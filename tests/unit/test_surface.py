@@ -40,7 +40,6 @@ def test_the_surface_lists_are_spelled_out() -> None:
         "organizations",
         "playground",
         "pricing",
-        "providers",
         "routing",
         "settings",
         "tools",

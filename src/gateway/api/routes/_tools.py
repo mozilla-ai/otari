@@ -20,14 +20,13 @@ from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools import (
     build_web_fetch_backend,
+    builtin_fetch_resolved,
+    resolve_fetch,
+    retargeted_tool_choice,
     web_search_max_results_baseline,
 )
 from gateway.services.traces import RequestTrace
-from gateway.services.web_retrieval_backend import (
-    WEB_SEARCH_TOOL_NAME,
-    WebRetrievalBackend,
-    WebRetrievalCounter,
-)
+from gateway.services.web_retrieval_backend import WebRetrievalBackend, WebRetrievalCounter
 from gateway.services.web_retrieval_policy import DomainPolicy
 
 if TYPE_CHECKING:
@@ -35,6 +34,7 @@ if TYPE_CHECKING:
 
     from gateway.core.config import GatewayConfig
     from gateway.models.tools import WebSearchCredential
+    from gateway.services.tools import ResolvedFetch
 
 # Gateway-internal fields the provider SDKs (any-llm, anthropic, openai, …)
 # don't accept as ``acompletion`` kwargs. Strip these from the model_dump
@@ -68,7 +68,7 @@ def _strip_gateway_fields(
 
     ``web_search_declared_name`` is the ``name`` on an extracted web-search entry.
     When the caller forced that name with ``tool_choice``, the choice is retargeted
-    to the backend's canonical tool name (see :func:`_retargeted_tool_choice`).
+    to the backend's canonical tool name (see ``retargeted_tool_choice``).
 
     Sensitive provider-call fields (credentials, ``provider`` selection, ...) are
     also stripped: the request schemas never derive them (see
@@ -87,7 +87,7 @@ def _strip_gateway_fields(
         else:
             fields.pop("tools", None)
     if web_search_declared_name and "tool_choice" in fields:
-        fields["tool_choice"] = _retargeted_tool_choice(fields["tool_choice"], web_search_declared_name)
+        fields["tool_choice"] = retargeted_tool_choice(fields["tool_choice"], web_search_declared_name)
     return fields
 
 
@@ -109,31 +109,6 @@ def _resolve_sandbox_purpose_hint(
     )
 
 
-def _retargeted_tool_choice(tool_choice: Any, declared_name: str) -> Any:
-    """Point a forced ``tool_choice`` at the gateway's canonical web-search tool.
-
-    A caller may declare web search under its own name
-    (``{"type": "web_search_20250305", "name": "search_the_web"}``) and force it
-    with a matching ``tool_choice``. The declaration is replaced by the backend's
-    own tool, which is named :data:`WEB_SEARCH_TOOL_NAME`, so an unrewritten
-    ``tool_choice`` would name a tool the provider never received and be rejected.
-
-    Only a choice naming ``declared_name`` is rewritten; ``auto`` / ``any`` /
-    ``none`` and choices naming a different tool pass through untouched. Returns a
-    new object rather than mutating the caller's.
-    """
-    if not isinstance(tool_choice, dict) or declared_name == WEB_SEARCH_TOOL_NAME:
-        return tool_choice
-    # Anthropic: {"type": "tool", "name": ...}. Responses: {"type": "function", "name": ...}.
-    if tool_choice.get("name") == declared_name:
-        return {**tool_choice, "name": WEB_SEARCH_TOOL_NAME}
-    # Chat Completions: {"type": "function", "function": {"name": ...}}.
-    function = tool_choice.get("function")
-    if isinstance(function, dict) and function.get("name") == declared_name:
-        return {**tool_choice, "function": {**function, "name": WEB_SEARCH_TOOL_NAME}}
-    return tool_choice
-
-
 def _resolve_web_search_purpose_hint(
     tool_entry: dict[str, Any] | None,
     config: GatewayConfig | None = None,
@@ -144,6 +119,13 @@ def _resolve_web_search_purpose_hint(
         or (config.web_search_purpose_hint if config is not None else None)
         or otari_env("WEB_SEARCH_PURPOSE_HINT")
         or None
+    )
+
+
+def _fetch_default(config: GatewayConfig | None) -> ResolvedFetch:
+    """The fetch tool's instance with no workspace policy: the fetch default, or ``builtin_fetch`` without a config."""
+    return (
+        resolve_fetch(config, None, requested=None, for_search=None) if config is not None else builtin_fetch_resolved()
     )
 
 
@@ -160,6 +142,7 @@ def _build_web_retrieval_backend(
     tally: ToolUsageTally | None = None,
     trace: RequestTrace | None = None,
     web_provider_client: httpx.AsyncClient | None = None,
+    fetch: ResolvedFetch | None = None,
 ) -> WebRetrievalBackend:
     """Construct a WebRetrievalBackend honoring env-level + per-tool config.
 
@@ -176,9 +159,11 @@ def _build_web_retrieval_backend(
     ``base_url`` may be ``None`` when the deployment configured a licensed
     search provider instead, which the backend then calls directly.
 
-    A declared fetch tool runs on the fetch backend the tools domain builds,
-    which the old backend delegates its fetch calls to; a provider instance
-    sends through ``web_provider_client``, the app's.
+    A declared fetch tool runs on the fetch backend the tools domain builds on
+    ``fetch``, the instance resolved when the request was admitted, or, for a
+    caller that resolved none, on the fetch default; the old backend delegates
+    its fetch calls to it. A provider instance sends through
+    ``web_provider_client``, the app's.
     """
     kwargs: dict[str, Any] = {
         "base_url": base_url,
@@ -251,7 +236,7 @@ def _build_web_retrieval_backend(
     kwargs["counter"] = counter
     if fetch_tool_entry is not None:
         kwargs["fetch_backend"] = build_web_fetch_backend(
-            config,
+            fetch if fetch is not None else _fetch_default(config),
             policy=fetch_policy,
             trust_env_proxy=kwargs["trust_env_proxy"],
             web_provider_client=web_provider_client,

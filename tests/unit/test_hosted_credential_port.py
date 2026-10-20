@@ -54,6 +54,7 @@ from gateway.services.provider_kwargs import (
     reaches_organization_key,
     resolve_provider_selector,
 )
+from gateway.types.attempt import Attempt
 
 ORGANIZATION_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 WORKSPACE_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
@@ -490,38 +491,40 @@ async def test_a_named_hosted_provider_is_dispatched_as_its_implementation_under
 
 
 @pytest.mark.asyncio
-async def test_multi_candidate_plan_is_not_asked_about() -> None:
-    """A routed chain dispatches from the plan's own kwargs, so asking would not serve it.
-
-    Only the roster is read, so the walk can refuse a candidate it offers by name.
-    """
+async def test_a_multi_candidate_plan_asks_for_each_candidate_only_when_the_walk_reaches_it() -> None:
+    """A routed chain dispatches from the plan's own kwargs, so the port is asked per candidate, as it is sent."""
 
     class _Plan:
         attempts = (_uncredentialed(), _uncredentialed())
 
-    port = RecordingPort(
-        credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"),
-        roster={"openai": None},
-    )
+    port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
     ctx = _ctx(resolved_provider=_uncredentialed(), plan=_Plan())
     result = await _dispatch(ctx, port)
     assert result.kwargs == {}
     assert port.calls == []
-    assert ctx.managed_only == {("openai", "gpt-4o")}
+    assert ctx.credential_candidate is not None
+
+    served = await ctx.credential_candidate(
+        Attempt(position=2, instance="openai", provider=LLMProvider.OPENAI, model="gpt-4o")
+    )
+
+    assert [call["model"] for call in port.calls] == ["gpt-4o"]
+    assert (served.instance, served.kwargs, served.deployment_paid) == ("openai", {"api_key": "hosted"}, True)
+    assert ctx.deployment_charge is not None
 
 
 @pytest.mark.asyncio
-async def test_a_cancelled_roster_read_releases_the_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
-    released, _ = _capture_settlement(monkeypatch)
-
+async def test_a_walk_candidate_the_port_does_not_serve_is_left_to_be_passed_over() -> None:
     class _Plan:
         attempts = (_uncredentialed(), _uncredentialed())
 
-    port = RecordingPort(roster=asyncio.CancelledError())
     ctx = _ctx(resolved_provider=_uncredentialed(), plan=_Plan())
-    with pytest.raises(asyncio.CancelledError):
-        await _dispatch(ctx, port)
-    assert released == [ctx]
+    await _dispatch(ctx, RecordingPort())
+    assert ctx.credential_candidate is not None
+    candidate = Attempt(position=1, instance="openai", provider=LLMProvider.OPENAI, model="gpt-4o")
+
+    assert await ctx.credential_candidate(candidate) is candidate
+    assert ctx.deployment_charge is None
 
 
 # ---------------------------------------------------------------------------

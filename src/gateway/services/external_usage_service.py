@@ -35,7 +35,7 @@ from gateway.core.metered_pricing import BillableUsage, ChargeLine, billable_usa
 from gateway.core.sql import INGEST_LOCK_TIMEOUT_MS, insert_ignoring_duplicates
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
-from gateway.models.pricing import ModelPricing
+from gateway.models.pricing import MODEL_KIND, ModelPricing
 from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User
 from gateway.services.pricing_service import (
@@ -391,7 +391,15 @@ async def _load_pricing_index(
         chunk = list(keys)[start : start + _IN_CHUNK]
         if not chunk:
             continue
-        rows = (await db.execute(select(ModelPricing).where(ModelPricing.model_key.in_(chunk)))).scalars().all()
+        rows = (
+            (
+                await db.execute(
+                    select(ModelPricing).where(ModelPricing.kind == MODEL_KIND, ModelPricing.model_key.in_(chunk))
+                )
+            )
+            .scalars()
+            .all()
+        )
         for row in rows:
             index.setdefault(row.model_key, []).append((normalize_effective_at(row.effective_at), row))
     for entries in index.values():

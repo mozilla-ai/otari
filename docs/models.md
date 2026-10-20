@@ -31,7 +31,7 @@ configuration, pricing, aliases, and routing policies.
 ## Configuring a provider
 
 Declare a provider under `providers` in `config.yml`, or add it on the
-standalone Providers page. Either way it serves requests and its models are
+Hosted providers page. Either way it serves requests and its models are
 discovered. Supply the key from the environment with a `${VAR}` reference:
 
 ```yaml
@@ -41,7 +41,7 @@ providers:
 ```
 
 A key reaches a provider only from where a declaration names it: an entry's own
-`api_key` (a `${VAR}` reference included), a key stored on the Providers page, or
+`api_key` (a `${VAR}` reference included), a hosted provider's key, or
 an organization's own provider key, which declares the provider for that
 organization's requests. A provider's native variable (such as `OPENAI_API_KEY`)
 is never read for it otherwise, so an entry with no `api_key`, or one carrying
@@ -127,7 +127,13 @@ catalog indefinitely.
 A [hosted provider](modes.md#hosted-providers-and-byo-credentials) lists its
 roster, the models switched on under it, rather than everything its upstream
 lists. The operator's `GET /api/v1/models/discoverable` and provider health
-dial it on its stored key beside the configured instances.
+dial it on its stored key beside the configured instances. A hosted provider
+serves only its roster unless it serves models not on its roster
+(`serves_unlisted_models`, off by default): it then also serves any model a
+request names, the way a `providers:` instance does, switches on every model
+it offers whether or not something prices it, and still refuses a model its
+roster switches off. A provider moved from the retired Deployment providers page
+starts with it off and every model it lists switched on.
 
 Each listed model carries the rate a request from the caller would be billed at,
 and `pricing_source` says which price list it came from: `organization` for the
@@ -358,9 +364,13 @@ organization sent requests to in the last 30 days, most requested first, with
 its offerings in the order a request sent by catalog id tries them for your
 organization. Beside each it counts the requests (an absorbed attempt is not one), the
 successful ones a later offering served, and the ones that named one offering
-or a policy rather than the catalog id and so had no automatic fallback. Under
-each offering it says who runs the built-in tools: the provider's own where it
-runs them itself, Otari's where it does not. That assumes a caller who declares
+or a policy rather than the catalog id and so had no automatic fallback. A model
+most of whose requests named one provider shows that provider alone, marked "No
+backup · pinned", because those requests get no fallback until they send the
+catalog id. Under each provider it says who runs the built-in tools: "Own
+tools" where the provider runs at least one itself, "Otari's tools" where Otari
+runs them all; the response's `own_tools` and `otari_tools` name which tool is
+whose. That assumes a caller who declares
 the tools in the provider's own words and sends no `Otari-*` executor header,
 so the deployment's code execution executor and web search interception decide;
 a workspace's code execution pin is not reflected. The order is the catalog's,

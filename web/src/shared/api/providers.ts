@@ -1,25 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
-  CreateStoredProviderRequest,
   KnownProvider,
   KnownProviderSummary,
   ProviderHealthResponse,
   ProvidersResponse,
-  ReencryptProviderCredentialsResult,
-  StoredProvider,
-  TestProviderResult,
-  UpdateStoredProviderRequest,
 } from "@/client"
-import { apiFetch, longRequestSignal } from "@/shared/api/client"
-import {
-  CATALOG,
-  DISCOVERABLE,
-  MODELS,
-  NO_RETRY,
-  PROVIDER_HEALTH,
-  PROVIDERS,
-  STORED_PROVIDERS,
-} from "@/shared/api/queryKeys"
+import { apiFetch } from "@/shared/api/client"
+import { useHostedProviders } from "@/shared/api/hostedProviders"
+import { NO_RETRY, PROVIDER_HEALTH, PROVIDERS } from "@/shared/api/queryKeys"
 
 export function useProviders(enabled = true) {
   return useQuery({
@@ -28,6 +16,22 @@ export function useProviders(enabled = true) {
     staleTime: 5 * 60_000,
     enabled,
   })
+}
+
+/**
+ * The provider names the deployment serves on its own credentials: the
+ * config.yml instances and the hosted providers, sorted. Operator-only, so a
+ * caller passes whether it is one.
+ */
+export function useDeploymentProviderNames(enabled: boolean): string[] {
+  const configured = useProviders(enabled)
+  const hosted = useHostedProviders(enabled)
+  return [
+    ...new Set([
+      ...(configured.data?.providers ?? []).map((p) => p.instance),
+      ...(hosted.data?.data ?? []).map((p) => p.name),
+    ]),
+  ].sort((a, b) => a.localeCompare(b))
 }
 
 // Every known provider the add-provider picker can offer: id + display name
@@ -89,117 +93,6 @@ export function useRecheckProviderHealth() {
     mutationFn: () =>
       apiFetch<ProviderHealthResponse>("/providers/health?refresh=true"),
     onSuccess: (data) => queryClient.setQueryData([PROVIDER_HEALTH], data),
-  })
-}
-
-// Providers configured at runtime through the dashboard. Distinct from
-// useProviders (static metadata for every configured provider, config + stored
-// merged): this is the editable set, with the last 4 of each stored key.
-export function useStoredProviders() {
-  return useQuery({
-    queryKey: [STORED_PROVIDERS],
-    queryFn: () => apiFetch<StoredProvider[]>("/provider-credentials"),
-    staleTime: 60_000,
-  })
-}
-
-// A new or changed provider can change which models the catalog and picker
-// report, so a credential write invalidates those too.
-function invalidateProviderViews(
-  queryClient: ReturnType<typeof useQueryClient>,
-): void {
-  void queryClient.invalidateQueries({ queryKey: [STORED_PROVIDERS] })
-  void queryClient.invalidateQueries({ queryKey: [PROVIDERS] })
-  void queryClient.invalidateQueries({ queryKey: [MODELS] })
-  void queryClient.invalidateQueries({ queryKey: [CATALOG] })
-  void queryClient.invalidateQueries({ queryKey: [DISCOVERABLE] })
-  // A credential change can flip a provider's reachability, so the health view
-  // must re-check rather than show a verdict from the old key.
-  void queryClient.invalidateQueries({ queryKey: [PROVIDER_HEALTH] })
-}
-
-export function useCreateStoredProvider() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: CreateStoredProviderRequest) =>
-      apiFetch<StoredProvider>("/provider-credentials", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: () => invalidateProviderViews(queryClient),
-  })
-}
-
-export function useUpdateStoredProvider() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: ({
-      instance,
-      body,
-    }: {
-      instance: string
-      body: UpdateStoredProviderRequest
-    }) =>
-      apiFetch<StoredProvider>(
-        `/provider-credentials/${encodeURIComponent(instance)}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify(body),
-        },
-      ),
-    onSuccess: () => invalidateProviderViews(queryClient),
-  })
-}
-
-export function useDeleteStoredProvider() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (instance: string) =>
-      apiFetch<void>(`/provider-credentials/${encodeURIComponent(instance)}`, {
-        method: "DELETE",
-      }),
-    onSuccess: () => invalidateProviderViews(queryClient),
-  })
-}
-
-export function useReencryptProviderCredentials() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: () =>
-      apiFetch<ReencryptProviderCredentialsResult>(
-        "/provider-credentials/reencrypt",
-        {
-          method: "POST",
-          signal: longRequestSignal(),
-        },
-      ),
-    onSuccess: () => invalidateProviderViews(queryClient),
-  })
-}
-
-// Tests a stored provider's key by listing its models. Read-only on the server,
-// so it invalidates nothing.
-export function useTestStoredProvider() {
-  return useMutation({
-    mutationFn: (instance: string) =>
-      apiFetch<TestProviderResult>(
-        `/provider-credentials/${encodeURIComponent(instance)}/test`,
-        {
-          method: "POST",
-        },
-      ),
-  })
-}
-
-// Tests credentials from the add/edit form before they are saved. Nothing is
-// persisted server-side, so it invalidates nothing.
-export function useTestProviderCredentials() {
-  return useMutation({
-    mutationFn: (body: CreateStoredProviderRequest) =>
-      apiFetch<TestProviderResult>("/provider-credentials/test", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
   })
 }
 

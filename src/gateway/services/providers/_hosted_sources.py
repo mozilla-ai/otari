@@ -58,6 +58,11 @@ class HostedSource:
         return self.row.enabled if self.row is not None else self._entry.enabled
 
     @property
+    def serves_unlisted_models(self) -> bool:
+        """Whether a model with no roster row is served; a configuration entry serves its roster alone."""
+        return self.row is not None and self.row.serves_unlisted_models
+
+    @property
     def restricted_to_organization_id(self) -> uuid.UUID | None:
         if self.row is not None:
             return self.row.restricted_to_organization_id

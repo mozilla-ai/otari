@@ -3,6 +3,8 @@
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import anthropic
+import httpx
 import pytest
 from any_llm.types.messages import (
     MessageResponse,
@@ -13,7 +15,9 @@ from any_llm.types.messages import (
 from fastapi.testclient import TestClient
 
 from gateway.api.routes.messages import CountTokensRequest
-from gateway.core.config import API_KEY_HEADER, API_ROOT
+from gateway.core.config import API_KEY_HEADER, API_ROOT, API_VERSION, GatewayConfig
+from gateway.exceptions import TenancyError
+from gateway.exceptions.control_plane_exceptions import ControlPlaneRefusedError
 
 
 def _make_message_response(**overrides: Any) -> MessageResponse:
@@ -90,7 +94,7 @@ def test_messages_endpoint_master_key_requires_user(
         )
 
     assert response.status_code == 400
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["error"]["type"] == "invalid_request_error"
 
 
@@ -98,13 +102,102 @@ def test_messages_endpoint_validation_error(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """Test that validation errors are returned for missing fields."""
+    """A request missing a field is refused as Anthropic refuses one: a 400 naming the field."""
     response = client.post(
         f"{API_ROOT}/messages",
         json={"model": "anthropic:claude-3-5-sonnet"},
         headers=master_key_header,
     )
-    assert response.status_code == 422
+    assert response.status_code == 400
+    assert response.headers["Otari-Error-Code"] == "invalid_request"
+    assert response.json() == {
+        "type": "error",
+        "error": {"type": "invalid_request_error", "message": "messages: Field required; max_tokens: Field required"},
+        "code": "invalid_request",
+    }
+
+
+def _sdk(client: TestClient, api_key: str) -> anthropic.Anthropic:
+    """Anthropic's SDK, sending its requests through the test app (see ``test_files_endpoint.anthropic_sdk``)."""
+
+    def forward(request: httpx.Request) -> httpx.Response:
+        sent = client.request(
+            request.method, str(request.url), headers=request.headers.multi_items(), content=request.read()
+        )
+        return httpx.Response(sent.status_code, headers=sent.headers.multi_items(), content=sent.content)
+
+    return anthropic.Anthropic(
+        base_url=f"{client.base_url}{API_ROOT.removesuffix(f'/{API_VERSION}')}",
+        api_key=api_key,
+        http_client=httpx.Client(transport=httpx.MockTransport(forward)),
+        max_retries=0,
+    )
+
+
+def test_the_anthropic_sdk_reads_a_refusal_s_type_and_message(client: TestClient) -> None:
+    with pytest.raises(anthropic.AuthenticationError) as refused:
+        _sdk(client, "sk-wrong").messages.create(
+            model="anthropic:claude-3-5-sonnet", max_tokens=8, messages=[{"role": "user", "content": "hi"}]
+        )
+
+    assert refused.value.body == {
+        "type": "error",
+        "error": {"type": "authentication_error", "message": "Invalid API key"},
+    }
+
+
+def test_the_anthropic_sdk_reads_a_validation_failure(client: TestClient, test_config: GatewayConfig) -> None:
+    assert test_config.master_key is not None
+    with pytest.raises(anthropic.BadRequestError) as refused:
+        _sdk(client, test_config.master_key).messages.create(
+            model="anthropic:claude-3-5-sonnet", max_tokens=8, messages=[]
+        )
+
+    assert isinstance(refused.value.body, dict)
+    assert refused.value.body["error"]["type"] == "invalid_request_error"
+    assert refused.value.body["error"]["message"].startswith("messages: ")
+
+
+class _NotFound(TenancyError):
+    status_code = 404
+
+
+@pytest.mark.parametrize(
+    ("raised", "status_code", "error", "retry_after"),
+    [
+        (
+            ControlPlaneRefusedError("slow down", status_code=429, retry_after="30"),
+            429,
+            {"type": "rate_limit_error", "message": "slow down"},
+            "30",
+        ),
+        (_NotFound("no such workspace"), 404, {"type": "not_found_error", "message": "no such workspace"}, None),
+        (RuntimeError("secret internals"), 500, {"type": "api_error", "message": "Internal server error"}, None),
+    ],
+    ids=["control-plane", "tenancy", "unexpected"],
+)
+def test_an_error_no_one_rendered_still_answers_in_anthropic_s_envelope(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    raised: Exception,
+    status_code: int,
+    error: dict[str, str],
+    retry_after: str | None,
+) -> None:
+    with patch("gateway.api.routes.messages.resolve_request_context", new=AsyncMock(side_effect=raised)):
+        response = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet",
+                "max_tokens": 8,
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == status_code
+    assert response.json() == {"type": "error", "error": error}
+    assert response.headers.get("Retry-After") == retry_after
 
 
 def test_messages_endpoint_with_tools(
@@ -174,7 +267,7 @@ def test_messages_endpoint_provider_error_format(
         )
 
     assert response.status_code == 500
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["type"] == "error"
     assert detail["error"]["type"] == "api_error"
 
@@ -207,7 +300,7 @@ def test_messages_endpoint_rejected_param_is_a_400_naming_it(
         )
 
     assert response.status_code == 400
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["error"]["type"] == "invalid_request_error"
     assert "'seed'" in detail["error"]["message"]
     assert "AsyncMessages" not in detail["error"]["message"]
@@ -237,7 +330,7 @@ def test_messages_endpoint_provider_error_streaming(
         )
 
     assert response.status_code == 500
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["type"] == "error"
     assert detail["error"]["type"] == "api_error"
 
@@ -464,13 +557,14 @@ def test_count_tokens_validation_error(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """Missing required fields produce a 422 before any counting."""
+    """Missing required fields produce an Anthropic 400 before any counting."""
     response = client.post(
         f"{API_ROOT}/messages/count_tokens",
         json={"model": "anthropic:claude-3-5-sonnet"},
         headers=master_key_header,
     )
-    assert response.status_code == 422
+    assert response.status_code == 400
+    assert response.json()["error"] == {"type": "invalid_request_error", "message": "messages: Field required"}
 
 
 def test_count_tokens_scales_with_input(

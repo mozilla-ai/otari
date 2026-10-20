@@ -39,6 +39,7 @@ Running and managing a gateway.
 - [Routing policies](routing.md): failover, conditions, weighted, priority and learned routing, and mandatory guardrails.
 - [Health checks](health-checks.md): a scheduled check of every model the deployment serves, and email when one stops answering.
 - [OpenAI provider guide](providers/openai.md): configure OpenAI and route your first request through Otari.
+- [Gemini provider guide](providers/gemini.md): configure Gemini and route your first request through Otari.
 
 ### For integrators
 

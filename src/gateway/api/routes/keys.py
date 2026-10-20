@@ -151,6 +151,13 @@ class CreateKeyRequest(BaseModel):
         description="Budgets a request may start a new end user on by naming one in Otari-End-User-Budget. "
         "Null allows end_user_budget_id alone. When both are set, end_user_budget_id must be on the list.",
     )
+    max_end_users: int | None = Field(
+        default=None,
+        ge=0,
+        description="Most live end users this key may have on the budgets it assigns (all of its owner's end users "
+        "when it assigns none). A request that would create one more is refused with 403 and "
+        "end_user_limit_reached; deleting end users frees room. Null is no cap.",
+    )
     workspace_id: uuid.UUID | None = Field(
         default=None,
         description="Workspace this key belongs to, which must be one in the caller's "
@@ -182,6 +189,7 @@ class CreateKeyResponse(BaseModel):
     is_service_key: bool
     end_user_budget_id: str | None
     end_user_budget_ids: list[str]
+    max_end_users: int | None
     metadata: dict[str, Any]
 
 
@@ -208,6 +216,7 @@ class KeyInfo(BaseModel):
     end_user_budget_id: str | None
     # The budgets a request may start an end user on: the key's list, or its default alone.
     end_user_budget_ids: list[str]
+    max_end_users: int | None = None
     workspace_id: uuid.UUID
     # Set while config.yml declares this key: a start writes the declared secret
     # and settings back when the key's entry changed, so a change made here lasts
@@ -237,6 +246,7 @@ class KeyInfo(BaseModel):
             is_service_key=bool(key.is_service_key),
             end_user_budget_id=key.end_user_budget_id,
             end_user_budget_ids=key.assignable_end_user_budgets(),
+            max_end_users=key.max_end_users,
             config_name=key.config_name,
             metadata=dict(key.metadata_) if key.metadata_ else {},
         )
@@ -267,6 +277,8 @@ class UpdateKeyRequest(BaseModel):
     end_user_budget_id: str | None = None
     # Tri-state via model_fields_set: absent = unchanged, null = the default alone.
     end_user_budget_ids: list[str] | None = Field(default=None, max_length=MAX_END_USER_BUDGETS)
+    # Tri-state via model_fields_set: absent = unchanged, null = no cap.
+    max_end_users: int | None = Field(default=None, ge=0)
     metadata: dict[str, Any] | None = None
 
 
@@ -390,6 +402,7 @@ async def create_key(
         is_service_key=request.is_service_key,
         end_user_budget_id=request.end_user_budget_id,
         end_user_budget_ids=end_user_budget_ids,
+        max_end_users=request.max_end_users,
         metadata_=request.metadata,
     )
 
@@ -512,6 +525,8 @@ async def update_key(
         key.end_user_budget_id = request.end_user_budget_id
     if "end_user_budget_ids" in request.model_fields_set:
         key.end_user_budget_ids = end_user_budget_ids
+    if "max_end_users" in request.model_fields_set:
+        key.max_end_users = request.max_end_users
     if request.metadata is not None:
         key.metadata_ = request.metadata
 

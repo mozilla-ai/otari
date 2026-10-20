@@ -32,6 +32,7 @@ from gateway.services.tools import (
     Tool,
     code_execution_declaration_forms,
     web_fetch_tool_definition,
+    web_search_configured,
     web_search_declaration_forms,
     web_search_tool_definition,
 )
@@ -85,7 +86,7 @@ def _managed_tools(config: GatewayConfig) -> list[ManagedTool]:
     # provider needs no URL, so deriving this from sandbox_url would publish
     # "unavailable" for a deployment that runs code perfectly well.
     sandbox_configured = config.sandbox_configured()
-    can_web_search = config.web_search_configured()
+    can_web_search = web_search_configured(config)
     return [
         ManagedTool(
             id=Tool.WEB_FETCH,

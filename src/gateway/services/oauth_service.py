@@ -44,6 +44,7 @@ in different directions. See ``web/src/features/auth/OAuthCallbackPage.tsx``.
 import hashlib
 import hmac
 import secrets
+import string
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
@@ -103,6 +104,7 @@ FLOW_COOKIE_PATH = f"{API_ROOT}{OAUTH_ROUTE_PREFIX}"
 # What ``secrets.token_urlsafe(32)`` produces; anything else in the cookie is
 # not ours and is replaced rather than reused.
 _FLOW_SECRET_LENGTH = 43
+_URLSAFE_CHARACTERS = frozenset(string.ascii_letters + string.digits + "-_")
 
 _PROVIDERS: dict[str, _Provider] = {
     "google": _Provider(label="Google", scopes=("openid", "email", "profile"), email_claim_trusted=True),
@@ -312,7 +314,7 @@ def flow_secret_for(existing: str | None) -> str:
 
 
 def _is_urlsafe(value: str) -> bool:
-    return all(character.isalnum() or character in "-_" for character in value)
+    return all(character in _URLSAFE_CHARACTERS for character in value)
 
 
 def apply_flow_cookie(response: Response, secret: str, *, secure: bool) -> None:

@@ -62,7 +62,7 @@ def test_the_tally_counts_provider_searches_under_their_own_label() -> None:
     tally.record_provider_searches("anthropic", 2, deployment_paid=False)
     tally.record_provider_searches("anthropic", 0, deployment_paid=False)
 
-    assert tally.billable_calls() == {"web_search": 3}
+    assert tally.meters() == {"web_search": {"billed": 3, "errors": 0}}
     [own, provider] = sorted(tally.label_calls(), key=lambda entry: entry.label or "")
     assert (own.label, own.calls) == (None, 1)
     assert (provider.label, provider.rate_keys, provider.calls, provider.unreported_calls) == (

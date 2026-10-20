@@ -72,7 +72,7 @@ def test_endpoint_is_public_and_uncacheable(tmp_path: Path) -> None:
 
 @requires_dashboard_bundle
 def test_index_html_is_uncacheable_so_a_reload_gets_the_new_bundle(tmp_path: Path) -> None:
-    # The whole prompt rests on this: "Update now" is a plain reload, which only
+    # The dashboard's auto-update rests on this: it is a plain reload, which only
     # helps if the browser refetches the page rather than reusing a cached copy
     # pointing at the old hashed asset.
     app = create_app(_config(tmp_path))

@@ -7,7 +7,7 @@ import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { providerInstanceOf } from "@/features/models/modelKey"
 import { useModels } from "@/shared/api/models"
 import { useDeploymentOperator } from "@/shared/api/organizations"
-import { useProviders } from "@/shared/api/providers"
+import { useDeploymentProviderNames } from "@/shared/api/providers"
 import { useAliases } from "@/shared/api/routing"
 
 // The per-key model access-list is a tri-state:
@@ -55,7 +55,7 @@ export function ModelScopeControl({
   const models = useModels()
   const { isOperator, isSettled } = useDeploymentOperator()
   // Operator-only: an organization admin is refused it.
-  const providers = useProviders(isSettled && isOperator)
+  const providers = useDeploymentProviderNames(isSettled && isOperator)
   const aliases = useAliases()
   const [mode, setMode] = useState<Mode>(modeOf(initial))
   const [entries, setEntries] = useState<string[]>(initial ?? [])
@@ -78,7 +78,7 @@ export function ModelScopeControl({
       .sort((a, b) => a.localeCompare(b))
     const instances = [
       ...new Set([
-        ...(providers.data?.providers ?? []).map((p) => p.instance),
+        ...providers,
         ...ids.map((id) => providerInstanceOf(id) as string),
       ]),
     ].sort((a, b) => a.localeCompare(b))
@@ -101,7 +101,7 @@ export function ModelScopeControl({
       seen.add(option.id)
       return true
     })
-  }, [models.data, providers.data, aliases.data])
+  }, [models.data, providers, aliases.data])
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()

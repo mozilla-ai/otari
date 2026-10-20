@@ -137,7 +137,7 @@ def test_a_disabled_workspace_is_refused_before_the_provider_is_called(
 
     assert response.status_code == 403
     # Anthropic-shaped body, the same mapping every other refusal on this route gets.
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["error"]["message"] == "code execution is not enabled for this workspace"
     assert seen.max_iterations is None, "the tool loop must never have run"
 
@@ -418,10 +418,11 @@ def test_a_policy_read_that_fails_releases_the_budget_reservation(
         raise SQLAlchemyError("connection lost mid-admission")
 
     monkeypatch.setattr(WorkspaceCodeExecutionPolicies, "resolve", failing_resolve)
-    # TestClient re-raises a server exception rather than rendering a 500, so the
-    # failure arrives here; what matters is the state it left behind.
-    with pytest.raises(SQLAlchemyError):
-        _post(funded)
+    # The Messages route answers an unexpected failure as Anthropic's 500; what matters
+    # is the state it left behind.
+    failed = _post(funded)
+    assert failed.status_code == 500, failed.text
+    assert failed.json()["error"]["type"] == "api_error"
 
     session = db_session_factory()
     try:
@@ -465,7 +466,7 @@ def test_an_unresolvable_workspace_refuses_rather_than_running_the_sandbox(
     response, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
 
     assert response.status_code == 500
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["error"]["message"] == "Code execution policy could not be resolved for this request"
     assert seen.max_iterations is None, "the tool loop must never have run"
 
@@ -715,7 +716,7 @@ def test_no_policy_is_refused_like_a_disabled_one_where_code_execution_is_opt_in
     refused, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
 
     assert refused.status_code == 403
-    assert refused.json()["detail"]["error"]["message"] == "code execution is not enabled for this workspace"
+    assert refused.json()["error"]["message"] == "code execution is not enabled for this workspace"
     assert seen.max_iterations is None
 
     _set_policy(client, master_key_header, _default_workspace_id(client, master_key_header), enabled=True)

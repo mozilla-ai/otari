@@ -27,7 +27,13 @@ from gateway.services.tools import DEFAULT_MAX_RESULTS as DEFAULT_MAX_RESULTS
 from gateway.services.tools import WEB_FETCH_TOOL_NAME as WEB_FETCH_TOOL_NAME
 from gateway.services.tools import WEB_RETRIEVAL_RESULT_MAX_BYTES as WEB_RETRIEVAL_RESULT_MAX_BYTES
 from gateway.services.tools import WEB_SEARCH_NATIVE_TYPE_PREFIX as WEB_SEARCH_NATIVE_TYPE_PREFIX
-from gateway.services.tools import WEB_SEARCH_PURPOSE_HINT, WebFetchBackend, WebToolFailure, build_web_fetch_backend
+from gateway.services.tools import (
+    WEB_SEARCH_PURPOSE_HINT,
+    WebFetchBackend,
+    WebToolFailure,
+    build_web_fetch_backend,
+    builtin_fetch_resolved,
+)
 from gateway.services.tools import WEB_SEARCH_TOOL_NAME as WEB_SEARCH_TOOL_NAME
 from gateway.services.tools import web_fetch_tool_definition as web_fetch_tool_definition
 from gateway.services.tools import web_search_tool_definition as web_search_tool_definition
@@ -195,7 +201,7 @@ class WebRetrievalBackend:
         self._fetch: WebFetchBackend | None = None
         if enable_fetch:
             self._fetch = fetch_backend or build_web_fetch_backend(
-                None,
+                builtin_fetch_resolved(),
                 policy=fetch_policy,
                 trust_env_proxy=trust_env_proxy,
                 tally=tally,

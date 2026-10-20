@@ -52,7 +52,7 @@ from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
-from gateway.services.tools import WorkspaceCodeExecutionPolicies
+from gateway.services.tools import WorkspaceCodeExecutionPolicies, web_search_configured
 from gateway.services.workspace_scope import organization_default_workspace_id
 from gateway.types.session_principal import SessionPrincipal
 
@@ -323,7 +323,7 @@ async def resolve_tool_availability(
 
     return PlaygroundToolAvailability(
         web_search=_tool_availability(
-            config.web_search_configured(), web_search_row, on_without_policy=config.web_search_on_without_policy()
+            web_search_configured(config), web_search_row, on_without_policy=config.web_search_on_without_policy()
         ),
         code_execution=offer.code_execution(code_execution_row),
         files=offer.files(),

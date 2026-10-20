@@ -34,6 +34,7 @@ from gateway.api.deps import (
     get_workspace_search_keys,
     set_config,
 )
+from gateway.api.error_body import BodyHTTPException
 from gateway.api.main import register_routers
 from gateway.api.request_id import with_request_id
 from gateway.api.trace_capture import TraceCaptureMiddleware
@@ -50,7 +51,6 @@ from gateway.core.config import (
 from gateway.core.database import create_session, describe_database_error, dispose_db, init_db
 from gateway.core.error_codes import INVALID_REQUEST, error_code_of, error_headers
 from gateway.core.feature import CoreFeature, Worker
-from gateway.core.settings.tools import warn_about_tool_instances
 from gateway.core.unit_of_work import create_unit_of_work
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
@@ -98,6 +98,8 @@ from gateway.services.policy_store import (
 )
 from gateway.services.pricing_init_service import (
     initialize_pricing_from_config,
+    initialize_tool_prices_from_config,
+    warn_about_legacy_tool_prices,
     warn_if_gateway_tools_lack_pricing,
     warn_if_require_pricing_without_pricing,
     warn_if_router_candidates_lack_pricing,
@@ -109,11 +111,10 @@ from gateway.services.pricing_refresh_service import (
     run_price_update_poller,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
-from gateway.services.provider_kwargs import configure_hosted_names, warn_about_ignored_provider_variables
-from gateway.services.provider_store_service import (
-    load_providers_at_startup,
-    reset_provider_cache,
-    run_provider_refresher,
+from gateway.services.provider_kwargs import (
+    configure_hosted_names,
+    settle_configured_providers,
+    warn_about_ignored_provider_variables,
 )
 from gateway.services.providers import (
     hosted_implementation,
@@ -145,7 +146,7 @@ from gateway.services.tenancy.organization_guardrail_runner import (
     run_guardrail_runner_refresher,
 )
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
-from gateway.services.tools import build_web_provider_client, register_builtin_fetcher
+from gateway.services.tools import build_web_provider_client, register_builtin_fetcher, warn_about_tool_instances
 from gateway.services.traces import RequestTraces, TraceWriter, stored_by
 from gateway.services.workspace_scope import default_workspace_id
 from gateway.version import __version__
@@ -340,6 +341,83 @@ async def _report_hosted_providers_config(config: GatewayConfig) -> None:
         )
 
 
+async def _move_deployment_providers(config: GatewayConfig) -> None:
+    """Move what is left of the deployment providers the retired dashboard page stored onto hosted providers.
+
+    Each becomes a hosted provider of the same name, so ``instance:model``
+    keeps reaching it, with every model it lists switched on. The provider is
+    asked for its models here, so the first start after an upgrade waits on
+    each one, up to the discovery timeout. A row that cannot move is logged
+    with the reason and stays listed on the Hosted providers page.
+    """
+    try:
+        async with create_unit_of_work() as uow:
+            report = await build_hosted_provider_service(uow, config=config).migrate_deployment_providers(apply=True)
+    except Exception as exc:
+        logger.error(
+            "Could not move the deployment providers onto hosted providers: %s; "
+            "review the move on the Hosted providers page.",
+            describe_database_error(exc),
+        )
+        return
+    moved = [row.instance for row in report.rows if row.source_removed]
+    if moved:
+        logger.info("Moved %d deployment provider(s) onto hosted providers: %s", len(moved), ", ".join(moved))
+    for row in report.rows:
+        if not row.source_removed:
+            logger.error(
+                "Deployment provider '%s' was not moved onto a hosted provider (%s), so it serves nothing: %s",
+                row.instance,
+                row.outcome,
+                row.detail or (row.notes[-1] if row.notes else "review the move on the Hosted providers page."),
+            )
+
+
+async def _import_configured_providers(config: GatewayConfig) -> None:
+    """Copy the ``providers:`` entries of config.yml onto hosted providers, and stop reading the copied ones.
+
+    The ``providers:`` block is deprecated: an entry is read once, its
+    ``${VAR}`` references as they resolve now, and the hosted provider of its
+    name serves it from then on with every control the Hosted providers page
+    has, every model it lists switched on. An entry a hosted provider cannot
+    hold keeps serving from config.yml, and the start says why.
+    """
+    if not config.providers or not config.import_configured_providers:
+        return
+    try:
+        async with create_unit_of_work() as uow:
+            imports = await build_hosted_provider_service(uow, config=config).import_configured_providers(
+                dict(config.providers)
+            )
+    except Exception as exc:
+        logger.error(
+            "Could not copy the config.yml providers onto hosted providers: %s; they keep serving from config.yml.",
+            describe_database_error(exc),
+        )
+        return
+    for name in (*imports.imported, *imports.already):
+        config.providers.pop(name, None)
+    if imports.imported:
+        logger.info(
+            "Copied %d config.yml provider(s) onto hosted providers: %s",
+            len(imports.imported),
+            ", ".join(imports.imported),
+        )
+    for name in (*imports.imported, *imports.already):
+        logger.warning(
+            "providers.%s in config.yml is served as a hosted provider and no longer read; remove it from config.yml "
+            "and manage it on the Hosted providers page.",
+            name,
+        )
+    for name, reason in imports.kept.items():
+        logger.warning(
+            "providers.%s keeps serving from config.yml because %s. The providers: block is deprecated; add the "
+            "provider on the Hosted providers page instead.",
+            name,
+            reason,
+        )
+
+
 # The periodic background workers a standalone deployment runs.
 # A new worker is one entry here.
 #
@@ -351,7 +429,6 @@ async def _report_hosted_providers_config(config: GatewayConfig) -> None:
 _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker("alias", lambda _config, _container: run_alias_refresher(), reset_alias_cache),
     _LifespanWorker("policy", lambda _config, _container: run_policy_refresher(), reset_policy_cache),
-    _LifespanWorker("provider", lambda config, _container: run_provider_refresher(config), reset_provider_cache),
     _LifespanWorker(
         "organization provider key",
         lambda _config, _container: run_org_provider_refresher(),
@@ -768,8 +845,11 @@ async def _run_feature_worker(name: str, worker: Worker, config: GatewayConfig) 
 
 
 def _create_lifespan() -> Callable[[FastAPI], Any]:
+    """The app's lifespan: startup's checks, migrations and seeding, then shutdown's cleanup."""
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+        """Prepare the database, prices and background tasks for ``app``, and stop them when it ends."""
         # From the app, not a closure: app.state.config is what get_config hands
         # every request, so startup reads the same object.
         config: GatewayConfig = app.state.config
@@ -841,22 +921,20 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 # under: revoke them all when the master key changed across a
                 # restart (e.g. OTARI_MASTER_KEY was rotated).
                 await revoke_sessions_on_master_key_change(config, session)
-                # Overlay dashboard-stored providers before pricing init, so a
-                # provider added at runtime is visible to everything that reads
-                # config.providers (pricing seeding, discovery, dispatch).
-                await load_providers_at_startup(session, config)
-                # After the stored providers, which declare a provider as config.yml does.
+                # Before pricing init, so nothing reads an entry that declares no credential.
+                settle_configured_providers(config)
                 warn_about_ignored_provider_variables(config)
                 # Organization-scoped provider keys (otari-ai#1748, otari#643):
-                # a disjoint overlay from the one above, keyed by
-                # (workspace_id, provider) rather than instance name. Empty on
-                # a fresh database (no workspace or key exists yet), the same
-                # posture load_providers_at_startup takes.
+                # an overlay keyed by (workspace_id, provider) rather than
+                # instance name. Empty on a fresh database (no workspace or key
+                # exists yet).
                 await load_org_provider_keys_at_startup(session)
                 await bootstrap_first_api_key(config, session, app.state.container.resolve(ApiKeyFormatPort, session))
                 await initialize_pricing_from_config(config, session)
+                await initialize_tool_prices_from_config(config, session)
                 await warn_if_require_pricing_without_pricing(config, session)
                 await warn_if_search_tools_lack_flat_pricing(config, session)
+                await warn_about_legacy_tool_prices(config, session)
                 await warn_if_gateway_tools_lack_pricing(config, session)
                 await warn_if_router_candidates_lack_pricing(config, session)
                 await load_aliases_at_startup(session)
@@ -868,6 +946,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # vendor handshake.
             await load_guardrail_runner_at_startup()
             await load_provider_endpoints_at_startup()
+            await _move_deployment_providers(config)
+            await _import_configured_providers(config)
             await load_hosted_names_at_startup(config)
             # On a Unit of Work of its own, after the session above has closed.
             await _report_hosted_providers_config(config)
@@ -955,10 +1035,14 @@ async def _http_exception_handler(request: Request, exc: Exception) -> Response:
 
     A body field survives where a header does not (a proxy that drops it, an SDK
     that surfaces only the body), so a client can map the refusal from either.
+    A ``BodyHTTPException`` is answered with its own body rather than under ``detail``.
     """
     if not isinstance(exc, StarletteHTTPException):
         raise exc
     code = error_code_of(exc.headers)
+    if isinstance(exc, BodyHTTPException):
+        body = exc.body if code is None else {**exc.body, "code": code}
+        return with_request_id(request, JSONResponse(body, status_code=exc.status_code, headers=exc.headers))
     if code is None:
         return with_request_id(request, await http_exception_handler(request, exc))
     return with_request_id(

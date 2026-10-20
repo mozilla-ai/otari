@@ -38,13 +38,14 @@ own logs.
 Billing: search is priced per request, not per token, so a usage row carries
 zero tokens and a cost taken from the provider's own reported charge when it
 reports one, else the call's flat per-request rate. A search on an instance is
-priced under ``<provider>:<tool>``, which only the operator's price or override
-sets, since the deployment pays for the call. A search a workspace's
-organization key served is priced under ``otari:web_search``, which the
-organization's own override may set, since a deployment cannot price a tenant's
-key. With ``require_pricing`` on, a search whose row is missing is refused with
-a 402 after the budget checks, even from a provider that reports its own cost;
-a key exempt from budgets is still served.
+priced at the tool's own search price row, then at the ``<provider>:<tool>`` row
+it was priced under before tools had a kind; only the operator's price or
+override sets either, since the deployment pays for the call. A search a
+workspace's organization key served is priced under ``otari:web_search``, which
+the organization's own override may set, since a deployment cannot price a
+tenant's key. With ``require_pricing`` on, a search whose rate is missing is
+refused with a 402 after the budget checks, even from a provider that reports
+its own cost; a key exempt from budgets is still served.
 """
 
 import time
@@ -376,8 +377,9 @@ async def _dispatch_search(
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
 
-    # The rate the reservation holds and the settlement falls back to. The call's
-    # label decides whose overrides count.
+    # The rate the reservation holds and the settlement falls back to: the
+    # instance's own row, under its new key or its old one, or ``otari:web_search``
+    # for an organization key (design L). The call's label decides whose overrides count.
     rate = await resolve_tool_rate(
         db,
         search.resolved.rate_keys,

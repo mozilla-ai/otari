@@ -177,6 +177,7 @@ def test_a_bare_alias_sharing_the_undated_name_does_not_disclose_the_dated_build
 def instance_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
     """A gateway whose ``config.yml`` also declares an ``anthropic`` instance."""
     config = GatewayConfig(
+        import_configured_providers=False,
         database_url=postgres_url,
         master_key="test-master-key",
         auto_migrate=False,

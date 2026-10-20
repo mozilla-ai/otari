@@ -6,8 +6,9 @@ deployment's hosted providers serve, and the Health page shows what each one
 answered. An alert list is emailed when a model stops answering and again when
 it answers.
 
-Health checks are a standalone feature, for operators only. A hosted control
-plane does not run them. `health_checks_enabled: false` in `config.yml` (or
+Health checks are for operators only, on a standalone or a hosted deployment. A
+hybrid gateway has no Health page: it keeps no database and hosts no dashboard
+pages of its own. `health_checks_enabled: false` in `config.yml` (or
 `OTARI_HEALTH_CHECKS_ENABLED=false`) removes the page, its routes and its worker;
 it is read at startup, so changing it needs a restart.
 

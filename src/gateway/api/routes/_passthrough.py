@@ -43,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     ContainerDep,
+    billing_port_on,
     extract_credential_token,
     get_config,
     get_db,
@@ -52,6 +53,8 @@ from gateway.api.deps import (
 from gateway.api.routes._helpers import resolve_user_id, with_retry_hint
 from gateway.api.routes._pipeline import (
     DB_UNAVAILABLE_DETAIL,
+    FUNDS_CHECK_UNAVAILABLE_DETAIL,
+    HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
     PROVIDER_CREDENTIALS_DETAIL,
     _await_usage_report,
@@ -78,8 +81,14 @@ from gateway.api.routes._platform import (
     run_platform_attempts,
 )
 from gateway.core.config import ATTEMPT_ID_HEADER, REQUEST_ID_HEADER, GatewayConfig
-from gateway.core.database import release_session
-from gateway.core.error_codes import MODEL_NOT_ALLOWED, PRICING_REQUIRED, PROVIDER_CREDENTIAL_REJECTED, error_headers
+from gateway.core.database import DATABASE_ERRORS, describe_database_error, release_session
+from gateway.core.error_codes import (
+    INSUFFICIENT_FUNDS,
+    MODEL_NOT_ALLOWED,
+    PRICING_REQUIRED,
+    PROVIDER_CREDENTIAL_REJECTED,
+    error_headers,
+)
 from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.exceptions import TenancyError
@@ -91,6 +100,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
 from gateway.ports.billing_port import BillingPort, InsufficientFundsError
+from gateway.ports.model_provider_port import HostedAccessDeniedError
 from gateway.rate_limit import check_rate_limit
 from gateway.schemas.inference import DecisionRequest, DecisionResponse, InlineCost
 from gateway.services.budgets import (
@@ -99,6 +109,7 @@ from gateway.services.budgets import (
     ReservationHandle,
     estimate_cost,
     estimate_tokens,
+    increase_reservation,
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
@@ -107,10 +118,13 @@ from gateway.services.catalog import hide_alias_target
 from gateway.services.inference import (
     DecisionProvider,
     DecisionProviderError,
+    DeploymentCharge,
     PassthroughBilling,
     ReportedUsage,
     UnknownDecisionProviderError,
+    admit_deployment_paid,
     decision_body,
+    describe_port_error,
     reported_charge,
     request_decision,
     resolve_decision_provider,
@@ -133,14 +147,12 @@ from gateway.services.pricing_service import (
     resolve_model_pricing,
 )
 from gateway.services.provider_kwargs import (
-    ManagedCredentialUnsupportedError,
-    MissingCredential,
     ResolvedProvider,
     missing_credential,
     require_declared_credential,
     resolve_provider_selector,
 )
-from gateway.services.providers import refuse_managed_only, unpriced_model_refusal
+from gateway.services.providers import serve_on_hosted_provider, unpriced_model_refusal
 from gateway.services.routing import refuse_local_policy
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
@@ -404,35 +416,84 @@ async def run_passthrough(
                 )
             raise
 
-    async def _refuse_managed_only(resolved: ResolvedProvider, reservation: ReservationHandle) -> None:
-        """Refuse a model only the deployment's managed credentials would serve, which this endpoint never asks.
+    async def _refuse(
+        reservation: ReservationHandle, resolved: ResolvedProvider, status_code: int, detail: str, **headers: str
+    ) -> HTTPException:
+        """Refund ``reservation``, record the refusal, and return the exception to raise."""
+        await refund_reservation(db, reservation)
+        await _log_rejection(detail, row_model=resolved.model, row_provider=resolved.instance, status_code=status_code)
+        return HTTPException(status_code=status_code, detail=detail, headers=headers or None)
 
-        Refunds ``reservation`` and records the rejection, and refunds it too when
-        the request is cancelled while the hosted models are listed.
+    async def _serve_hosted(
+        resolved: ResolvedProvider, reservation: ReservationHandle
+    ) -> tuple[ResolvedProvider, DeploymentCharge | None] | None:
+        """Serve ``resolved`` on the deployment's own credential where nothing declared serves it.
+
+        Returns the deployment-paid dispatch and what settlement charges it
+        through, or ``None`` to dispatch as resolved. Every refusal refunds
+        ``reservation`` and is recorded.
         """
+        port = model_provider_port_on(raw_request, db)
         try:
-            await refuse_managed_only(
-                config,
-                resolved,
-                hosted=lambda: model_provider_port_on(raw_request, db),
-                organization_id=organization_id,
-                surface=endpoint,
+            served = await serve_on_hosted_provider(
+                config, port, resolved, organization_id=organization_id, workspace_id=workspace_id
             )
         except asyncio.CancelledError:
             await refund_reservation(db, reservation)
             raise
-        except ManagedCredentialUnsupportedError as exc:
-            await refund_reservation(db, reservation)
-            managed = MissingCredential.from_error(exc)
-            await _log_rejection(
-                managed.detail,
-                row_model=resolved.model,
-                row_provider=resolved.instance,
-                status_code=managed.status_code,
-            )
-            raise HTTPException(
-                status_code=managed.status_code, detail=managed.detail, headers=error_headers(managed.code)
+        except HostedAccessDeniedError as exc:
+            raise await _refuse(
+                reservation,
+                resolved,
+                status.HTTP_403_FORBIDDEN,
+                model_not_allowed_detail(model),
+                **error_headers(MODEL_NOT_ALLOWED),
             ) from exc
+        except Exception as exc:
+            logger.error(
+                "ModelProviderPort failed to resolve a credential for %s:%s: %s",
+                resolved.instance,
+                resolved.model,
+                describe_port_error(exc),
+            )
+            raise await _refuse(
+                reservation, resolved, status.HTTP_502_BAD_GATEWAY, HOSTED_CREDENTIAL_UNUSABLE_DETAIL
+            ) from exc
+        if served is None:
+            return None
+        try:
+            charge = await admit_deployment_paid(
+                billing_port_on(raw_request, db),
+                deployment_paid=True,
+                organization_id=organization_id,
+                api_key_id=api_key_id,
+                user_id=user_id,
+                request_id=None,
+            )
+        except InsufficientFundsError as exc:
+            raise await _refuse(
+                reservation,
+                served,
+                status.HTTP_402_PAYMENT_REQUIRED,
+                exc.public_message,
+                **error_headers(INSUFFICIENT_FUNDS),
+            ) from exc
+        except Exception as exc:
+            logger.error(
+                "BillingPort failed to admit a deployment-paid request: organization=%s: %s",
+                organization_id,
+                describe_port_error(exc),
+            )
+            try:
+                await db.rollback()
+            except DATABASE_ERRORS as rollback_error:
+                logger.warning(
+                    "Could not roll back a failed funding check: %s", describe_database_error(rollback_error)
+                )
+            raise await _refuse(
+                reservation, served, status.HTTP_503_SERVICE_UNAVAILABLE, FUNDS_CHECK_UNAVAILABLE_DETAIL
+            ) from exc
+        return served, charge
 
     pricing: ModelPricing | None = None
     # ``pricing`` with where it came from, recorded on the row it prices.
@@ -517,13 +578,14 @@ async def run_passthrough(
                 pricing, meter=billing.meter, reports_tokens=billing.reports_tokens, legacy_unit_reading=True
             )
         ):
-            # A model only managed credentials would serve is refused for that,
-            # not for its price: pricing it would not make it servable here.
-            await _refuse_managed_only(resolved, reservation)
             await refund_reservation(db, reservation)
-            # This path never asks the hosted port, so none is passed.
             unpriced = await unpriced_model_refusal(
-                config, model, resolved, plan=None, hosted=None, organization_id=organization_id
+                config,
+                model,
+                resolved,
+                plan=None,
+                hosted=model_provider_port_on(raw_request, db),
+                organization_id=organization_id,
             )
             # Record the rejection so dropped traffic is visible in the activity
             # log and countable as an error, rather than only reaching the
@@ -584,8 +646,51 @@ async def run_passthrough(
             headers=error_headers(refusal.code),
         )
 
-    # Managed credentials serve only the completion routes.
-    await _refuse_managed_only(resolved, reservation)
+    # The last rung of the credential ladder, past every gate on the name the caller wrote.
+    deployment_charge: DeploymentCharge | None = None
+    hosted = await _serve_hosted(resolved, reservation)
+    if hosted is not None:
+        resolved, deployment_charge = hosted
+        if lookup_pricing:
+            # Settled at the rate a deployment-paid request settles at, which no
+            # organization override reaches.
+            found_pricing = await resolve_model_pricing(
+                db,
+                resolved.instance,
+                resolved.model,
+                use_defaults=pricing_use_defaults,
+                organization_id=organization_id,
+                deployment_paid=True,
+            )
+            pricing = found_pricing.pricing if found_pricing is not None else None
+            if (
+                enforce_require_pricing
+                and not budget_exempt
+                and config.require_pricing
+                and not can_price(
+                    pricing, meter=billing.meter, reports_tokens=billing.reports_tokens, legacy_unit_reading=True
+                )
+            ):
+                raise await _refuse(
+                    reservation,
+                    resolved,
+                    status.HTTP_402_PAYMENT_REQUIRED,
+                    no_pricing_error_detail(f"{resolved.instance}:{resolved.model}"),
+                    **error_headers(PRICING_REQUIRED),
+                )
+            if estimate is not None:
+                try:
+                    await increase_reservation(
+                        db,
+                        reservation,
+                        estimate=estimate(pricing),
+                        model=f"{resolved.instance}:{resolved.model}",
+                        strategy=config.budget_strategy,
+                    )
+                except HTTPException as exc:
+                    raise await _refuse(
+                        reservation, resolved, exc.status_code, str(exc.detail), **(exc.headers or {})
+                    ) from exc
 
     # Already resolved above (needed there for organization-scoped provider
     # credentials); reused here rather than re-derived, since it is fixed for
@@ -611,6 +716,7 @@ async def run_passthrough(
             status=row_status,
             latency_ms=_elapsed_ms(started_at),
             counts_toward_budget=not budget_exempt,
+            deployment_paid=deployment_charge is not None,
             **outcome,
         )
 
@@ -665,6 +771,14 @@ async def run_passthrough(
             if charge.meters:
                 usage_log.billing_meters, usage_log.pricing_breakdown = charge.meters, charge.lines
 
+        if deployment_charge is not None:
+            await deployment_charge.settle(
+                cost,
+                model=resolved.model,
+                description=f"{resolved.instance}:{resolved.model}",
+                expects_cost=True,
+                savepoint=db.begin_nested,
+            )
         await log_writer.put(usage_log)
         # The measured total, so a token ceiling counts this endpoint's traffic.
         # These paths hold no token estimate at admission (the estimate callback is
@@ -1262,8 +1376,8 @@ async def run_decision(
             await billing.hold(organization_id=funding.organization_id, amount=funding.hold)
         except InsufficientFundsError as exc:
             await refund_reservation(db, reservation)
-            await log_rejection(str(exc), row_model=model, row_provider=provider_name, status_code=402)
-            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(exc)) from exc
+            await log_rejection(exc.public_message, row_model=model, row_provider=provider_name, status_code=402)
+            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=exc.public_message) from exc
 
     async def undo() -> None:
         """Give back what the request holds: the billing hold, then the budget reservation.

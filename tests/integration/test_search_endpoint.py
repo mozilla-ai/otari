@@ -642,6 +642,36 @@ def test_search_falls_back_to_configured_flat_pricing(
     assert search_logs[0]["cost"] == pytest.approx(0.005)
 
 
+def test_a_search_tools_own_row_prices_it_ahead_of_its_old_key(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """The search row named after the tool bills, over a row still under ``<provider>:<tool>``."""
+    _price(client, master_key_header, "fake:fake-fast", 5000.0)
+    own = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "kind": "search",
+            "model_key": "fake-fast",
+            "input_price_per_million": 2000.0,
+            "output_price_per_million": 0,
+        },
+        headers=master_key_header,
+    )
+    assert own.status_code == 200, own.text
+    assert (own.json()["kind"], own.json()["unit"]) == ("search", "requests")
+    # The two kinds are two rows: the tool's is not read as a model's, nor the other way round.
+    assert client.get(f"{API_ROOT}/pricing/fake-fast", headers=master_key_header).status_code == 404
+    assert client.get(f"{API_ROOT}/pricing/fake-fast?kind=search", headers=master_key_header).status_code == 200
+
+    resp = client.post(f"{API_ROOT}/search/fake-fast", json=SEARCH_PAYLOAD, headers=api_key_header)
+    assert resp.status_code == 200
+
+    assert _search_rows(client, master_key_header, api_key_obj["user_id"])[0]["cost"] == pytest.approx(0.002)
+
+
 def test_search_logs_error_and_refunds_on_failure(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -1280,9 +1310,14 @@ def test_an_unpriced_search_is_refused_with_402_naming_its_row(
     assert resp.headers["Otari-Error-Code"] == "pricing_required"
     assert resp.json()["code"] == "pricing_required"
     detail = resp.json()["detail"]
-    assert "'fake:fake-fast'" in detail
+    # The new form of the tool's price, not the <provider>:<tool> it was priced under before.
+    assert "kind 'search' and the tool's name as model_key" in detail
+    assert "fake:fake-fast" not in detail
+    # price_per_call only for a tool declared in config.yml; a stored tool has no entry to carry it.
+    assert "price_per_call on its entry if it is declared in config.yml" in detail
     # The deployment pays for the search, so only its operator's price counts.
-    assert "operator has not priced" in detail
+    assert "no price the deployment's operator set" in detail
+    assert len(detail) <= 400
     assert f"POST {API_ROOT}/pricing" in detail
     # The dashboard can set only otari:web_search, not an instance's row.
     assert "Tools & Guardrails" not in detail
@@ -1306,6 +1341,51 @@ def test_a_zero_rate_prices_a_search(strict_client: TestClient, master_key_heade
     assert (row["status"], row["cost"]) == ("success", 0)
 
 
+def test_a_search_kind_price_satisfies_require_pricing(
+    strict_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The tool's own price, kind ``search`` under its name, prices it as its old ``<provider>:<tool>`` row did."""
+    headers = _keyed(strict_client, master_key_header, "search-kind-price")
+    resp = strict_client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "kind": "search",
+            "model_key": "fake-fast",
+            "input_price_per_million": 2000.0,
+            "output_price_per_million": 0.0,
+        },
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200, resp.text
+
+    served = strict_client.post(f"{API_ROOT}/search/fake-fast", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert served.status_code == 200, served.text
+    (row,) = _search_rows(strict_client, master_key_header, "search-kind-price")
+    assert row["cost"] == pytest.approx(0.002)
+
+
+@pytest.fixture
+def strict_priced_per_call_client(test_config: GatewayConfig) -> Generator[TestClient]:
+    """``require_pricing`` on, with ``fake-fast`` priced by ``price_per_call`` alone."""
+    tools = _search_tools()
+    tools["fake-fast"] = {**tools["fake-fast"], "price_per_call": 0.003}
+    yield from _client_on(test_config, require_pricing=True, search_tools=tools)
+
+
+def test_a_price_per_call_satisfies_require_pricing(
+    strict_priced_per_call_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client = strict_priced_per_call_client
+    headers = _keyed(client, master_key_header, "per-call-price")
+
+    served = client.post(f"{API_ROOT}/search/fake-fast", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert served.status_code == 200, served.text
+    (row,) = _search_rows(client, master_key_header, "per-call-price")
+    assert row["cost"] == pytest.approx(0.003)
+
+
 def test_a_provider_that_reports_its_cost_still_needs_a_row(
     strict_client: TestClient, master_key_header: dict[str, str]
 ) -> None:
@@ -1317,7 +1397,7 @@ def test_a_provider_that_reports_its_cost_still_needs_a_row(
     served = strict_client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
 
     assert refused.status_code == 402, refused.text
-    assert "'fake:fake-search'" in refused.json()["detail"]
+    assert "A search on 'fake-search' has no price" in refused.json()["detail"]
     assert served.status_code == 200, served.text
     success = [
         row

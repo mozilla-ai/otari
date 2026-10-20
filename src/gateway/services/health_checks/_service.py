@@ -4,9 +4,8 @@ import asyncio
 import uuid
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol
+from typing import Protocol
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -31,7 +30,7 @@ from gateway.services.health_checks._alerts import (
     diff_alerts,
     render_health_alert,
 )
-from gateway.services.health_checks._probe import ProbeOutcome, ProbeTarget, probe_all
+from gateway.services.health_checks._probe import HealthCheckOffering, ProbeOutcome, probe_all
 from gateway.services.health_checks._summary import FailureStreak, failure_streaks, summarize
 from gateway.services.mail import Mailer
 
@@ -44,20 +43,6 @@ RECOVERY_RETENTION = timedelta(days=90)
 ABANDONED_AFTER = timedelta(hours=1)
 # Where an alert links to, the dashboard route of the Health page.
 HEALTH_PAGE = "/#/health-checks"
-
-
-@dataclass(frozen=True)
-class HealthCheckOffering:
-    """One model a hosted provider serves, and how to reach it."""
-
-    selector: str
-    instance: str
-    reasoning: bool
-    chat: bool
-    # The any-llm implementation, the provider's own model id, and the connection arguments, key included.
-    implementation: str
-    model: str
-    call_kwargs: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 ListOfferings = Callable[[], Awaitable[Sequence[HealthCheckOffering]]]
@@ -246,19 +231,7 @@ class HealthCheckService:
 
         try:
             offerings = await list_offerings()
-            targets = [
-                ProbeTarget(
-                    offering.selector,
-                    offering.instance,
-                    offering.reasoning,
-                    offering.chat,
-                    offering.implementation,
-                    offering.model,
-                    offering.call_kwargs,
-                )
-                for offering in offerings
-                if include_reasoning or not offering.reasoning
-            ]
+            targets = [offering for offering in offerings if include_reasoning or not offering.reasoning]
             deferred = sorted(
                 offering.selector for offering in offerings if offering.reasoning and not include_reasoning
             )

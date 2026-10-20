@@ -22,6 +22,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from any_llm.types.model import Model
 
@@ -29,6 +30,7 @@ from gateway.core.config import GatewayConfig, hosted_key_optional
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyError
 from gateway.exceptions.providers_exceptions import (
+    DeploymentProviderNotFoundError,
     HostedModelAlreadyOfferedError,
     HostedModelNameRequiredError,
     HostedModelNotFoundError,
@@ -75,7 +77,8 @@ from gateway.services.model_discovery_service import (
     test_provider_credentials,
 )
 from gateway.services.pricing import DeploymentPricingService
-from gateway.services.provider_store_service import config_file_instances, forget_stored_providers
+from gateway.services.provider_kwargs import configured_instances
+from gateway.services.providers._configured_provider_import import plan_import
 from gateway.services.providers._deployment_provider_move import PlannedMove, plan_move
 from gateway.services.providers._hosted_catalog_sweep import UNDECRYPTABLE, HostedCatalogSweep, LiveByoPairs
 from gateway.services.providers._hosted_credentials import (
@@ -101,6 +104,20 @@ from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecrypt
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 OrganizationExists = Callable[[uuid.UUID], Awaitable[bool]]
+
+
+@dataclass(frozen=True)
+class ConfiguredProviderImports:
+    """What one start did with the ``providers:`` entries of config.yml.
+
+    ``imported`` were copied onto hosted providers now; ``already`` were copied
+    by an earlier start, so config.yml no longer serves them; ``kept`` maps
+    each entry config.yml still serves to why a hosted provider cannot hold it.
+    """
+
+    imported: list[str]
+    already: list[str]
+    kept: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -174,13 +191,17 @@ class HostedProviderService:
                 data=[self._public(source) for source in sources[skip : skip + limit]], count=len(sources)
             )
 
-    async def create_provider(self, request: HostedProviderCreateRequest) -> HostedProviderPublic:
+    async def create_provider(
+        self, request: HostedProviderCreateRequest, *, switch_on_listed: bool = False
+    ) -> HostedProviderPublic:
         """Configure a provider, offering everything it lists on the new key.
 
         A name the configuration already defines may be created too, and the
         row then wins over the entry. A provider that will not list yields a
         provider with no models rather than a failed create: the credential may
-        still be right for dispatch.
+        still be right for dispatch. ``switch_on_listed`` switches on every
+        model it lists whether or not something prices it, for a provider that
+        already served them elsewhere.
 
         Raises:
             HostedProviderUnknownProviderError: ``provider`` names no any-llm implementation.
@@ -222,11 +243,14 @@ class HostedProviderService:
                     encrypted_client_args=encrypted_client_args,
                     enabled=request.enabled,
                     restricted_to_organization_id=request.restricted_to_organization_id,
+                    serves_unlisted_models=request.serves_unlisted_models,
                 )
             except HostedProviderConflict as conflict:
                 # The pre-check races the insert; the unique constraint decides.
                 raise HostedProviderAlreadyExistsError(conflict.name) from conflict
-            await self.offers.offer(name, discovered, defaults)
+            await self.offers.offer(
+                name, discovered, defaults, serves_unlisted=request.serves_unlisted_models or switch_on_listed
+            )
             public = HostedProviderPublic.from_row(
                 row,
                 client_args=request.client_args,
@@ -292,6 +316,8 @@ class HostedProviderService:
                 row.encrypted_client_args = encrypt_client_args(restore_redacted_values(request.client_args, stored))
             if request.enabled is not None:
                 row.enabled = request.enabled
+            if request.serves_unlisted_models is not None:
+                row.serves_unlisted_models = request.serves_unlisted_models
             if "restricted_to_organization_id" in request.model_fields_set:
                 await self._require_organization(request.restricted_to_organization_id)
                 row.restricted_to_organization_id = request.restricted_to_organization_id
@@ -366,12 +392,14 @@ class HostedProviderService:
             await self._provider_or_raise(provider)
             if priced:
                 try:
-                    [model] = await self.models.create_many(provider, [name], enabled={name: True})
+                    [model] = await self.models.create_many(provider, [name])
                 except HostedModelConflict as conflict:
                     raise HostedModelAlreadyOfferedError(provider, conflict.model) from conflict
                 await self.offers.write_rate(provider, name, request)
             else:
-                [model] = await self.offers.offer(provider, [name], defaults)
+                [model] = await self.offers.offer(
+                    provider, [name], defaults, serves_unlisted=source.serves_unlisted_models
+                )
         rates = await self.offers.current_rates(provider, [model], implementation=implementation)
         return HostedModelPublic.from_row(model, rates=rates.get(name))
 
@@ -379,6 +407,9 @@ class HostedProviderService:
         self, provider: str, model_id: uuid.UUID, request: HostedModelUpdateRequest
     ) -> HostedModelPublic:
         """Reprice one offered model, toggle whether it is served, or both.
+
+        A rate given for a model held off for want of one serves it, unless
+        the same request switches it off.
 
         Raises:
             HostedProviderNotFoundError: no such provider.
@@ -391,8 +422,10 @@ class HostedProviderService:
             priced = request.input_price_per_million is not None and request.output_price_per_million is not None
             if priced:
                 await self.offers.write_rate(provider, model.model, request)
+                self.offers.serve_once_priced(model)
             if request.enabled is not None:
-                model.enabled = request.enabled
+                await self.offers.switch_by_operator(provider, model, request.enabled)
+            if priced or request.enabled is not None:
                 await self.models.save(model)
         rates = await self.offers.current_rates(provider, [model], implementation=source.implementation)
         return HostedModelPublic.from_row(model, rates=rates.get(model.model))
@@ -404,7 +437,9 @@ class HostedProviderService:
         over. Returns how many models were switched off.
         """
         async with self.uow:
-            return sum([await self.models.switch_off(provider, names) for provider, names in models.items()])
+            return sum(
+                [await self.offers.switch_off_by_operator(provider, names) for provider, names in models.items()]
+            )
 
     async def remove_model(self, provider: str, model_id: uuid.UUID) -> None:
         """Stop offering a model. Its pricing history stays.
@@ -451,8 +486,8 @@ class HostedProviderService:
 
         async with self.uow:
             await self._provider_or_raise(provider)
-            repriced = await self.offers.reseed(provider, defaults)
-            await self.offers.offer(provider, added, defaults)
+            repriced = await self.offers.reseed(provider, defaults, serves_unlisted=source.serves_unlisted_models)
+            await self.offers.offer(provider, added, defaults, serves_unlisted=source.serves_unlisted_models)
         return HostedModelsRefreshPublic(added=added, repriced=repriced, count=len(offered) + len(added))
 
     async def available_models(self, provider: str) -> HostedAvailableModelsPublic:
@@ -559,12 +594,13 @@ class HostedProviderService:
     ) -> DeploymentProviderMigrationPublic:
         """Move the deployment providers stored through the dashboard onto hosted providers, or preview it.
 
-        Each becomes a hosted provider of the same name, its models discovered
-        as on any create. The deployment provider is removed once the hosted
-        one offers a model, so a provider that will not list keeps serving as
-        it did until the operator adds its models. One that cannot move (a
-        name a hosted provider already holds, a key no configured key reads)
-        is reported and left where it is; so is one edited while this ran.
+        Each becomes a hosted provider of the same name, every model it lists
+        offered and switched on, priced or not, as the deployment provider
+        served them. The deployment provider is removed once the hosted one
+        offers a model, so a provider that will not list keeps serving as it
+        did until the operator adds its models. One that cannot move (a name a
+        hosted provider already holds, a key no configured key reads) is
+        reported and left where it is; so is one edited while this ran.
 
         ``reviewed`` binds an apply to the preview the caller reviewed, by
         instance and the version it was shown at: a row it does not name, or
@@ -573,7 +609,7 @@ class HostedProviderService:
         async with self.uow:
             hosted_names = {row.name for row in await self.providers.list_all()}
             stored = list(await self.providers.list_deployment_providers())
-        configured = set(config_file_instances(self.config))
+        configured = set(configured_instances(self.config))
         plans = [plan_move(row, hosted_names=hosted_names, configured_instances=configured) for row in stored]
         if apply:
             removed: set[str] = set()
@@ -589,11 +625,68 @@ class HostedProviderService:
                         continue
                 if await self._move(plan):
                     removed.add(plan.row.instance)
-            if removed:
-                forget_stored_providers(self.config, removed)
-                for instance in removed:
-                    get_model_cache().clear(instance)
+            for instance in removed:
+                get_model_cache().clear(instance)
         return DeploymentProviderMigrationPublic(rows=[plan.row for plan in plans])
+
+    async def import_configured_providers(self, entries: Mapping[str, Mapping[str, Any]]) -> ConfiguredProviderImports:
+        """Copy the ``providers:`` entries of config.yml onto hosted providers of their names, once each.
+
+        An entry copied by an earlier start is not copied again, so removing
+        its hosted provider sticks. Each is asked for its models, which are
+        switched on, and one that lists none is not copied.
+        """
+        async with self.uow:
+            done = await self.providers.imported_configured_names()
+            hosted_names = {row.name for row in await self.providers.list_all()}
+        imports = ConfiguredProviderImports(imported=[], already=[], kept={})
+        for name, entry in entries.items():
+            if name in done:
+                imports.already.append(name)
+                continue
+            plan = plan_import(name, entry, hosted_names=hosted_names)
+            if plan.create is None:
+                imports.kept[name] = plan.reason or "it cannot be copied"
+                continue
+            try:
+                await self.create_provider(plan.create, switch_on_listed=True)
+            except TenancyError as exc:
+                # Another replica may have copied it first.
+                async with self.uow:
+                    if name in await self.providers.imported_configured_names():
+                        imports.already.append(name)
+                    else:
+                        imports.kept[name] = str(exc)
+                continue
+            async with self.uow:
+                if not await self.models.names_for_provider(name):
+                    # It would serve none of what the entry served, so the
+                    # entry keeps serving, and the next start asks again.
+                    row = await self.providers.get_by_name(name)
+                    if row is not None:
+                        await self.providers.delete_row(row)
+                    listed = False
+                else:
+                    await self.providers.record_configured_import(name)
+                    listed = True
+            if not listed:
+                forget_hosted_name(name)
+                imports.kept[name] = "the provider listed no models, so a hosted provider would serve none of them"
+                continue
+            imports.imported.append(name)
+        return imports
+
+    async def discard_deployment_provider(self, instance: str) -> None:
+        """Remove a deployment provider the move did not take, which serves nothing.
+
+        Raises:
+            DeploymentProviderNotFoundError: no such deployment provider.
+        """
+        async with self.uow:
+            row = await self.providers.get_deployment_provider(instance)
+            if row is None:
+                raise DeploymentProviderNotFoundError(instance)
+            await self.providers.delete_deployment_provider(row)
 
     async def _move(self, plan: PlannedMove) -> bool:
         """Create the hosted provider a plan names and remove its source; returns whether the source went."""
@@ -601,7 +694,7 @@ class HostedProviderService:
             return False
         row = plan.row
         try:
-            await self.create_provider(plan.create)
+            await self.create_provider(plan.create, switch_on_listed=True)
         except TenancyError as exc:
             row.outcome = "failed"
             row.detail = str(exc)

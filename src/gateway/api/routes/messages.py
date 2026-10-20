@@ -1,8 +1,9 @@
 import json
 import math
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from functools import partial
+from http import HTTPStatus
 from typing import Annotated, Any, Literal
 
 from any_llm import AnyLLM
@@ -15,8 +16,11 @@ from any_llm.types.messages import (
     MessageStreamEvent,
 )
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from gateway.api.deps import (
     BillingPortDep,
@@ -32,6 +36,7 @@ from gateway.api.deps import (
     get_unit_of_work_if_needed,
     verify_api_key_or_master_key,
 )
+from gateway.api.error_body import BodyHTTPException
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import (
@@ -48,6 +53,7 @@ from gateway.api.routes._pipeline import (
     ToolBackends,
     ToolContext,
     classify_provider_error,
+    control_plane_error,
     default_attempt_kwargs,
     domain_error,
     error_kind_for_status,
@@ -77,14 +83,17 @@ from gateway.api.routes._request_tags import (
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import INVALID_REQUEST, error_headers
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
+from gateway.exceptions import TenancyError
+from gateway.exceptions.control_plane_exceptions import ControlPlaneError
 from gateway.exceptions.files_exceptions import ProviderUploadFailedError
 from gateway.exceptions.tools_exceptions import ContainerOnManagedCredentialError
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.schemas.inference import SettledCost
+from gateway.schemas.inference import AnthropicErrorResponse, SettledCost
 from gateway.services.code_execution import ContainerLease, check_container_on_credential, gateway_container_value
 from gateway.services.content_normalizer import stage_container_blocks
 from gateway.services.files import StagedFile
@@ -126,7 +135,46 @@ from gateway.streaming import ANTHROPIC_STREAM_FORMAT, IncompleteStreamError, St
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 
-router = APIRouter(tags=["messages"])
+
+class _AnthropicErrorRoute(APIRoute):
+    """A route whose every error, a request that fails validation included, is answered in Anthropic's envelope.
+
+    Anthropic's SDKs, and the clients built on them, read no other error body.
+    """
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handle = super().get_route_handler()
+
+        async def handle_in_anthropic_envelope(request: Request) -> Response:
+            try:
+                return await handle(request)
+            except RequestValidationError as exc:
+                raise _anthropic_error(
+                    _ERR_INVALID_REQUEST,
+                    _validation_message(exc),
+                    status.HTTP_400_BAD_REQUEST,
+                    error_headers(INVALID_REQUEST),
+                ) from exc
+            except StarletteHTTPException as exc:
+                enveloped = _ensure_anthropic_error(exc)
+                if enveloped is exc:
+                    raise
+                raise enveloped from exc
+            except ControlPlaneError as exc:
+                raise control_plane_error(_ADAPTER, exc) from exc
+            except TenancyError as exc:
+                raise domain_error(_ADAPTER, exc) from exc
+            except Exception as exc:
+                # Not ``BaseException``: a cancelled request is a disconnected client, not a failure.
+                logger.exception("Messages request failed: %s", type(exc).__name__)
+                raise _anthropic_error(
+                    _ERR_API, "Internal server error", status.HTTP_500_INTERNAL_SERVER_ERROR
+                ) from exc
+
+        return handle_in_anthropic_envelope
+
+
+router = APIRouter(tags=["messages"], route_class=_AnthropicErrorRoute)
 
 # See chat.USAGE_ENDPOINT.
 USAGE_ENDPOINT = "/v1/messages"
@@ -305,6 +353,12 @@ class CountTokensResponse(BaseModel):
     input_tokens: int
 
 
+_ANTHROPIC_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    "4XX": {"model": AnthropicErrorResponse, "description": "The request was refused."},
+    "5XX": {"model": AnthropicErrorResponse, "description": "The request failed."},
+}
+
+
 def _is_gateway_minted_result(block: Any) -> bool:
     """Whether a web search or fetch result block was minted by this gateway.
 
@@ -478,14 +532,24 @@ def _anthropic_error(
     error_type: str,
     message: str,
     status_code: int,
-    headers: dict[str, str] | None = None,
-) -> HTTPException:
-    """Create an HTTPException with Anthropic-style error body."""
-    return HTTPException(
-        status_code=status_code,
-        detail={"type": "error", "error": {"type": error_type, "message": message}},
-        headers=headers,
-    )
+    headers: Mapping[str, str] | None = None,
+    *,
+    details: Mapping[str, Any] | None = None,
+) -> BodyHTTPException:
+    """An error answered in Anthropic's envelope, with any ``details`` beside its ``type`` and ``message``."""
+    error = {**(details or {}), "type": error_type, "message": message}
+    return BodyHTTPException(status_code, {"type": "error", "error": error}, headers)
+
+
+def _validation_message(exc: RequestValidationError) -> str:
+    """Each failure as ``field: reason``, never echoing the rejected value."""
+    failures = []
+    for error in exc.errors():
+        # A JSON decode error's location is a character offset, not a field.
+        loc = () if error.get("type") == "json_invalid" else error.get("loc", ())[1:]
+        field = ".".join(str(part) for part in loc)
+        failures.append(f"{field}: {error.get('msg', '')}" if field else error.get("msg", ""))
+    return "; ".join(failures)
 
 
 _ERR_INVALID_REQUEST = "invalid_request_error"
@@ -507,24 +571,21 @@ _ERROR_KIND_TO_ANTHROPIC_TYPE = {
 }
 
 
-def _ensure_anthropic_error(exc: HTTPException) -> HTTPException:
-    """Re-wrap a plain-string ``HTTPException`` in the Anthropic error envelope,
-    preserving the status code and headers (e.g. a 429's ``Retry-After``).
+def _ensure_anthropic_error(exc: StarletteHTTPException) -> BodyHTTPException:
+    """``exc`` in the Anthropic error envelope, keeping its status code and headers (a 429's ``Retry-After``).
 
-    HTTPExceptions already carrying the Anthropic ``detail`` dict (raised via
-    ``_anthropic_error``) pass through unchanged, so this is safe to apply to any
-    HTTPException on the ``/api/v1/messages`` path, including format-agnostic ones
-    raised by the hybrid preamble (platform resolve/auth) and the shared
-    execution runners.
+    One already in the envelope is returned as it is. A string detail becomes the
+    message; a dict detail gives its ``message``, and its other fields ride beside it.
     """
-    if not isinstance(exc.detail, str):
+    if isinstance(exc, BodyHTTPException):
         return exc
     error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[error_kind_for_status(exc.status_code)]
-    return HTTPException(
-        status_code=exc.status_code,
-        detail={"type": "error", "error": {"type": error_type, "message": exc.detail}},
-        headers=exc.headers,
-    )
+    detail = exc.detail
+    if isinstance(detail, dict):
+        details = {key: value for key, value in detail.items() if key != "message"}
+        message = str(detail.get("message", HTTPStatus(exc.status_code).phrase))
+        return _anthropic_error(error_type, message, exc.status_code, exc.headers, details=details)
+    return _anthropic_error(error_type, str(detail), exc.status_code, exc.headers)
 
 
 _ERR_OVERLOADED = "overloaded_error"
@@ -880,7 +941,7 @@ def _adapter_for(config: GatewayConfig) -> _MessagesAdapter:
     return _MessagesAdapter(instances) if instances else _ADAPTER
 
 
-@router.post("/messages", response_model=None)
+@router.post("/messages", response_model=None, responses=_ANTHROPIC_ERROR_RESPONSES)
 async def create_message(
     raw_request: Request,
     response: Response,
@@ -996,11 +1057,6 @@ async def create_message(
         )
     except IdempotentReplay as replay:
         return replay.response()
-    except HTTPException as exc:
-        # The hybrid preamble (platform resolve / auth) raises format-agnostic
-        # plain-string HTTPExceptions (some with a Retry-After header); re-wrap
-        # them in the Anthropic envelope so /api/v1/messages errors stay structured.
-        raise _ensure_anthropic_error(exc) from exc
 
     # Standalone credentials are the operator's own, so only hybrid can route to a managed one.
     # Any managed attempt counts, not only the first: fallback decides which serves, past this point.
@@ -1133,14 +1189,8 @@ async def create_message(
                     session_label=request.session_label,
                     started_at=ctx.started_at,
                 )
-            except HTTPException as exc:
-                # Hybrid terminal failures arrive as format-agnostic plain-string
-                # HTTPExceptions; ensure the Anthropic envelope (dict details pass
-                # through unchanged).
-                converted = _ensure_anthropic_error(exc)
-                if converted is exc:
-                    raise
-                raise converted from exc
+            except HTTPException:
+                raise
             except Exception as exc:
                 raise_all_streaming_attempts_failed(adapter, exc, route)
 
@@ -1171,27 +1221,17 @@ async def create_message(
     if ctx.hybrid_mode:
         route = ctx.route
         assert route is not None  # guaranteed by the hybrid-mode preamble
-        try:
-            result = await run_platform_non_stream(
-                adapter=adapter,
-                route=route,
-                base_request_fields=request_fields,
-                tool_ctx=tool_ctx,
-                response=response,
-                background_tasks=background_tasks,
-                config=config,
-                rate_limit_info=ctx.rate_limit_info,
-                session_label=request.session_label,
-            )
-        except HTTPException as exc:
-            # Hybrid terminal failures arrive as format-agnostic plain-string
-            # HTTPExceptions; ensure the Anthropic envelope (dict details pass
-            # through unchanged, including the sandbox / web_search 502s that
-            # run_platform_non_stream raises via the adapter).
-            converted = _ensure_anthropic_error(exc)
-            if converted is exc:
-                raise
-            raise converted from exc
+        result = await run_platform_non_stream(
+            adapter=adapter,
+            route=route,
+            base_request_fields=request_fields,
+            tool_ctx=tool_ctx,
+            response=response,
+            background_tasks=background_tasks,
+            config=config,
+            rate_limit_info=ctx.rate_limit_info,
+            session_label=request.session_label,
+        )
         return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path
@@ -1235,7 +1275,7 @@ def _estimate_input_tokens(request: CountTokensRequest) -> int:
     return max(1, math.ceil(chars / _CHARS_PER_TOKEN))
 
 
-@router.post("/messages/count_tokens")
+@router.post("/messages/count_tokens", responses=_ANTHROPIC_ERROR_RESPONSES)
 async def count_message_tokens(
     raw_request: Request,
     request: CountTokensRequest,
@@ -1250,26 +1290,22 @@ async def count_message_tokens(
     resolves the caller's token against the platform, standalone mode validates
     the API key — so the endpoint is not an open token-counting oracle.
     """
-    try:
-        if config.is_hybrid_mode:
-            # Resolve against the platform purely to authenticate the caller (same
-            # as create_message); the routing plan is discarded since counting is
-            # local. Without this, any non-empty bearer string would be accepted.
-            user_token = extract_credential_token(raw_request)
-            await _resolve_platform_credentials(
-                config=config,
-                user_token=user_token,
-                model_selector=request.model,
-            )
-        else:
-            if db is None:
-                raise _anthropic_error(_ERR_API, DB_UNAVAILABLE_DETAIL, status.HTTP_500_INTERNAL_SERVER_ERROR)
-            # No session cookie here either, for the reason the completions path
-            # gives (`_pipeline.resolve_request_context`): this counts tokens for
-            # the plane a cookie may not reach, so it must not report on one.
-            await verify_api_key_or_master_key(raw_request, db, config)
-    except HTTPException as exc:
-        # Keep count_tokens auth errors in the Anthropic envelope too.
-        raise _ensure_anthropic_error(exc) from exc
+    if config.is_hybrid_mode:
+        # Resolve against the platform purely to authenticate the caller (same
+        # as create_message); the routing plan is discarded since counting is
+        # local. Without this, any non-empty bearer string would be accepted.
+        user_token = extract_credential_token(raw_request)
+        await _resolve_platform_credentials(
+            config=config,
+            user_token=user_token,
+            model_selector=request.model,
+        )
+    else:
+        if db is None:
+            raise _anthropic_error(_ERR_API, DB_UNAVAILABLE_DETAIL, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # No session cookie here either, for the reason the completions path
+        # gives (`_pipeline.resolve_request_context`): this counts tokens for
+        # the plane a cookie may not reach, so it must not report on one.
+        await verify_api_key_or_master_key(raw_request, db, config)
 
     return CountTokensResponse(input_tokens=_estimate_input_tokens(request))

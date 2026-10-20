@@ -63,11 +63,15 @@ Adding a provider offers every model its key lists. A model the deployment
 price list already prices is switched on at that rate. Otherwise, where
 `default_pricing` is on, the model is seeded with its models.dev rate and
 switched on; where it is off, or models.dev does not price the model, the model
-is offered switched off until the operator prices it. Refreshing a provider's
-models moves a seeded rate nobody has changed to the current default, and
-leaves a rate the operator set alone. The API never returns a hosted provider's
-key, only its last four characters, and it masks credentials in `client_args`
-and in the base URL.
+is offered switched off until it is priced, by the operator or by a later
+refresh once models.dev prices it. Refreshing a provider's models moves a
+seeded rate nobody has changed to the current default, leaves a rate the
+operator set alone, and never switches on a model the operator switched off.
+A model switched on without a price on purpose stays on through a refresh: one
+a moved or copied provider lists, one an operator switched on while nothing
+priced it, and every model of a provider that serves models not on its list.
+The API never returns a hosted provider's key, only its last four characters,
+and it masks credentials in `client_args` and in the base URL.
 
 ## Organizations and workspaces
 
@@ -230,12 +234,37 @@ A request that names nobody, or the key's own user, bills the key's user as it
 would on any other key. Blocking the key's user stops its end users too.
 
 Each distinct `user` value creates an end user, whether or not the request is
-then admitted, and nothing else caps how many a key can create. Set a rate
-limit on a deployment that issues service keys, and send a stable id per end
-user rather than a per-session or per-request value. An id is at most 256
+then admitted. Unless the key sets `max_end_users` (see
+[Capping a key's end users](#capping-a-keys-end-users)), nothing caps how many
+it can create. Set a rate limit on a deployment that issues service keys, and
+send a stable id per end user rather than a per-session or per-request value. An id is at most 256
 characters and may otherwise be any string, `/` included, such as a base64 key
 id. The routes below name every end user with the `external_id` query
 parameter, which carries any id intact.
+
+### Capping a key's end users
+
+`max_end_users` on a service key (in `POST` or `PATCH /api/v1/keys`, or in
+config.yml) caps how many live end users it may have. A request that would
+create one more, or revive one that was deleted, is refused with 403 and the
+code `end_user_limit_reached`, and nothing is created; the end users the key
+already has keep working. Deleting end users makes room again. `null`, the
+default, is no cap, and `0` admits no new end user at all.
+
+The cap counts the end users of the key's user that are on a budget the key may
+assign (its `end_user_budget_ids`, or its default alone), or every end user of
+that user when the key assigns none. A key with a list and no default also
+counts the end users on no budget, which is where a request naming none starts
+one. So two service keys of one user, each with budgets of its own, such as one
+for signed-in users and one for guests, keep separate caps. For a key with
+budgets of its own, an end user moved to a budget outside its list stops
+counting toward it, and moving one onto the list from outside takes a place, so
+that move is refused with `end_user_limit_reached` when the key is full. A key
+that assigns no budget counts every end user wherever it is moved.
+
+Replicas admitting end users at once cannot exceed the cap: each new or revived
+end user is counted and created while the key's user is locked. Requests from
+live end users never take that lock.
 
 ### Several budgets on one key
 

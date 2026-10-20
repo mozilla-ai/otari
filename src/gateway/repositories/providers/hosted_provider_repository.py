@@ -13,7 +13,13 @@ from sqlalchemy import CursorResult, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.providers import HostedProvider, HostedProviderModel, ProviderCredential
+from gateway.models.providers import (
+    ConfiguredProviderImport,
+    HostedModelDisabledReason,
+    HostedProvider,
+    HostedProviderModel,
+    ProviderCredential,
+)
 from gateway.repositories.base_repository import BaseRepository
 
 # An operator adds hosted providers by hand, so a full listing stays small
@@ -131,13 +137,12 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
         await self.db.delete(row)
         await self.db.flush()
 
-    # The deployment providers stored through the dashboard (``provider_credentials``)
+    # The deployment providers the retired dashboard page stored (``provider_credentials``)
     # are what moves onto hosted providers, so the move reads and removes them
-    # here. The table goes once the move has run everywhere; until then the
-    # runtime overlay still reads it through ``services/provider_store_service.py``.
+    # here. The table goes once the move has run everywhere.
 
     async def list_deployment_providers(self) -> Sequence[ProviderCredential]:
-        """Every deployment provider stored through the dashboard, by instance name, bounded."""
+        """Every deployment provider the retired dashboard page stored, by instance name, bounded."""
         result = await self.db.execute(
             select(ProviderCredential).order_by(ProviderCredential.instance).limit(_ALL_PROVIDERS)
         )
@@ -150,6 +155,14 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
     async def delete_deployment_provider(self, row: ProviderCredential) -> None:
         """Remove one stored deployment provider, flushed so the caller's block sees it gone."""
         await self.db.delete(row)
+        await self.db.flush()
+
+    async def imported_configured_names(self) -> set[str]:
+        result = await self.db.execute(select(ConfiguredProviderImport.name))
+        return set(result.scalars().all())
+
+    async def record_configured_import(self, name: str) -> None:
+        self.db.add(ConfiguredProviderImport(name=name))
         await self.db.flush()
 
 
@@ -247,8 +260,8 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
             served.setdefault(provider, set()).add(model)
         return served
 
-    async def switch_off(self, provider: str, models: Collection[str]) -> int:
-        """Stop serving these models under ``provider``. Returns how many were still switched on."""
+    async def switch_off(self, provider: str, models: Collection[str], *, reason: HostedModelDisabledReason) -> int:
+        """Stop serving these models under ``provider``, off for ``reason``. Returns how many were still switched on."""
         if not models:
             return 0
         result = cast(
@@ -260,23 +273,40 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
                     HostedProviderModel.model.in_(set(models)),
                     HostedProviderModel.enabled.is_(True),
                 )
-                .values(enabled=False)
+                .values(enabled=False, disabled_reason=reason)
                 .execution_options(synchronize_session=False)
             ),
         )
         return int(result.rowcount or 0)
 
     async def create_many(
-        self, provider: str, names: Sequence[str], *, enabled: Mapping[str, bool]
+        self,
+        provider: str,
+        names: Sequence[str],
+        *,
+        disabled: Mapping[str, HostedModelDisabledReason] | None = None,
+        unpriced_served: Collection[str] = (),
     ) -> Sequence[HostedProviderModel]:
-        """Stage one offered row per name, switched on where ``enabled`` says so.
+        """Stage one offered row per name, switched on except those ``disabled`` names, off for that reason.
+
+        A name in ``unpriced_served`` is marked as served without a rate.
 
         Raises:
             HostedModelConflict: one of these models is already offered here.
         """
         if not names:
             return []
-        rows = [HostedProviderModel(provider=provider, model=name, enabled=enabled.get(name, True)) for name in names]
+        reasons = disabled or {}
+        rows = [
+            HostedProviderModel(
+                provider=provider,
+                model=name,
+                enabled=name not in reasons,
+                disabled_reason=reasons.get(name),
+                serves_unpriced=name in unpriced_served,
+            )
+            for name in names
+        ]
         self.db.add_all(rows)
         try:
             await self.db.flush()

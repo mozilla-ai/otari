@@ -207,9 +207,11 @@ function compareOfferings(
 function offeringColumns({
   canOverride,
   withUsage,
+  withSource,
 }: {
   canOverride: boolean
   withUsage: boolean
+  withSource: boolean
 }): DataTableColumn<OfferingRow>[] {
   // Lane order is what a laptop sees without scrolling: the provider and its
   // selector, then the prices the page exists to compare, then where each came
@@ -290,11 +292,17 @@ function offeringColumns({
         </span>
       ),
     },
-    {
-      id: "source",
-      header: "Price from",
-      cell: ({ offering: row }) => <SourceMark source={row.price_source} />,
-    },
+    ...(withSource
+      ? [
+          {
+            id: "source",
+            header: "Price from",
+            cell: ({ offering: row }: OfferingRow) => (
+              <SourceMark source={row.price_source} />
+            ),
+          },
+        ]
+      : []),
     {
       id: "context",
       header: "Context / max out",
@@ -508,18 +516,10 @@ export function ModelDetailView({
             {model.description}
           </p>
         ) : null}
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
           <Stat
             label="Modalities"
             value={`${modalities(model.input_modalities)} → ${modalities(model.output_modalities)}`}
-          />
-          <Stat
-            label="In / out price"
-            value={
-              model.min_input_price_per_million == null
-                ? "unpriced"
-                : `${formatRate(model.min_input_price_per_million)} / ${rate(model.min_output_price_per_million)} per 1M`
-            }
           />
           <Stat
             label="Context"
@@ -603,11 +603,9 @@ export function ModelDetailView({
             </h2>
             <p className="max-w-prose text-sm text-muted">
               Several providers serve the same model. Each row is one offering:
-              what {publicView ? "this deployment lists it at" : "you pay"} and
-              where that price comes from.{" "}
               {publicView
-                ? null
-                : `"Use this model" has the request to send, to the gateway's pick or a provider you pin. `}
+                ? " what it costs. "
+                : ` what you pay and where that price comes from. "Use this model" has the request to send, to the gateway's pick or a provider you pin. `}
               {model.offering_count} on {model.provider_count}{" "}
               {model.provider_count === 1 ? "provider" : "providers"}, cheapest
               first.
@@ -636,6 +634,7 @@ export function ModelDetailView({
                 columns={offeringColumns({
                   canOverride,
                   withUsage,
+                  withSource: !publicView,
                 })}
                 rows={rows}
                 getRowKey={(row) => row.offering.selector}
@@ -654,15 +653,16 @@ export function ModelDetailView({
           {unpriced > 0 && defaultPricing === false ? (
             <p className="text-caption">
               Default pricing is off, so an offering with no stored rate is
-              unpriced here even where models.dev publishes one.
+              unpriced.
               {isOperator ? " Both switches live on Settings." : ""}
             </p>
           ) : null}
           {listPriceDiffers ? (
             <InfoBanner>
-              A rate marked <em>list</em> differs from the price the provider
-              publishes on models.dev. What is metered here is the rate shown;
-              the list price is what the provider would charge you directly.
+              Where a rate differs from the price the provider publishes, that
+              price is shown beside it marked <em>list</em>. What is metered
+              here is the rate shown; the list price is what the provider would
+              charge you directly.
             </InfoBanner>
           ) : null}
         </section>

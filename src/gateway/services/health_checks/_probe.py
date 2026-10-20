@@ -31,8 +31,8 @@ _NOT_CHAT_ID = re.compile(r"embed|rerank|bge-|whisper|tts|dall-e|image", re.IGNO
 
 
 @dataclass(frozen=True)
-class ProbeTarget:
-    """One offering to check: its selector, the hosted provider it names, and how to reach it."""
+class HealthCheckOffering:
+    """One model a hosted provider serves: its selector, the hosted provider it names, and how to reach it."""
 
     selector: str
     provider: str
@@ -45,7 +45,7 @@ class ProbeTarget:
 
 @dataclass(frozen=True)
 class ProbeOutcome:
-    target: ProbeTarget
+    target: HealthCheckOffering
     status: Literal["pass", "fail", "skip"]
     status_code: int | None
     error: str | None
@@ -91,7 +91,7 @@ def _describe(exc: BaseException) -> str:
 
 
 async def probe(
-    target: ProbeTarget, *, prompt: str, max_tokens: int, timeout: float = PROBE_TIMEOUT_SECONDS
+    target: HealthCheckOffering, *, prompt: str, max_tokens: int, timeout: float = PROBE_TIMEOUT_SECONDS
 ) -> ProbeOutcome:
     """Send ``prompt`` to one offering. Any answer passes; an error or a timeout fails."""
     if not target.chat:
@@ -116,7 +116,7 @@ async def probe(
 
 
 async def probe_all(
-    targets: Sequence[ProbeTarget],
+    targets: Sequence[HealthCheckOffering],
     *,
     prompt: str,
     max_tokens: int,
@@ -125,7 +125,7 @@ async def probe_all(
     """Probe every target, a few at a time, so a run does not burst a provider's rate limit."""
     gate = asyncio.Semaphore(PROBE_CONCURRENCY)
 
-    async def one(target: ProbeTarget) -> ProbeOutcome:
+    async def one(target: HealthCheckOffering) -> ProbeOutcome:
         async with gate:
             cap = reasoning_max_tokens if target.reasoning else max_tokens
             return await probe(target, prompt=prompt, max_tokens=cap)

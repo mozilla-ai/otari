@@ -29,19 +29,27 @@ from any_fetch import AnyFetch, FetchedPage, ProviderError
 from any_fetch.providers import builtin as any_fetch_builtin
 from gateway.api.routes._tools import _build_web_retrieval_backend
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.tools_exceptions import WebSearchCredentialRefusedError
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
-from gateway.models.tools import WebTool
+from gateway.models.tools import (
+    ResolvedWebSearchConfig,
+    WebFetchCredential,
+    WebTool,
+    WebToolCredentialSource,
+)
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools import (
     WEB_FETCH_TOOL_NAME,
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     WEB_SEARCH_TOOL_NAME,
+    DeclaredWebTools,
     Dialect,
     NativeCall,
     ResolvedFetch,
     WebFetchBackend,
     WebToolFailure,
+    admit_web_access,
     apply_web_access_policy,
     builtin_fetch_resolved,
     native_rendering,
@@ -80,7 +88,7 @@ from gateway.services.web_retrieval_policy import (
     canonicalize_domain_rules,
     canonicalize_web_url,
 )
-from gateway.types.tool_charges import LabelCalls
+from gateway.types.tool_charges import InstanceRateKey, LabelCalls
 
 _URL = "https://example.com/start"
 _FAKE = "fake-fetch"
@@ -291,7 +299,6 @@ async def test_a_fetched_page_is_billed_and_a_failed_one_is_not(fetcher: AsyncMo
         await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
 
     assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": 1, "errors": 1}}
-    assert tally.billable_calls() == {WEB_FETCH_TOOL_NAME: 1}
 
 
 @pytest.mark.asyncio
@@ -305,7 +312,7 @@ async def test_a_fetch_is_recorded_under_its_instances_label_rate_keys_and_repor
         LabelCalls(
             tool=WEB_FETCH_TOOL_NAME,
             label=f"fake:{_FAKE}",
-            rate_keys=(f"fake:{_FAKE}", "otari:web_fetch"),
+            rate_keys=(InstanceRateKey("fetch", _FAKE, f"fake:{_FAKE}"), "otari:web_fetch"),
             calls=2,
             unreported_calls=0,
             reported_cost=Decimal("0.004"),
@@ -324,7 +331,7 @@ async def test_a_built_in_fetch_is_recorded_under_builtin_fetch_for_its_rate(fet
         LabelCalls(
             tool=WEB_FETCH_TOOL_NAME,
             label="builtin:builtin_fetch",
-            rate_keys=("builtin:builtin_fetch", "otari:web_fetch"),
+            rate_keys=(InstanceRateKey("fetch", "builtin_fetch", "builtin:builtin_fetch"), "otari:web_fetch"),
             calls=1,
             unreported_calls=1,
             reported_cost=Decimal(0),
@@ -564,6 +571,61 @@ def test_builtin_fetch_serves_a_deployment_with_no_fetch_instances() -> None:
     assert resolve_fetch(GatewayConfig(), None, requested=None, for_search=None) == builtin_fetch_resolved()
 
 
+_FETCH_ONLY = DeclaredWebTools(
+    fetch_tool_entry={"type": "otari_web_fetch"}, remaining_user_tools=None, search_tool_entry=None
+)
+
+
+def _fetch_policy(credential: WebFetchCredential | None) -> ResolvedWebSearchConfig:
+    return ResolvedWebSearchConfig(
+        enabled=True,
+        max_results=None,
+        purpose_hint=None,
+        allowed_domains=None,
+        blocked_domains=None,
+        provider_options=None,
+        authorized_tools=None,
+        fetch_credential=credential,
+    )
+
+
+def _admitted_fetch(config: GatewayConfig, policy: ResolvedWebSearchConfig | None = None) -> ResolvedFetch | None:
+    return admit_web_access(_FETCH_ONLY, policy=policy, config=config).fetch
+
+
+def test_admission_resolves_the_fetch_tool_on_the_default_fetch_instance() -> None:
+    config = GatewayConfig(fetch_tools={_FAKE: {"provider": "fake"}}, web_fetch_default_tool=_FAKE)
+
+    fetch = _admitted_fetch(config)
+
+    assert fetch is not None
+    assert (fetch.name, fetch.label) == (_FAKE, f"fake:{_FAKE}")
+
+
+def test_admission_resolves_the_fetch_tool_on_the_workspaces_fetch_key() -> None:
+    key = WebFetchCredential(provider="fake", source=WebToolCredentialSource.ORG)
+
+    fetch = _admitted_fetch(GatewayConfig(), _fetch_policy(key))
+
+    assert fetch is not None
+    assert (fetch.provider, fetch.label, fetch.rate_keys) == ("fake", "org:fake", ("otari:web_fetch",))
+
+
+def test_admission_refuses_a_fetch_key_its_provider_cannot_be_called_with() -> None:
+    key = WebFetchCredential(provider="exa", source=WebToolCredentialSource.ORG)
+
+    with pytest.raises(WebSearchCredentialRefusedError):
+        _admitted_fetch(GatewayConfig(), _fetch_policy(key))
+
+
+def test_admission_resolves_no_fetch_where_none_was_declared() -> None:
+    search_only = DeclaredWebTools(
+        fetch_tool_entry=None, remaining_user_tools=None, search_tool_entry={"type": "otari_web_search"}
+    )
+
+    assert admit_web_access(search_only, policy=None, config=GatewayConfig()).fetch is None
+
+
 @pytest.mark.asyncio
 async def test_the_builder_puts_the_fetch_tool_on_builtin_fetch_by_default(fetcher: AsyncMock) -> None:
     backend = _build_web_retrieval_backend(
@@ -577,13 +639,17 @@ async def test_the_builder_puts_the_fetch_tool_on_builtin_fetch_by_default(fetch
 
 
 @pytest.mark.asyncio
-async def test_the_builder_puts_the_fetch_tool_on_the_default_fetch_instance(fetcher: AsyncMock) -> None:
+async def test_the_builder_puts_the_fetch_tool_on_the_instance_admission_resolved(fetcher: AsyncMock) -> None:
     config = GatewayConfig(
         fetch_tools={_FAKE: {"provider": "fake", "options": {"text": "from the instance"}}},
         web_fetch_default_tool=_FAKE,
     )
     backend = _build_web_retrieval_backend(
-        base_url=None, search_tool_entry=None, fetch_tool_entry={"type": "otari_web_fetch"}, config=config
+        base_url=None,
+        search_tool_entry=None,
+        fetch_tool_entry={"type": "otari_web_fetch"},
+        config=config,
+        fetch=_admitted_fetch(config),
     )
     async with backend:
         text = await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
@@ -938,7 +1004,7 @@ async def test_the_old_counter_refuses_the_eleventh_call_before_dispatch() -> No
             await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
 
     assert counter.count == MAX_WEB_RETRIEVAL_CALLS
-    assert tally.billable_calls() == {WEB_FETCH_TOOL_NAME: MAX_WEB_RETRIEVAL_CALLS}
+    assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": MAX_WEB_RETRIEVAL_CALLS, "errors": 0}}
 
 
 @pytest.mark.asyncio
@@ -966,7 +1032,7 @@ async def test_the_old_counter_survives_the_backend_being_rebuilt_between_routin
         with pytest.raises(WebRetrievalLimitExceededError):
             await second.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
 
-    assert tally.billable_calls() == {WEB_FETCH_TOOL_NAME: MAX_WEB_RETRIEVAL_CALLS}
+    assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": MAX_WEB_RETRIEVAL_CALLS, "errors": 0}}
 
 
 # ---------------------------------------------------------------------------

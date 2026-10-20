@@ -27,7 +27,7 @@ import {
   useDeploymentOperator,
   useOrganizationContext,
 } from "@/shared/api/organizations"
-import { useProviders } from "@/shared/api/providers"
+import { useDeploymentProviderNames } from "@/shared/api/providers"
 import {
   useAllWorkspaceBudgetDefaults,
   useAllWorkspaceProviderKeys,
@@ -539,7 +539,7 @@ function EditWorkspaceForm({
   const narrowed = (defaults.data ?? []).filter(
     (row) => row.provider_key_id !== null,
   )
-  const providers = useProviders(isOperator)
+  const providers = useDeploymentProviderNames(isOperator)
   const [name, setName] = useState(workspace.name)
   const [description, setDescription] = useState(workspace.description ?? "")
   const [budgetId, setBudgetId] = useState<string>()
@@ -664,9 +664,7 @@ function EditWorkspaceForm({
             workspaceId={workspace.id}
             budgets={budgets.data ?? []}
             narrowed={narrowed}
-            providers={(providers.data?.providers ?? []).map(
-              (provider) => provider.instance,
-            )}
+            providers={providers}
           />
         </>
       ) : null}

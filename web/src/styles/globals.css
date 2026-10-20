@@ -2675,9 +2675,16 @@ main {
   width: 8.75rem;
   min-width: 8.75rem;
 }
+/* Wide enough for the longest label, "TOKEN UNREADABLE", on one line inside the
+   button that opens its detail. */
+.otari-mcp-table .table__column[data-key="health"] {
+  width: 12rem;
+  min-width: 12rem;
+}
+/* Three 24px actions 16px apart, plus the cell's padding. */
 .otari-mcp-table .table__column[data-key="actions"] {
-  width: 6rem;
-  min-width: 6rem;
+  width: 8.5rem;
+  min-width: 8.5rem;
 }
 .otari-budgets-table .table__row .table__cell {
   height: 3.625rem;

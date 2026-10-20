@@ -236,10 +236,13 @@ for example, enforces the workspace search disable switch.
 
 ## Provider and search credential stores
 
-`provider_store_service.py` and `search_tool_store_service.py` overlay
-encrypted stored rows on a preserved config baseline and refresh them across
-workers. Stored values win over config values of the same name; config entries
-remain read-only through the management API.
+`search_tool_store_service.py` overlays encrypted stored rows on a preserved
+config baseline and refreshes them across workers. Stored values win over config
+values of the same name; config entries remain read-only through the management
+API. A provider credential the deployment stores is a hosted provider (below);
+the `provider_credentials` rows the Deployment providers page used to store are
+moved onto hosted providers at startup (`_move_deployment_providers` in
+`main.py`), and nothing else reads them.
 
 `secret_box.py` owns encryption through `OTARI_SECRET_KEY`. Public responses
 return metadata such as `last4`, never plaintext credentials.

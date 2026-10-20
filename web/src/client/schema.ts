@@ -1699,24 +1699,45 @@ export interface paths {
         };
         /**
          * Preview Deployment Provider Migration
-         * @description What moving the deployment providers stored through the dashboard onto hosted providers would do.
+         * @description What moving the deployment providers the retired dashboard page stored onto hosted providers would do.
          *
-         *     Writes nothing and dials nothing.
+         *     The gateway moves them at startup, so this lists the ones it could not
+         *     move, each with the reason. Writes nothing and dials nothing.
          */
         get: operations["hosted-providers-preview_deployment_provider_migration"];
         put?: never;
         /**
          * Apply Deployment Provider Migration
-         * @description Move the deployment providers stored through the dashboard onto hosted providers of the same name.
+         * @description Move the deployment providers the retired dashboard page stored onto hosted providers of the same name.
          *
-         *     Each is created as a hosted provider, offering what it lists as a create
-         *     does, and the deployment provider is removed once the hosted one offers a
-         *     model. One that cannot move is reported and left in place. ``rows``
+         *     Each is created as a hosted provider that serves models not on its roster,
+         *     offering what it lists as a create does, and the deployment provider is
+         *     removed. One that cannot move is reported and left in place. ``rows``
          *     limits the move to the rows of the preview the caller reviewed, at the
          *     versions it was shown them.
          */
         post: operations["hosted-providers-apply_deployment_provider_migration"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/migration/{instance}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Discard Deployment Provider
+         * @description Remove a deployment provider the move could not take, which serves nothing.
+         */
+        delete: operations["hosted-providers-discard_deployment_provider"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1735,7 +1756,7 @@ export interface paths {
          * Reencrypt Hosted Providers
          * @description Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.
          *
-         *     Run after rotating the key, alongside ``POST /api/v1/provider-credentials/reencrypt``.
+         *     Run after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.
          *     A provider no configured key reads is left as it is, to be re-entered.
          */
         post: operations["hosted-providers-reencrypt_hosted_providers"];
@@ -3894,7 +3915,7 @@ export interface paths {
         };
         /**
          * List Traces
-         * @description List agent sessions, most recently active first.
+         * @description List agent sessions, most recently active first unless ``sort`` says otherwise.
          */
         get: operations["organization-traces-list_traces"];
         put?: never;
@@ -3957,7 +3978,11 @@ export interface paths {
         };
         /**
          * Trace Series
-         * @description Count sessions per bucket of their start, split by whether any span failed unrecovered.
+         * @description Count sessions per bucket of their start, split by whether they failed.
+         *
+         *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
+         *     goes back to the model, an MCP tool's included, so a session whose only errors are tools'
+         *     counts as succeeded.
          */
         get: operations["organization-traces-trace_series"];
         put?: never;
@@ -4558,10 +4583,11 @@ export interface paths {
         };
         /**
          * List Pricing
-         * @description List all model pricing.
+         * @description List every stored price version, of every kind.
          *
-         *     A hosted provider restricted to another organization than the caller's is
-         *     left out, as it is from the catalog.
+         *     A row's ``kind`` says whether it prices a model or a search or fetch
+         *     instance. A hosted provider restricted to another organization than the
+         *     caller's is left out, as it is from the catalog.
          */
         get: operations["pricing-list_pricing"];
         put?: never;
@@ -4589,15 +4615,16 @@ export interface paths {
         };
         /**
          * List Current Pricing
-         * @description List the rate each priced model is metered at, one row per model key.
+         * @description List the rate each priced key is metered at, one row per kind and key.
          *
          *     Listing prices answers the stored history, one row per ``effective_at``, so a
-         *     page of that is a page of revisions rather than a page of models. This
+         *     page of that is a page of revisions rather than a page of keys. This
          *     answers one row per key: the newest rate that has taken effect, or the
-         *     earliest scheduled rate for a key that has none yet. ``count`` is the number
-         *     of priced models, so a caller can page without reading the collection to
-         *     learn how long it is. A hosted provider restricted to another organization
-         *     than the caller's is left out of both.
+         *     earliest scheduled rate for a key that has none yet. Every kind is returned,
+         *     a row's ``kind`` telling a model's price from a search or fetch instance's,
+         *     and ``count`` is the number of priced keys of any kind, so a caller can page
+         *     without reading the collection to learn how long it is. A hosted provider
+         *     restricted to another organization than the caller's is left out of both.
          */
         get: operations["pricing-list_current_pricing"];
         put?: never;
@@ -4747,7 +4774,7 @@ export interface paths {
         };
         /**
          * Get Pricing
-         * @description Get pricing for a specific model as of a timestamp.
+         * @description Get pricing for a specific model, or a search or fetch instance, as of a timestamp.
          *
          *     A 404 for a model of a hosted provider restricted to another organization
          *     than the caller's.
@@ -4757,7 +4784,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Pricing
-         * @description Delete pricing entries for a model.
+         * @description Delete pricing entries for a model, or for a search or fetch instance.
          */
         delete: operations["pricing-delete_pricing"];
         options?: never;
@@ -4774,7 +4801,7 @@ export interface paths {
         };
         /**
          * Get Pricing History
-         * @description Return the full pricing history for a model.
+         * @description Return the full pricing history for a model, or for a search or fetch instance.
          *
          *     A 404 for a model of a hosted provider restricted to another organization
          *     than the caller's.
@@ -4782,128 +4809,6 @@ export interface paths {
         get: operations["pricing-get_pricing_history"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/provider-credentials": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Stored Providers
-         * @description List runtime-stored providers. Keys are never returned, only ``last4``.
-         */
-        get: operations["providers-list_stored_providers"];
-        put?: never;
-        /**
-         * Create Stored Provider
-         * @description Add a provider at runtime. Storing a key requires OTARI_SECRET_KEY.
-         */
-        post: operations["providers-create_stored_provider"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/provider-credentials/reencrypt": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reencrypt Stored Provider Keys
-         * @description Re-encrypt stored provider keys with the primary OTARI_SECRET_KEY.
-         *
-         *     Operators rotate ``OTARI_SECRET_KEY`` by setting it to ``new,old`` first,
-         *     restarting, running this endpoint, then removing the old key and restarting
-         *     again. Rows that cannot be decrypted are left untouched and must be recovered
-         *     by replacing the affected provider keys.
-         */
-        post: operations["providers-reencrypt_stored_provider_keys"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/provider-credentials/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Test Provider Connection
-         * @description Test provider credentials without storing them (for the add/edit form).
-         *
-         *     Resolves the implementation from ``provider_type`` (honoring the
-         *     ``*-compatible`` aliases) or the ``instance`` name, then lists the provider's
-         *     models with the supplied credentials. Nothing is persisted and the key is
-         *     never echoed.
-         */
-        post: operations["providers-test_provider_connection"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/provider-credentials/{instance}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Stored Provider
-         * @description Delete a stored provider. A config.yml provider cannot be deleted here.
-         */
-        delete: operations["providers-delete_stored_provider"];
-        options?: never;
-        head?: never;
-        /**
-         * Update Stored Provider
-         * @description Update a stored provider. Omitted fields are left as-is; an explicit ``null`` clears them.
-         *
-         *     ``api_key`` follows the same rule: omit it to keep the stored key, send a new
-         *     one to rotate, or send ``null`` to clear it. The row is locked ``FOR UPDATE``
-         *     so the ``expected_updated_at`` check and the write it guards are atomic.
-         */
-        patch: operations["providers-update_stored_provider"];
-        trace?: never;
-    };
-    "/api/v1/provider-credentials/{instance}/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Test Stored Provider
-         * @description Verify a stored provider's key by listing its models, without exposing the key.
-         */
-        post: operations["providers-test_stored_provider"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5547,7 +5452,7 @@ export interface paths {
          * @description Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.
          *
          *     The search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it
-         *     alongside ``POST /api/v1/provider-credentials/reencrypt``. Rows that cannot be
+         *     alongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be
          *     decrypted are left untouched and must be recovered by replacing the affected
          *     tool's key.
          */
@@ -6018,7 +5923,7 @@ export interface paths {
         };
         /**
          * List Traces
-         * @description List agent sessions, most recently active first.
+         * @description List agent sessions, most recently active first unless ``sort`` says otherwise.
          */
         get: operations["traces-list_traces"];
         put?: never;
@@ -6081,7 +5986,11 @@ export interface paths {
         };
         /**
          * Trace Series
-         * @description Count sessions per bucket of their start, split by whether any span failed unrecovered.
+         * @description Count sessions per bucket of their start, split by whether they failed.
+         *
+         *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
+         *     goes back to the model, an MCP tool's included, so a session whose only errors are tools'
+         *     counts as succeeded.
          */
         get: operations["traces-trace_series"];
         put?: never;
@@ -6679,8 +6588,37 @@ export interface paths {
          *     is checked for SSRF safety here as well as on the request path, and must
          *     use https when a token is set. A name already used in this workspace is
          *     refused with a 409.
+         *
+         *     Once stored, the server is connected to and its tools listed, and the
+         *     outcome is returned as `health`. A server that fails this check is still
+         *     stored, and `health.error` says why.
          */
         post: operations["mcp-servers-create_workspace_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Workspace Mcp Server Connection
+         * @description Check connection details without storing them. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     What a form's Test button calls before it saves. Answers with what a stored
+         *     server's `health` would say, and records nothing. Pass `server_id` and omit
+         *     `authorization_token` to test with that server's stored token. The URL is
+         *     checked for SSRF safety first, with the same 400 a create gets.
+         */
+        post: operations["mcp-servers-check_workspace_mcp_server_connection"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6710,9 +6648,35 @@ export interface paths {
          *
          *     Only the fields sent are applied. Omit `authorization_token` to leave the
          *     stored token alone, send an empty string to clear it, or send a value to
-         *     rotate it.
+         *     rotate it. A change to the URL, the token or the allow-list checks the
+         *     server again, as creating it does.
          */
         patch: operations["mcp-servers-update_workspace_mcp_server"];
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Workspace Mcp Server
+         * @description Check a server's connection now. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     Opens one session, lists the server's tools, and stores the outcome as
+         *     `health`. A server that fails is still a 200, with `health.status` set to
+         *     `failing`. A 429 means every check slot on this gateway was busy and
+         *     nothing was recorded.
+         */
+        post: operations["mcp-servers-check_workspace_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/workspaces/{workspace_id}/member-budget-policies": {
@@ -7831,6 +7795,37 @@ export interface components {
             priority?: number | null;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * AnthropicError
+         * @description What went wrong, in Anthropic's terms.
+         */
+        AnthropicError: {
+            /** Message */
+            message: string;
+            /**
+             * Type
+             * @description Anthropic's error type, such as `invalid_request_error` or `rate_limit_error`.
+             */
+            type: string;
+        };
+        /**
+         * AnthropicErrorResponse
+         * @description Anthropic's error envelope, which every error on a Messages route is answered in.
+         */
+        AnthropicErrorResponse: {
+            /**
+             * Code
+             * @description The refusal's `Otari-Error-Code`, where it has one.
+             */
+            code?: string | null;
+            error: components["schemas"]["AnthropicError"];
+            /**
+             * Type
+             * @default error
+             * @constant
+             */
+            type: "error";
         };
         /**
          * AnthropicFileDeleted
@@ -8959,6 +8954,16 @@ export interface components {
             user?: string | null;
         };
         /**
+         * CheckFailure
+         * @description Why a stored server failed its connection check.
+         *
+         *     Stored on the server's row and shown to whoever manages it, so each value
+         *     names a cause an operator can act on, and none carries anything the remote
+         *     server said. The first two are decided before any connection is opened.
+         * @enum {string}
+         */
+        CheckFailure: "unsafe_url" | "credentials_unavailable" | "unreachable" | "tls_failed" | "timeout" | "redirected" | "unauthorized" | "forbidden" | "not_found" | "server_error" | "http_error" | "not_mcp" | "limits_exceeded" | "connection_failed";
+        /**
          * CheckVerdictRequest
          * @description One verifier gate's verdict, as the caller's own verifier run produced it.
          *
@@ -9247,6 +9252,11 @@ export interface components {
              */
             key_name?: string | null;
             /**
+             * Max End Users
+             * @description Most live end users this key may have on the budgets it assigns (all of its owner's end users when it assigns none). A request that would create one more is refused with 403 and end_user_limit_reached; deleting end users frees room. Null is no cap.
+             */
+            max_end_users?: number | null;
+            /**
              * Metadata
              * @description Optional metadata
              */
@@ -9302,6 +9312,8 @@ export interface components {
             key_prefix: string | null;
             /** Key Suffix */
             key_suffix: string | null;
+            /** Max End Users */
+            max_end_users: number | null;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
@@ -9480,33 +9492,6 @@ export interface components {
             password?: string | null;
         };
         /**
-         * CreateStoredProviderRequest
-         * @description Create a stored provider. ``api_key`` is write-only and requires OTARI_SECRET_KEY.
-         */
-        CreateStoredProviderRequest: {
-            /** Api Base */
-            api_base?: string | null;
-            /**
-             * Api Key
-             * @description Provider API key. Stored encrypted; never returned.
-             */
-            api_key?: string | null;
-            /** Client Args */
-            client_args?: {
-                [key: string]: unknown;
-            } | null;
-            /**
-             * Instance
-             * @description Routing key, e.g. 'openai' or a named instance like 'home_lab'.
-             */
-            instance: string;
-            /**
-             * Provider Type
-             * @description any-llm implementation when the instance name is not itself one.
-             */
-            provider_type?: string | null;
-        };
-        /**
          * CreateUserRequest
          * @description Request model for creating a new user.
          */
@@ -9604,7 +9589,7 @@ export interface components {
         };
         /**
          * CurrentPricingPage
-         * @description One page of current model prices, with the total number of priced models.
+         * @description One page of current prices, with the total number of priced keys of any kind.
          */
         CurrentPricingPage: {
             /** Count */
@@ -9762,7 +9747,7 @@ export interface components {
             deployment_type: "standalone" | "hosted" | "hybrid";
             /**
              * Docs Url
-             * @description Where this deployment's documentation lives, when it is not the operator guide bundled with the gateway. Set, the dashboard's Documentation links open it in a new tab; null, they go to the bundled guide at /#/docs, which stays served either way. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
+             * @description Where this deployment's documentation lives, when it is not docs.otari.ai. Set, the dashboard's Documentation links open it in a new tab; null, they open https://docs.otari.ai/. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
              */
             docs_url: string | null;
             /**
@@ -9845,7 +9830,7 @@ export interface components {
         };
         /**
          * DeploymentProviderMigrationPublic
-         * @description The deployment providers stored through the dashboard, and how each moves onto a hosted provider.
+         * @description The deployment providers the retired dashboard page stored, and how each moves onto a hosted provider.
          */
         DeploymentProviderMigrationPublic: {
             /** Rows */
@@ -9892,7 +9877,7 @@ export interface components {
          *     ``unreadable``, ``invalid`` and ``failed`` leave the row where it is, with
          *     ``detail`` saying why. ``source_removed`` says whether the deployment
          *     provider was removed: it is kept while the hosted provider offers no model,
-         *     so nothing it serves stops being served. ``notes`` are what an operator
+         *     and when it changed while the move ran. ``notes`` are what an operator
          *     should check afterwards.
          */
         DeploymentProviderMigrationRowPublic: {
@@ -11242,6 +11227,9 @@ export interface components {
          *     key takes. Values under credential-shaped names come back masked.
          *     ``restricted_to_organization_id`` keeps the provider to one organization;
          *     every other one is served as if it were not configured.
+         *     ``serves_unlisted_models`` serves a model the roster does not list, as a
+         *     ``config.yml`` instance does, and switches on every model it offers
+         *     whether or not something prices it.
          * @example {
          *       "api_key": "<your OpenAI API key>",
          *       "provider": "openai"
@@ -11267,6 +11255,11 @@ export interface components {
             provider: string;
             /** Restricted To Organization Id */
             restricted_to_organization_id?: string | null;
+            /**
+             * Serves Unlisted Models
+             * @default false
+             */
+            serves_unlisted_models: boolean;
         };
         /**
          * HostedProviderPublic
@@ -11287,6 +11280,8 @@ export interface components {
          *     the row is deleted. ``has_api_key`` is false for one stored without a key,
          *     and ``decryptable`` false for one whose key or extras no configured
          *     ``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.
+         *     ``serves_unlisted_models`` is true for one that serves a model its roster
+         *     does not list.
          */
         HostedProviderPublic: {
             /** Api Base */
@@ -11319,6 +11314,11 @@ export interface components {
             provider: string;
             /** Restricted To Organization Id */
             restricted_to_organization_id?: string | null;
+            /**
+             * Serves Unlisted Models
+             * @default false
+             */
+            serves_unlisted_models: boolean;
             /**
              * Shadows Config
              * @default false
@@ -11413,6 +11413,8 @@ export interface components {
             enabled?: boolean | null;
             /** Restricted To Organization Id */
             restricted_to_organization_id?: string | null;
+            /** Serves Unlisted Models */
+            serves_unlisted_models?: boolean | null;
         };
         /**
          * HostedProvidersPublic
@@ -11709,6 +11711,8 @@ export interface components {
             key_suffix: string | null;
             /** Last Used At */
             last_used_at: string | null;
+            /** Max End Users */
+            max_end_users?: number | null;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
@@ -13645,7 +13649,7 @@ export interface components {
         };
         /**
          * OrganizationModelPricingCreate
-         * @description Create one rate override for a model, for a period.
+         * @description Create one rate override for a model, or a search or fetch instance, for a period.
          */
         OrganizationModelPricingCreate: {
             /**
@@ -13674,8 +13678,13 @@ export interface components {
              */
             input_price_per_million: number;
             /**
+             * Kind
+             * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
+             */
+            kind?: ("model" | "search" | "fetch") | null;
+            /**
              * Model Key
-             * @description Model identifier in 'provider:model' form, matching the key the deployment price list uses. A provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the instance a request resolves to.
+             * @description For a model, 'provider:model', matching the key the deployment price list uses; a provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the instance a request resolves to. For a search or fetch kind, the instance's name.
              */
             model_key: string;
             /**
@@ -13724,6 +13733,11 @@ export interface components {
             id: string;
             /** Input Price Per Million */
             input_price_per_million: number;
+            /**
+             * Kind
+             * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
+             */
+            kind: string;
             /** Model Key */
             model_key: string;
             /**
@@ -14659,6 +14673,11 @@ export interface components {
             effective_at: string;
             /** Input Price Per Million */
             input_price_per_million: number;
+            /**
+             * Kind
+             * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
+             */
+            kind: string;
             /** Model Key */
             model_key: string;
             /**
@@ -14986,11 +15005,11 @@ export interface components {
             provider_type: string;
             /**
              * Source
-             * @description Where the instance is defined: 'config' for config.yml (or OTARI_CONFIG_YAML), 'dashboard' for one stored through the deployment providers page.
+             * @description Where the instance is defined: 'config' for config.yml (or OTARI_CONFIG_YAML).
              * @default config
-             * @enum {string}
+             * @constant
              */
-            source: "config" | "dashboard";
+            source: "config";
         };
         /**
          * ProvidersResponse
@@ -15217,28 +15236,6 @@ export interface components {
             task_id: string | null;
             /** Warm */
             warm: boolean;
-        };
-        /**
-         * ReencryptProviderCredentialsResponse
-         * @description Result of re-encrypting stored provider keys with the primary secret key.
-         */
-        ReencryptProviderCredentialsResponse: {
-            /**
-             * Reencrypted
-             * @description Number of stored provider keys re-encrypted.
-             */
-            reencrypted: number;
-            /**
-             * Skipped
-             * @description Number of rows whose stored key changed between the read and the write, so the re-encryption was not applied. They already hold whoever wrote them last.
-             * @default 0
-             */
-            skipped: number;
-            /**
-             * Unreadable
-             * @description Number of encrypted keys left untouched because they could not be decrypted.
-             */
-            unreadable: number;
         };
         /**
          * ReencryptSearchToolsResponse
@@ -16281,8 +16278,13 @@ export interface components {
              */
             input_price_per_million: number;
             /**
+             * Kind
+             * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
+             */
+            kind?: ("model" | "search" | "fetch") | null;
+            /**
              * Model Key
-             * @description Model identifier in format 'provider:model'
+             * @description Model identifier in format 'provider:model', or a search or fetch instance's name for those kinds
              */
             model_key: string;
             /**
@@ -16355,6 +16357,16 @@ export interface components {
             attributes: {
                 [key: string]: string | number | boolean;
             };
+            /**
+             * Cache Read Tokens
+             * @description Input tokens read from the prompt cache.
+             */
+            cache_read_tokens: number | null;
+            /**
+             * Cache Write Tokens
+             * @description Input tokens written to the prompt cache.
+             */
+            cache_write_tokens: number | null;
             /** Cost */
             cost: number | null;
             /** Duration Ms */
@@ -16363,7 +16375,10 @@ export interface components {
             end_time: string | null;
             /** Error Class */
             error_class: string | null;
-            /** Input Tokens */
+            /**
+             * Input Tokens
+             * @description The whole prompt, cached tokens included.
+             */
             input_tokens: number | null;
             /** Kind */
             kind: string;
@@ -16401,6 +16416,11 @@ export interface components {
             parent_span_id: string | null;
             /** Provider */
             provider: string | null;
+            /**
+             * Reasoning Tokens
+             * @description Output tokens spent reasoning.
+             */
+            reasoning_tokens: number | null;
             /** Recovered */
             recovered: boolean;
             /** Request Id */
@@ -16415,33 +16435,6 @@ export interface components {
             tool_name: string | null;
             /** Tool Type */
             tool_type: string | null;
-        };
-        /**
-         * StoredProviderResponse
-         * @description A runtime-stored provider. The API key is never returned, only ``last4``.
-         */
-        StoredProviderResponse: {
-            /** Api Base */
-            api_base?: string | null;
-            /** Client Args */
-            client_args?: {
-                [key: string]: unknown;
-            };
-            /** Created At */
-            created_at?: string | null;
-            /**
-             * Decryptable
-             * @default true
-             */
-            decryptable: boolean;
-            /** Instance */
-            instance: string;
-            /** Last4 */
-            last4?: string | null;
-            /** Provider Type */
-            provider_type?: string | null;
-            /** Updated At */
-            updated_at?: string | null;
         };
         /**
          * StoredSearchToolSchema
@@ -16530,45 +16523,6 @@ export interface components {
             task_id: string;
             /** Warm */
             warm: boolean;
-        };
-        /**
-         * TestProviderRequest
-         * @description Credentials to test before saving (from the add-provider form).
-         */
-        TestProviderRequest: {
-            /** Api Base */
-            api_base?: string | null;
-            /** Api Key */
-            api_key?: string | null;
-            /** Client Args */
-            client_args?: {
-                [key: string]: unknown;
-            } | null;
-            /**
-             * Instance
-             * @description Provider/instance name; the impl when no provider_type.
-             */
-            instance?: string | null;
-            /** Provider Type */
-            provider_type?: string | null;
-        };
-        /**
-         * TestProviderResponse
-         * @description Result of a live provider connection test.
-         */
-        TestProviderResponse: {
-            /**
-             * Discovery Unsupported
-             * @description True when the test failed only because this backend serves no model-listing endpoint, so the credentials could not be verified this way but may still work for requests.
-             * @default false
-             */
-            discovery_unsupported: boolean;
-            /** Error */
-            error?: string | null;
-            /** Model Count */
-            model_count: number;
-            /** Ok */
-            ok: boolean;
         };
         /**
          * TestServiceRequest
@@ -16769,9 +16723,15 @@ export interface components {
              * @description Bucket start, ISO 8601 UTC.
              */
             bucket: string;
-            /** Failed */
+            /**
+             * Failed
+             * @description Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.
+             */
             failed: number;
-            /** Succeeded */
+            /**
+             * Succeeded
+             * @description Sessions that started in the bucket and did not fail.
+             */
             succeeded: number;
         };
         /** TraceCountPublic */
@@ -16828,7 +16788,7 @@ export interface components {
             cost: number;
             /**
              * Error Count
-             * @description Spans that ended in an error no fallback recovered.
+             * @description Spans that ended in an error no fallback recovered, including tools' errors, which do not fail the session.
              */
             error_count: number;
             /**
@@ -16880,6 +16840,8 @@ export interface components {
          * @description One user prompt and the steps it caused.
          */
         TurnPublic: {
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
             /**
              * Continued
              * @description True for steps a session started with before any prompt was seen.
@@ -16999,6 +16961,8 @@ export interface components {
             is_service_key?: boolean | null;
             /** Key Name */
             key_name?: string | null;
+            /** Max End Users */
+            max_end_users?: number | null;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;
@@ -17146,30 +17110,6 @@ export interface components {
             vision_describe_model?: string | null;
             /** Vision Strategy */
             vision_strategy?: ("describe" | "ocr" | "off") | null;
-        };
-        /**
-         * UpdateStoredProviderRequest
-         * @description Update a stored provider. Omitted fields are unchanged; ``api_key`` rotates in place.
-         */
-        UpdateStoredProviderRequest: {
-            /** Api Base */
-            api_base?: string | null;
-            /**
-             * Api Key
-             * @description New API key. Omit to keep the existing one. Never returned.
-             */
-            api_key?: string | null;
-            /** Client Args */
-            client_args?: {
-                [key: string]: unknown;
-            } | null;
-            /**
-             * Expected Updated At
-             * @description Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.
-             */
-            expected_updated_at?: string | null;
-            /** Provider Type */
-            provider_type?: string | null;
         };
         /**
          * UpdateToolSettingsRequest
@@ -18078,6 +18018,36 @@ export interface components {
             name: string;
         };
         /**
+         * WorkspaceMcpServerCheckRequest
+         * @description Connection details to check without storing them, for a form to test before it saves.
+         *
+         *     ``server_id`` names a stored server whose token stands in when
+         *     ``authorization_token`` is omitted, so an edit form can test a new URL with
+         *     a token it was never shown. ``""`` checks with no token at all.
+         */
+        WorkspaceMcpServerCheckRequest: {
+            /**
+             * Allowed Tools
+             * @description The allow-list to report the catalog against
+             */
+            allowed_tools?: string[] | null;
+            /**
+             * Authorization Token
+             * @description Bearer token; omit to use the stored server's, if any
+             */
+            authorization_token?: string | null;
+            /**
+             * Server Id
+             * @description A stored server whose token to use
+             */
+            server_id?: string | null;
+            /**
+             * Url
+             * @description Streamable HTTP MCP endpoint
+             */
+            url: string;
+        };
+        /**
          * WorkspaceMcpServerCreate
          * @description Request body for registering a server.
          *
@@ -18119,6 +18089,45 @@ export interface components {
             url: string;
         };
         /**
+         * WorkspaceMcpServerHealth
+         * @description The last connection check: whether the gateway reached the server, and what it found.
+         *
+         *     Describes the server as the gateway saw it at ``checked_at``, not now: a
+         *     server that answered then can be down since, and the request path checks
+         *     nothing in advance on the strength of this.
+         */
+        WorkspaceMcpServerHealth: {
+            /** Checked At */
+            checked_at: string;
+            /** @description Why the check failed; null when healthy */
+            error?: components["schemas"]["CheckFailure"] | null;
+            /**
+             * Http Status
+             * @description The HTTP status the server refused with, if any
+             */
+            http_status?: number | null;
+            /**
+             * Missing Allowed Tools
+             * @description Allow-listed names the server did not offer
+             */
+            missing_allowed_tools?: string[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "healthy" | "failing";
+            /**
+             * Tool Count
+             * @description Live tools the allow-list admits; null when the check failed
+             */
+            tool_count?: number | null;
+            /**
+             * Tools
+             * @description Every tool name the server offers, allowed or not, up to 200; empty on a failure
+             */
+            tools?: string[];
+        };
+        /**
          * WorkspaceMcpServerPublic
          * @description The API-facing shape. Never carries the token, only whether one is set.
          *
@@ -18136,6 +18145,8 @@ export interface components {
             enabled: boolean;
             /** Has Token */
             has_token: boolean;
+            /** @description The last connection check; null until one has run */
+            health: components["schemas"]["WorkspaceMcpServerHealth"] | null;
             /**
              * Id
              * Format: uuid
@@ -21186,6 +21197,35 @@ export interface operations {
             };
         };
     };
+    "hosted-providers-discard_deployment_provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "hosted-providers-reencrypt_hosted_providers": {
         parameters: {
             query?: never;
@@ -22446,13 +22486,22 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description Validation Error */
-            422: {
+            /** @description The request was refused. */
+            "4XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["AnthropicErrorResponse"];
+                };
+            };
+            /** @description The request failed. */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicErrorResponse"];
                 };
             };
         };
@@ -22479,13 +22528,22 @@ export interface operations {
                     "application/json": components["schemas"]["CountTokensResponse"];
                 };
             };
-            /** @description Validation Error */
-            422: {
+            /** @description The request was refused. */
+            "4XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["AnthropicErrorResponse"];
+                };
+            };
+            /** @description The request failed. */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicErrorResponse"];
                 };
             };
         };
@@ -24149,6 +24207,8 @@ export interface operations {
             query?: {
                 /** @description Return only this model's periods, in the canonical 'provider:model' form. */
                 model_key?: string | null;
+                /** @description Return only overrides of this kind. */
+                kind?: ("model" | "search" | "fetch") | null;
                 /** @description Number of records to skip */
                 skip?: number;
                 /** @description Maximum number of records to return */
@@ -25066,6 +25126,10 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description What to order by. Latency runs from a session's start to its last activity. */
+                sort?: "last_activity" | "latency" | "tokens" | "cost" | "errors";
+                /** @description The direction of `sort`. */
+                order?: "asc" | "desc";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
                 /** @description Last activity at or after this instant (ISO 8601). */
@@ -25082,7 +25146,7 @@ export interface operations {
                 session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
                 /** @description Only sessions with, or without, an unrecovered error. */
                 has_error?: boolean | null;
-                /** @description A trace id, or the start of one. */
+                /** @description Part of a trace id, session name, harness or user id, in any case. */
                 q?: string | null;
             };
             header?: never;
@@ -25130,7 +25194,7 @@ export interface operations {
                 session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
                 /** @description Only sessions with, or without, an unrecovered error. */
                 has_error?: boolean | null;
-                /** @description A trace id, or the start of one. */
+                /** @description Part of a trace id, session name, harness or user id, in any case. */
                 q?: string | null;
             };
             header?: never;
@@ -25210,7 +25274,7 @@ export interface operations {
                 session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
                 /** @description Only sessions with, or without, an unrecovered error. */
                 has_error?: boolean | null;
-                /** @description A trace id, or the start of one. */
+                /** @description Part of a trace id, session name, harness or user id, in any case. */
                 q?: string | null;
             };
             header?: never;
@@ -26573,6 +26637,8 @@ export interface operations {
             query?: {
                 /** @description ISO datetime for effective lookup */
                 as_of?: string | null;
+                /** @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate. */
+                kind?: "model" | "search" | "fetch";
             };
             header?: never;
             path: {
@@ -26614,6 +26680,8 @@ export interface operations {
             query?: {
                 /** @description ISO datetime identifying a specific pricing row to delete */
                 effective_at?: string | null;
+                /** @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate. */
+                kind?: "model" | "search" | "fetch";
             };
             header?: never;
             path: {
@@ -26643,7 +26711,10 @@ export interface operations {
     };
     "pricing-get_pricing_history": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate. */
+                kind?: "model" | "search" | "fetch";
+            };
             header?: never;
             path: {
                 model_key: string;
@@ -26667,207 +26738,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "providers-list_stored_providers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StoredProviderResponse"][];
-                };
-            };
-        };
-    };
-    "providers-create_stored_provider": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateStoredProviderRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StoredProviderResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "providers-reencrypt_stored_provider_keys": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReencryptProviderCredentialsResponse"];
-                };
-            };
-        };
-    };
-    "providers-test_provider_connection": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TestProviderRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TestProviderResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "providers-delete_stored_provider": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                instance: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "providers-update_stored_provider": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                instance: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateStoredProviderRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StoredProviderResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "providers-test_stored_provider": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                instance: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TestProviderResponse"];
-                };
             };
             /** @description Validation Error */
             422: {
@@ -28413,6 +28283,10 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description What to order by. Latency runs from a session's start to its last activity. */
+                sort?: "last_activity" | "latency" | "tokens" | "cost" | "errors";
+                /** @description The direction of `sort`. */
+                order?: "asc" | "desc";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
                 /** @description Last activity at or after this instant (ISO 8601). */
@@ -28429,7 +28303,7 @@ export interface operations {
                 session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
                 /** @description Only sessions with, or without, an unrecovered error. */
                 has_error?: boolean | null;
-                /** @description A trace id, or the start of one. */
+                /** @description Part of a trace id, session name, harness or user id, in any case. */
                 q?: string | null;
             };
             header?: never;
@@ -28477,7 +28351,7 @@ export interface operations {
                 session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
                 /** @description Only sessions with, or without, an unrecovered error. */
                 has_error?: boolean | null;
-                /** @description A trace id, or the start of one. */
+                /** @description Part of a trace id, session name, harness or user id, in any case. */
                 q?: string | null;
             };
             header?: never;
@@ -28557,7 +28431,7 @@ export interface operations {
                 session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
                 /** @description Only sessions with, or without, an unrecovered error. */
                 has_error?: boolean | null;
-                /** @description A trace id, or the start of one. */
+                /** @description Part of a trace id, session name, harness or user id, in any case. */
                 q?: string | null;
             };
             header?: never;
@@ -29700,6 +29574,55 @@ export interface operations {
             };
         };
     };
+    "mcp-servers-check_workspace_mcp_server_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMcpServerCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerHealth"];
+                };
+            };
+            /** @description The URL failed the SSRF or TLS check; nothing was sent to it. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Every check slot on this gateway was busy. Try again shortly. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     "mcp-servers-delete_workspace_mcp_server": {
         parameters: {
             query?: never;
@@ -29765,6 +29688,45 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    "mcp-servers-check_workspace_mcp_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Every check slot on this gateway was busy; nothing was recorded. Try again shortly. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

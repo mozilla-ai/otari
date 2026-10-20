@@ -110,7 +110,7 @@ async def test_hosted_provider(
 async def reencrypt_hosted_providers(service: HostedProviderServiceDep) -> HostedProvidersReencryptPublic:
     """Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.
 
-    Run after rotating the key, alongside ``POST /api/v1/provider-credentials/reencrypt``.
+    Run after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.
     A provider no configured key reads is left as it is, to be re-entered.
     """
     return await service.reencrypt()
@@ -120,9 +120,10 @@ async def reencrypt_hosted_providers(service: HostedProviderServiceDep) -> Hoste
 async def preview_deployment_provider_migration(
     service: HostedProviderServiceDep,
 ) -> DeploymentProviderMigrationPublic:
-    """What moving the deployment providers stored through the dashboard onto hosted providers would do.
+    """What moving the deployment providers the retired dashboard page stored onto hosted providers would do.
 
-    Writes nothing and dials nothing.
+    The gateway moves them at startup, so this lists the ones it could not
+    move, each with the reason. Writes nothing and dials nothing.
     """
     return await service.migrate_deployment_providers(apply=False)
 
@@ -133,16 +134,22 @@ async def apply_deployment_provider_migration(
     # Defaulted rather than optional: a POST with no body moves every row that can move.
     body: Annotated[DeploymentProviderMigrationRequest, Body()] = _EVERY_ROW,
 ) -> DeploymentProviderMigrationPublic:
-    """Move the deployment providers stored through the dashboard onto hosted providers of the same name.
+    """Move the deployment providers the retired dashboard page stored onto hosted providers of the same name.
 
-    Each is created as a hosted provider, offering what it lists as a create
-    does, and the deployment provider is removed once the hosted one offers a
-    model. One that cannot move is reported and left in place. ``rows``
+    Each is created as a hosted provider that serves models not on its roster,
+    offering what it lists as a create does, and the deployment provider is
+    removed. One that cannot move is reported and left in place. ``rows``
     limits the move to the rows of the preview the caller reviewed, at the
     versions it was shown them.
     """
     reviewed = None if body.rows is None else {row.instance: row.updated_at for row in body.rows}
     return await service.migrate_deployment_providers(apply=True, reviewed=reviewed)
+
+
+@router.delete("/migration/{instance}", status_code=status.HTTP_204_NO_CONTENT)
+async def discard_deployment_provider(instance: str, service: HostedProviderServiceDep) -> None:
+    """Remove a deployment provider the move could not take, which serves nothing."""
+    await service.discard_deployment_provider(instance)
 
 
 @router.get("/refresh/preview")

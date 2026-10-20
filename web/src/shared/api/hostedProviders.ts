@@ -29,7 +29,6 @@ import {
   PRICING,
   PROVIDER_HEALTH,
   PROVIDERS,
-  STORED_PROVIDERS,
 } from "@/shared/api/queryKeys"
 
 // The providers this deployment serves on its own keys, for a request that
@@ -285,8 +284,8 @@ export function useReencryptHostedProviders() {
 }
 
 /**
- * What moving the deployment providers stored through the dashboard onto
- * hosted providers would do. Reads the stored rows only and dials nothing, so
+ * What moving the providers startup could not move onto hosted providers
+ * would do. Reads the stored rows only and dials nothing, so
  * it is cheap enough to ask whenever the page is open.
  */
 export function useDeploymentProviderMigrationPreview(enabled: boolean) {
@@ -300,7 +299,7 @@ export function useDeploymentProviderMigrationPreview(enabled: boolean) {
 }
 
 /**
- * Moves the deployment providers named, the rows of the preview the operator
+ * Moves the stored providers named, the rows of the preview the operator
  * reviewed at the versions shown; a row the preview did not show, or one
  * changed since, is left where it is. Each move asks
  * the provider what it serves, as a create does.
@@ -317,8 +316,26 @@ export function useApplyDeploymentProviderMigration() {
       }),
     onSuccess: () => {
       invalidate()
-      void queryClient.invalidateQueries({ queryKey: [STORED_PROVIDERS] })
       void queryClient.invalidateQueries({ queryKey: [PROVIDERS] })
     },
+  })
+}
+
+/**
+ * Removes a stored provider the move could not take. It serves nothing, so
+ * only the migration preview changes.
+ */
+export function useDiscardDeploymentProvider() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (instance: string) =>
+      apiFetch<void>(
+        `/hosted-providers/migration/${encodeURIComponent(instance)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: [HOSTED_PROVIDERS, "migration"],
+      }),
   })
 }

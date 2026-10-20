@@ -87,7 +87,7 @@ the corresponding startup value after the database is available.
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
 | `pricing_refresh` | What a scheduled models.dev price check does with an update: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting, unavailable in hybrid mode. See [Product feedback](#product-feedback). |
-| `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting, standalone only. See [Health checks](health-checks.md). |
+| `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting, standalone and hosted only. See [Health checks](health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -104,6 +104,7 @@ the corresponding startup value after the database is available.
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
 | `streaming_first_chunk_hold_ms` | How long a standalone gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
+| `provider_request_timeout_seconds` | How long a non-streaming provider call may take, in seconds. Defaults to 600. Connecting stays capped at 5 seconds for providers whose SDK separates the two (Anthropic, OpenAI and OpenAI-compatible, Groq, Cerebras, Together); Bedrock, Gemini, Vertex AI, Mistral and Cohere apply the value as a whole. Without it, Anthropic's SDK refuses a non-streaming request with a large `max_tokens`. Providers with no per-request timeout, and a provider whose `client_args` sets its own `timeout`, keep their client's timeout. |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
@@ -227,8 +228,7 @@ skips a full model and tries its next candidate, and a request is refused with a
 429 only when no candidate has room. A direct call to a full model is refused.
 A candidate that fails before responding gives back its tokens and its slot but
 keeps its request counted, since the provider was sent it.
-A search tool is limited the same way, named as `provider:tool` (`exa:exa-search`),
-the name its pricing uses.
+A search tool is limited the same way, named as `provider:tool` (`exa:exa-search`).
 
 Rules can also be added, changed and removed from the dashboard (Settings, Rate
 limit rules) or through `/api/v1/rate-limits`. A change applies at once on the
@@ -304,6 +304,7 @@ the next start. It takes:
 | `user_id` | The user the key bills to, created when missing. Unset uses the shared `default` user. |
 | `is_service_key` | Lets requests name end users. See [Service keys and end users](access-control.md#service-keys-and-end-users). |
 | `end_user_budget_ids` | Budgets a request may start a new end user on with `Otari-End-User-Budget`. |
+| `max_end_users` | Most live end users the key may have on the budgets it assigns, or on any budget when it assigns none. See [Capping a key's end users](access-control.md#capping-a-keys-end-users). |
 | `end_user_budget_id` | Budget a new end user starts on when the request names none. Must be on `end_user_budget_ids` when both are set. |
 | `ceiling` | Budget that caps the key as a whole, across all of its end users: a scoped budget with `scope_type: api_token` on the key. |
 | `exclude_from_budget` | Log the key's cost without enforcing any budget. |
@@ -378,8 +379,29 @@ deployment that declares a key does not mint and print one.
 
 ## Provider configuration
 
+> **Deprecated.** The `providers:` block is being retired in favor of hosted
+> providers, which the Hosted providers page and `/api/v1/hosted-providers`
+> manage. At startup, each entry a hosted provider can hold is copied onto a
+> hosted provider of the same name, once: its `${VAR}` values are read at that
+> start, and the hosted provider serves the name from then on, with a serving
+> switch, a test, its models and removal like any other. The start asks the
+> provider for its models and switches on every one it lists, priced or not,
+> and a later refresh keeps them on; one that lists none is not copied, and keeps serving from `config.yml`. The start then logs
+> that the entry is no longer read, so it can be taken out of `config.yml`;
+> rotate its key on the Hosted providers page rather than in the environment.
+> Removing the copied provider on the page sticks: the entry is not copied
+> again. An entry a hosted provider cannot hold keeps serving from `config.yml`,
+> and the start logs why: one that sets `models`, `max_retries`,
+> `messages_api` or Vertex AI's `credentials`, `project` or `location`, a
+> keyless Bedrock or SageMaker entry served on the server's own cloud role, a
+> name that names another provider or that a hosted provider already holds, or
+> a key with no `OTARI_SECRET_KEY` to encrypt it. Once copied, an organization's
+> own key for the provider is asked first, where the entry was asked before it.
+> Set `import_configured_providers: false` (`OTARI_IMPORT_CONFIGURED_PROVIDERS`)
+> to keep serving every entry from `config.yml` for now.
+
 The `providers` map is keyed by provider instance. Only a provider it declares
-(or the Providers page, or an organization's key) serves requests. A standard
+(or a hosted provider, or an organization's key) serves requests. A standard
 provider needs only its credential, which the entry names:
 
 ```yaml
@@ -526,30 +548,45 @@ providers:
 
 ### Runtime provider management
 
-Standalone operators can store provider credentials through the Providers page
-or `/api/v1/provider-credentials`. Stored entries override config-file entries with
-the same instance name. Config-file entries remain read-only in the dashboard.
+Operators add provider credentials at runtime as hosted providers, on the
+Hosted providers page or through `/api/v1/hosted-providers` (see
+[Hosted providers in config.yml](#hosted-providers-in-configyml) for the
+fields). Config-file entries remain read-only in the dashboard.
 
 Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
 `otari gen-secret-key`. To rotate it, configure the new key before the old key,
-run the provider, hosted provider and search-tool re-encryption endpoints
-(`POST /api/v1/provider-credentials/reencrypt`,
-`POST /api/v1/hosted-providers/reencrypt` and
+run the hosted provider and search-tool re-encryption endpoints
+(`POST /api/v1/hosted-providers/reencrypt` and
 `POST /api/v1/search-tools/reencrypt`), then remove the old key. Losing every
 configured encryption key makes stored credentials unrecoverable.
 
-Providers stored this way are moving onto hosted providers.
-`GET /api/v1/hosted-providers/migration` previews the move and
-`POST /api/v1/hosted-providers/migration` applies it: each stored provider
-becomes a hosted provider of the same name, served by the implementation its
-`provider_type` names, so an `instance:model` selector keeps its name. The
-stored provider is removed once the hosted one offers a model; one whose
-provider lists none is kept until its models are added on the Hosted providers
-page. A name a hosted provider already holds, or a key no configured
-`OTARI_SECRET_KEY` reads, is reported and left in place. A hosted provider is
-asked after an organization's own key, where a stored provider was asked
-before it, so an organization holding its own key is served on that key once
-its provider has moved.
+#### Upgrading from the Deployment providers page
+
+Earlier releases stored runtime providers on a Deployment providers page
+(`/api/v1/provider-credentials`), which is gone. At startup, each provider it
+stored becomes a hosted provider of the same name, served by the
+implementation its `provider_type` names, so an `instance:model` selector,
+routing policy or alias naming it keeps working. The start asks each provider
+for its models, so the first start after the upgrade can take a little longer,
+and offers every model it lists switched on, priced or not, as the stored
+provider served it, and a later refresh keeps them on, on every path: completions, routing-policy fallbacks, the
+pass-through endpoints and batches. A model it does not list is refused until
+it is added on the Hosted providers page, or until "Serve models not on its
+list" is turned on there.
+
+A provider the move cannot take is logged at startup and listed on the Hosted
+providers page with the reason (`GET /api/v1/hosted-providers/migration`), and
+serves nothing until it is added again: a provider that lists no models, a
+name a hosted provider already holds, a key no configured `OTARI_SECRET_KEY`
+reads, an instance named after another provider (`groq` declared as
+`openai`), or a keyless Bedrock or SageMaker provider served on the server's
+own cloud role, which belongs under `providers:` in `config.yml` instead.
+
+Two things behave differently once moved. A hosted provider is asked after an
+organization's own key, where a stored provider was asked before it, so an
+organization holding its own key is served on that key. And a `config.yml`
+provider of the same name now serves ahead of it, where a stored provider
+used to override the configured one.
 
 ### Hosted providers in config.yml
 
@@ -885,24 +922,47 @@ generation, embeddings, rerank and direct search are subject to
 `require_pricing`, which also refuses a rate that cannot price the endpoint,
 such as an `images` rate on embeddings, rather than serving it unpriced.
 
-A search tool's rate is keyed `provider:tool` (`exa:exa-search` for a tool named
-`exa-search` backed by `exa`), and its provider needs no entry under
-`providers:`. That rate is what a search reserves against the caller's budget
-before it runs. A successful search settles at the provider's reported charge
-when it reports one, and at the rate otherwise. A search a workspace's
-organization search key served is priced under `otari:web_search` instead, since
-the deployment cannot price the organization's own provider account. With
-`require_pricing` on, a direct search whose row is missing is refused with a
-402 naming it, even on a provider that reports its charge, unless the key is
-exempt from budgets; a zero rate is a valid row. With it off, such a search
-holds no dollars, though it still holds one request against a request-count
-budget.
+A search tool declared in this file takes its rate as `price_per_call`, in USD,
+on its own entry:
 
-A fetch instance's rate is keyed the same way (`tabstack:tabstack` for an
-instance named `tabstack` backed by `tabstack`), and so is the built-in
-fetcher's, `builtin:builtin_fetch`; their providers need no entry under
-`providers:` either. They price the fetch tool's calls on that instance, ahead
-of `otari:web_fetch`.
+```yaml
+search_tools:
+  exa-search:
+    provider: exa
+    api_key: ${EXA_API_KEY}
+    price_per_call: 0.005
+```
+
+It is stored as a price row of kind `search` keyed by the tool's name, apart
+from every model price, so no provider entry under `providers:` is needed and a
+model price can never be read as the tool's. The same row can be set through
+`POST /api/v1/pricing` with `"kind": "search"` and the tool's name as
+`model_key`, which is how a tool stored from the dashboard, with no entry here,
+is priced; a `price_per_call` in the file adds a new version at startup only
+when it differs from the rate in force, so a rate set through the API for a tool
+that has a `price_per_call` lasts until the next restart, as a `pricing:` entry
+without `effective_at` does for a model. That rate is what a search reserves
+against the caller's budget before it runs. A successful search settles at the
+provider's reported charge when it reports one, and at the rate otherwise. A
+search a workspace's organization search key served is priced under
+`otari:web_search` instead, since the deployment cannot price the
+organization's own provider account. With `require_pricing` on, a direct search
+with no rate is refused with a 402 naming the price to add, even on a provider
+that reports its charge, unless the key is exempt from budgets; a zero rate is
+a valid price. With it off, such a search holds no dollars, though it still
+holds one request against a request-count budget.
+
+A fetch instance's `price_per_call` is stored the same way, as kind `fetch`.
+The built-in fetcher cannot be declared, so its rate is set through the pricing
+API, kind `fetch` and `model_key: builtin_fetch`. Either prices the fetch tool's
+calls on that instance, ahead of `otari:web_fetch`.
+
+A rate written before tools had a kind of their own, under `pricing:` or the
+pricing API as `<provider>:<instance>` (`exa:exa-search`, `builtin:builtin_fetch`),
+still prices its tool, behind the tool's own row, until a later release stops
+reading it; startup names every such row and how to replace it. A key under a
+tool's provider that names no configured tool is a model's price like any
+other, never a tool's.
 
 Rerank accepts either unit. A rerank model priced `unit: tokens` is charged
 on the input tokens the provider reports. Providers that bill reranking per
@@ -976,6 +1036,7 @@ fetch_tools:
   exa-fetch:
     provider: exa
     api_key: "${EXA_API_KEY}"
+    price_per_call: 0.001   # USD, when Exa reports no cost
 web_search_default_tool: exa
 web_fetch_default_tool: builtin_fetch
 web_search_max_calls: 10
@@ -1208,9 +1269,9 @@ each policy covers.
 
 ## Documentation links
 
-By default the dashboard's Documentation link opens the bundled guide at
-`/#/docs`. Set `docs_url` or `OTARI_DOCS_URL` to point it at an absolute
-HTTP or HTTPS URL. The bundled guide remains available.
+By default the dashboard's Documentation link opens
+[docs.otari.ai](https://docs.otari.ai/). Set `docs_url` or `OTARI_DOCS_URL` to
+point it at another absolute HTTP or HTTPS URL.
 
 ## Legal pages
 

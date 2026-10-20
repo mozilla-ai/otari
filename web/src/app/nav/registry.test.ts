@@ -87,7 +87,6 @@ describe("nav registry", () => {
       "Email domains",
       "Spend & budgets",
       "Providers",
-      "Deployment providers",
       "Guardrails",
       "Org settings",
       "Settings",
@@ -131,7 +130,6 @@ describe("nav registry", () => {
     expect(
       NAV_ITEMS.filter((item) => item.operatorOnly).map((item) => item.to),
     ).toEqual([
-      "/providers",
       "/settings",
       "/admin/accounts",
       "/admin/hosted-providers",
@@ -209,31 +207,27 @@ describe("nav registry", () => {
     expect(navContextForPath("/settings")).toBe("deployment")
     expect(navContextForPath("/organization/members")).toBe("organization")
     // Unregistered paths open in the context the shell starts in.
-    expect(navContextForPath("/docs")).toBe("workspace")
+    expect(navContextForPath("/account")).toBe("workspace")
   })
 
-  it.each([
-    ["standalone", "providers", "/providers"],
-    ["hosted", "organization_providers", "/organization/provider-keys"],
-  ])(
-    "places %s providers above Org settings in General",
-    (_, surface, path) => {
-      const visible = (item: NavItem) =>
-        item.surface === surface || item.surface === "organizations"
-      const general = visibleNavSections(ORG_NAV_SECTIONS, visible).find(
-        ({ section }) => section.id === "org-general",
-      )
-      expect(general?.items.map((item) => item.to)).toEqual([
-        path,
-        "/organization",
-      ])
-      expect(navContextForPath(path)).toBe("organization")
-      expect(navContextForPath(`${path}/detail`)).toBe("organization")
-      expect(
-        visibleNavSections(NAV_SECTIONS, visible).flatMap(({ items }) => items),
-      ).toEqual([])
-    },
-  )
+  it("places providers above Org settings in General", () => {
+    const path = "/organization/provider-keys"
+    const visible = (item: NavItem) =>
+      item.surface === "organization_providers" ||
+      item.surface === "organizations"
+    const general = visibleNavSections(ORG_NAV_SECTIONS, visible).find(
+      ({ section }) => section.id === "org-general",
+    )
+    expect(general?.items.map((item) => item.to)).toEqual([
+      path,
+      "/organization",
+    ])
+    expect(navContextForPath(path)).toBe("organization")
+    expect(navContextForPath(`${path}/detail`)).toBe("organization")
+    expect(
+      visibleNavSections(NAV_SECTIONS, visible).flatMap(({ items }) => items),
+    ).toEqual([])
+  })
 
   it("splits the tenancy pages across their two surfaces", () => {
     // The organization pages and the workspace pages are separate management
@@ -285,7 +279,7 @@ describe("nav registry", () => {
     // The prefix pass is what a future child route (/routing/new) relies on to
     // inherit its parent's gating; only an exact match outranks it.
     expect(navItemForPath("/routing/new")?.label).toBe("Routing")
-    expect(navItemForPath("/docs")).toBeUndefined()
+    expect(navItemForPath("/account")).toBeUndefined()
   })
 
   it("points every entry at an absolute path", () => {
@@ -361,7 +355,6 @@ describe("nav registry", () => {
       "organization_usage",
       "organizations",
       "pricing",
-      "providers",
       "routing",
       "settings",
       "tools",
@@ -375,8 +368,6 @@ describe("nav registry", () => {
     expect(navItemForPath("/organization/usage")?.surface).toBe(
       "organization_usage",
     )
-    // Provider keys sits beside the process-global row on standalone, which is
-    // why the two carry different labels.
     expect(navItemForPath("/organization/provider-keys")?.surface).toBe(
       "organization_providers",
     )
@@ -451,16 +442,11 @@ describe("nav registry", () => {
     expect(general?.label).toBe("General")
     expect(general?.items.map((item) => item.to)).toEqual([
       "/organization/provider-keys",
-      "/providers",
       "/organization/guardrails",
       "/organization",
     ])
-    // The labels are the thing under test, because both rows render on a
-    // standalone deployment and a shared label would leave them
-    // indistinguishable.
     expect(general?.items.map((item) => item.label)).toEqual([
       "Providers",
-      "Deployment providers",
       "Guardrails",
       "Org settings",
     ])
@@ -551,9 +537,9 @@ describe("navItemForPath", () => {
   })
 
   it("returns nothing for a path the registry does not declare", () => {
-    // The bundled guide and the 404 splat are not destinations, so they are
+    // The account page and the 404 splat are not destinations, so they are
     // never gated.
-    expect(navItemForPath("/docs")).toBeUndefined()
+    expect(navItemForPath("/account")).toBeUndefined()
     expect(navItemForPath("/nope")).toBeUndefined()
   })
 })
@@ -586,9 +572,9 @@ describe("isPathVisible", () => {
   })
 
   it("leaves a path the registry does not declare ungated", () => {
-    // The guide and the 404 splat: the registry governs what it declares and
+    // The account page and the 404 splat: the registry governs what it declares and
     // nothing else, so withholding every surface must not gate them.
-    expect(isPathVisible("/docs", () => false)).toBe(true)
+    expect(isPathVisible("/account", () => false)).toBe(true)
     expect(isPathVisible("/nope", () => false)).toBe(true)
   })
 })

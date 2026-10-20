@@ -24,7 +24,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
-from gateway.models.pricing import ModelPricing, PriceSource
+from gateway.models.pricing import MODEL_KIND, ModelPricing, PriceSource
 from gateway.models.pricing_schemas import PricingTier
 from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
@@ -40,6 +40,7 @@ from gateway.services.pricing_service import (
     default_model_pricing,
     default_pricing_enabled,
     default_pricing_reference,
+    legacy_tool_price_keys,
     load_organization_override_index,
     normalize_effective_at,
     pricing_key_forms,
@@ -344,19 +345,24 @@ async def get_pricing_map(
     provider_filter: str | None = None,
     model_keys: Sequence[str] | None = None,
 ) -> dict[str, ModelPricing]:
-    """Load latest pricing per model_key, optionally filtered by provider prefix or key set."""
+    """Load latest model pricing per model_key, optionally filtered by provider prefix or key set.
+
+    Model-kind rows only: a search or fetch tool's own price is not a model.
+    """
     latest_effective = (
         select(
             ModelPricing.model_key.label("model_key"),
             func.max(ModelPricing.effective_at).label("effective_at"),
         )
+        .where(ModelPricing.kind == MODEL_KIND)
         .group_by(ModelPricing.model_key)
         .subquery()
     )
 
     stmt = select(ModelPricing).join(
         latest_effective,
-        (ModelPricing.model_key == latest_effective.c.model_key)
+        (ModelPricing.kind == MODEL_KIND)
+        & (ModelPricing.model_key == latest_effective.c.model_key)
         & (ModelPricing.effective_at == latest_effective.c.effective_at),
     )
 
@@ -825,6 +831,7 @@ async def build_merged_catalog(
     # forces a pricing entry for it, and publishing that entry here would expose
     # the very name the alias exists to hide. Whether real models are listed is
     # governed by ``model_discovery`` (phase 1), never by pricing config.
+    legacy_tool_keys = legacy_tool_price_keys(config)
     for model_key, pricing in pricing_map.items():
         if model_key in merged or normalize_pricing_key(config, model_key) in alias_targets:
             continue
@@ -835,6 +842,9 @@ async def build_merged_catalog(
         # selectable entry in the OpenAI-compatible catalog whose per-request rate
         # reads as a per-million-token price, and calling it would fail.
         if model_key.startswith(f"{GATEWAY_TOOL_PRICING_PROVIDER}:"):
+            continue
+        # Nor is a tool's rate still under its old ``<provider>:<instance>`` key.
+        if model_key in legacy_tool_keys:
             continue
         merged[model_key] = model_from_pricing(pricing)
 

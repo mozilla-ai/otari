@@ -2,9 +2,9 @@
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, false, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base
@@ -82,14 +82,12 @@ class ModelAlias(Base):
 
 
 class ProviderCredential(Base):
-    """A provider instance configured at runtime through the dashboard.
+    """A provider instance the retired Deployment providers page stored.
 
-    The database counterpart of a ``providers:`` entry in config.yml: it is
-    merged over the config-file providers at runtime (see
-    ``provider_store_service``), with the stored row winning on an instance-name
-    collision. The API key is held encrypted (``secret_box``); ``last4`` is kept
-    in clear only so the UI can show which key is set without ever decrypting.
-    Standalone mode only, never used in the hybrid platform path.
+    Nothing serves on it: at startup each row is moved onto a hosted provider of
+    the same name and removed (``migrate_deployment_providers`` in
+    ``services/providers``). A row the move cannot take stays, so the Hosted
+    providers page can say why. The API key is held encrypted (``secret_box``).
     """
 
     __tablename__ = "provider_credentials"
@@ -214,6 +212,9 @@ class HostedProvider(Base):
     # protect a copy of the database.
     encrypted_client_args: Mapped[str | None] = mapped_column()
     enabled: Mapped[bool] = mapped_column(default=True)
+    # Serve a model the roster does not list, as a ``config.yml`` instance does.
+    # A model the roster switches off is still refused.
+    serves_unlisted_models: Mapped[bool] = mapped_column(default=False, server_default=false())
     # The one organization served on this provider, or None for every one. Any
     # other organization is answered as if the provider were not configured.
     # RESTRICT: SET NULL would open the provider to every organization, and
@@ -228,6 +229,11 @@ class HostedProvider(Base):
     )
 
 
+HostedModelDisabledReason = Literal["unpriced", "operator"]
+DISABLED_UNPRICED: HostedModelDisabledReason = "unpriced"
+DISABLED_BY_OPERATOR: HostedModelDisabledReason = "operator"
+
+
 class HostedProviderModel(Base):
     """One model the deployment offers on a hosted provider.
 
@@ -238,7 +244,13 @@ class HostedProviderModel(Base):
     no row of its own, and its roster still lives here.
 
     Dispatch serves only a model whose row is switched on: a row switched
-    off and a model with no row are both refused.
+    off is refused, and so is a model with no row unless the provider
+    ``serves_unlisted_models``.
+
+    ``disabled_reason`` says why a row is off, and is null exactly when it is
+    on: ``unpriced`` while it waits for a rate, ``operator`` while an operator
+    has switched it off. ``serves_unpriced`` marks a row switched on without a
+    rate on purpose, so a refresh does not hold it for one.
     """
 
     __tablename__ = "hosted_provider_models"
@@ -247,9 +259,24 @@ class HostedProviderModel(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     provider: Mapped[str] = mapped_column(String(64))
     model: Mapped[str] = mapped_column(String(255))
-    # A model nothing prices is offered but not served.
     enabled: Mapped[bool] = mapped_column(default=True)
+    disabled_reason: Mapped[HostedModelDisabledReason | None] = mapped_column(String(16), default=None)
+    serves_unpriced: Mapped[bool] = mapped_column(default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
     )
+
+
+class ConfiguredProviderImport(Base):
+    """A ``providers:`` entry of config.yml already copied onto a hosted provider of its name.
+
+    Recorded so the entry is read once: from then on the hosted provider is
+    what serves the name, and removing it on the Hosted providers page is not
+    undone by the next start.
+    """
+
+    __tablename__ = "configured_provider_imports"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

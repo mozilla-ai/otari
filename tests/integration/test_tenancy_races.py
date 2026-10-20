@@ -63,8 +63,9 @@ from gateway.models.tenancy import (
     WorkspaceMember,
     WorkspacePublic,
 )
+from gateway.models.users import User as BillingUser
 from gateway.repositories.api_keys import ApiKeyRepositories
-from gateway.repositories.budgets import BudgetRepositories
+from gateway.repositories.budgets import BudgetRepositories, EndUserRepository
 from gateway.repositories.tenancy import (
     InvitationRepository,
     OrganizationMemberRepository,
@@ -1658,3 +1659,53 @@ async def test_concurrent_first_issuance_leaves_one_setup_key(
     # one row would fail rather than look like an improvement.
     live = [issue for issue in issued if hash_key(issue.key) == key_hash]  # type: ignore[attr-defined]
     assert len(live) == 1
+
+
+@pytest.mark.parametrize("entrypoint", ["resolve", "put"])
+async def test_racers_naming_one_new_end_user_under_a_full_cap_all_get_it(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    entrypoint: str,
+) -> None:
+    """With one place left, every racer for the same new id gets the end user the first one created.
+
+    Each racer has found no end user before any takes the owner's lock, so the
+    ones that wait behind the first would count it and refuse a 403 for their
+    own end user unless they look it up again under the lock.
+    """
+    owner_id = f"mlpa-{uuid.uuid4().hex[:8]}"
+    async_db.add(BillingUser(user_id=owner_id))
+    budget_id = await create_budget(async_db, name=f"eu-{owner_id}")
+    await async_db.commit()
+
+    real_lock = EndUserRepository.lock_owner
+    all_looked_up = asyncio.Barrier(_RACERS)
+
+    async def lock_after_all_look_up(self: EndUserRepository, owner_user_id: str) -> None:
+        async with asyncio.timeout(_CHECKPOINT_TIMEOUT):
+            await all_looked_up.wait()
+        await real_lock(self, owner_user_id)
+
+    monkeypatch.setattr(EndUserRepository, "lock_owner", lock_after_all_look_up)
+
+    async def attempt(session: AsyncSession) -> object:
+        api_key = APIKey(
+            user_id=owner_id,
+            is_service_key=True,
+            end_user_budget_ids=[budget_id],
+            end_user_budget_id=budget_id,
+            max_end_users=1,
+        )
+        service = budget_service(session)
+        if entrypoint == "resolve":
+            return (await service.resolve_end_user(api_key=api_key, external_id="fxa1")).user_id
+        return (await service.put_end_user(api_key=api_key, external_id="fxa1", budget_id=budget_id))[0].user_id
+
+    outcomes = await _race(sessions, attempt)
+
+    assert not [outcome for outcome in outcomes if isinstance(outcome, Exception)], outcomes
+    assert len(set(outcomes)) == 1
+    async_db.expire_all()
+    end_users = (await async_db.execute(select(BillingUser).where(BillingUser.parent_user_id == owner_id))).scalars()
+    assert [user.user_id for user in end_users] == outcomes[:1]

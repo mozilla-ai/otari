@@ -32,6 +32,7 @@ from gateway.services.tools._web_names import (
     ANTHROPIC_WEB_FETCH_TYPE,
     WEB_FETCH_NATIVE_TYPE_PREFIX,
     WEB_SEARCH_NATIVE_TYPE_PREFIX,
+    WEB_SEARCH_TOOL_NAME,
 )
 
 if TYPE_CHECKING:
@@ -263,3 +264,28 @@ def web_search_declaration_forms(config: GatewayConfig | None = None) -> list[st
     if web_search_intercept_enabled(config):
         forms += [_BARE_WEB_SEARCH_TYPE, f"{WEB_SEARCH_NATIVE_TYPE_PREFIX}<date>"]
     return forms
+
+
+def retargeted_tool_choice(tool_choice: Any, declared_name: str) -> Any:
+    """Point a forced ``tool_choice`` at the gateway's canonical web-search tool.
+
+    A caller may declare web search under its own name
+    (``{"type": "web_search_20250305", "name": "search_the_web"}``) and force it
+    with a matching ``tool_choice``. The declaration is replaced by the backend's
+    own tool, which is named :data:`WEB_SEARCH_TOOL_NAME`, so an unrewritten
+    ``tool_choice`` would name a tool the provider never received and be rejected.
+
+    Only a choice naming ``declared_name`` is rewritten; ``auto`` / ``any`` /
+    ``none`` and choices naming a different tool pass through untouched. Returns a
+    new object rather than mutating the caller's.
+    """
+    if not isinstance(tool_choice, dict) or declared_name == WEB_SEARCH_TOOL_NAME:
+        return tool_choice
+    # Anthropic: {"type": "tool", "name": ...}. Responses: {"type": "function", "name": ...}.
+    if tool_choice.get("name") == declared_name:
+        return {**tool_choice, "name": WEB_SEARCH_TOOL_NAME}
+    # Chat Completions: {"type": "function", "function": {"name": ...}}.
+    function = tool_choice.get("function")
+    if isinstance(function, dict) and function.get("name") == declared_name:
+        return {**tool_choice, "function": {**function, "name": WEB_SEARCH_TOOL_NAME}}
+    return tool_choice
