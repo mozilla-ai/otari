@@ -2,7 +2,7 @@
 
 Otari separates deployment administration, human identity, workload credentials,
 and spend limits. This page explains how those pieces relate. The generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.30.0/docs/public/openapi.json) is the source of truth for endpoint
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.30.1/docs/public/openapi.json) is the source of truth for endpoint
 schemas.
 
 ## Deployment-wide account administration
