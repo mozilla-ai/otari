@@ -8,7 +8,7 @@ current provider list and [Models](../models.md) for Otari's model-name format.
 ## Before you start
 
 - A running Otari with `OTARI_SECRET_KEY` set, and its master key. The
-  [Quickstart](../quickstart.md) sets up both.
+  [Self-hosted quickstart](../self-hosted-quickstart.md) sets up both.
 - An OpenAI API key from <https://platform.openai.com/api-keys>.
 
 ## Add the key

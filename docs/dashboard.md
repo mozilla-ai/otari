@@ -66,7 +66,7 @@ organization, so the account menu names you even before you join one.
 6. Create an API key from the setup guide or the Keys page.
 7. Send a request and confirm it appears under Activity.
 
-The [Quickstart](quickstart.md) includes a complete request example.
+The [Self-hosted quickstart](self-hosted-quickstart.md) includes a complete request example.
 
 ## The setup guide
 

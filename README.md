@@ -176,7 +176,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 ## Documentation
 
-- [Quickstart](docs/quickstart.md)
+- [Quickstart](docs/self-hosted-quickstart.md)
 - [Deployment](docs/deployment.md)
 - [Configuration](docs/configuration.md)
 - [Models](docs/models.md)

@@ -1,128 +1,74 @@
+---
+description: Go from sign-up to your first request in a few minutes.
+---
+
 # Quickstart
 
-In this tutorial you run Otari on your own machine with Docker Compose, connect
-it to OpenAI, and send your first request through it. For a throwaway container
-with no clone, see the [README quickstart](../README.md#quickstart) instead.
+In this quickstart you send your first request through [otari.ai](https://otari.ai):
+you create an API key in your default workspace, pick a model, send one request,
+and see it in the workspace's usage. It takes about five minutes, and all you
+need is an otari.ai account.
 
-You need:
+To run Otari on your own machine instead, follow the
+[Self-hosted quickstart](self-hosted-quickstart.md).
 
-- Docker with Compose
-- `git`, `curl` and `openssl`
-- An OpenAI API key from <https://platform.openai.com/api-keys>
+## 1. Open your workspace
 
-## 1. Get the code
+Log in to [otari.ai](https://otari.ai) and open your default workspace from the
+top-left corner. This quickstart uses its **API Keys**, **Models** and **Usage**
+tabs.
+
+## 2. Create an API key
+
+1. Open the **API Keys** tab and click **Create Key**.
+2. Give the key a name. It can use every model your workspace can, unless you
+   limit it under **Advanced**.
+3. Copy the key, which starts with `otk_`. It is shown only once.
+
+Keep the key in your shell for the next steps:
 
 ```bash
-git clone https://github.com/mozilla-ai/otari
-cd otari
+export OTARI_API_KEY=otk_...
 ```
 
-Run every command that follows from this directory.
+Treat it like a password: keep it in your shell or a secret store, never in
+source control.
 
-## 2. Write the configuration file
+## 3. Pick a model
 
-Create `config.yml`. It tells Otari to keep its data in the PostgreSQL database
-that Compose starts, and to price common models with the prices bundled in
-Otari:
+Open the **Models** tab, find a model with the filters (modality, provider,
+vendor, capabilities), and click **Use this model** to copy its name. This
+quickstart uses `deepseek/deepseek-v4-pro-0813`.
 
-```bash
-cat > config.yml <<'EOF'
-database_url: "postgresql://otari:otari@postgres:5432/otari"
-default_pricing: true
-EOF
-```
+## 4. Send a request
 
-## 3. Create the secrets
-
-Otari needs three secrets: a master key you manage the gateway with, a key that
-encrypts the provider credentials it stores, and a pepper for the copies of
-attached files it makes at providers. Generate all three into `.env`, which
-Compose reads:
+otari.ai serves an OpenAI-compatible API at `https://api.otari.ai/api/v1`, or at
+`https://eu.api.otari.ai/api/v1` for an account in the European Union:
 
 ```bash
-export OTARI_MASTER_KEY=$(openssl rand -hex 32)
-cat > .env <<EOF
-OTARI_MASTER_KEY=$OTARI_MASTER_KEY
-OTARI_SECRET_KEY=$(docker run --rm docker.io/mzdotai/otari:latest otari gen-secret-key)
-OTARI_PROVIDER_ACCOUNT_PEPPER=$(openssl rand -base64 32)
-EOF
-```
-
-The first command also keeps the master key in your shell for step 6. Git
-ignores both `config.yml` and `.env`.
-
-## 4. Start Otari
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-Wait a few seconds, then check that it answers:
-
-```bash
-curl http://localhost:8000/api/v1/health
-```
-
-The answer includes `"status":"healthy"`. If the connection is refused, wait a
-few more seconds and try again.
-
-## 5. Copy your API key
-
-On its first start, Otari creates an API key and prints it once. Find it in the
-logs:
-
-```bash
-docker compose logs otari | grep 'tk-'
-```
-
-Copy the `tk-...` value. This is the key an application calls Otari with.
-
-## 6. Connect OpenAI
-
-Add OpenAI as a provider, replacing `sk-...` with your OpenAI API key:
-
-```bash
-curl -X POST http://localhost:8000/api/v1/hosted-providers \
-  -H "Authorization: Bearer $OTARI_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"provider": "openai", "api_key": "sk-..."}'
-```
-
-Otari stores the key encrypted, asks OpenAI which models the key can use, and
-switches on every one it has a price for. The answer describes the new provider
-and shows only the last four characters of your key.
-
-## 7. Send a request
-
-Replace `tk-...` with the key from step 5:
-
-```bash
-curl http://localhost:8000/api/v1/chat/completions \
-  -H "Authorization: Bearer tk-..." \
+curl https://api.otari.ai/api/v1/chat/completions \
+  -H "Authorization: Bearer $OTARI_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "openai:gpt-4o-mini",
-    "messages": [{"role": "user", "content": "Say hello."}]
+    "model": "deepseek/deepseek-v4-pro-0813",
+    "messages": [{"role": "user", "content": "Say hello in one short sentence."}]
   }'
 ```
 
 The answer is an OpenAI-style chat completion, with the model's reply in
-`choices[0].message.content` and the tokens it used in `usage`.
+`choices[0].message.content`.
 
-## 8. See it in the dashboard
+## 5. See it in Usage
 
-Open <http://localhost:8000/> and sign in with your master key (`echo
-$OTARI_MASTER_KEY` prints it). Open **Activity**: your request is listed with
-its model, its tokens and its cost.
+Open the **Usage** tab: your request is listed with its model, its tokens and
+its cost.
 
-You now have a gateway that authenticates its callers, holds the provider
-credential for them, and records every request.
+You now have a key your applications can call otari.ai with, and every request
+they send is recorded against your workspace.
 
 ## Next steps
 
-- [Admin dashboard](dashboard.md): manage keys, users and providers in the browser.
-- [Access control](access-control.md): give each application its own key and budget.
-- [Models](models.md): connect more providers and choose model names.
-- [Routing](routing.md): fall back to another model when one fails.
-- [Deployment](deployment.md): run Otari in production.
+- [Use with Claude Code](use-with-claude-code.md): point Claude Code at otari.ai.
+- [Access control](access-control.md): workspaces, members, keys and budgets.
+- [Routing policies](routing.md): fall back to another model when one fails.
+- [Inference Guardrails](guardrails.md): check requests and responses.

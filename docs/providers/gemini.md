@@ -9,7 +9,7 @@ format.
 ## Before you start
 
 - A running Otari with `OTARI_SECRET_KEY` set, and its master key. The
-  [Quickstart](../quickstart.md) sets up both.
+  [Self-hosted quickstart](../self-hosted-quickstart.md) sets up both.
 - A Gemini API key from <https://aistudio.google.com/apikey>.
 
 ## Add the key
