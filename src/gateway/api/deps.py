@@ -41,6 +41,12 @@ from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.api_keys import ApiKeyRepositories, ApiKeyRepository, FederationRuleRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.files import FileRepositories
+from gateway.repositories.health_checks import (
+    HealthCheckRecoveryRepository,
+    HealthCheckResultRepository,
+    HealthCheckRunRepository,
+    HealthCheckSettingsRepository,
+)
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
@@ -86,6 +92,7 @@ from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
+from gateway.services.health_checks import HealthCheckService
 from gateway.services.identity import IdentityService
 from gateway.services.inference import InferenceService
 from gateway.services.log_writer import LogWriter
@@ -1780,6 +1787,34 @@ def get_rate_limit_service(
 
 
 RateLimitServiceDep = Annotated[RateLimitService, Depends(get_rate_limit_service)]
+
+
+def build_health_check_service(uow: UnitOfWork, config: GatewayConfig) -> HealthCheckService:
+    """Build the health checks service on a request's Unit of Work, or the worker's own.
+
+    The service is handed the Unit of Work, never the session under it, with its own domain's repositories and
+    the providers domain's service for the hosted roster, as DOMAINS.md's constructor injection asks.
+    """
+    return HealthCheckService(
+        uow,
+        HealthCheckSettingsRepository(uow),
+        HealthCheckRunRepository(uow),
+        HealthCheckResultRepository(uow),
+        HealthCheckRecoveryRepository(uow),
+        build_hosted_provider_service(uow, config=config),
+        config,
+    )
+
+
+def get_health_check_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> HealthCheckService:
+    """The request's service. The poll builds its own through ``build_health_check_service``."""
+    return build_health_check_service(uow, config)
+
+
+HealthCheckServiceDep = Annotated[HealthCheckService, Depends(get_health_check_service)]
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
 
 
@@ -2043,6 +2078,8 @@ __all__ = [
     "HostedProviderServiceDep",
     "OrgProviderModelServiceDep",
     "RateLimitServiceDep",
+    "HealthCheckServiceDep",
+    "build_health_check_service",
     "RequestSessionModelProviderPortDep",
     "TelemetryStoragePortDep",
     "ToolPorts",

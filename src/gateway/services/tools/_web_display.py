@@ -1,13 +1,17 @@
 """How a web search's hits and a fetch's URL are shown to a caller, in every dialect that reports them.
 
 A hit's title and date are whatever a provider sent, so each dialect bounds and
-collapses them the same way before they go on the wire. A fetch's URL loses its
+collapses them the same way before they go on the wire. A hit is any-search's
+``SearchHit``, whose date is shown as an ISO date, or the old backend's dict,
+whose date string is shown as the provider sent it. A fetch's URL loses its
 query string and fragment, which a fetch result never displays.
 """
 
 from collections.abc import Iterable, Iterator, Mapping
+from datetime import datetime
 from typing import Any
 
+from any_search import SearchHit
 from gateway.services.web_retrieval_network import truncate_utf8
 from gateway.services.web_retrieval_policy import (
     MAX_WEB_URL_LENGTH,
@@ -38,17 +42,41 @@ def hit_date(value: object) -> str | None:
     return " ".join(str(value or "").split())[:_HIT_DATE_MAX_CHARS] or None
 
 
+def published_date(value: datetime | None) -> str | None:
+    """A hit's publication time as an ISO date, or date-time when it has a time of day; ``None`` without one."""
+    if value is None:
+        return None
+    if (value.hour, value.minute, value.second, value.microsecond) == (0, 0, 0, 0):
+        return value.date().isoformat()
+    return value.isoformat()
+
+
 def search_query(arguments: Mapping[str, Any]) -> str:
     """The query a search call asked for, empty when it named none."""
     return str(arguments.get("query") or "")
 
 
-def hits_to_show(results: Iterable[Mapping[str, Any]]) -> Iterator[tuple[str, str, str | None]]:
+def hits_to_show(results: Iterable[SearchHit | Mapping[str, Any]]) -> Iterator[tuple[str, str, str | None]]:
     """Each hit's URL, title and date as a caller is shown them; a hit without a URL has nothing to show."""
     for result in results:
-        url = str(result.get("url") or "").strip()
+        title: object
+        date: object
+        if isinstance(result, SearchHit):
+            url, title, date = result.url.strip(), result.title, published_date(result.published)
+        else:
+            url, title, date = str(result.get("url") or "").strip(), result.get("title"), result.get("published_date")
         if url:
-            yield url, hit_title(result.get("title"), url), hit_date(result.get("published_date"))
+            yield url, hit_title(title, url), hit_date(date)
+
+
+def take_last_hits(pool: object) -> list[SearchHit] | list[dict[str, Any]] | None:
+    """The hits the backend that ran a search kept, taking them: any-search's, else the old backend's.
+
+    ``None`` for a backend that keeps none, which is how a gateway-run search is
+    told apart from an MCP server's tool of the same name.
+    """
+    take = getattr(pool, "take_last_hits", None) or getattr(pool, "take_last_results", None)
+    return take() if take is not None else None
 
 
 def fetched_url(value: str) -> CanonicalWebURL | None:

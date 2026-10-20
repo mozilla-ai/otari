@@ -53,11 +53,14 @@ class ApiKeyService:
         end_user_budget_ids: list[str] | None,
         workspace_id: uuid.UUID,
         fingerprint: Callable[[str], str],
-    ) -> str:
+    ) -> tuple[str, bool]:
         """Create the key config.yml declares under ``config_name``, or write the declared values over it.
 
-        Returns the key's id. ``owner`` is the id of the user it bills to; ``end_user_budget_ids`` is the declared list
-        once checked; ``fingerprint`` is the bound key format's, and a new key lands in ``workspace_id``.
+        Returns the key's id, and whether anything was written: a key config.yml
+        already wrote this same entry over is left as it is. ``owner`` is the id
+        of the user it bills to; ``end_user_budget_ids`` is the declared list once
+        checked; ``fingerprint`` is the bound key format's, and a new key lands in
+        ``workspace_id``.
         """
         return await apply_declared_key(
             self._keys,

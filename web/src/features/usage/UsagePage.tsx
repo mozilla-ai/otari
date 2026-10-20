@@ -205,7 +205,7 @@ interface BreakdownProps {
   emptyLabel: string
   // How a real group whose column was NULL reads. The default suits an id that
   // has gone missing (a deleted user); a dimension where NULL is a normal state
-  // (gateway rows carry no session label) passes its own wording.
+  // (a request that named no session) passes its own wording.
   unknownLabel?: string
   // How a real group's key reads. The default names the two dimensions whose
   // key is an opaque id from the label the server resolved in the same GROUP

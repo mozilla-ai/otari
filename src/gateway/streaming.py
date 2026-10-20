@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import aclosing, suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -86,16 +86,25 @@ _ANTHROPIC_ERROR = json.dumps(
 )
 
 
-def openai_error_event(fmt: StreamFormat, code: str | None, message: str | None = None) -> str:
+def openai_error_event(
+    fmt: StreamFormat,
+    code: str | None,
+    message: str | None = None,
+    provider_failure: Mapping[str, object] | None = None,
+) -> str:
     """``fmt``'s error event, carrying ``code`` and ``message`` in the OpenAI error object where given.
 
     ``message`` must already be safe to show the caller; without one the event says only that streaming failed.
+    ``provider_failure`` adds the fields a provider's own failure may show (``provider``, ``status``, ``tag``,
+    ``retryable``), under ``error.provider_failure``.
     """
-    if code is None and message is None:
+    if code is None and message is None and provider_failure is None:
         return fmt.error_payload
-    error: dict[str, str] = {"message": message or "An error occurred during streaming", "type": "server_error"}
+    error: dict[str, object] = {"message": message or "An error occurred during streaming", "type": "server_error"}
     if code is not None:
         error["code"] = code
+    if provider_failure is not None:
+        error["provider_failure"] = dict(provider_failure)
     return fmt.error_payload.replace(_OPENAI_ERROR, json.dumps({"error": error}))
 
 

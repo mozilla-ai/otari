@@ -5,6 +5,7 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from gateway.core.settings.declarations import declaration_digest
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
 from gateway.models.budgets import BUDGET_ID_PATTERN, MAX_COUNT_LIMIT, MAX_MINUTE_LIMIT, ResetAlignment
 from gateway.models.money import MAX_USD_LIMIT
@@ -38,6 +39,10 @@ class BudgetConfig(BaseModel):
             msg = "a budget resets on budget_duration_sec or on reset_alignment, not both"
             raise ValueError(msg)
         return self
+
+    def declaration_digest(self) -> str:
+        """A digest of this entry, which changes when any field config.yml sets for it does."""
+        return declaration_digest(self.model_dump(mode="json"))
 
 
 class BudgetSettings(BaseModel):

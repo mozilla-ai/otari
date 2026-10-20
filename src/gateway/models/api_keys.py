@@ -123,8 +123,12 @@ class APIKey(Base):
     # credential anybody manages, and no endpoint ever returns the value itself.
     internal_secret: Mapped[str | None] = mapped_column()
     # The name config.yml declares this key under, set only while it does. Every
-    # start finds the key by it and writes the declared settings and secret back.
+    # start finds the key by it, and writes the declared settings and secret back
+    # when the entry's digest differs from ``declared_digest``.
     config_name: Mapped[str | None] = mapped_column(default=None)
+    # A digest of the config.yml entry last written over this key, its secret's
+    # hash included, so changing the entry or the secret writes it back.
+    declared_digest: Mapped[str | None] = mapped_column(String(64), default=None)
 
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
 

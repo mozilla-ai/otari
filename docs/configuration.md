@@ -87,6 +87,7 @@ the corresponding startup value after the database is available.
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
 | `pricing_refresh` | What a scheduled models.dev price check does with an update: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting, unavailable in hybrid mode. See [Product feedback](#product-feedback). |
+| `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting, standalone only. See [Health checks](health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -260,8 +261,8 @@ allow-list.
 ## Budgets and API keys in config
 
 A deployment can declare its budgets and API keys in config.yml instead of
-creating them through the management API. Each start writes them to the
-database, so a service that calls Otari needs only this file and one secret
+creating them through the management API. Each start creates the ones missing
+from the database and writes back the ones whose entry changed, so a service that calls Otari needs only this file and one secret
 that both sides read from the environment. Standalone and hosted mode only: a
 hybrid gateway holds no budgets or keys of its own, so it refuses to start with
 either section set.
@@ -331,24 +332,34 @@ its usual prefix and last four characters.
 
 ### What config.yml owns
 
-Config is the source of truth for what it declares, and every start writes it
-back:
+Config is the source of truth for what it declares, and a start writes an
+entry back whenever the entry changed:
 
-- A missing budget or key is created. An existing one gets the declared values,
-  so a change made through the API or the dashboard lasts until the next start.
-  Fields a key does not declare (expiry, allowed models, metadata) are left as
-  they are, and a key that was deactivated is active again.
-- Changing a key's secret in config changes its secret at the next start, and
-  the old one stops working.
-- `end_user_budget_ids`, `end_user_budget_id` and `ceiling` are reconciled the
-  same way. End users already created keep the budget they started on, as they
+- A missing budget or key is created. An existing one gets the declared values
+  when its entry in config.yml differs from the one a start last wrote over it,
+  so a change made through the API or the dashboard, such as lowering a budget
+  or deactivating a key in an emergency, lasts across restarts and new replicas
+  until config.yml changes that entry. Changing any field of the entry writes
+  the whole entry back: a key that was deactivated is active again. Fields a
+  key does not declare (expiry, allowed models, metadata) are left as they are.
+- Changing a key's secret in config, including through the environment
+  variable it reads, changes its secret at the next start, and the old one
+  stops working.
+- `end_user_budget_ids`, `end_user_budget_id` and `ceiling` are part of the
+  key's entry and are reconciled with it. End users already created keep the budget they started on, as they
   do when the key is changed through the API. A ceiling moved to another budget
   restarts its period and keeps the spend it has recorded; a ceiling already on
   the declared budget keeps its period, so a restart does not reset it. A key
-  with no `ceiling` keeps any ceiling it has.
+  with no `ceiling` keeps any ceiling it has, and an unchanged entry leaves a
+  ceiling changed or removed through the API as it is.
+- Otari keeps a digest of each entry it wrote beside the budget or key, never
+  the secret itself (the secret enters as its hash), to tell whether the entry
+  changed. The first start of a version that keeps it writes every entry once,
+  as every start used to.
 - Nothing is deleted. A budget or key removed from config stays as it is and
   stops being marked as declared, so it can then be changed or deleted through
-  the API. A key deleted through the API while config still declares it is
+  the API. Declaring it again writes the entry back over it at the next start,
+  even an entry unchanged from before. A key deleted through the API while config still declares it is
   created again at the next start.
 
 `GET /api/v1/budgets` reports `origin: config` on a declared budget, and
@@ -870,19 +881,22 @@ image's size and quality, or an audio file's length. Set it at the dearest
 option you allow.
 
 An unpriced request on audio or moderations is served at zero cost. Image
-generation, embeddings and rerank are subject to `require_pricing`, which also
-refuses a rate that cannot price the endpoint, such as an `images` rate on
-embeddings, rather than serving it unpriced.
+generation, embeddings, rerank and direct search are subject to
+`require_pricing`, which also refuses a rate that cannot price the endpoint,
+such as an `images` rate on embeddings, rather than serving it unpriced.
 
 A search tool's rate is keyed `provider:tool` (`exa:exa-search` for a tool named
 `exa-search` backed by `exa`), and its provider needs no entry under
 `providers:`. That rate is what a search reserves against the caller's budget
-before it runs; without one no dollars are held, though the search still holds
-one request against a request-count budget. A successful search settles at the
-provider's reported charge when it reports one, and at the rate otherwise. A
-search a workspace's organization search key served is priced under
-`otari:web_search` instead, since the deployment cannot price the organization's
-own provider account.
+before it runs. A successful search settles at the provider's reported charge
+when it reports one, and at the rate otherwise. A search a workspace's
+organization search key served is priced under `otari:web_search` instead, since
+the deployment cannot price the organization's own provider account. With
+`require_pricing` on, a direct search whose row is missing is refused with a
+402 naming it, even on a provider that reports its charge, unless the key is
+exempt from budgets; a zero rate is a valid row. With it off, such a search
+holds no dollars, though it still holds one request against a request-count
+budget.
 
 A fetch instance's rate is keyed the same way (`tabstack:tabstack` for an
 instance named `tabstack` backed by `tabstack`), and so is the built-in
@@ -990,8 +1004,11 @@ Rules for instances:
   (`None` and `BUILTIN_FETCH` are reserved too), and is unique across both maps.
 - `options` are checked against the provider's options. A search instance may also
   set `max_results` and `time_range`, and a fetch instance `max_chars`, which every
-  provider of that tool takes. A fetch instance's `max_chars` cuts what each fetch
-  tool call returns; in-loop search does not read the search ones yet.
+  provider of that tool takes. In the loop, a search instance's `max_results` can
+  only lower the request's count, and on a direct call it is the count when the
+  request names none. A fetch instance's `max_chars` cuts what each fetch tool call
+  returns, and what an enrichment fetch asks for when it is below the 1,500
+  characters a search result shows.
 - A `search_tools` entry that breaks the name rules, or whose `options` carry a key
   the provider does not know or a value it refuses, still loads, with a warning
   that names the entry and the problem. Fix it: a later release refuses it, and
@@ -1028,23 +1045,18 @@ file or environment, then to the built-in default.
 - `web_fetch_default_tool`: the fetch instance for the fetch tool and for
   enrichment. Default `builtin_fetch`.
 - `web_search_max_calls`: how many search and fetch calls one request may make
-  together. Default 10.
+  together. Default 10. A call past it gets a tool error the model can recover
+  from.
 
 A default that names no instance, set in the file or earlier at runtime, is treated
 as unset, with a warning at startup, or from the refresh that first finds it so.
 
-In this release `web_search_default_tool` picks the tool for a direct
-`POST /api/v1/search` that names none, and `web_fetch_default_tool` the fetch
-instance every fetch tool call runs on. The rest take effect when in-loop search
-moves onto the search instances: the in-loop parts of `web_search_default_tool`
-and `web_search_max_calls`, and the fetch instance that enriches search results,
-a search instance's `fetch_tool` or else `web_fetch_default_tool`.
-
-After that, the old in-loop backend still serves some requests until it is
-removed. In that period `web_fetch_default_tool` governs every fetch tool call,
-while `web_search_max_calls` and `fetch_tool` apply only where the new backend
-serves the request: the old one keeps its fixed limit of 10 calls, its 422 past
-it, and its own enrichment through the built-in fetcher.
+The older in-loop backend still serves some requests until it is removed: a
+search on the legacy settings, or on a Tavily or Brave organization key, and a
+request that declares only the fetch tool. `web_fetch_default_tool` governs every
+fetch tool call, while `web_search_max_calls` and `fetch_tool` apply only where a
+search instance serves the request: the older backend keeps its fixed limit of 10
+calls, its 422 past it, and its own enrichment through the built-in fetcher.
 
 ## Decision providers
 

@@ -103,8 +103,9 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
     assert response.json() == {
         "deployment_type": "standalone",
         "session_type": "local_operator",
-        # The trace explorer is a core feature, published on top of the declared surfaces while it is on.
-        "surfaces": sorted({*STANDALONE_SURFACES, "traces"}),
+        # The trace explorer and the Health page are core features, published on top of the declared surfaces
+        # while they are on.
+        "surfaces": sorted({*STANDALONE_SURFACES, "health_checks", "traces"}),
         "sign_in_methods": ["master_key"],
         "management_url": None,
         "data_plane_url": None,
@@ -302,6 +303,7 @@ def test_open_signup_is_published_only_with_mail_to_carry_the_verification(tmp_p
 # mounted route has not.
 SURFACE_ROUTE_PREFIXES = {
     "hosted_providers": f"{API_ROOT}/hosted-providers",
+    "health_checks": f"{API_ROOT}/health-checks",
     "organization_guardrails": f"{API_ROOT}/organizations/me/guardrails",
     "organization_providers": f"{API_ROOT}/organizations/me/provider-keys",
     "organization_usage": f"{API_ROOT}/organizations/me/usage",

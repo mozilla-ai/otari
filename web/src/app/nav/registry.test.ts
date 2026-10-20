@@ -93,6 +93,7 @@ describe("nav registry", () => {
       "Settings",
       "Accounts",
       "Hosted providers",
+      "Health",
     ])
   })
 
@@ -134,6 +135,7 @@ describe("nav registry", () => {
       "/settings",
       "/admin/accounts",
       "/admin/hosted-providers",
+      "/health-checks",
     ])
   })
 
@@ -149,7 +151,12 @@ describe("nav registry", () => {
       DEPLOYMENT_NAV_SECTIONS.flatMap((section) =>
         section.items.map((item) => item.to),
       ),
-    ).toEqual(["/settings", "/admin/accounts", "/admin/hosted-providers"])
+    ).toEqual([
+      "/settings",
+      "/admin/accounts",
+      "/admin/hosted-providers",
+      "/health-checks",
+    ])
     // And on neither of the others. A destination drawn on two rails would
     // resolve to whichever came first in NAV_ITEMS and be gated by that one.
     const others = [...NAV_SECTIONS, ...ORG_NAV_SECTIONS].flatMap((section) =>
@@ -158,6 +165,7 @@ describe("nav registry", () => {
     expect(others).not.toContain("/settings")
     expect(others).not.toContain("/admin/accounts")
     expect(others).not.toContain("/admin/hosted-providers")
+    expect(others).not.toContain("/health-checks")
   })
 
   it("keeps a deployment destination registered, and therefore gated", () => {
@@ -171,6 +179,7 @@ describe("nav registry", () => {
       ["/settings", "settings", "refused"],
       ["/admin/accounts", "admin", "unlisted"],
       ["/admin/hosted-providers", "hosted_providers", "unlisted"],
+      ["/health-checks", "health_checks", "refused"],
     ] as const) {
       const item = navItemForPath(to)
       expect(item?.to).toBe(to)

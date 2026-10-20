@@ -16,6 +16,7 @@ import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as AliasesRouteImport } from './routes/aliases'
 import { Route as BudgetsRouteImport } from './routes/budgets'
 import { Route as DocsRouteImport } from './routes/docs'
+import { Route as HealthChecksRouteImport } from './routes/health-checks'
 import { Route as InvitationsRouteImport } from './routes/invitations'
 import { Route as KeysRouteImport } from './routes/keys'
 import { Route as MembersRouteImport } from './routes/members'
@@ -81,6 +82,11 @@ const BudgetsRoute = BudgetsRouteImport.update({
 const DocsRoute = DocsRouteImport.update({
   id: '/docs',
   path: '/docs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HealthChecksRoute = HealthChecksRouteImport.update({
+  id: '/health-checks',
+  path: '/health-checks',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InvitationsRoute = InvitationsRouteImport.update({
@@ -248,6 +254,7 @@ export interface FileRoutesByFullPath {
   '/aliases': typeof AliasesRoute
   '/budgets': typeof BudgetsRoute
   '/docs': typeof DocsRoute
+  '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
@@ -288,6 +295,7 @@ export interface FileRoutesByTo {
   '/aliases': typeof AliasesRoute
   '/budgets': typeof BudgetsRoute
   '/docs': typeof DocsRoute
+  '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
@@ -325,6 +333,7 @@ export interface FileRoutesById {
   '/aliases': typeof AliasesRoute
   '/budgets': typeof BudgetsRoute
   '/docs': typeof DocsRoute
+  '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
@@ -367,6 +376,7 @@ export interface FileRouteTypes {
     | '/aliases'
     | '/budgets'
     | '/docs'
+    | '/health-checks'
     | '/invitations'
     | '/keys'
     | '/members'
@@ -407,6 +417,7 @@ export interface FileRouteTypes {
     | '/aliases'
     | '/budgets'
     | '/docs'
+    | '/health-checks'
     | '/invitations'
     | '/keys'
     | '/members'
@@ -443,6 +454,7 @@ export interface FileRouteTypes {
     | '/aliases'
     | '/budgets'
     | '/docs'
+    | '/health-checks'
     | '/invitations'
     | '/keys'
     | '/members'
@@ -484,6 +496,7 @@ export interface RootRouteChildren {
   AliasesRoute: typeof AliasesRoute
   BudgetsRoute: typeof BudgetsRoute
   DocsRoute: typeof DocsRoute
+  HealthChecksRoute: typeof HealthChecksRoute
   InvitationsRoute: typeof InvitationsRoute
   KeysRoute: typeof KeysRoute
   MembersRoute: typeof MembersRoute
@@ -550,6 +563,13 @@ declare module '@tanstack/react-router' {
       path: '/docs'
       fullPath: '/docs'
       preLoaderRoute: typeof DocsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/health-checks': {
+      id: '/health-checks'
+      path: '/health-checks'
+      fullPath: '/health-checks'
+      preLoaderRoute: typeof HealthChecksRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/invitations': {
@@ -848,6 +868,7 @@ const rootRouteChildren: RootRouteChildren = {
   AliasesRoute: AliasesRoute,
   BudgetsRoute: BudgetsRoute,
   DocsRoute: DocsRoute,
+  HealthChecksRoute: HealthChecksRoute,
   InvitationsRoute: InvitationsRoute,
   KeysRoute: KeysRoute,
   MembersRoute: MembersRoute,

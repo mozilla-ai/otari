@@ -135,10 +135,10 @@ may also define:
 The plaintext key is returned only when it is created or rotated. Store it then.
 Rotation preserves the key record and invalidates the previous secret.
 A key can also be declared in config.yml with a secret you choose, in which
-case config.yml owns it and writes it back at every start; see
+case config.yml owns it and writes it back whenever its entry changes; see
 [Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
-Rotating a declared key through the API lasts only until the next start, which
-restores the secret config.yml declares.
+Rotating a declared key through the API lasts until config.yml changes the
+key's entry or its secret, which restores the secret config.yml declares.
 
 A budget-exempt key is also exempt from `require_pricing`. Reserve such keys for
 usage import or other intentional observability-only traffic.
@@ -305,8 +305,9 @@ api_keys:
 `ceiling` is the key's own ceiling, the scoped budget on the API key that pools
 every end user. The service reads the same `MLPA_SERVICE_KEY` and presents it as
 its API key, so nothing has to hand a freshly minted secret from one to the
-other, and a restart or a second replica does not change it. Every start writes
-the declared settings back over changes made through the API; see
+other, and a restart or a second replica does not change it. A start writes
+the declared settings back over changes made through the API only when the
+key's entry in config.yml changed; see
 [What config.yml owns](configuration.md#what-configyml-owns).
 
 ### Managing end users
@@ -320,6 +321,8 @@ by the id it names it by. It needs neither the master key nor its key's id:
 | `GET /api/v1/end-users?external_id=...` | Reads the end user: its budget, counters and whether it is blocked, as a list of one, or none when no end user goes by the id |
 | `PUT /api/v1/end-users?external_id=...` `{"budget_id": ...}` | Puts the end user on a budget, creating it first if it has not made a request yet (201) |
 | `PATCH /api/v1/end-users?external_id=...` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
+| `DELETE /api/v1/end-users?external_id=...` | Deletes the end user, answering `{"deleted": 1}`, or 404 |
+| `DELETE /api/v1/end-users?created_before=...` | Deletes up to `limit` (default 100, at most 1000) of the oldest end users created before that time, answering `{"deleted": n}`; repeat until `n` is 0 |
 | `GET /api/v1/end-user-budgets` | Lists the budgets on the key's list, with how many end users are on each |
 
 ```http
@@ -332,8 +335,8 @@ Authorization: Bearer <service key>
 The query parameter names any end user, so use it for an id that may contain
 `/`, and URL-encode the id as any query value is (`/` as `%2F`, `+` as `%2B`).
 The id can also go in the path, `/api/v1/end-users/{external_id}`, for `GET`,
-`PUT` and `PATCH`, which answer as their query forms do (the `GET` with the
-end user itself, or 404). That form suits an id without `/`: a
+`PUT`, `PATCH` and `DELETE`, which answer as their query forms do (the `GET`
+with the end user itself, or 404, and the `DELETE` with 204, or 404). That form suits an id without `/`: a
 proxy can merge the `//` of an id like `ab//cd`, and an HTTP client collapses
 `.` and `..` segments, so in a path such an id can reach another end user. An
 id with a `.` or `..` segment is refused there with 400.
@@ -348,6 +351,15 @@ routes still reach them.
 every match in the `Otari-Total-Count` header. Its list and the counts on
 `/api/v1/end-user-budgets` leave out deleted end users, and the counts include
 blocked ones, which `blocked_end_user_count` also gives on its own.
+
+Deleting an end user erases its telemetry and agent traces, as deleting any
+user does, and stops it being listed or counted. Its row stays, with what it
+has spent and used: a request that names the same id again revives it with
+those counters, on the budget it was on, so deleting an end user cannot reset
+its budget. Its usage history stays too. A service whose end users are
+short-lived, such as one id per guest session, can delete the expired ones by
+age with `created_before` (`2026-10-10T00:00:00Z`), a page per call. When
+erasure fails the call answers 5xx and deletes nothing, so it can be repeated.
 
 A budget set this way must be on the key's list: any other is refused with 403
 and `end_user_budget_not_allowed`, so a key cannot put an end user on a budget

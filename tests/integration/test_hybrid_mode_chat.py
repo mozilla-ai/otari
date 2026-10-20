@@ -24,7 +24,15 @@ from gateway.api.deps import reset_config
 from gateway.api.routes._platform import all_attempts_rejected_detail
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
-from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, ERROR_CODE_HEADER, PROVIDER_CREDENTIAL_REJECTED
+from gateway.core.error_codes import (
+    ALL_CANDIDATES_REJECTED,
+    ERROR_CODE_HEADER,
+    ERROR_PROVIDER_HEADER,
+    ERROR_RETRYABLE_HEADER,
+    ERROR_STATUS_HEADER,
+    ERROR_TAG_HEADER,
+    PROVIDER_CREDENTIAL_REJECTED,
+)
 from gateway.services.bedrock_gateway_auth import BEDROCK_READ_TIMEOUT_SECONDS
 
 from .conftest import app_for
@@ -566,6 +574,10 @@ def test_hybrid_mode_maps_provider_timeout(
 
     assert response.status_code == 504
     assert response.json() == {"detail": "LLM provider timeout"}
+    assert response.headers[ERROR_PROVIDER_HEADER] == "openai"
+    assert response.headers[ERROR_TAG_HEADER] == "timeout"
+    assert response.headers[ERROR_RETRYABLE_HEADER] == "true"
+    assert ERROR_STATUS_HEADER not in response.headers
 
 
 def test_hybrid_mode_falls_through_on_sdk_wrapped_connection_error(
@@ -1665,6 +1677,46 @@ def _two_attempt_resolve_response(*, request_id: str) -> httpx.Response:
             ],
         },
     )
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["unstreamed", "streamed"])
+def test_hybrid_mode_names_the_last_attempt_when_every_provider_fails(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+    stream: bool,
+) -> None:
+    """The plan's 502 stays generic, while its headers name the last attempt's own 5xx."""
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _two_attempt_resolve_response(request_id="0b7f3a52-2f0e-4c5d-9a51-0f4b5d6e7a81")
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        request = httpx.Request("POST", "http://upstream")
+        raise httpx.HTTPStatusError("503", request=request, response=httpx.Response(503, request=request))
+
+    control_plane_transport(fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "anything", "messages": [{"role": "user", "content": "hi"}], "stream": stream},
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "All upstream providers failed"}
+    assert response.headers[ERROR_PROVIDER_HEADER] == "openai"
+    assert response.headers[ERROR_STATUS_HEADER] == "503"
+    assert response.headers[ERROR_TAG_HEADER] == "http_error"
+    assert response.headers[ERROR_RETRYABLE_HEADER] == "true"
 
 
 def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(

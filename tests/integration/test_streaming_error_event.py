@@ -124,20 +124,25 @@ def test_streaming_creation_error_returns_http_error(
     assert response.json() == {"detail": "LLM provider error"}
 
 
+_GEMINI_503 = {"provider": "gemini", "status": 503, "tag": "http_error", "retryable": True}
+
+
 @pytest.mark.parametrize(
-    ("exc", "code", "message"),
+    ("exc", "code", "message", "provider_failure"),
     [
-        (_UpstreamStatusError(503), "provider_error", "The provider failed the request with HTTP 503"),
-        (_UpstreamStatusError(429), "upstream_rate_limited", "upstream detail [redacted] at [redacted]"),
+        (_UpstreamStatusError(503), "provider_error", "The provider failed the request with HTTP 503", _GEMINI_503),
+        (_UpstreamStatusError(429), "upstream_rate_limited", "upstream detail [redacted] at [redacted]", None),
         (
             ContextLengthExceededError("prompt is too long", status_code=400),
             "context_length_exceeded",
             "prompt is too long",
+            None,
         ),
         (
             TypeError("AsyncClientV2.chat_stream() got an unexpected keyword argument 'n'"),
             "provider_error",
             "The provider serving this model does not accept the 'n' parameter",
+            None,
         ),
     ],
     ids=["provider", "rate-limited", "context-length", "rejected-param"],
@@ -149,17 +154,22 @@ def test_a_chat_stream_the_provider_fails_ends_in_a_coded_error_event(
     exc: Exception,
     code: str,
     message: str,
+    provider_failure: dict[str, Any] | None,
 ) -> None:
     """The status line has already gone out as 200, so the event is where the caller learns the code.
 
     The message is the detail the same failure gets unstreamed, so it names a
-    cause where that detail does and stays fixed where it does not.
+    cause where that detail does and stays fixed where it does not. Only a
+    failure on the provider's own side names it.
     """
     response = _stream_chat_failing_with(client, master_key_header, exc)
 
     assert response.status_code == 200, response.text
     error = _error_event(response.text)["error"]
-    assert error == {"message": message, "type": "server_error", "code": code}
+    expected: dict[str, Any] = {"message": message, "type": "server_error", "code": code}
+    if provider_failure is not None:
+        expected["provider_failure"] = provider_failure
+    assert error == expected
     assert "sk-live-abc123" not in response.text
     assert "internal.example" not in response.text
     assert response.text.rstrip().endswith("data: [DONE]")

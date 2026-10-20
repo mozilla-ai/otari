@@ -450,6 +450,13 @@ const DEPLOYMENT_SECTIONS = [
         operatorOnly: "unlisted",
         icon: FiCpu,
       },
+      {
+        to: "/health-checks",
+        label: "Health",
+        surface: "health_checks",
+        icon: FiActivity,
+        operatorOnly: "refused",
+      },
     ],
   },
 ] as const satisfies readonly NavSection[]

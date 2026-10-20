@@ -37,19 +37,20 @@ own logs.
 
 Billing: search is priced per request, not per token, so a usage row carries
 zero tokens and a cost taken from the provider's own reported charge when it
-reports one. Otherwise the cost is the flat per-request rate configured for
-``<provider>:<tool>`` under the same convention moderations uses
-(:func:`flat_request_cost`), or, for a search a workspace's organization key
-served, the ``otari:web_search`` rate, since a deployment cannot price a
-tenant's key. Like moderations and audio, search is exempt from
-``require_pricing``: a provider that reports its own cost is metered whether or
-not a rate is configured, so failing closed would reject calls the gateway can
-bill precisely.
+reports one, else the call's flat per-request rate. A search on an instance is
+priced under ``<provider>:<tool>``, which only the operator's price or override
+sets, since the deployment pays for the call. A search a workspace's
+organization key served is priced under ``otari:web_search``, which the
+organization's own override may set, since a deployment cannot price a tenant's
+key. With ``require_pricing`` on, a search whose row is missing is refused with
+a 402 after the budget checks, even from a provider that reports its own cost;
+a key exempt from budgets is still served.
 """
 
 import time
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Annotated, Any
 
 import httpx
@@ -78,10 +79,12 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.core.config import END_USER_BUDGET_HEADER, GatewayConfig
 from gateway.core.database import release_session
+from gateway.core.error_codes import error_headers
 from gateway.core.metered_pricing import quantize_cost
 from gateway.exceptions.tools_exceptions import (
     DirectSearchFailedError,
     DirectSearchFieldRefusedError,
+    DirectSearchPricingRequiredError,
     SearchToolMisconfiguredError,
     SearchToolNotFoundError,
     SearchToolSelectionError,
@@ -107,8 +110,13 @@ from gateway.services.budgets import (
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
-from gateway.services.pricing_service import find_model_pricing, flat_request_cost
-from gateway.services.tools import pick_direct_search_instance, resolve_direct_search, run_direct_search
+from gateway.services.pricing_service import resolve_tool_rate
+from gateway.services.tools import (
+    pick_direct_search_instance,
+    refuse_unpriced_direct_search,
+    resolve_direct_search,
+    run_direct_search,
+)
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
 router = APIRouter(tags=["search"])
@@ -368,16 +376,15 @@ async def _dispatch_search(
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
 
-    # A search tool is not a model, so the community default-pricing dataset can
-    # only produce a false match on the tool's name.
-    price_provider, price_model = search.price_key
-    pricing = await find_model_pricing(
+    # The rate the reservation holds and the settlement falls back to. The call's
+    # label decides whose overrides count.
+    rate = await resolve_tool_rate(
         db,
-        price_provider,
-        price_model,
-        use_defaults=False,
+        search.resolved.rate_keys,
+        label=search.resolved.label,
         organization_id=await organization_for_key_id(db, api_key_id),
     )
+    unit_rate = rate.unit_rate if rate is not None else Decimal(0)
     # After the gates above, so a search they refuse is counted by no rule, and
     # before the reservation, so one the rules refuse holds no budget to refund.
     rate_limit_grant = await admit_rate_limit_rules(
@@ -395,7 +402,7 @@ async def _dispatch_search(
     reservation = await reserve_budget(
         db,
         user_id,
-        flat_request_cost(pricing),
+        unit_rate,
         # Deliberately not the pricing key: ``model`` exists only to drive
         # reserve_budget's free-model shortcut, which splits the string through
         # any-llm. A search tool is not an any-llm model, so passing it logs a
@@ -409,6 +416,18 @@ async def _dispatch_search(
         # so the scope carries the tool's provider as the narrowing axis.
         scope=BudgetScopeRequest(api_key=api_key, provider_instance=tool.provider),
     )
+    # After the budget checks, so a missing or exhausted budget answers first.
+    try:
+        refuse_unpriced_direct_search(
+            search, priced=rate is not None, require_pricing=config.require_pricing, budget_exempt=budget_exempt
+        )
+    except DirectSearchPricingRequiredError as exc:
+        await refund_reservation(db, reservation)
+        # The rejection row shows an operator the searches require_pricing turns away.
+        await log_rejection(exc.message, row_model=tool.name, row_provider=tool.provider, status_code=exc.status_code)
+        raise HTTPException(
+            status_code=exc.status_code, detail=exc.message, headers=error_headers(exc.error_code)
+        ) from exc
 
     def usage_row(**overrides: Any) -> UsageLog:
         """Build the row for a search that reached the provider.
@@ -473,7 +492,7 @@ async def _dispatch_search(
     # The provider's own charge is the true cost; the configured flat rate is
     # the fallback for a provider that reports none.
     # Rounded once, here, so the row and the reconciled spend agree.
-    cost = quantize_cost(result.cost if result.cost is not None else flat_request_cost(pricing))
+    cost = quantize_cost(result.cost if result.cost is not None else unit_rate)
     await log_writer.put(
         usage_row(
             status="success",

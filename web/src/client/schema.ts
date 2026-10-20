@@ -1289,7 +1289,18 @@ export interface paths {
          */
         put: operations["end-users-put_end_user_by_query"];
         post?: never;
-        delete?: never;
+        /**
+         * Delete End Users
+         * @description Delete one end user of the calling service key, or a page of those created before a time.
+         *
+         *     Requires a service key, and exactly one of ``external_id`` and ``created_before``. ``external_id`` deletes that
+         *     end user, any id, one containing '/' included, and answers 404 when it has none. ``created_before`` deletes up
+         *     to ``limit`` of the oldest end users created before then; call again until ``deleted`` is 0. An end user's
+         *     telemetry and agent traces are erased with it. The end user's row and spend are kept: a request naming it again
+         *     revives it with what it had spent, so deleting one cannot clear its budget. A deleted end user is neither listed
+         *     nor counted.
+         */
+        delete: operations["end-users-delete_end_users"];
         options?: never;
         head?: never;
         /**
@@ -1327,7 +1338,15 @@ export interface paths {
          */
         put: operations["end-users-put_end_user"];
         post?: never;
-        delete?: never;
+        /**
+         * Delete End User
+         * @description Delete an end user of the calling service key by the id the service names it by.
+         *
+         *     Requires a service key. An id no live end user of the key's user goes by answers 404. The end user's telemetry
+         *     and agent traces are erased; its row and spend are kept, so a request naming it again revives it with what it had
+         *     spent. An id with a '.' or '..' segment is refused with 400; ``DELETE /end-users?external_id=`` takes any id.
+         */
+        delete: operations["end-users-delete_end_user"];
         options?: never;
         head?: never;
         /**
@@ -1460,6 +1479,92 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/health-checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Health Check Status
+         * @description The settings, the run in progress, and the latest finished run by provider and by offering.
+         */
+        get: operations["health-checks-get_health_check_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/health-checks/disable-failing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable Failing Models
+         * @description Stop serving every model the latest run found failing, on its hosted provider.
+         *
+         *     Each stays listed on the Hosted providers page, priced, to be switched back on there.
+         */
+        post: operations["health-checks-disable_failing_models"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/health-checks/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Health Checks
+         * @description Start a run within a minute, whether or not the schedule is on.
+         */
+        post: operations["health-checks-run_health_checks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/health-checks/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Health Check Settings
+         * @description Whether the checks run on a schedule, how often, and what they send.
+         */
+        get: operations["health-checks-get_health_check_settings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Health Check Settings
+         * @description Change the settings. Turning the schedule on starts a run within a minute.
+         */
+        patch: operations["health-checks-update_health_check_settings"];
         trace?: never;
     };
     "/api/v1/health/liveness": {
@@ -8056,7 +8161,7 @@ export interface components {
             organization_id: string | null;
             /**
              * Origin
-             * @description 'config' while config.yml declares this budget, in which case every start writes the declared values back over any change made through the API; null otherwise
+             * @description 'config' while config.yml declares this budget, in which case a start writes the declared values back over any change made through the API when the budget's entry in config.yml changed, and once on the first start after upgrading to a version that tracks this; null otherwise
              */
             origin?: string | null;
             /** Request Limit */
@@ -10154,6 +10259,17 @@ export interface components {
             budget_id?: string | null;
         };
         /**
+         * EndUsersDeleted
+         * @description How many end users a delete removed.
+         */
+        EndUsersDeleted: {
+            /**
+             * Deleted
+             * @description End users deleted by this call. A page as full as the limit may leave more.
+             */
+            deleted: number;
+        };
+        /**
          * ExecutionState
          * @description Whether the remote tool may have run.
          *
@@ -10729,6 +10845,159 @@ export interface components {
             code?: "invalid_request";
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HealthCheckDisabled
+         * @description What switching off the failing models did.
+         */
+        HealthCheckDisabled: {
+            /**
+             * Disabled
+             * @description How many models were switched off on their hosted provider.
+             */
+            disabled: number;
+        };
+        /**
+         * HealthCheckResultPublic
+         * @description What one offering answered in the latest finished run.
+         */
+        HealthCheckResultPublic: {
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** Error */
+            error: string | null;
+            /**
+             * Failed Runs
+             * @description How many runs in a row it has failed.
+             * @default 0
+             */
+            failed_runs: number;
+            /**
+             * Failing Since
+             * @description When a failing model's unbroken run of failures began, as far back as results are kept (48 hours). Null when it answered.
+             */
+            failing_since?: string | null;
+            /** Latency Ms */
+            latency_ms: number;
+            /** Provider */
+            provider: string;
+            /** Selector */
+            selector: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "fail" | "skip";
+            /** Status Code */
+            status_code: number | null;
+        };
+        /**
+         * HealthCheckRunPublic
+         * @description One pass over every offering.
+         */
+        HealthCheckRunPublic: {
+            /** Failed */
+            failed: number;
+            /** Finished At */
+            finished_at: string | null;
+            /** Id */
+            id: string;
+            /** Included Reasoning */
+            included_reasoning: boolean;
+            /** Passed */
+            passed: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Total */
+            total: number;
+        };
+        /**
+         * HealthCheckSettingsPublic
+         * @description Whether the checks run, how often, and what they send.
+         */
+        HealthCheckSettingsPublic: {
+            /** Alert Emails */
+            alert_emails: string[];
+            /** Interval Minutes */
+            interval_minutes: number;
+            /** Max Tokens */
+            max_tokens: number;
+            /** Next Run At */
+            next_run_at: string | null;
+            /** Prompt */
+            prompt: string;
+            /** Reasoning Every Runs */
+            reasoning_every_runs: number;
+            /** Reasoning Max Tokens */
+            reasoning_max_tokens: number;
+            /** Run Requested */
+            run_requested: boolean;
+            /** Schedule Enabled */
+            schedule_enabled: boolean;
+        };
+        /**
+         * HealthCheckSettingsUpdate
+         * @description Settings to change. An omitted field keeps its value.
+         * @example {
+         *       "interval_minutes": 60,
+         *       "schedule_enabled": true
+         *     }
+         */
+        HealthCheckSettingsUpdate: {
+            /**
+             * Alert Emails
+             * @description Who is emailed when a model stops answering and when it answers again. An empty list emails nobody.
+             */
+            alert_emails?: string[] | null;
+            /**
+             * Interval Minutes
+             * @description Minutes between scheduled runs.
+             */
+            interval_minutes?: number | null;
+            /**
+             * Max Tokens
+             * @description Output cap for a model that does not reason.
+             */
+            max_tokens?: number | null;
+            /**
+             * Prompt
+             * @description The user message every model is sent. A check passes on any answer, whatever it says.
+             */
+            prompt?: string | null;
+            /**
+             * Reasoning Every Runs
+             * @description Include reasoning models every Nth run; 0 leaves them out.
+             */
+            reasoning_every_runs?: number | null;
+            /**
+             * Reasoning Max Tokens
+             * @description Output cap for a reasoning model.
+             */
+            reasoning_max_tokens?: number | null;
+            /**
+             * Schedule Enabled
+             * @description Run the checks on a schedule.
+             */
+            schedule_enabled?: boolean | null;
+        };
+        /**
+         * HealthCheckStatus
+         * @description The Health page: settings, the run in progress, and the latest finished run by provider.
+         */
+        HealthCheckStatus: {
+            last_run: components["schemas"]["HealthCheckRunPublic"] | null;
+            /** Providers */
+            providers: components["schemas"]["ProviderHealthSummary"][];
+            /** Results */
+            results: components["schemas"]["HealthCheckResultPublic"][];
+            running: components["schemas"]["HealthCheckRunPublic"] | null;
+            settings: components["schemas"]["HealthCheckSettingsPublic"];
         };
         /**
          * HostedAvailableModelsPublic
@@ -11925,6 +12194,13 @@ export interface components {
             } | null;
             /** Model */
             model: string;
+            /**
+             * Output Config
+             * @description Anthropic's output configuration (`effort`, `format`). Forwarded to the provider as `output_config`. An alternative to `output_format`; send one or the other.
+             */
+            output_config?: {
+                [key: string]: unknown;
+            } | null;
             /** Output Format */
             output_format?: {
                 [key: string]: unknown;
@@ -14629,6 +14905,52 @@ export interface components {
              * @description True when the provider's credentials could list models.
              */
             ok: boolean;
+        };
+        /**
+         * ProviderHealthSummary
+         * @description One provider's offerings in the latest finished run.
+         *
+         *     ``down`` when none answered, ``degraded`` when some did not, ``ok`` when all did.
+         */
+        ProviderHealthSummary: {
+            /** Answered */
+            answered: number;
+            /**
+             * History
+             * @description Every finished run in the last 24 hours, oldest first.
+             */
+            history: components["schemas"]["ProviderHistoryPoint"][];
+            /** Provider */
+            provider: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "degraded" | "down";
+            /**
+             * Top Error
+             * @description The most common failure, with the model id taken out.
+             */
+            top_error: string | null;
+            /** Top Error Count */
+            top_error_count: number;
+            /** Total */
+            total: number;
+        };
+        /**
+         * ProviderHistoryPoint
+         * @description How one provider did in one run.
+         */
+        ProviderHistoryPoint: {
+            /** Answered */
+            answered: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Total */
+            total: number;
         };
         /**
          * ProviderInfoSchema
@@ -20088,6 +20410,42 @@ export interface operations {
             };
         };
     };
+    "end-users-delete_end_users": {
+        parameters: {
+            query?: {
+                /** @description Delete the end user the service names with this `user` value. */
+                external_id?: string | null;
+                /** @description Delete the end users created before this time, oldest first, up to `limit` of them. */
+                created_before?: string | null;
+                /** @description The most end users one call deletes with `created_before`. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUsersDeleted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "end-users-update_end_user_by_query": {
         parameters: {
             query: {
@@ -20189,6 +20547,36 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["EndUserPublic"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "end-users-delete_end_user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The id the service names the end user by in a request's user field */
+                external_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -20488,6 +20876,119 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+        };
+    };
+    "health-checks-get_health_check_status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthCheckStatus"];
+                };
+            };
+        };
+    };
+    "health-checks-disable_failing_models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthCheckDisabled"];
+                };
+            };
+        };
+    };
+    "health-checks-run_health_checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthCheckSettingsPublic"];
+                };
+            };
+        };
+    };
+    "health-checks-get_health_check_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthCheckSettingsPublic"];
+                };
+            };
+        };
+    };
+    "health-checks-update_health_check_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HealthCheckSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthCheckSettingsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -24793,7 +25294,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;
@@ -24859,7 +25360,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;
@@ -24925,7 +25426,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;
@@ -24989,7 +25490,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;
@@ -28140,7 +28641,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;
@@ -28239,7 +28740,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;
@@ -28389,7 +28890,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;
@@ -28486,7 +28987,7 @@ export interface operations {
                 provider?: string | null;
                 /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
                 source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                /** @description Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried */
                 source_label?: string | null;
                 /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
                 tag?: string[] | null;

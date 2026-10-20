@@ -15,7 +15,7 @@ from any_llm.types.messages import (
     MessageStreamEvent,
 )
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -245,6 +245,35 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
     metadata: AnthropicRequestMetadata = None
+    # Declared so the published contract carries Anthropic's wire name; the
+    # validator below moves it into ``output_format``, so it is never set or forwarded.
+    output_config: dict[str, Any] | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            "Anthropic's output configuration (`effort`, `format`). Forwarded to the provider as "
+            "`output_config`. An alternative to `output_format`; send one or the other."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_output_config(cls, data: Any) -> Any:
+        """Read Anthropic's ``output_config`` as the ``output_format`` any-llm forwards.
+
+        ``output_config`` (``effort``, ``format``) is the Messages API's wire name, and
+        what Claude Code and the Anthropic SDK send; any-llm takes the same object as
+        ``output_format`` and sends it on as ``output_config``.
+        """
+        if not isinstance(data, dict) or "output_config" not in data:
+            return data
+        if data.get("output_format") is not None:
+            raise ValueError("Send output_config or output_format, not both.")
+        data = dict(data)
+        output_config = data.pop("output_config")
+        if output_config is not None:
+            data["output_format"] = output_config
+        return data
 
 
 class CountTokensRequest(BaseModel):
@@ -688,7 +717,7 @@ class _MessagesAdapter:
         # same way after ``message_start`` went out.
         return _reached_message_stop()
 
-    def stream_error_payload(self, exc: BaseException) -> str:
+    def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
         if isinstance(exc, IncompleteStreamError):
             error_type, message = _ERR_API, _INCOMPLETE_STREAM_MESSAGE
         else:

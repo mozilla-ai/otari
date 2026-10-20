@@ -52,6 +52,12 @@ export const AUTOMATIC_FALLBACKS = "automatic-fallbacks"
 export const DISCOVERABLE = "discoverable"
 export const PROVIDERS = "providers"
 export const PROVIDER_HEALTH = "provider-health"
+// Not PROVIDER_HEALTH: that asks each provider to list its models, while this
+// is the stored result of a completion sent to every offering on a schedule.
+export const HEALTH_CHECKS = "health-checks"
+// A run is started by a worker that polls every 15 seconds, so the page polls
+// at the same pace while it is open.
+export const HEALTH_CHECKS_POLL_MS = 15_000
 export const STORED_PROVIDERS = "stored-providers"
 export const BUILD = "build"
 export const HEALTH = "health"

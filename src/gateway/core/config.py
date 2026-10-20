@@ -23,6 +23,7 @@ from gateway.core.env import otari_env
 from gateway.core.settings.api_keys import ApiKeySettings
 from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
+from gateway.core.settings.health_checks import HealthCheckFeatureSettings
 from gateway.core.settings.inference import InferenceSettings
 from gateway.core.settings.organizations import OrganizationSettings
 from gateway.core.settings.pricing import PricingSettings
@@ -567,6 +568,7 @@ class GatewayConfig(
     PricingSettings,
     ProviderSettings,
     FeedbackSettings,
+    HealthCheckFeatureSettings,
     OrganizationSettings,
     ToolSettings,
     TraceSettings,

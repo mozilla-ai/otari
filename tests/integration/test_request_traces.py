@@ -26,8 +26,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT, REQUEST_ID_HEADER
+from gateway.core.config import API_ROOT, CONVERSATION_HEADER, REQUEST_ID_HEADER
 from gateway.models.traces import Trace, TraceSpan
+from gateway.models.usage import UsageLog
 
 from .conftest import MODEL_NAME
 
@@ -290,3 +291,38 @@ def test_a_claude_code_subagent_continues_its_parents_turn(
     assert [step.opens_turn for step in steps] == [True, False, False]
     [tool] = [span for span in spans if span.kind == "tool"]
     assert (tool.tool_name, tool.tool_type, tool.outcome) == ("Bash", "client", "ok")
+
+
+def test_usage_breaks_spend_down_by_the_session_a_request_was_traced_into(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    session_headers = api_key_header | {CONVERSATION_HEADER: "run-1"}
+    with patch("gateway.api.routes.chat.acompletion", return_value=_completion()):
+        for headers in (session_headers, session_headers, api_key_header):
+            response = client.post(
+                f"{API_ROOT}/chat/completions", json={"model": MODEL_NAME, "messages": _MESSAGES}, headers=headers
+            )
+            assert response.status_code == 200
+    unnamed_request_id = response.headers[REQUEST_ID_HEADER]
+
+    _wait_for_spans(db_session_factory, unnamed_request_id, 2)
+    deadline = time.monotonic() + 10
+    while True:
+        with db_session_factory() as session:
+            trace_ids = list(session.scalars(select(Trace.trace_id).where(Trace.session_source == "client")))
+        if trace_ids or time.monotonic() > deadline:
+            [trace_id] = trace_ids
+            break
+        time.sleep(0.1)
+
+    with db_session_factory() as session:
+        labels = sorted(session.scalars(select(UsageLog.source_label)), key=str)
+    assert labels == sorted([None, trace_id, trace_id], key=str)
+
+    summary = client.get(
+        f"{API_ROOT}/usage/summary", params={"dimensions": "source_label"}, headers=master_key_header
+    ).json()
+    assert {row["key"]: row["requests"] for row in summary["by_source_label"]} == {trace_id: 2, None: 1}

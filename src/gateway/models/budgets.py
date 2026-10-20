@@ -38,8 +38,8 @@ MAX_MINUTE_LIMIT = 2_147_483_647
 # reads the same in a path, a header and a config file.
 BUDGET_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 
-# The ``origin`` of a budget that config.yml declares, which every start writes
-# back. NULL is every other budget, whoever created it.
+# The ``origin`` of a budget that config.yml declares, which a start writes back
+# when its entry changed. NULL is every other budget, whoever created it.
 BUDGET_ORIGIN_CONFIG = "config"
 
 # An enum changes the published OpenAPI schema, so the two published vocabularies stay `Literal`.
@@ -132,9 +132,13 @@ class Budget(Base):
     # reset on a cadence the budget defining it had never heard of.
     reset_alignment: Mapped[str | None] = mapped_column(default=None)
     # ``config`` while config.yml declares this budget, so the dashboard can say
-    # that an edit made here lasts only until the next start. Cleared on the
-    # start after the declaration is removed; the budget itself stays.
+    # that an edit made here lasts until config.yml changes the entry. Cleared on
+    # the start after the declaration is removed; the budget itself stays.
     origin: Mapped[str | None] = mapped_column(String(16), default=None)
+    # A digest of the config.yml entry last written over this budget. A start
+    # writes the entry back only when its digest differs, so a change made
+    # through the API lasts until config.yml changes the entry.
+    declared_digest: Mapped[str | None] = mapped_column(String(64), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

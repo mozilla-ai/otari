@@ -115,7 +115,11 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
 )
-from gateway.api.routes._tools import _build_web_retrieval_backend, _resolve_sandbox_purpose_hint
+from gateway.api.routes._tools import (
+    _build_web_retrieval_backend,
+    _resolve_sandbox_purpose_hint,
+    _resolve_web_search_purpose_hint,
+)
 from gateway.api.trace_capture import begin_request_trace
 from gateway.core.config import (
     ATTEMPT_COUNT_HEADER,
@@ -153,6 +157,7 @@ from gateway.core.metered_pricing import (
     quantize_cost,
 )
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
+from gateway.core.settings.tools import effective_web_search_max_calls
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import (
     cache_read_tokens_of,
@@ -176,8 +181,11 @@ from gateway.exceptions.tools_exceptions import (
     McpServerConfigurationError,
     McpServerDeclarationError,
     McpServerResolutionFailedError,
+    SearchToolMisconfiguredError,
     WebAccessRefusedError,
+    WebSearchCredentialRefusedError,
     WebSearchInterceptedError,
+    WebSearchOptionRefusedError,
     WebSearchPolicyResolutionFailedError,
     WebSearchPolicyResolutionFailure,
     WebToolDeclarationError,
@@ -256,6 +264,7 @@ from gateway.services.inference import (
     is_upstream_connect_failure,
     is_upstream_request_fault,
     is_upstream_stream_interrupted,
+    provider_failure,
     upstream_body_messages,
     upstream_error_message,
     upstream_exception_chain,
@@ -351,11 +360,16 @@ from gateway.services.tools import (
     DeclaredCodeExecution,
     DeclaredWebTools,
     Dialect,
+    InLoopSearch,
     ProviderToolDeclaration,
     ToolUseBudget,
     WebClaims,
+    WebFetchBackend,
+    WebSearchBackend,
+    WebToolCallCap,
     admit_mcp_servers,
     admit_web_access,
+    build_web_search_backends,
     decide_candidate_tools,
     declare_code_execution,
     declares_code_execution,
@@ -368,7 +382,7 @@ from gateway.services.tools import (
     validate_web_declarations,
     web_search_intercept_enabled,
 )
-from gateway.services.traces import RequestTrace, TurnFacts, harness_of, is_subagent, resolve_session
+from gateway.services.traces import RequestTrace, SessionRef, TurnFacts, harness_of, is_subagent, resolve_session
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.web_retrieval_backend import (
     WEB_FETCH_TOOL_NAME,
@@ -909,6 +923,19 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
     return headers
 
 
+def with_provider_failure(error: HTTPException, exc: BaseException, provider: str | None) -> HTTPException:
+    """Add :func:`provider_failure`'s headers to the 5xx ``exc`` ended a request with.
+
+    Stamps ``error`` in place and returns it, so it can wrap a raise. A refusal
+    of the gateway's own, or a 4xx, is left as it is.
+    """
+    failure = provider_failure(exc, provider)
+    if failure is None or error.status_code < status.HTTP_500_INTERNAL_SERVER_ERROR:
+        return error
+    error.headers = {**(error.headers or {}), **failure.as_headers()}
+    return error
+
+
 def _is_context_length_error(exc: BaseException) -> bool:
     """Whether any-llm classified the failure as a prompt too long for the model."""
     return any(isinstance(current, ContextLengthExceededError) for current in upstream_exception_chain(exc))
@@ -1113,8 +1140,11 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         """
         ...
 
-    def stream_error_payload(self, exc: BaseException) -> str:
+    def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
         """Render the SSE error event for a failure after the stream committed.
+
+        ``provider`` is the provider the stream came from, for a format whose
+        event carries :func:`provider_failure`'s fields.
 
         The status line is already on the wire by then, so this event is the only
         place the caller learns what kind of failure ended the stream.
@@ -1274,6 +1304,7 @@ class RequestContext:
         tags: dict[str, str] | None = None,
         upstream_user: str | None = None,
         trace: RequestTrace | None = None,
+        source_label: str | None = None,
     ) -> None:
         self.config = config
         # The request's trace while it is served; None where nothing records one.
@@ -1305,6 +1336,9 @@ class RequestContext:
         # The caller's request tags, written onto every usage row the request
         # writes once this context exists.
         self.tags = tags
+        # The trace id of the request's session, written onto its usage rows as
+        # ``source_label`` so usage groups by the sessions the Sessions page lists.
+        self.source_label = source_label
         # Standalone-only, `None` in hybrid mode: the workspace this request
         # bills to, resolved once in the preamble (`resolve_workspace_id`) and
         # reused here for the rare fallback resolve in `resolve_dispatch_provider`,
@@ -2064,6 +2098,7 @@ async def _bill_vision_side_call(
     counts_toward_budget: bool = True,
     request_id: str | None = None,
     tags: dict[str, str] | None = None,
+    source_label: str | None = None,
 ) -> None:
     """Meter and bill a vision describe side-call made during normalization.
 
@@ -2101,6 +2136,7 @@ async def _bill_vision_side_call(
         counts_toward_budget=counts_toward_budget,
         request_id=request_id,
         tags=tags,
+        source_label=source_label,
     )
     # Commit the spend directly via an unreserved handle (no held estimate to
     # release): this just adds the actual cost to users.spend. When the request is
@@ -2529,6 +2565,15 @@ async def _budget_minute_limits(
     return await get_budget_service(uow, db).minute_limits(user_id, strategy=strategy)
 
 
+def _session_trace_id(
+    session: SessionRef | None, workspace_id: uuid.UUID | None, user_id: str | None, api_key_id: str | None
+) -> str | None:
+    """The trace id the request's session is recorded under, or None without a session or a local workspace."""
+    if session is None or workspace_id is None:
+        return None
+    return session.trace_id(workspace_id, user_id, api_key_id)
+
+
 async def resolve_request_context(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -2617,6 +2662,7 @@ async def resolve_request_context(
     rate_limit_grant: RateLimitGrant | None = None
     upstream_user: str | None = None
     request_id: str
+    session = resolve_session(raw_request.headers, session_label=session_label, tags=tags)
 
     if hybrid_mode:
         # Refuse a policy name before the resolve call rather than after. Hybrid
@@ -3091,6 +3137,7 @@ async def resolve_request_context(
                         counts_toward_budget=not budget_exempt,
                         request_id=request_id,
                         tags=tags,
+                        source_label=_session_trace_id(session, workspace_id, user_id, api_key_id),
                     )
                 # Attachments expanded the payload, so the stored inputs must
                 # follow or a later fallover would reprice against the pre-
@@ -3158,7 +3205,6 @@ async def resolve_request_context(
     # Opened beside the in-flight entry, for the same requests, and closed by the
     # trace middleware once the response is sent. A request with no local workspace
     # (every hybrid request) records nothing here yet.
-    session = resolve_session(raw_request.headers, session_label=session_label, tags=tags)
     trace: RequestTrace | None = None
     if config.trace_capture_enabled and workspace_id is not None:
         trace = RequestTrace(
@@ -3206,6 +3252,7 @@ async def resolve_request_context(
         tags=tags,
         upstream_user=upstream_user,
         trace=trace,
+        source_label=_session_trace_id(session, workspace_id, user_id, api_key_id),
     )
 
 
@@ -3235,6 +3282,7 @@ class ToolContext:
         web_search_url: str | None,
         web_search_auth_token: str | None,
         web_search_credential: WebSearchCredential | None = None,
+        web_search: InLoopSearch | None = None,
         remaining_user_tools: list[dict[str, Any]] | None,
         max_tool_iterations: int,
         tools_header: str | None,
@@ -3285,6 +3333,9 @@ class ToolContext:
         self.web_search_auth_token = web_search_auth_token
         # The workspace's own search key, which its searches use in place of the deployment's.
         self.web_search_credential = web_search_credential
+        # What the request's searches run on through the libraries, resolved at admission;
+        # None where the old backend serves them.
+        self.web_search = web_search
         self.use_web_fetch = use_web_fetch
         self.web_fetch_tool_entry = web_fetch_tool_entry
         self.web_fetch_policy = web_fetch_policy or DomainPolicy()
@@ -3304,14 +3355,19 @@ class ToolContext:
         # other attempts spend, where they are dispatched with tools of their own.
         if shared is None:
             caps = _tool_use_caps(self.web_search_tool_entry, self.web_fetch_tool_entry)
-            shared = SharedToolUse(use_budget=ToolUseBudget(caps) if caps else None)
+            shared = SharedToolUse(
+                use_budget=ToolUseBudget(caps) if caps else None,
+                web_call_cap=WebToolCallCap(effective_web_search_max_calls(config)),
+            )
         self.tally: ToolUsageTally = shared.tally
         # The request's trace, handed to each backend beside the tally for the same reasons.
         self.trace = trace
         # Successful calls spend the caller's caps across all routing attempts.
         self.use_budget: ToolUseBudget | None = shared.use_budget
-        # Search and Fetch share a separate attempted-call cap across routing attempts.
+        # On the old backend, Search and Fetch share a fixed attempted-call cap across routing attempts.
         self.web_retrieval_counter: WebRetrievalCounter = shared.web_retrieval_counter
+        # On the libraries, they share the deployment's ``web_search_max_calls`` across routing attempts.
+        self.web_call_cap: WebToolCallCap = shared.web_call_cap
         # Each candidate's tools by its provider and model, where the request's candidates are not all dispatched alike.
         self.candidate_variants: dict[tuple[str | None, str | None], CandidateVariant] = {}
         # The built-in tool names no MCP server may expose: those any attempt of the request runs here.
@@ -3475,6 +3531,29 @@ class ToolContext:
     def use_tool_loop(self) -> bool:
         return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search or self.use_web_fetch
 
+    def build_web_backends(self) -> Sequence[WebSearchBackend | WebFetchBackend | WebRetrievalBackend]:
+        """Build the request's web tool backends: on the libraries where its search runs on one, else the old backend.
+
+        On the libraries, the search and fetch backends are two members of the
+        request's pool, sharing its call allowance. A request that declared only
+        the fetch tool keeps the old backend, which delegates its fetches.
+        """
+        if self.web_search is None:
+            return [self.build_web_retrieval_backend()]
+        search_tool_entry = self.web_search_tool_entry or {}
+        return build_web_search_backends(
+            self.config,
+            self.web_search,
+            search_tool_entry=search_tool_entry,
+            fetch_declared=self.use_web_fetch,
+            fetch_policy=self.web_fetch_policy,
+            cap=self.web_call_cap,
+            purpose_hint=_resolve_web_search_purpose_hint(search_tool_entry, self.config),
+            web_provider_client=self.web_provider_client,
+            tally=self.tally,
+            trace=self.trace,
+        )
+
     def build_web_retrieval_backend(self) -> WebRetrievalBackend:
         """Build the request's shared Search and Fetch backend."""
         return _build_web_retrieval_backend(
@@ -3499,6 +3578,8 @@ class SharedToolUse:
     tally: ToolUsageTally = field(default_factory=ToolUsageTally)
     use_budget: ToolUseBudget | None = None
     web_retrieval_counter: WebRetrievalCounter = field(default_factory=WebRetrievalCounter)
+    # Sized by the deployment's ``web_search_max_calls`` when the request is admitted.
+    web_call_cap: WebToolCallCap = field(kw_only=True)
 
 
 def _tool_use_caps(search_entry: dict[str, Any] | None, fetch_entry: dict[str, Any] | None) -> dict[str, int]:
@@ -3832,7 +3913,10 @@ async def prepare_gateway_tools(
     caps: dict[str, int] = {}
     for answer in admitted.values():
         caps |= _tool_use_caps(answer.web_access.search_tool_entry, answer.web.fetch_tool_entry)
-    shared = SharedToolUse(use_budget=ToolUseBudget(caps) if caps else None)
+    shared = SharedToolUse(
+        use_budget=ToolUseBudget(caps) if caps else None,
+        web_call_cap=WebToolCallCap(effective_web_search_max_calls(ctx.config)),
+    )
 
     def _tool_context(answer: _AdmittedTools) -> ToolContext:
         code, web, web_access = answer.code, answer.web, answer.web_access
@@ -3853,6 +3937,7 @@ async def prepare_gateway_tools(
             web_search_url=web_access.search_url,
             web_search_auth_token=web_access.search_auth_token,
             web_search_credential=web_access.search_credential,
+            web_search=web_access.in_loop_search,
             use_web_fetch=web.fetch_tool_entry is not None,
             web_fetch_tool_entry=web.fetch_tool_entry,
             web_fetch_policy=web_access.fetch_policy,
@@ -4174,6 +4259,7 @@ class _AdmittedWebAccess:
     search_tool_entry: dict[str, Any] | None
     search_url: str | None
     search_credential: WebSearchCredential | None = None
+    in_loop_search: InLoopSearch | None = None
 
 
 async def _admit_web_access(
@@ -4208,12 +4294,15 @@ async def _admit_web_access(
         raise adapter.error(_policy_failure_status(exc.reason), exc.message, ErrorKind.API) from exc
     except (WebAccessRefusedError, WorkspaceWebSearchDomainsExcludedError) as exc:
         raise adapter.error(403, exc.message, ErrorKind.PERMISSION) from exc
+    except (WebSearchOptionRefusedError, WebSearchCredentialRefusedError, SearchToolMisconfiguredError) as exc:
+        raise domain_error(adapter, exc) from exc
     return _AdmittedWebAccess(
         fetch_policy=grant.fetch_policy,
         search_auth_token=search_auth_token,
         search_tool_entry=grant.search_tool_entry,
         search_url=search_url,
         search_credential=grant.search_credential,
+        in_loop_search=grant.in_loop_search,
     )
 
 
@@ -4517,6 +4606,7 @@ async def record_usage(
     tags: dict[str, str] | None = None,
     prices: RequestPrices | None = None,
     deployment_paid: bool = False,
+    source_label: str | None = None,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
@@ -4580,6 +4670,9 @@ async def record_usage(
         deployment_paid: The request was admitted as deployment-paid
             (``RequestContext.deployment_charge`` is set), stored as-is, and
             priced from no override the organization wrote itself.
+        source_label: The trace id of the session the request belongs to
+            (``RequestContext.source_label``), so usage groups by the same
+            session the Sessions page shows; None when it names no session.
 
     Returns:
         The computed cost for this request, or None when usage/pricing is absent,
@@ -4609,6 +4702,7 @@ async def record_usage(
         request_group_id=attribution.request_group_id if attribution else request_id,
         tags=tags,
         deployment_paid=deployment_paid,
+        source_label=source_label,
     )
 
     usage_data = usage_override
@@ -5074,6 +5168,7 @@ async def _log_failure_and_refund(
         workspace_id=ctx.workspace_id,
         request_id=ctx.request_id,
         tags=ctx.tags,
+        source_label=ctx.source_label,
         deployment_paid=ctx.deployment_charge is not None,
     )
     if ctx.reservation is not None:
@@ -5172,7 +5267,7 @@ async def _open_tool_backends(
             raise domain_error(adapter, exc) from exc
     backends: list[ToolBackend] = []
     if tool_ctx.use_web_search or tool_ctx.use_web_fetch:
-        backends.append(await stack.enter_async_context(tool_ctx.build_web_retrieval_backend()))
+        backends.extend([await stack.enter_async_context(backend) for backend in tool_ctx.build_web_backends()])
     sandbox: SandboxBackend | None = None
     if tool_ctx.use_sandbox:
         sandbox = await stack.enter_async_context(tool_ctx.build_sandbox_backend())
@@ -5447,6 +5542,7 @@ def build_streaming_response(
     prices: RequestPrices | None = None,
     tool_loop: bool = False,
     deployment_charge: DeploymentCharge | None = None,
+    source_label: str | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -5551,6 +5647,7 @@ def build_streaming_response(
             workspace_id=workspace_id,
             request_id=request_id,
             tags=tags,
+            source_label=source_label,
             prices=prices,
             deployment_paid=deployment_paid,
         )
@@ -5613,6 +5710,7 @@ def build_streaming_response(
                 workspace_id=workspace_id,
                 request_id=request_id,
                 tags=tags,
+                source_label=source_label,
                 prices=prices,
                 deployment_paid=deployment_paid,
             )
@@ -5637,6 +5735,7 @@ def build_streaming_response(
                 workspace_id=workspace_id,
                 request_id=request_id,
                 tags=tags,
+                source_label=source_label,
                 deployment_paid=deployment_paid,
             )
             # "Free" is about the tokens the provider never reported, not about
@@ -5669,6 +5768,7 @@ def build_streaming_response(
             workspace_id=workspace_id,
             request_id=request_id,
             tags=tags,
+            source_label=source_label,
             deployment_paid=deployment_paid,
         )
         # The estimate covers the unreported tokens; log_usage adds any tool cost on
@@ -5737,6 +5837,7 @@ def build_streaming_response(
             workspace_id=workspace_id,
             request_id=request_id,
             tags=tags,
+            source_label=source_label,
             deployment_paid=deployment_paid,
         )
         if reservation is not None:
@@ -5782,6 +5883,7 @@ def build_streaming_response(
                 workspace_id=workspace_id,
                 request_id=request_id,
                 tags=tags,
+                source_label=source_label,
                 deployment_paid=deployment_paid,
             )
             await _charge(abandoned_cost, expects_cost=reported_usage is not None)
@@ -5828,7 +5930,7 @@ def build_streaming_response(
             is_cost_carrier=adapter.is_stream_cost_carrier if settles_inline else None,
             attach_settlement=_attach_inline_cost if settles_inline else None,
             on_first_chunk=_on_first_chunk,
-            error_payload=adapter.stream_error_payload,
+            error_payload=lambda exc: adapter.stream_error_payload(exc, provider),
             completes_stream=adapter.stream_completion(),
         ),
         media_type="text/event-stream",
@@ -6086,6 +6188,9 @@ async def run_single_attempt_stream(
                 await log_exhausted_plan(
                     ctx, adapter, exhausted, stopped_on[0] if stopped_on else None, tool_tally=tool_ctx.tally
                 )
+                # The walk raises from the failure that ended it, on the candidate it stopped on.
+                if exhausted.__cause__ is not None and stopped_on:
+                    with_provider_failure(exhausted, exhausted.__cause__, stopped_on[0].instance)
                 raise
             finally:
                 await _absorbed_rows_written(absorbed_rows)
@@ -6126,7 +6231,9 @@ async def run_single_attempt_stream(
         )
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)
-        raise adapter.provider_error(exc, _model_as_named(provider, model, display_model)) from exc
+        raise with_provider_failure(
+            adapter.provider_error(exc, _model_as_named(provider, model, display_model)), exc, provider
+        ) from exc
 
     files_bridge = tool_ctx.sandbox_files
     if files_bridge is not None:
@@ -6160,6 +6267,7 @@ async def run_single_attempt_stream(
         attribution=stream_attribution,
         tool_tally=tool_ctx.tally,
         tags=ctx.tags,
+        source_label=ctx.source_label,
         tool_loop=served_tools.use_tool_loop,
         deployment_charge=ctx.deployment_charge,
     )
@@ -6327,9 +6435,11 @@ async def run_streaming_with_fallback(
     # all-failed path below.
     pending_error_reports: list[_PendingUsageReport] = []
     attempt_errors: list[BaseException] = []
+    failed_attempts: list[ResolvedAttempt] = []
 
     async def _on_attempt_failed(attempt: ResolvedAttempt, failure: StreamingAttemptFailure) -> None:
         attempt_errors.append(failure.exception)
+        failed_attempts.append(attempt)
         background_tasks.add_task(
             _report_platform_usage,
             config,
@@ -6392,7 +6502,8 @@ async def run_streaming_with_fallback(
             kind = error_kind_for_status(rejection.status_code)
             shared = adapter.error(rejection.status_code, str(rejection.detail), kind, dict(rejection.headers or {}))
             raise with_attempt_id(shared, last_attempt_id) from exc
-        raise_all_streaming_attempts_failed(adapter, exc, route, last_attempt_id)
+        last_provider = failed_attempts[-1].provider if failed_attempts else None
+        raise_all_streaming_attempts_failed(adapter, exc, route, last_attempt_id, last_provider)
 
     tool_mode = _tools_for(chosen).use_tool_loop
     if tool_mode:
@@ -6465,11 +6576,13 @@ def raise_all_streaming_attempts_failed(
     exc: Exception,
     route: ResolvedRoute,
     last_attempt_id: str | None = None,
+    last_provider: str | None = None,
 ) -> NoReturn:
     """Map pre-stream failures, preserving sandbox retry hints and provider status.
 
     ``last_attempt_id`` names the attempt that failed last, which the hybrid
-    protocol owes the caller on total failure.
+    protocol owes the caller on total failure, and ``last_provider`` is the
+    provider :func:`with_provider_failure` names.
     """
     if isinstance(exc, SandboxNotReachableError):
         logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
@@ -6479,11 +6592,13 @@ def raise_all_streaming_attempts_failed(
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
     if len(route.attempts) <= 1:
-        raise with_attempt_id(adapter.provider_error(exc), last_attempt_id) from exc
+        raise with_attempt_id(
+            with_provider_failure(adapter.provider_error(exc), exc, last_provider), last_attempt_id
+        ) from exc
     kind, status_code = upstream_exception_shape(exc)
     if kind == "timeout":
         timed_out = adapter.error(504, ALL_PROVIDERS_TIMED_OUT_DETAIL, ErrorKind.API)
-        raise with_attempt_id(timed_out, last_attempt_id) from exc
+        raise with_attempt_id(with_provider_failure(timed_out, exc, last_provider), last_attempt_id) from exc
     if status_code == 429:
         rate_limited = adapter.error(
             429,
@@ -6493,7 +6608,7 @@ def raise_all_streaming_attempts_failed(
         )
         raise with_attempt_id(rate_limited, last_attempt_id) from exc
     all_failed = adapter.error(502, ALL_PROVIDERS_FAILED_DETAIL, ErrorKind.API)
-    raise with_attempt_id(all_failed, last_attempt_id) from exc
+    raise with_attempt_id(with_provider_failure(all_failed, exc, last_provider), last_attempt_id) from exc
 
 
 async def run_platform_non_stream(
@@ -6545,6 +6660,7 @@ async def run_platform_non_stream(
     # so they can be flushed inline if the request ends in an exception.
     pending_error_reports: list[_PendingUsageReport] = []
     successful_report: tuple[ResolvedAttempt, Any] | None = None
+    last_failed: ResolvedAttempt | None = None
 
     def _report_attempt_outcome(
         attempt: ResolvedAttempt,
@@ -6553,10 +6669,11 @@ async def run_platform_non_stream(
         error_class: str | None,
         is_final_attempt: bool,
     ) -> None:
-        nonlocal successful_report
+        nonlocal successful_report, last_failed
         if outcome == "success":
             successful_report = (attempt, usage)
             return
+        last_failed = attempt
         background_tasks.add_task(
             _report_platform_usage,
             config,
@@ -6605,7 +6722,7 @@ async def run_platform_non_stream(
         logger.error("Web search backend unreachable request_id=%s: %s", route.request_id, exc)
         await _flush_pending_usage_reports(config, pending_error_reports, route.request_id, session_label)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
-    except HTTPException:
+    except HTTPException as exhausted:
         # An error response drops the queued BackgroundTasks, so send the
         # per-attempt error reports inline before propagating. The background
         # copies never run on this path, so there is no double-report. This
@@ -6613,6 +6730,8 @@ async def run_platform_non_stream(
         # all-failed path); a CancelledError propagates without doing reporting
         # I/O during teardown.
         await _flush_pending_usage_reports(config, pending_error_reports, route.request_id, session_label)
+        if exhausted.__cause__ is not None and last_failed is not None:
+            with_provider_failure(exhausted, exhausted.__cause__, last_failed.provider)
         raise
 
     if successful_report is None:
@@ -6716,6 +6835,7 @@ async def log_exhausted_plan(
         tool_tally=tool_tally,
         workspace_id=ctx.workspace_id,
         tags=ctx.tags,
+        source_label=ctx.source_label,
     )
     ctx.tool_charge = cost or Decimal(0)
 
@@ -6813,6 +6933,7 @@ async def _log_absorbed_row(
             attribution=_attribution_for(ctx, attempt, absorbed=True),
             workspace_id=ctx.workspace_id,
             tags=ctx.tags,
+            source_label=ctx.source_label,
         )
     except Exception:
         logger.warning(
@@ -6913,6 +7034,9 @@ async def run_standalone_non_stream(
                 await log_exhausted_plan(
                     ctx, adapter, exhausted, stopped_on[0] if stopped_on else None, tool_tally=tool_ctx.tally
                 )
+                # The walk raises from the failure that ended it, on the candidate it stopped on.
+                if exhausted.__cause__ is not None and stopped_on:
+                    with_provider_failure(exhausted, exhausted.__cause__, stopped_on[0].instance)
                 raise
             finally:
                 await _absorbed_rows_written(absorbed_rows)
@@ -6973,6 +7097,7 @@ async def run_standalone_non_stream(
                     workspace_id=ctx.workspace_id,
                     request_id=ctx.request_id,
                     tags=ctx.tags,
+                    source_label=ctx.source_label,
                     prices=ctx.prices,
                     deployment_paid=ctx.deployment_charge is not None,
                 )
@@ -7036,4 +7161,6 @@ async def run_standalone_non_stream(
         )
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Provider call failed for %s:%s: %s", provider, model, e)
-        raise adapter.provider_error(e, _model_as_named(provider, model, display_model)) from e
+        raise with_provider_failure(
+            adapter.provider_error(e, _model_as_named(provider, model, display_model)), e, provider
+        ) from e

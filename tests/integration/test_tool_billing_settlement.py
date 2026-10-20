@@ -46,6 +46,7 @@ from .test_require_pricing import strict_pricing_client as strict_pricing_client
 _SEARCH_RATE_PER_MILLION = 10_000.0
 _SEARCH_UNIT_COST = 0.01
 _FAKE_FETCH = "fake-fetch"
+_FAKE_SEARCH = "fake-search"
 
 
 def _completion(
@@ -320,6 +321,93 @@ async def test_a_search_with_no_hits_is_billed_at_the_rate(
         "unit_rate": pytest.approx(_SEARCH_UNIT_COST),
         "cost": pytest.approx(_SEARCH_UNIT_COST),
     }
+
+
+def _serve_search_on_fake(
+    monkeypatch: pytest.MonkeyPatch, config: GatewayConfig, search: dict[str, Any], fetch: dict[str, Any]
+) -> None:
+    """Serve in-loop search on a ``fake`` instance with ``search`` options, enriched by a ``fake`` fetch instance."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    monkeypatch.setattr(
+        config,
+        "search_tools",
+        {_FAKE_SEARCH: {"provider": "fake", "options": search, "fetch_tool": _FAKE_FETCH}},
+    )
+    monkeypatch.setattr(config, "fetch_tools", {_FAKE_FETCH: {"provider": "fake", "options": fetch}})
+    monkeypatch.setattr(config, "web_search_default_tool", _FAKE_SEARCH)
+
+
+def _search_once(client: TestClient, headers: dict[str, str]) -> None:
+    """One chat request whose model searches once, then answers."""
+    responses = [_completion(tool_call=True), _completion(tool_call=False)]
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "what is otari"}],
+                "tools": [{"type": "otari_web_search"}],
+            },
+            headers=headers,
+        )
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_a_search_on_an_instance_is_priced_at_its_own_row_with_its_enrichment(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    model_pricing: dict[str, Any],
+    search_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    """``fake:<instance>`` wins over ``otari:web_search``, and what the enrichment fetcher reported adds to it."""
+    # Of the fake search's three canned hits, two come without page text and are enriched, at 0.002 each.
+    _serve_search_on_fake(monkeypatch, test_config, search={}, fetch={"cost": 0.002})
+    response = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": f"fake:{_FAKE_SEARCH}",
+            "input_price_per_million": 4_000.0,
+            "output_price_per_million": 0.0,
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+
+    _search_once(client, api_key_header)
+
+    row = _latest_row(db_session_factory, api_key_obj["user_id"])
+    [line] = [entry for entry in (row.pricing_breakdown or []) if entry["meter"] == "web_search_calls"]
+    assert (line["label"], line["units"]) == (f"fake:{_FAKE_SEARCH}", 1)
+    assert line["cost"] == pytest.approx(0.004 + 0.004)
+    assert set((row.billing_meters or {})[TOOL_METER_NAMESPACE]) == {"web_search"}, "enrichment records no fetch"
+
+
+@pytest.mark.asyncio
+async def test_a_search_whose_provider_reports_its_cost_is_billed_that_cost(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    model_pricing: dict[str, Any],
+    search_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    """The reported cost wins over the ``otari:web_search`` fallback, and an enrichment reporting none adds none."""
+    _serve_search_on_fake(monkeypatch, test_config, search={"cost": 0.005}, fetch={})
+
+    _search_once(client, api_key_header)
+
+    row = _latest_row(db_session_factory, api_key_obj["user_id"])
+    [line] = [entry for entry in (row.pricing_breakdown or []) if entry["meter"] == "web_search_calls"]
+    assert (line["label"], line["units"]) == (f"fake:{_FAKE_SEARCH}", 1)
+    assert line["cost"] == pytest.approx(0.005)
 
 
 class _Writer:
