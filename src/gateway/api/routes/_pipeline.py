@@ -1723,20 +1723,8 @@ async def _admit_or_refuse(
             ctx.request_id,
         )
         detail = str(exc)
-        await release_reservation(ctx)
-        await log_gateway_rejection(
-            db=ctx.db,
-            log_writer=ctx.log_writer,
-            api_key_id=ctx.api_key_id,
-            user_id=ctx.user_id,
-            model=resolved.model,
-            provider=resolved.instance,
-            endpoint=adapter.endpoint,
-            detail=detail,
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            started_at=ctx.started_at,
-            request_id=ctx.request_id,
-            tags=ctx.tags,
+        await _record_funding_refusal(
+            ctx, resolved, adapter=adapter, detail=detail, status_code=status.HTTP_402_PAYMENT_REQUIRED
         )
         raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)) from exc
     except Exception as exc:
@@ -1777,6 +1765,25 @@ async def _funding_unavailable(
     adapter: FormatAdapter[Any, Any],
 ) -> HTTPException:
     """Release the reservation, record the refusal, and return the 503 to raise."""
+    await _record_funding_refusal(
+        ctx,
+        resolved,
+        adapter=adapter,
+        detail=FUNDS_CHECK_UNAVAILABLE_DETAIL,
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
+    return adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API)
+
+
+async def _record_funding_refusal(
+    ctx: RequestContext,
+    resolved: ResolvedProvider,
+    *,
+    adapter: FormatAdapter[Any, Any],
+    detail: str,
+    status_code: int,
+) -> None:
+    """Release the reservation of a request its funding gate refused, and log the refusal."""
     await release_reservation(ctx)
     await log_gateway_rejection(
         db=ctx.db,
@@ -1786,13 +1793,12 @@ async def _funding_unavailable(
         model=resolved.model,
         provider=resolved.instance,
         endpoint=adapter.endpoint,
-        detail=FUNDS_CHECK_UNAVAILABLE_DETAIL,
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=detail,
+        status_code=status_code,
         started_at=ctx.started_at,
         request_id=ctx.request_id,
         tags=ctx.tags,
     )
-    return adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API)
 
 
 async def _provider_not_configured(
