@@ -1,9 +1,13 @@
-"""Errors the routing domain raises about a model recommendation.
+"""Errors the routing domain raises about a model recommendation, and about the recommenders an operator adds.
 
-Plain exceptions rather than the tenancy family: the route renders each as a
-generic detail of its own, the way the tools domain's refusals are rendered,
-so nothing an upstream said reaches the caller.
+The recommendation's errors are plain exceptions rather than the tenancy
+family: the route renders each as a generic detail of its own, the way the
+tools domain's refusals are rendered, so nothing an upstream said reaches the
+caller. The recommenders' admin errors are the tenancy family, each carrying
+its status, and none of their messages carries key material.
 """
+
+from gateway.exceptions import TenancyConflictError, TenancyNotFoundError, TenancyValidationError
 
 
 class CandidatesNotAllowedError(Exception):
@@ -36,3 +40,17 @@ class PolicyOnHybridGatewayError(Exception):
 
     The message says what to name instead.
     """
+
+
+class InvalidAgentRecommenderError(TenancyValidationError):
+    """The recommender could not work: an unknown provider, a missing key or address, an unsafe address, or no price."""
+
+
+class AgentRecommenderNotFoundError(TenancyNotFoundError):
+    def __init__(self) -> None:
+        super().__init__("No subagent recommender has this id")
+
+
+class AgentRecommenderSwitchConflictError(TenancyConflictError):
+    def __init__(self) -> None:
+        super().__init__("Another subagent recommender was switched on at the same moment. Reload and try again.")

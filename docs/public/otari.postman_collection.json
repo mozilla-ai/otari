@@ -5477,6 +5477,130 @@
           }
         },
         {
+          "name": "List Agent Recommenders",
+          "request": {
+            "description": "List the decision models added to recommend a subagent's model, oldest first.\n\nAt most one is switched on, and it answers `POST /api/v1/routing/recommend`\nat its own price. While none has been added, `agent_recommender_model`\nanswers; once one has, with every one switched off, nothing does. The answer\nalso lists the decision providers one may be added on.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "routing",
+                "recommenders"
+              ],
+              "raw": "{{baseUrl}}/api/v1/routing/recommenders"
+            }
+          }
+        },
+        {
+          "name": "Add Agent Recommender",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_key\": \"<your TypeSafe API key>\",\n  \"input_price_per_million\": 0.15,\n  \"model\": \"jev-latest\",\n  \"output_price_per_million\": 0.6,\n  \"provider\": \"typesafe\"\n}"
+            },
+            "description": "Add a decision model that recommends a subagent's model, with its key and its price per million tokens.\n\nIt lands switched off unless `enabled` is true, and switching it on\nswitches every other one off. A recommendation is charged for the decision\nmodel's tokens at these prices, so at least one must be above zero.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "routing",
+                "recommenders"
+              ],
+              "raw": "{{baseUrl}}/api/v1/routing/recommenders"
+            }
+          }
+        },
+        {
+          "name": "Update Agent Recommender",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"enabled\": true\n}"
+            },
+            "description": "Change a recommender, or switch it on in place of the one that is.\n\nAn omitted `api_key` keeps the stored key while the provider and the API base stay the same.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "routing",
+                "recommenders",
+                ":recommender_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/routing/recommenders/:recommender_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "recommender_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Remove Agent Recommender",
+          "request": {
+            "description": "Remove a recommender and its key. With none left, `agent_recommender_model` answers again.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "routing",
+                "recommenders",
+                ":recommender_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/routing/recommenders/:recommender_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "recommender_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Routing Memory Status",
           "request": {
             "description": "Report how warm one user's routing memory is in one workspace, per pool.\n\n``user_id`` is required rather than optional because there is no aggregate\nanswer: warmth is per user, and a total across users would describe a pool\nthat no request ever votes over. The same holds across workspaces, which is\nwhy ``workspace_id`` narrows rather than aggregating; it merely defaults\ninstead of being required, because a single-workspace deployment has one\nanswer.",

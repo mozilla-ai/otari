@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db_if_needed, get_enabled_features
 from gateway.api.routes import (
     admin,
+    agent_routing,
     budgets,
     hosted_providers,
     keys,
@@ -81,6 +82,7 @@ SignInMethod = Literal["master_key", "password", "passkey"]
 # A route module's ``SURFACE`` is published only once listed here.
 _DECLARED_SURFACES: tuple[Surface, ...] = (
     admin.SURFACE,
+    agent_routing.SURFACE,
     budgets.SURFACE,
     hosted_providers.SURFACE,
     keys.SURFACE,

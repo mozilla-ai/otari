@@ -43,6 +43,8 @@ def test_the_surface_lists_are_spelled_out() -> None:
         "providers",
         "routing",
         "settings",
+        # The decision models that answer a subagent recommendation, on either edition.
+        "subagent_router",
         "tools",
         "usage",
         "users",
@@ -65,6 +67,7 @@ def test_the_surface_lists_are_spelled_out() -> None:
         "pricing",
         "routing",
         "settings",
+        "subagent_router",
         "tools",
         "usage",
         "users",

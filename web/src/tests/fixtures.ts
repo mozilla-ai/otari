@@ -161,6 +161,7 @@ export const STANDALONE_SURFACES = [
   "providers",
   "routing",
   "settings",
+  "subagent_router",
   "tools",
   "usage",
   "users",

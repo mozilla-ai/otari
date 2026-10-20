@@ -1,4 +1,4 @@
-"""The routing domain's service: what callers get from routing, read for one organization."""
+"""The routing domain's service: what callers get from routing, and the subagent recommenders an operator adds."""
 
 import uuid
 from collections import Counter
@@ -7,7 +7,17 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.repositories.routing import AgentRecommenderRepository
+from gateway.schemas.routing import (
+    AgentRecommenderCreate,
+    AgentRecommenderPublic,
+    AgentRecommendersPublic,
+    AgentRecommenderUpdate,
+)
 from gateway.services.catalog import catalog_models
+from gateway.services.routing._agent_recommenders import AgentRecommenders
+from gateway.services.routing._recommender_snapshot import RecommenderSnapshot
 from gateway.services.tools import provider_tools
 from gateway.services.usage_and_telemetry import ServedTraffic, UsageService
 
@@ -58,11 +68,58 @@ def _served_selectors(row: ServedTraffic) -> tuple[str, ...]:
 
 
 class RoutingService:
-    """What routing gives an organization's callers."""
+    """What routing gives an organization's callers, and the deployment's subagent recommenders."""
 
-    def __init__(self, config: GatewayConfig, usage: UsageService) -> None:
+    def __init__(
+        self,
+        config: GatewayConfig,
+        usage: UsageService,
+        *,
+        uow: UnitOfWork,
+        recommenders: AgentRecommenderRepository,
+        snapshot: RecommenderSnapshot,
+    ) -> None:
         self._config = config
         self._usage = usage
+        self._recommenders = AgentRecommenders(uow, recommenders, snapshot)
+
+    async def list_agent_recommenders(self) -> AgentRecommendersPublic:
+        """Every subagent recommender added, oldest first."""
+        return await self._recommenders.list()
+
+    async def add_agent_recommender(self, body: AgentRecommenderCreate) -> AgentRecommenderPublic:
+        """Add a subagent recommender; switching it on switches every other one off.
+
+        Raises:
+            InvalidAgentRecommenderError: it could not work.
+            SecretBoxUnavailableTenancyError: its key cannot be encrypted.
+            AgentRecommenderSwitchConflictError: another one was switched on at the same moment.
+
+        """
+        return await self._recommenders.add(body)
+
+    async def update_agent_recommender(
+        self, recommender_id: uuid.UUID, patch: AgentRecommenderUpdate
+    ) -> AgentRecommenderPublic:
+        """Change a subagent recommender; switching it on switches every other one off.
+
+        Raises:
+            AgentRecommenderNotFoundError: no recommender has this id.
+            InvalidAgentRecommenderError: it could not work.
+            SecretBoxUnavailableTenancyError: its key cannot be encrypted.
+            AgentRecommenderSwitchConflictError: another one was switched on at the same moment.
+
+        """
+        return await self._recommenders.update(recommender_id, patch)
+
+    async def remove_agent_recommender(self, recommender_id: uuid.UUID) -> None:
+        """Remove a subagent recommender and its key. With none left, the configuration's answers again.
+
+        Raises:
+            AgentRecommenderNotFoundError: no recommender has this id.
+
+        """
+        await self._recommenders.remove(recommender_id)
 
     async def automatic_fallbacks(
         self, *, organization_id: uuid.UUID, workspace_ids: Collection[uuid.UUID]

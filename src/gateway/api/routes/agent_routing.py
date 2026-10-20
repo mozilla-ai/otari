@@ -13,14 +13,29 @@ in usage like a ``POST /api/v1/decisions`` call: priced from this deployment's
 own rows, or held and charged at the price the recommender quotes. Nothing
 else is dispatched here, which is why any active API key may ask rather than
 only an operator. See ``docs/use-with-claude-code.md``.
+
+``/api/v1/routing/recommenders`` is where the deployment's operator adds the
+decision models the core recommender asks, with their keys and their prices,
+and switches one on. It is on a router of its own, behind the operator gate
+``/api/v1/hosted-providers`` holds, because it stores a deployment credential.
+**It never returns a key**, only whether one is stored and its last four
+characters.
 """
 
+import uuid
 from collections.abc import Mapping
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
-from gateway.api.deps import AgentModelRecommenderPortDep, get_config, verify_api_key_or_master_key
+from gateway.api.deps import (
+    AgentModelRecommenderPortDep,
+    RoutingServiceDep,
+    get_config,
+    require_deployment_operator_or_absent,
+    verify_api_key_or_master_key,
+    verify_master_key,
+)
 from gateway.api.routes._passthrough import (
     ESTIMATED_OUTPUT_TOKENS_PER_QUESTION,
     PASSTHROUGH_PROVIDER_ERROR_DETAIL,
@@ -34,6 +49,7 @@ from gateway.api.routes._passthrough import (
     get_decision_scaffold,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.surface import Surface
 from gateway.exceptions.routing_exceptions import (
     CandidatesNotAllowedError,
     RecommendationFailedError,
@@ -42,10 +58,27 @@ from gateway.exceptions.routing_exceptions import (
 )
 from gateway.models.api_keys import APIKey
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort, ModelRecommendation, SubagentSpawn
-from gateway.schemas.routing import AgentModelRecommendation, AgentModelRecommendationRequest
+from gateway.schemas.routing import (
+    AgentModelRecommendation,
+    AgentModelRecommendationRequest,
+    AgentRecommenderCreate,
+    AgentRecommenderPublic,
+    AgentRecommendersPublic,
+    AgentRecommenderUpdate,
+)
 from gateway.services.routing import build_decision_request, candidates_for
 
 router = APIRouter(prefix="/routing", tags=["routing"])
+
+recommenders_router = APIRouter(
+    prefix="/routing/recommenders",
+    tags=["routing"],
+    dependencies=[Depends(verify_master_key), Depends(require_deployment_operator_or_absent)],
+)
+
+# Published by both topologies, operator-only on either, as the hosted
+# providers page is.
+SURFACE = Surface("subagent_router")
 
 
 class _RecommenderCall:
@@ -149,3 +182,43 @@ async def recommend_model_for_agent(
         reason=recommendation.reason,
         probabilities=dict(recommendation.probabilities) if recommendation.probabilities is not None else None,
     )
+
+
+@recommenders_router.get("")
+async def list_agent_recommenders(routing: RoutingServiceDep) -> AgentRecommendersPublic:
+    """List the decision models added to recommend a subagent's model, oldest first.
+
+    At most one is switched on, and it answers `POST /api/v1/routing/recommend`
+    at its own price. While none has been added, `agent_recommender_model`
+    answers; once one has, with every one switched off, nothing does. The answer
+    also lists the decision providers one may be added on.
+    """
+    return await routing.list_agent_recommenders()
+
+
+@recommenders_router.post("", status_code=status.HTTP_201_CREATED)
+async def add_agent_recommender(routing: RoutingServiceDep, body: AgentRecommenderCreate) -> AgentRecommenderPublic:
+    """Add a decision model that recommends a subagent's model, with its key and its price per million tokens.
+
+    It lands switched off unless `enabled` is true, and switching it on
+    switches every other one off. A recommendation is charged for the decision
+    model's tokens at these prices, so at least one must be above zero.
+    """
+    return await routing.add_agent_recommender(body)
+
+
+@recommenders_router.patch("/{recommender_id}")
+async def update_agent_recommender(
+    routing: RoutingServiceDep, recommender_id: uuid.UUID, body: AgentRecommenderUpdate
+) -> AgentRecommenderPublic:
+    """Change a recommender, or switch it on in place of the one that is.
+
+    An omitted `api_key` keeps the stored key while the provider and the API base stay the same.
+    """
+    return await routing.update_agent_recommender(recommender_id, body)
+
+
+@recommenders_router.delete("/{recommender_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_agent_recommender(routing: RoutingServiceDep, recommender_id: uuid.UUID) -> None:
+    """Remove a recommender and its key. With none left, `agent_recommender_model` answers again."""
+    await routing.remove_agent_recommender(recommender_id)
