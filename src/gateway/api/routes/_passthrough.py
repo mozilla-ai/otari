@@ -49,7 +49,7 @@ from gateway.api.deps import (
     get_log_writer,
     model_provider_port_on,
 )
-from gateway.api.routes._helpers import resolve_user_id, with_retry_hint
+from gateway.api.routes._helpers import missing_credential_error, resolve_user_id, with_retry_hint
 from gateway.api.routes._pipeline import (
     DB_UNAVAILABLE_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
@@ -430,9 +430,7 @@ async def run_passthrough(
                 row_provider=resolved.instance,
                 status_code=managed.status_code,
             )
-            raise HTTPException(
-                status_code=managed.status_code, detail=managed.detail, headers=error_headers(managed.code)
-            ) from exc
+            raise missing_credential_error(managed) from exc
 
     pricing: ModelPricing | None = None
     # ``pricing`` with where it came from, recorded on the row it prices.
@@ -690,10 +688,7 @@ async def run_passthrough(
         missing = missing_credential(e)
         if missing is not None:
             logger.warning("No credential configured for %s:%s", resolved.provider, resolved.model)
-            public = missing.behind_alias(resolved.alias)
-            raise HTTPException(
-                status_code=public.status_code, detail=public.detail, headers=error_headers(public.code)
-            ) from e
+            raise missing_credential_error(missing.behind_alias(resolved.alias)) from e
 
         mapped = map_provider_error(e) if map_provider_error else None
         if mapped is not None:

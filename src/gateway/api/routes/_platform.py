@@ -23,7 +23,7 @@ from fastapi import HTTPException, status
 from pydantic import BaseModel, Field, ValidationError
 
 from gateway.api.routes._attempt_metrics import record_abandoned_attempt
-from gateway.api.routes._helpers import with_retry_hint
+from gateway.api.routes._helpers import missing_credential_error, with_retry_hint
 from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
 from gateway.core.error_codes import (
     ALL_CANDIDATES_REJECTED,
@@ -334,9 +334,7 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
     missing = [entry for entry in map(missing_credential, errors) if entry is not None]
     if len(missing) == len(errors):
         if (managed := shared_managed_refusal(missing)) is not None:
-            return HTTPException(
-                status_code=managed.status_code, detail=managed.detail, headers=error_headers(managed.code)
-            )
+            return missing_credential_error(managed)
         return HTTPException(
             status_code=missing[0].status_code,
             detail=no_candidate_configured_detail(missing),
