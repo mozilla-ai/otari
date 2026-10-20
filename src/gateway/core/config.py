@@ -247,6 +247,33 @@ def validate_agent_recommender(model: str, candidates: dict[str, str | None]) ->
         raise ValueError(msg)
 
 
+def decision_endpoint_problem(provider: str, *, has_api_key: bool, api_base: str | None) -> tuple[str, str] | None:
+    """What makes a decision provider's endpoint unusable, as the field at fault and the complaint, or ``None``.
+
+    Shared by ``decision_providers`` entries and the recommenders an operator
+    adds from the dashboard, so the two cannot come to disagree.
+    """
+    if provider not in DECISION_PROVIDERS:
+        return (
+            "provider",
+            f"'{provider}' is not a supported decision provider (one of: {', '.join(DECISION_PROVIDERS)})",
+        )
+    self_hosted = provider in DECISION_PROVIDERS_SELF_HOSTED
+    if not has_api_key and not self_hosted:
+        return "api_key", f"is required for provider '{provider}'"
+    if not api_base and self_hosted:
+        return "api_base", f"is required for provider '{provider}'"
+    if api_base is not None:
+        try:
+            scheme = urlsplit(api_base.strip()).scheme.lower()
+        except ValueError:
+            scheme = ""
+        # Plain http only for a keyless self-hosted server, such as a llama-server on the same host.
+        if scheme != "https" and not (scheme == "http" and self_hosted and not has_api_key):
+            return "api_base", "must use https when it carries an api_key"
+    return None
+
+
 def validate_decision_provider_entry(name: str, entry: Any) -> None:
     """Validate one ``decision_providers`` entry, raising ``ValueError`` on any problem.
 
@@ -262,30 +289,16 @@ def validate_decision_provider_entry(name: str, entry: Any) -> None:
     if not isinstance(entry, dict):
         msg = f"decision_providers.{name} must be a mapping."
         raise ValueError(msg)
-    provider = entry.get("provider") or name
-    if provider not in DECISION_PROVIDERS:
-        msg = (
-            f"decision_providers.{name}.provider '{provider}' is not a supported decision provider "
-            f"(one of: {', '.join(DECISION_PROVIDERS)})."
-        )
+    api_base = entry.get("api_base")
+    problem = decision_endpoint_problem(
+        str(entry.get("provider") or name),
+        has_api_key=bool(entry.get("api_key")),
+        api_base=None if api_base is None else str(api_base),
+    )
+    if problem is not None:
+        field, complaint = problem
+        msg = f"decision_providers.{name}.{field} {complaint}."
         raise ValueError(msg)
-    self_hosted = provider in DECISION_PROVIDERS_SELF_HOSTED
-    api_key, api_base = entry.get("api_key"), entry.get("api_base")
-    if not api_key and not self_hosted:
-        msg = f"decision_providers.{name}.api_key is required for provider '{provider}'."
-        raise ValueError(msg)
-    if not api_base and self_hosted:
-        msg = f"decision_providers.{name}.api_base is required for provider '{provider}'."
-        raise ValueError(msg)
-    if api_base is not None:
-        try:
-            scheme = urlsplit(str(api_base).strip()).scheme.lower()
-        except ValueError:
-            scheme = ""
-        # Plain http only for a keyless self-hosted server, such as a llama-server on the same host.
-        if scheme != "https" and not (scheme == "http" and self_hosted and not api_key):
-            msg = f"decision_providers.{name}.api_base must use https when it carries an api_key."
-            raise ValueError(msg)
     timeout = entry.get("timeout")
     if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0):
         msg = f"decision_providers.{name}.timeout must be a number of seconds greater than 0."
