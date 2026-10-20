@@ -23,10 +23,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
     op.add_column("api_keys", sa.Column("max_end_users", sa.Integer(), nullable=True))
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
     op.drop_column("api_keys", "max_end_users")

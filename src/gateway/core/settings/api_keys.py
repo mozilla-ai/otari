@@ -69,7 +69,8 @@ class ApiKeyConfig(BaseModel):
     max_end_users: int | None = Field(
         default=None,
         ge=0,
-        description="Most live end users the key may have on the budgets it assigns; null is no cap.",
+        description="Most live end users the key may have on the budgets it assigns, or on any budget when it "
+        "assigns none; null is no cap.",
     )
     ceiling: str | None = Field(
         default=None,

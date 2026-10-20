@@ -66,12 +66,11 @@ class _EndUsers:
         requested = await self._listed_budget(api_key, requested_budget_id) if requested_budget_id else None
         owner_user_id = await self._available_owner(api_key)
         existing = await self._repositories.end_users.find(owner_user_id, external_id)
+        if existing is None or existing.deleted_at is not None:
+            existing = await self._admitted(api_key, owner_user_id, external_id, existing)
         if existing is not None:
-            if existing.deleted_at is not None:
-                await self._admit(api_key, owner_user_id)
-                existing.deleted_at = None
+            existing.deleted_at = None
             return ResolvedEndUser(existing.user_id, existing.budget_id)
-        await self._admit(api_key, owner_user_id)
 
         budget = requested
         if budget is None and api_key.end_user_budget_id:
@@ -97,7 +96,7 @@ class _EndUsers:
         owner_user_id = await self._available_owner(api_key)
         user = await self._repositories.end_users.find(owner_user_id, external_id)
         if user is None or user.deleted_at is not None:
-            await self._admit(api_key, owner_user_id)
+            user = await self._admitted(api_key, owner_user_id, external_id, user)
         if user is None:
             user = _new_end_user(owner_user_id, external_id, budget)
             if await self._repositories.end_users.add(user):
@@ -174,20 +173,27 @@ class _EndUsers:
         _require_service_key(api_key)
         await self._available_owner(api_key)
 
-    async def _admit(self, api_key: APIKey, owner_user_id: str) -> None:
-        """Refuse one more live end user when the key already has its ``max_end_users``.
+    async def _admitted(self, api_key: APIKey, owner_user_id: str, external_id: str, found: User | None) -> User | None:
+        """``found`` again, once the key's ``max_end_users`` admits one more live end user.
 
         Counted on the budgets the key assigns, so two keys of one owner, each
         with budgets of its own, keep separate caps over end users they share
         an owner for. The owner's row is locked first, so replicas admitting at
         once cannot overshoot; an existing end user's requests never get here.
+        The end user is looked up again under that lock: a request for the same
+        id may have created or revived it while this one waited, and then it
+        takes no new place.
         """
         if api_key.max_end_users is None:
-            return
+            return found
         await self._repositories.end_users.lock_owner(owner_user_id)
+        found = await self._repositories.end_users.find(owner_user_id, external_id)
+        if found is not None and found.deleted_at is None:
+            return found
         budgets = api_key.assignable_end_user_budgets() or None
         if await self._repositories.end_users.count_live_on_budgets(owner_user_id, budgets) >= api_key.max_end_users:
             raise EndUserLimitReachedError()
+        return found
 
     async def _available_owner(self, api_key: APIKey) -> str:
         """The key's user, refused when it is blocked or deleted, since its end users bill through it."""

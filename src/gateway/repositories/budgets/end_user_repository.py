@@ -17,9 +17,15 @@ class EndUserRepository(BaseRepository[User, Never, Never]):
         super().__init__(uow, User)
 
     async def find(self, owner_user_id: str, external_id: str) -> User | None:
-        """Return the owner's end user named ``external_id``, soft-deleted or not."""
+        """Return the owner's end user named ``external_id``, soft-deleted or not.
+
+        Read fresh even when the session already holds the row, so a lookup made
+        after waiting on ``lock_owner`` sees what the request it waited on wrote.
+        """
         result = await self.db.execute(
-            select(User).where(User.parent_user_id == owner_user_id, User.external_id == external_id)
+            select(User)
+            .where(User.parent_user_id == owner_user_id, User.external_id == external_id)
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
 
