@@ -1,9 +1,14 @@
-"""Record why a hosted model is switched off.
+"""Record why a hosted model is switched off, and which are served without a rate on purpose.
 
 ``disabled_reason`` is null while a row is on, ``unpriced`` while it is held off
 for want of a rate, and ``operator`` while an operator has switched it off. A
 refresh serves an ``unpriced`` row once a rate appears and never touches an
-``operator`` one.
+``operator`` one. ``serves_unpriced`` marks a row switched on without a rate on
+purpose, which a refresh does not hold for one.
+
+A row on with no rate under its ``provider:model`` key was switched on that
+way, by the move of a provider that serves everything it lists or by an
+operator, so it is backfilled as ``serves_unpriced``.
 
 Rows already off carry no record of why, so the backfill reads it from the
 timestamps. A model offered at a rate has that rate stored before its row, so a
@@ -15,7 +20,7 @@ serves a model on its own, and the migration logs those rows so an operator can
 switch on any that were only waiting for a price.
 
 Revision ID: ae8d42792fd8
-Revises: e3a5c7f9b1d4
+Revises: c0e83c6fe801
 Create Date: 2026-10-19
 """
 
@@ -27,12 +32,13 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "ae8d42792fd8"
-down_revision: str | Sequence[str] | None = "e3a5c7f9b1d4"
+down_revision: str | Sequence[str] | None = "c0e83c6fe801"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _TABLE = "hosted_provider_models"
 _COLUMN = "disabled_reason"
+_SERVES_UNPRICED = "serves_unpriced"
 _UNPRICED = "unpriced"
 _OPERATOR = "operator"
 # Enough to act on from a deploy log without flooding it.
@@ -49,6 +55,7 @@ _models = sa.table(
     sa.column("created_at", sa.DateTime(timezone=True)),
     sa.column("updated_at", sa.DateTime(timezone=True)),
     sa.column(_COLUMN, sa.String()),
+    sa.column(_SERVES_UNPRICED, sa.Boolean()),
 )
 _pricing = sa.table(
     "model_pricing",
@@ -78,7 +85,10 @@ def disabled_reason(created_at: datetime, updated_at: datetime | None, first_pri
 def upgrade() -> None:
     """Upgrade schema."""
     op.add_column(_TABLE, sa.Column(_COLUMN, sa.String(length=16), nullable=True))
+    op.add_column(_TABLE, sa.Column(_SERVES_UNPRICED, sa.Boolean(), nullable=False, server_default=sa.false()))
     connection = op.get_bind()
+    priced = sa.exists().where(_pricing.c.model_key == _models.c.provider + ":" + _models.c.model)
+    connection.execute(sa.update(_models).where(_models.c.enabled.is_(True), ~priced).values({_SERVES_UNPRICED: True}))
     rows = connection.execute(
         sa.select(_models.c.id, _models.c.provider, _models.c.model, _models.c.created_at, _models.c.updated_at).where(
             _models.c.enabled.is_(False)
@@ -124,4 +134,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_column(_TABLE, _SERVES_UNPRICED)
     op.drop_column(_TABLE, _COLUMN)

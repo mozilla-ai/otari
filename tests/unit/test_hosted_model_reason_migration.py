@@ -19,7 +19,7 @@ from sqlalchemy import Engine, create_engine, text
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _REVISION = "ae8d42792fd8"
-_BEFORE = "e3a5c7f9b1d4"
+_BEFORE = "c0e83c6fe801"
 _OFFERED = datetime(2026, 10, 1, tzinfo=UTC)
 
 
@@ -87,6 +87,12 @@ def _reasons(engine: Engine) -> dict[str, str | None]:
     return {model: reason for model, reason in rows}
 
 
+def _served_unpriced(engine: Engine) -> dict[str, bool]:
+    with engine.connect() as connection:
+        rows = connection.execute(text("SELECT model, serves_unpriced FROM hosted_provider_models")).all()
+    return {model: bool(served) for model, served in rows}
+
+
 def test_each_row_already_off_gets_the_reason_its_timestamps_support(before: tuple[Config, Engine]) -> None:
     config, engine = before
     hour = timedelta(hours=1)
@@ -119,7 +125,23 @@ def test_the_downgrade_drops_the_column_and_the_upgrade_runs_again(before: tuple
     command.downgrade(config, _BEFORE)
     with engine.connect() as connection:
         columns = {row[1] for row in connection.execute(text("PRAGMA table_info(hosted_provider_models)"))}
-    assert "disabled_reason" not in columns
+    assert {"disabled_reason", "serves_unpriced"}.isdisjoint(columns)
 
     command.upgrade(config, _REVISION)
     assert _reasons(engine) == {"never-priced": "unpriced"}
+
+
+def test_a_row_on_without_a_rate_is_marked_as_served_unpriced(before: tuple[Config, Engine]) -> None:
+    """What a moved provider's models look like: switched on, priced by nothing."""
+    config, engine = before
+    _row(engine, "moved-and-unpriced", enabled=True)
+    _row(engine, "on-and-priced", enabled=True, priced_at=_OFFERED - timedelta(hours=1))
+    _row(engine, "off-and-unpriced")
+
+    command.upgrade(config, _REVISION)
+
+    assert _served_unpriced(engine) == {
+        "moved-and-unpriced": True,
+        "on-and-priced": False,
+        "off-and-unpriced": False,
+    }

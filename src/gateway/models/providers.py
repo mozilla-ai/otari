@@ -249,7 +249,8 @@ class HostedProviderModel(Base):
 
     ``disabled_reason`` says why a row is off, and is null exactly when it is
     on: ``unpriced`` while it waits for a rate, ``operator`` while an operator
-    has switched it off.
+    has switched it off. ``serves_unpriced`` marks a row switched on without a
+    rate on purpose, so a refresh does not hold it for one.
     """
 
     __tablename__ = "hosted_provider_models"
@@ -260,6 +261,7 @@ class HostedProviderModel(Base):
     model: Mapped[str] = mapped_column(String(255))
     enabled: Mapped[bool] = mapped_column(default=True)
     disabled_reason: Mapped[HostedModelDisabledReason | None] = mapped_column(String(16), default=None)
+    serves_unpriced: Mapped[bool] = mapped_column(default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)

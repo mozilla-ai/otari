@@ -424,7 +424,7 @@ class HostedProviderService:
                 await self.offers.write_rate(provider, model.model, request)
                 self.offers.serve_once_priced(model)
             if request.enabled is not None:
-                self.offers.switch_by_operator(model, request.enabled)
+                await self.offers.switch_by_operator(provider, model, request.enabled)
             if priced or request.enabled is not None:
                 await self.models.save(model)
         rates = await self.offers.current_rates(provider, [model], implementation=source.implementation)

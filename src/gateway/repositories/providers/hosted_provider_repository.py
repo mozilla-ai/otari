@@ -285,8 +285,11 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
         names: Sequence[str],
         *,
         disabled: Mapping[str, HostedModelDisabledReason] | None = None,
+        unpriced_served: Collection[str] = (),
     ) -> Sequence[HostedProviderModel]:
         """Stage one offered row per name, switched on except those ``disabled`` names, off for that reason.
+
+        A name in ``unpriced_served`` is marked as served without a rate.
 
         Raises:
             HostedModelConflict: one of these models is already offered here.
@@ -296,7 +299,11 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
         reasons = disabled or {}
         rows = [
             HostedProviderModel(
-                provider=provider, model=name, enabled=name not in reasons, disabled_reason=reasons.get(name)
+                provider=provider,
+                model=name,
+                enabled=name not in reasons,
+                disabled_reason=reasons.get(name),
+                serves_unpriced=name in unpriced_served,
             )
             for name in names
         ]

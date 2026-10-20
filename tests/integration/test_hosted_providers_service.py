@@ -1443,3 +1443,75 @@ async def test_a_model_switched_off_in_bulk_stays_off_through_a_refresh(
 
     assert await _offered(async_db, "openai") == {"gpt-4o": False}
     assert await _reasons(async_db, "openai") == {"gpt-4o": "operator"}
+
+
+async def _served_unpriced(db: AsyncSession, provider: str) -> dict[str, bool]:
+    rows = (await db.execute(select(HostedProviderModel).where(HostedProviderModel.provider == provider))).scalars()
+    return {row.model: row.serves_unpriced for row in rows}
+
+
+async def test_a_moved_provider_keeps_serving_its_unpriced_models_through_a_refresh(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A self-hosted provider moved onto a hosted one serves what it lists, which nothing prices."""
+    _defaults(monkeypatch, {})
+    service = _service(async_db)
+    _discovery(monkeypatch, "llama-local")
+    await service.create_provider(HostedProviderCreateRequest(provider="openai", api_key=KEY), switch_on_listed=True)
+
+    _discovery(monkeypatch, "llama-local", "qwen-local")
+    await service.refresh_models("openai")
+
+    assert await _offered(async_db, "openai") == {"llama-local": True, "qwen-local": False}
+    assert await _served_unpriced(async_db, "openai") == {"llama-local": True, "qwen-local": False}
+    assert await service.resolve("openai", "llama-local", organization_id=None) is not None
+
+
+async def test_serving_unlisted_models_releases_price_holds_but_not_an_operator_s_switch(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _defaults(monkeypatch, {})
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "held", "refused")
+    models = {model.model: model.id for model in (await service.list_models("openai")).data}
+    await service.update_model("openai", models["refused"], HostedModelUpdateRequest(enabled=False))
+
+    await service.update_provider("openai", HostedProviderUpdateRequest(serves_unlisted_models=True))
+    await service.refresh_models("openai")
+
+    assert await _offered(async_db, "openai") == {"held": True, "refused": False}
+    assert await _reasons(async_db, "openai") == {"held": None, "refused": "operator"}
+
+
+async def test_an_operator_switching_on_an_unpriced_model_keeps_it_on_through_a_refresh(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _defaults(monkeypatch, {})
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "brand-new")
+    [model] = (await service.list_models("openai")).data
+
+    await service.update_model("openai", model.id, HostedModelUpdateRequest(enabled=True))
+    await service.refresh_models("openai")
+
+    assert await _offered(async_db, "openai") == {"brand-new": True}
+    assert await _served_unpriced(async_db, "openai") == {"brand-new": True}
+
+
+async def test_a_model_switched_on_while_priced_is_held_again_once_its_rates_are_deleted(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Switching a priced model on does not license serving it free later."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gpt-4o")
+    [model] = (await service.list_models("openai")).data
+    await service.update_model("openai", model.id, HostedModelUpdateRequest(enabled=False))
+    await service.update_model("openai", model.id, HostedModelUpdateRequest(enabled=True))
+    await async_db.execute(delete(ModelPricing).where(ModelPricing.model_key == "openai:gpt-4o"))
+    await async_db.commit()
+
+    _defaults(monkeypatch, {})
+    await service.refresh_models("openai")
+
+    assert await _reasons(async_db, "openai") == {"gpt-4o": "unpriced"}

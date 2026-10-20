@@ -385,8 +385,8 @@ deployment that declares a key does not mint and print one.
 > hosted provider of the same name, once: its `${VAR}` values are read at that
 > start, and the hosted provider serves the name from then on, with a serving
 > switch, a test, its models and removal like any other. The start asks the
-> provider for its models and switches on every one it lists, priced or not;
-> one that lists none is not copied, and keeps serving from `config.yml`. The start then logs
+> provider for its models and switches on every one it lists, priced or not,
+> and a later refresh keeps them on; one that lists none is not copied, and keeps serving from `config.yml`. The start then logs
 > that the entry is no longer read, so it can be taken out of `config.yml`;
 > rotate its key on the Hosted providers page rather than in the environment.
 > Removing the copied provider on the page sticks: the entry is not copied
@@ -569,7 +569,7 @@ implementation its `provider_type` names, so an `instance:model` selector,
 routing policy or alias naming it keeps working. The start asks each provider
 for its models, so the first start after the upgrade can take a little longer,
 and offers every model it lists switched on, priced or not, as the stored
-provider served it, on every path: completions, routing-policy fallbacks, the
+provider served it, and a later refresh keeps them on, on every path: completions, routing-policy fallbacks, the
 pass-through endpoints and batches. A model it does not list is refused until
 it is added on the Hosted providers page, or until "Serve models not on its
 list" is turned on there.
