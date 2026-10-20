@@ -311,8 +311,15 @@ def _conditions(query: TraceFilter) -> list[ColumnElement[bool]]:
     elif query.has_error is False:
         conditions.append(Trace.error_count == 0)
     if query.search:
-        escaped = query.search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        conditions.append(
-            or_(Trace.trace_id.like(f"{escaped}%", escape="\\"), Trace.name.like(f"{escaped}%", escape="\\"))
-        )
+        conditions.append(or_(_starts_with(Trace.trace_id, query.search), _starts_with(Trace.name, query.search)))
     return conditions
+
+
+def _starts_with(column: Any, prefix: str) -> ColumnElement[bool]:
+    """Whether the column starts with ``prefix``, case-sensitively on every dialect.
+
+    The ``LIKE`` is what an index serves. SQLite's ignores ASCII case, so the
+    comparison of the column's leading characters is what holds the case there.
+    """
+    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return and_(column.like(f"{escaped}%", escape="\\"), func.substr(column, 1, len(prefix)) == prefix)

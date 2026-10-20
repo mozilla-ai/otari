@@ -281,6 +281,8 @@ async def test_a_search_finds_a_session_by_the_start_of_its_name_inside_the_scop
     assert [(item.trace_id, item.name) for item in exact.items] == [("s-aaa", "hackbot-1234")]
     assert sorted(item.trace_id for item in prefix.items) == ["s-aaa", "s-bbb"]
     assert await store.count(scope, TraceFilter(search="hackbot_")) == 0
+    assert await store.count(scope, TraceFilter(search="HACKBOT-12")) == 0
+    assert await store.count(scope, TraceFilter(search="S-AAA")) == 0
 
 
 async def test_a_trace_with_more_spans_than_asked_for_says_it_was_cut(
