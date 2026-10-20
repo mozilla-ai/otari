@@ -209,7 +209,7 @@ def test_a_providers_container_is_refused_when_the_gateway_runs_code_execution(
         )
 
     assert resp.status_code == 400, resp.text
-    error = resp.json()["detail"]["error"]
+    error = resp.json()["error"]
     assert error["type"] == "invalid_request_error"
     assert "has expired or does not exist" in error["message"]
     sandbox.assert_not_called()
@@ -810,11 +810,9 @@ def test_provider_web_tool_passes_through_to_upstream(
 
 
 def _assert_anthropic_error(body: dict[str, Any], *, error_type: str, message_substr: str) -> None:
-    assert "detail" in body, body
-    detail = body["detail"]
-    assert detail["type"] == "error"
-    assert detail["error"]["type"] == error_type
-    assert message_substr in detail["error"]["message"]
+    assert body["type"] == "error", body
+    assert body["error"]["type"] == error_type
+    assert message_substr in body["error"]["message"]
 
 
 def test_code_execution_without_sandbox_env_returns_400_anthropic_body(

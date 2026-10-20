@@ -120,7 +120,7 @@ def test_the_messages_route_answers_in_its_own_envelope(
             headers=api_key_header,
         )
     _assert_credential_rejected(response)
-    assert response.json()["detail"]["error"]["message"] == PROVIDER_CREDENTIALS_DETAIL
+    assert response.json()["error"]["message"] == PROVIDER_CREDENTIALS_DETAIL
 
 
 @pytest.mark.parametrize(

@@ -540,7 +540,7 @@ def test_an_mcp_tool_named_like_a_declared_builtin_is_refused_before_a_sandbox_o
         )
 
     assert response.status_code == 400, response.text
-    assert "'web_search'" in response.json()["detail"]["error"]["message"]
+    assert "'web_search'" in response.json()["error"]["message"]
     assert backends.port.opened == 0
     assert sent == []
 
@@ -721,7 +721,7 @@ def test_code_execution_disabled_for_the_workspace_refuses_the_whole_request(
         response = client.post(f"{API_ROOT}/messages", json=_messages_body(tools, with_mcp), headers=api_key_header)
 
     assert response.status_code == 403, response.text
-    assert response.json()["detail"]["error"]["message"] == "code execution is not enabled for this workspace"
+    assert response.json()["error"]["message"] == "code execution is not enabled for this workspace"
     assert sent == []
     assert _ran(backends) == set()
 
@@ -746,7 +746,7 @@ def test_web_search_disabled_for_the_workspace_refuses_the_whole_request(
         response = client.post(f"{API_ROOT}/messages", json=_messages_body(tools, with_mcp), headers=api_key_header)
 
     assert response.status_code == 403, response.text
-    assert response.json()["detail"]["error"]["message"] == "web search is not enabled for this workspace"
+    assert response.json()["error"]["message"] == "web search is not enabled for this workspace"
     assert sent == []
     assert backends.port.opened == 0
     assert _ran(backends) == set()

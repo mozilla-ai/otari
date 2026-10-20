@@ -136,13 +136,11 @@ def test_hybrid_mode_requires_credentials(platform_client: TestClient) -> None:
     assert response.status_code == 401
     # /api/v1/messages errors, including auth, are delivered in the Anthropic envelope.
     assert response.json() == {
-        "detail": {
-            "type": "error",
-            "error": {
-                "type": "authentication_error",
-                "message": "Missing Otari-Key, Authorization, or x-api-key header",
-            },
-        }
+        "type": "error",
+        "error": {
+            "type": "authentication_error",
+            "message": "Missing Otari-Key, Authorization, or x-api-key header",
+        },
     }
 
 
@@ -172,7 +170,8 @@ def test_hybrid_mode_maps_resolve_unauthorized(
 
     assert response.status_code == 401
     assert response.json() == {
-        "detail": {"type": "error", "error": {"type": "authentication_error", "message": "Invalid user token"}}
+        "type": "error",
+        "error": {"type": "authentication_error", "message": "Invalid user token"},
     }
 
 
@@ -476,7 +475,8 @@ def test_hybrid_mode_returns_502_and_reports_every_attempt_when_all_fail(
     # The aggregate failure is delivered in the Anthropic error envelope rather
     # than a bare {"detail": <str>}.
     assert response.json() == {
-        "detail": {"type": "error", "error": {"type": "api_error", "message": "All upstream providers failed"}}
+        "type": "error",
+        "error": {"type": "api_error", "message": "All upstream providers failed"},
     }
     assert response.headers["Otari-Attempt-ID"] == "att-2"
     # Each failed attempt is reported exactly once, despite the terminal 502. A
@@ -544,9 +544,10 @@ def test_hybrid_mode_falls_through_on_provider_400(
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == {
+    assert response.json() == {
         "type": "error",
         "error": {"type": "invalid_request_error", "message": all_attempts_rejected_detail(2)},
+        "code": "all_candidates_rejected",
     }
     assert len(calls) == 2
     assert sorted((r["correlation_id"], r["is_final_attempt"], r.get("error_class")) for r in usage_reports) == [
@@ -999,13 +1000,11 @@ def test_hybrid_mode_count_tokens_requires_credentials(
 
     assert response.status_code == 401
     assert response.json() == {
-        "detail": {
-            "type": "error",
-            "error": {
-                "type": "authentication_error",
-                "message": "Missing Otari-Key, Authorization, or x-api-key header",
-            },
-        }
+        "type": "error",
+        "error": {
+            "type": "authentication_error",
+            "message": "Missing Otari-Key, Authorization, or x-api-key header",
+        },
     }
 
 
@@ -1038,7 +1037,8 @@ def test_hybrid_mode_count_tokens_validates_token(
 
     assert response.status_code == 401
     assert response.json() == {
-        "detail": {"type": "error", "error": {"type": "authentication_error", "message": "Invalid user token"}}
+        "type": "error",
+        "error": {"type": "authentication_error", "message": "Invalid user token"},
     }
 
 
@@ -1126,7 +1126,7 @@ def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
     )
 
     assert response.status_code == 404
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["type"] == "error"
     assert detail["error"]["type"] == "not_found_error"
 
@@ -1164,7 +1164,7 @@ def test_hybrid_mode_preamble_rejection_uses_anthropic_envelope_and_keeps_retry_
 
     assert response.status_code == 429
     assert response.headers.get("Retry-After") == "30"
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["type"] == "error"
     assert detail["error"]["type"] == "rate_limit_error"
 
@@ -1273,7 +1273,7 @@ def test_hybrid_mode_tool_resolve_refusal_uses_anthropic_envelope(
 
     assert response.status_code == status, response.text
     assert response.headers.get("Retry-After") == peer_headers.get("Retry-After")
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["type"] == "error"
     assert detail["error"]["type"] == error_type
     assert detail["error"]["message"] == message
@@ -1426,7 +1426,7 @@ def test_container_is_refused_on_a_managed_credential(
     )
 
     assert response.status_code == 400, response.text
-    body = response.json()["detail"]
+    body = response.json()
     assert body["error"]["type"] == "invalid_request_error"
     assert "container cannot be used on this route" in body["error"]["message"]
     assert calls == [], "the provider must not be called at all"
@@ -1490,7 +1490,7 @@ def test_a_managed_attempt_anywhere_on_the_route_refuses_the_container(
     )
 
     assert response.status_code == 400, response.text
-    assert "container cannot be used on this route" in response.json()["detail"]["error"]["message"]
+    assert "container cannot be used on this route" in response.json()["error"]["message"]
 
 
 def test_a_request_without_a_container_is_untouched_by_the_gate(
@@ -1613,7 +1613,7 @@ def test_container_auto_without_the_gateway_sandbox_is_still_refused(
     )
 
     assert response.status_code == 400, response.text
-    assert "container names a sandbox this gateway holds" in response.json()["detail"]["error"]["message"]
+    assert "container names a sandbox this gateway holds" in response.json()["error"]["message"]
     assert calls == []
 
 

@@ -34,6 +34,7 @@ from gateway.api.deps import (
     get_workspace_search_keys,
     set_config,
 )
+from gateway.api.error_body import BodyHTTPException
 from gateway.api.main import register_routers
 from gateway.api.request_id import with_request_id
 from gateway.api.trace_capture import TraceCaptureMiddleware
@@ -1028,10 +1029,14 @@ async def _http_exception_handler(request: Request, exc: Exception) -> Response:
 
     A body field survives where a header does not (a proxy that drops it, an SDK
     that surfaces only the body), so a client can map the refusal from either.
+    A ``BodyHTTPException`` is answered with its own body rather than under ``detail``.
     """
     if not isinstance(exc, StarletteHTTPException):
         raise exc
     code = error_code_of(exc.headers)
+    if isinstance(exc, BodyHTTPException):
+        body = exc.body if code is None else {**exc.body, "code": code}
+        return with_request_id(request, JSONResponse(body, status_code=exc.status_code, headers=exc.headers))
     if code is None:
         return with_request_id(request, await http_exception_handler(request, exc))
     return with_request_id(

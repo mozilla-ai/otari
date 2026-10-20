@@ -18,7 +18,12 @@ from fastapi import HTTPException, status
 from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
 
 from gateway.api.routes._pipeline import ErrorKind
-from gateway.api.routes.messages import _ADAPTER, _ERROR_KIND_TO_ANTHROPIC_TYPE, _ensure_anthropic_error
+from gateway.api.routes.messages import (
+    _ADAPTER,
+    _ERROR_KIND_TO_ANTHROPIC_TYPE,
+    _anthropic_error,
+    _ensure_anthropic_error,
+)
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT
 
 
@@ -92,9 +97,26 @@ def test_an_unclassifiable_provider_failure_says_nothing_about_the_provider() ->
 
 
 def test_an_already_enveloped_error_is_left_alone() -> None:
-    enveloped = HTTPException(status_code=404, detail={"type": "error", "error": {"type": "custom", "message": "x"}})
+    enveloped = _anthropic_error("not_found_error", "x", status.HTTP_404_NOT_FOUND)
 
     assert _ensure_anthropic_error(enveloped) is enveloped
+
+
+def test_a_dict_detail_gives_its_message_and_keeps_its_other_fields() -> None:
+    blocked = HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={"message": "Request blocked by guardrail policy.", "code": "guardrail_violation", "guardrails": []},
+    )
+
+    assert _ensure_anthropic_error(blocked).body == {
+        "type": "error",
+        "error": {
+            "type": "permission_error",
+            "message": "Request blocked by guardrail policy.",
+            "code": "guardrail_violation",
+            "guardrails": [],
+        },
+    }
 
 
 def test_the_retry_hint_survives_enveloping() -> None:
