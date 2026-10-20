@@ -1375,8 +1375,13 @@ def get_request_session_model_provider_port(
 
 
 def model_provider_port_on(request: Request, db: AsyncSession) -> ModelProviderPort:
-    """Resolve the model-provider adapter on ``db``, for a path that asks it only to explain a refusal."""
+    """Resolve the model-provider adapter on ``db``, for a path that resolves it only when it needs it."""
     return get_container(request).resolve(ModelProviderPort, db, uow=get_unit_of_work(db))
+
+
+def billing_port_on(request: Request, db: AsyncSession) -> BillingPort:
+    """Resolve the billing adapter on ``db``, whose commit lands the charge it writes."""
+    return get_container(request).resolve(BillingPort, db)
 
 
 # Deliberately ``get_db`` and not ``PortSessionDep``: every surface that

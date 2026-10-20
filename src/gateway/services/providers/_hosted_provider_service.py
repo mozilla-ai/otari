@@ -222,11 +222,12 @@ class HostedProviderService:
                     encrypted_client_args=encrypted_client_args,
                     enabled=request.enabled,
                     restricted_to_organization_id=request.restricted_to_organization_id,
+                    serves_unlisted_models=request.serves_unlisted_models,
                 )
             except HostedProviderConflict as conflict:
                 # The pre-check races the insert; the unique constraint decides.
                 raise HostedProviderAlreadyExistsError(conflict.name) from conflict
-            await self.offers.offer(name, discovered, defaults)
+            await self.offers.offer(name, discovered, defaults, serves_unlisted=request.serves_unlisted_models)
             public = HostedProviderPublic.from_row(
                 row,
                 client_args=request.client_args,
@@ -292,6 +293,8 @@ class HostedProviderService:
                 row.encrypted_client_args = encrypt_client_args(restore_redacted_values(request.client_args, stored))
             if request.enabled is not None:
                 row.enabled = request.enabled
+            if request.serves_unlisted_models is not None:
+                row.serves_unlisted_models = request.serves_unlisted_models
             if "restricted_to_organization_id" in request.model_fields_set:
                 await self._require_organization(request.restricted_to_organization_id)
                 row.restricted_to_organization_id = request.restricted_to_organization_id
@@ -371,7 +374,9 @@ class HostedProviderService:
                     raise HostedModelAlreadyOfferedError(provider, conflict.model) from conflict
                 await self.offers.write_rate(provider, name, request)
             else:
-                [model] = await self.offers.offer(provider, [name], defaults)
+                [model] = await self.offers.offer(
+                    provider, [name], defaults, serves_unlisted=source.serves_unlisted_models
+                )
         rates = await self.offers.current_rates(provider, [model], implementation=implementation)
         return HostedModelPublic.from_row(model, rates=rates.get(name))
 
@@ -451,8 +456,8 @@ class HostedProviderService:
 
         async with self.uow:
             await self._provider_or_raise(provider)
-            repriced = await self.offers.reseed(provider, defaults)
-            await self.offers.offer(provider, added, defaults)
+            repriced = await self.offers.reseed(provider, defaults, serves_unlisted=source.serves_unlisted_models)
+            await self.offers.offer(provider, added, defaults, serves_unlisted=source.serves_unlisted_models)
         return HostedModelsRefreshPublic(added=added, repriced=repriced, count=len(offered) + len(added))
 
     async def available_models(self, provider: str) -> HostedAvailableModelsPublic:
@@ -559,12 +564,11 @@ class HostedProviderService:
     ) -> DeploymentProviderMigrationPublic:
         """Move the deployment providers stored through the dashboard onto hosted providers, or preview it.
 
-        Each becomes a hosted provider of the same name, its models discovered
-        as on any create. The deployment provider is removed once the hosted
-        one offers a model, so a provider that will not list keeps serving as
-        it did until the operator adds its models. One that cannot move (a
-        name a hosted provider already holds, a key no configured key reads)
-        is reported and left where it is; so is one edited while this ran.
+        Each becomes a hosted provider of the same name that serves unlisted
+        models, its models discovered as on any create, and the deployment
+        provider is removed. One that cannot move (a name a hosted provider
+        already holds, a key no configured key reads) is reported and left
+        where it is; so is one edited while this ran.
 
         ``reviewed`` binds an apply to the preview the caller reviewed, by
         instance and the version it was shown at: a row it does not name, or
@@ -609,12 +613,6 @@ class HostedProviderService:
         row.outcome = "migrated"
         async with self.uow:
             row.models = len(await self.models.names_for_provider(plan.name))
-            if row.models == 0:
-                row.notes.append(
-                    "The provider listed no models, so the deployment provider is kept. Add its models on the "
-                    "hosted provider, then remove the deployment provider."
-                )
-                return False
             source = await self.providers.get_deployment_provider(row.instance)
             if source is None or source.updated_at != plan.updated_at:
                 row.notes.append(

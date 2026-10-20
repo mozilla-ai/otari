@@ -1,3 +1,4 @@
+import { Spinner } from "@heroui/react"
 import { useEffect, useRef } from "react"
 
 import { Button } from "@/design-system/actions/Button"
@@ -10,7 +11,9 @@ import { errorMessage } from "@/design-system/feedback/errorMessage"
 // under the operator's hands; in the body it scrolls with everything else.
 //
 // Shared by the deployment providers form and the hosted providers forms, whose
-// test routes answer in the same shape and take different bodies.
+// test routes answer in the same shape and take different bodies. A stored
+// provider's row test answers through `ConnectionTestRowResult`, in the
+// narrower wording a table cell has room for.
 
 /** What a connection test answers. */
 export interface ConnectionTestOutcome {
@@ -103,6 +106,62 @@ export function ConnectionTestResult<Payload>({
           </span>
         )
       ) : null}
+    </span>
+  )
+}
+
+/** A stored provider's test verdict, under its row's actions. */
+export function ConnectionTestRowResult({
+  isPending,
+  data,
+  error,
+}: {
+  isPending: boolean
+  data?: ConnectionTestOutcome
+  error?: unknown
+}) {
+  if (isPending) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-caption">
+        {/* Hidden rather than left as HeroUI's own role="status": its
+            "Loading" name would contradict the "Testing…" beside it. */}
+        <Spinner size="sm" aria-hidden="true" /> Testing…
+      </span>
+    )
+  }
+  if (error) {
+    return (
+      <span className="block max-w-xs break-words text-caption text-danger">
+        {errorMessage(error)}
+      </span>
+    )
+  }
+  if (!data) return null
+  if (data.ok) {
+    return (
+      <span className="text-xs font-medium text-success">
+        Connected. {data.model_count} model{data.model_count === 1 ? "" : "s"}{" "}
+        available.
+      </span>
+    )
+  }
+  // A backend with no model-listing endpoint cannot be verified this way, but
+  // the key is not therefore wrong. The provider error stays visible
+  // underneath, because a 404 is also what a wrong api_base returns.
+  if (data.discovery_unsupported) {
+    return (
+      <span className="block max-w-xs break-words text-xs text-warning">
+        Could not list models, so the key could not be verified. It may still
+        work for requests.
+        {data.error ? (
+          <span className="mt-0.5 block text-muted">{data.error}</span>
+        ) : null}
+      </span>
+    )
+  }
+  return (
+    <span className="block max-w-xs break-words text-caption text-danger">
+      {data.error ?? "Connection failed."}
     </span>
   )
 }

@@ -142,7 +142,18 @@ gateway process rather than to any organization on it:
   reached as `openai-eu:<model>`. The key is optional for a provider that needs
   none and for one pointed at an endpoint of its own. Test connection, in the
   add and edit dialogs, asks the provider what it lists on the dialog's values
-  without saving them, the stored key standing in for a blank key box. Below
+  without saving them, the stored key standing in for a blank key box; Test on
+  a provider's row asks the same of what it stores. Serve models not on its
+  list, in both dialogs, makes a provider serve any model a request names, as
+  a `config.yml` provider does, priced or not, while a model switched off on
+  its list is still refused; such a provider carries an Any model badge, and
+  every provider moved from the Deployment providers page arrives with it on.
+  A provider's name opens Models filtered to it, and above the table a summary
+  counts the providers reachable, with Re-check all to ask them again. With no
+  provider yet, the page walks through adding the first one, and offers to
+  enable default pricing when pricing is required and nothing sets it. Adding
+  a provider is disabled, with a banner saying why, while the server has no
+  `OTARI_SECRET_KEY` to encrypt its key with. Below
   the table, Configured providers lists the `providers:` instances of
   `config.yml` read-only, with their reachability. While deployment providers
   stored through the Deployment providers page remain, a banner offers to move

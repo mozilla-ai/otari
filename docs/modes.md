@@ -182,14 +182,13 @@ adapter does nothing, so with no overlay a hosted-provider request is served
 and recorded as deployment-paid on its usage row, and no organization is
 charged.
 
-Today this covers Chat Completions, Messages, Responses and the Playground for a
-plain model or a single-target alias or policy. A routing policy with fallback
-candidates, the pass-through endpoints (embeddings, images, audio, rerank,
-moderations) and batches never serve on a deployment-owned credential. A model
-the deployment offers the organization only that way is refused there with `424`
-(`managed_credential_unsupported`) rather than `provider_not_configured`, before
-anything is sent upstream. A routing policy skips such a candidate as it skips
-one with no credential, and answers with that code only when no candidate served.
+This covers every path that calls a provider: Chat Completions, Messages,
+Responses and the Playground, each candidate of a routing policy with fallbacks,
+the pass-through endpoints (embeddings, images, audio, rerank, moderations) and
+batches. A routing policy asks for each candidate as it reaches it, so the one
+that serves is the one that settles, and one the organization cannot fund is
+skipped. A batch is admitted when it is created and charged when its results
+are accounted.
 
 ## Internal protocol
 

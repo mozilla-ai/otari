@@ -1,4 +1,4 @@
-import { Button, Spinner } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import {
   type Dispatch,
@@ -25,9 +25,7 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
-import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
-import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import {
@@ -40,16 +38,20 @@ import {
   useProviderDetail,
   useProviderHealth,
   useProviders,
-  useRecheckProviderHealth,
   useStoredProviders,
   useTestProviderCredentials,
   useTestStoredProvider,
   useUpdateStoredProvider,
 } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
-import { formatRelative } from "@/shared/helpers/format"
-import { ConnectionTestButton, ConnectionTestResult } from "./ConnectionTest"
+import {
+  ConnectionTestButton,
+  ConnectionTestResult,
+  ConnectionTestRowResult,
+} from "./ConnectionTest"
 import { HealthPill } from "./HealthPill"
+import { HealthSummary } from "./HealthSummary"
+import { OnboardingPanel } from "./OnboardingPanel"
 import {
   type CredentialFieldValues,
   credentialFieldsFor,
@@ -65,6 +67,7 @@ import {
   ProviderCredentialFields,
   parseClientArgs,
 } from "./providerFields"
+import { SecretKeyMissingBanner } from "./SecretKeyMissingBanner"
 
 // Everything the operator can change on each tab, as one value per tab. The
 // drafts outlive the components that render them (only the active tab mounts),
@@ -772,213 +775,11 @@ type TestState =
 
 function TestOutcome({ state }: { state: TestState | undefined }) {
   if (!state) return null
-  if (state.status === "pending") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-caption">
-        {/* Hidden rather than left as HeroUI's own role="status": its
-            "Loading" name would contradict the "Testing…" beside it. */}
-        <Spinner size="sm" aria-hidden="true" /> Testing…
-      </span>
-    )
-  }
-  if (state.ok) {
-    return (
-      <span className="text-xs font-medium text-success">
-        Connected. {state.model_count} model{state.model_count === 1 ? "" : "s"}{" "}
-        available.
-      </span>
-    )
-  }
-  // A backend with no model-listing endpoint cannot be verified this way, but the
-  // key is not therefore wrong: say so instead of reporting a failed connection.
-  // The provider error stays visible underneath, because a 404 is also what a
-  // wrong api_base returns, and that is a misconfiguration to fix, not to reassure
-  // away.
-  if (state.discovery_unsupported) {
-    return (
-      <span className="block max-w-xs break-words text-xs text-warning">
-        Could not list models, so the key could not be verified. It may still
-        work for requests.
-        {state.error ? (
-          <span className="mt-0.5 block text-muted">{state.error}</span>
-        ) : null}
-      </span>
-    )
-  }
   return (
-    <span className="block max-w-xs break-words text-caption text-danger">
-      {state.error ?? "Connection failed."}
-    </span>
-  )
-}
-
-// A one-line "N of M providers reachable" summary with a live re-check, above the
-// table. The healthy/degraded/total counts come precomputed from the gateway, and
-// the same counts feed the overview page's summary tile (issue #302). `degraded`
-// providers are not reachable-by-discovery but are not failures either, so they
-// are called out separately and keep the dot amber rather than red.
-function HealthSummary({
-  healthy,
-  degraded,
-  total,
-  checkedAt,
-}: {
-  healthy: number
-  degraded: number
-  total: number
-  checkedAt: string | null
-}) {
-  const allHealthy = healthy === total
-  const dot = allHealthy
-    ? "bg-success"
-    : healthy + degraded === total
-      ? "bg-warning"
-      : "bg-danger"
-  const recheck = useRecheckProviderHealth()
-  return (
-    // A band of the page rather than a card, which is what the rest of this page
-    // became: the summary is a region between rules, so the rules are what bound
-    // it and the fill goes.
-    <Section
-      className="border-y border-border py-3"
-      contentClassName="flex flex-wrap items-center gap-3 text-sm"
-    >
-      <Dot className={dot} />
-      <span className="font-medium text-foreground">
-        {healthy} of {total} provider{total === 1 ? "" : "s"} reachable
-      </span>
-      {degraded > 0 ? (
-        <span className="text-warning">{degraded} without model discovery</span>
-      ) : null}
-      {checkedAt ? (
-        <span className="text-muted">
-          Last checked {formatRelative(checkedAt)}
-        </span>
-      ) : null}
-      <Button
-        size="sm"
-        variant="ghost"
-        className="ml-auto"
-        isDisabled={recheck.isPending}
-        onPress={() => recheck.mutate()}
-      >
-        {recheck.isPending ? "Re-checking…" : "Re-check all"}
-      </Button>
-    </Section>
-  )
-}
-
-function Step({
-  n,
-  title,
-  children,
-}: {
-  n: number
-  title: string
-  children: ReactNode
-}) {
-  return (
-    <li className="flex gap-3">
-      <span className="flex h-6 w-6 shrink-0 items-center justify-center bg-primary-subtle text-xs font-semibold text-primary-subtle-foreground">
-        {n}
-      </span>
-      <div className="text-sm">
-        <div className="font-medium text-foreground">{title}</div>
-        <div className="text-muted">{children}</div>
-      </div>
-    </li>
-  )
-}
-
-// Shown on first run (no provider configured yet). It disappears the moment a
-// provider exists, so it is a nudge to the first key, not a permanent banner.
-function OnboardingPanel({
-  onAddProvider,
-  needsPricing,
-  onEnablePricing,
-  isEnabling,
-  secretKeyConfigured,
-}: {
-  onAddProvider: () => void
-  needsPricing: boolean
-  onEnablePricing: () => void
-  isEnabling: boolean
-  secretKeyConfigured: boolean
-}) {
-  return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
-    >
-      <div className="flex items-start gap-3">
-        <Dot className="mt-2.5 bg-accent" />
-        <div>
-          <h2 className="text-display-sub">Welcome to Otari</h2>
-          <p className="mt-1 text-sm text-muted">
-            You are signed in. Add a provider to start serving models: three
-            quick steps.
-          </p>
-        </div>
-      </div>
-      <ol className="flex flex-col gap-3">
-        <Step n={1} title="Add a provider">
-          Enter a provider name (like <code>openai</code>) and its API key. Keys
-          are encrypted at rest.
-        </Step>
-        <Step n={2} title="Test the connection">
-          Use <strong>Test</strong> on the provider row to confirm the key works
-          and see how many models it serves.
-        </Step>
-        <Step n={3} title="Send your first request">
-          Once a provider exists, the <strong>Overview</strong> page usually
-          offers a setup guide that hands you an API key and the call to make.
-          Either way, point your app at <code>/v1</code> on this gateway with an
-          API key (the one printed in the server logs on first start will do).
-          See the{" "}
-          {/* /welcome is served by the gateway itself, not by a client route, so this
-                stays a plain path anchor: a router Link would resolve to /#/welcome, which
-                the catch-all route sends back to the overview. It leaves the SPA, so open a
-                new tab and the operator keeps the dashboard (as the guide's links do). */}
-          <a
-            href="/welcome"
-            target="_blank"
-            rel="noreferrer"
-            className="font-medium text-link hover:text-link-hover"
-          >
-            quickstart
-          </a>
-          .
-        </Step>
-      </ol>
-      {needsPricing ? (
-        <p className="text-sm text-muted">
-          Tip: <code>require_pricing</code> is on, so requests are rejected
-          until pricing is set.{" "}
-          <button
-            type="button"
-            className="font-medium text-link hover:text-link-hover disabled:opacity-(--disabled-opacity)"
-            disabled={isEnabling}
-            onClick={onEnablePricing}
-          >
-            Enable default pricing
-          </button>{" "}
-          to meter new models with public rates.
-        </p>
-      ) : null}
-      <div>
-        {/* Disabled at 0.4 rather than hidden. Blocked is not the same as
-              empty: an operator whose server has no secret key has to see the
-              action they are being denied, or the page reads as though adding a
-              provider is not a thing this product does. */}
-        <Button
-          variant="primary"
-          isDisabled={!secretKeyConfigured}
-          onPress={onAddProvider}
-        >
-          Add your first provider
-        </Button>
-      </div>
-    </Section>
+    <ConnectionTestRowResult
+      isPending={state.status === "pending"}
+      data={state.status === "done" ? state : undefined}
+    />
   )
 }
 
@@ -1253,31 +1054,11 @@ export function ProvidersPage() {
         }
       />
 
-      {/* A band of the page, not a tinted box: a square danger dot, the setting
-          named in mono so it is copyable by eye, and the consequence in muted
-          prose. No fill, no border, no radius. */}
       {/* `context.data &&` as well as the flag: a context read that failed
           leaves the flag falsy, and claiming the key is unset would be a guess,
           and the wrong one whenever the deployment has one. The error banner
           above already names the read that actually failed. */}
-      {context.data && !secretKeyConfigured ? (
-        <Section
-          className="border-y border-border py-3"
-          contentClassName="flex items-start gap-3 text-sm"
-        >
-          <Dot className="mt-2 bg-danger" />
-          <p className="text-muted">
-            <span className="text-mono-caption text-foreground">
-              OTARI_SECRET_KEY
-            </span>{" "}
-            is not set, so provider keys can&rsquo;t be encrypted at rest and
-            adding providers from the dashboard is disabled. Set it on the
-            server and restart to add providers here. Providers defined in{" "}
-            <span className="text-mono-caption">config.yml</span> keep working
-            without it.
-          </p>
-        </Section>
-      ) : null}
+      {context.data && !secretKeyConfigured ? <SecretKeyMissingBanner /> : null}
 
       {showOnboarding ? (
         <OnboardingPanel
@@ -1320,7 +1101,7 @@ export function ProvidersPage() {
           healthy={health.data.healthy}
           degraded={health.data.degraded}
           total={health.data.total}
-          checkedAt={health.data.checked_at ?? null}
+          checkedAt={health.data.checked_at ?? ""}
         />
       ) : null}
 

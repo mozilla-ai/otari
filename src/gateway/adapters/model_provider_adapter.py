@@ -41,7 +41,8 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
 
         ``model`` selects nothing (a hosted provider is one credential) but it
         can refuse: only a model the operator switched on in this provider's
-        roster is served, so one switched off or never offered is refused.
+        roster is served, so one switched off is refused, and so is one never
+        offered unless the provider serves unlisted models.
 
         ``organization_id`` decides one thing: a provider restricted to another
         organization answers ``None``, as if it were not configured, so a tenant

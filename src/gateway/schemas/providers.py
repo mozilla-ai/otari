@@ -361,6 +361,9 @@ class HostedProviderCreateRequest(SQLModel):
     key takes. Values under credential-shaped names come back masked.
     ``restricted_to_organization_id`` keeps the provider to one organization;
     every other one is served as if it were not configured.
+    ``serves_unlisted_models`` serves a model the roster does not list, as a
+    ``config.yml`` instance does, and switches on every model it offers
+    whether or not something prices it.
     """
 
     model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "<your OpenAI API key>"}}}
@@ -372,6 +375,7 @@ class HostedProviderCreateRequest(SQLModel):
     client_args: dict[str, Any] | None = None
     enabled: bool = True
     restricted_to_organization_id: uuid.UUID | None = None
+    serves_unlisted_models: bool = False
 
 
 class HostedProviderUpdateRequest(SQLModel):
@@ -396,6 +400,7 @@ class HostedProviderUpdateRequest(SQLModel):
     client_args: dict[str, Any] | None = None
     enabled: bool | None = None
     restricted_to_organization_id: uuid.UUID | None = None
+    serves_unlisted_models: bool | None = None
 
 
 class HostedProviderPublic(SQLModel):
@@ -416,6 +421,8 @@ class HostedProviderPublic(SQLModel):
     the row is deleted. ``has_api_key`` is false for one stored without a key,
     and ``decryptable`` false for one whose key or extras no configured
     ``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.
+    ``serves_unlisted_models`` is true for one that serves a model its roster
+    does not list.
     """
 
     id: uuid.UUID | None = None
@@ -429,6 +436,7 @@ class HostedProviderPublic(SQLModel):
     client_args: dict[str, Any] | None = None
     enabled: bool
     restricted_to_organization_id: uuid.UUID | None = None
+    serves_unlisted_models: bool = False
     shadows_config: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -462,6 +470,7 @@ class HostedProviderPublic(SQLModel):
             client_args=redact_secret_like_values(client_args),
             enabled=row.enabled,
             restricted_to_organization_id=row.restricted_to_organization_id,
+            serves_unlisted_models=row.serves_unlisted_models,
             shadows_config=shadows_config,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -559,9 +568,8 @@ class DeploymentProviderMigrationRowPublic(SQLModel):
     ``migrate`` in a preview and ``migrated`` once applied; ``conflict``,
     ``unreadable``, ``invalid`` and ``failed`` leave the row where it is, with
     ``detail`` saying why. ``source_removed`` says whether the deployment
-    provider was removed: it is kept while the hosted provider offers no model,
-    so nothing it serves stops being served. ``notes`` are what an operator
-    should check afterwards.
+    provider was removed: it is kept when it changed while the move ran.
+    ``notes`` are what an operator should check afterwards.
     """
 
     instance: str

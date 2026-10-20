@@ -164,20 +164,19 @@ def test_a_row_that_shadows_a_config_entry_says_the_entry_serves_again(
     assert any("config.yml declares a provider of the same name" in note for note in row["notes"])
 
 
-def test_a_provider_that_lists_nothing_keeps_its_deployment_provider(
+def test_a_provider_that_lists_nothing_still_moves_and_serves_every_model(
     client: TestClient, master_key_header: dict[str, str], db_session: Session, dials: list[dict[str, Any]]
 ) -> None:
+    """The hosted provider serves models its roster does not list, so nothing the row served stops being served."""
     _deployment_provider(client, master_key_header, "openai", api_key="sk-quiet-5555", api_base="https://silent.test")
 
     [row] = _rows(client.post(PATH, headers=master_key_header)).values()
 
-    assert (row["outcome"], row["source_removed"], row["models"]) == ("migrated", False, 0)
-    assert "listed no models" in row["notes"][-1]
+    assert (row["outcome"], row["source_removed"], row["models"]) == ("migrated", True, 0)
     db_session.expire_all()
-    assert [credential.instance for credential in db_session.execute(select(ProviderCredential)).scalars()] == [
-        "openai"
-    ]
-    assert [provider.name for provider in db_session.execute(select(HostedProvider)).scalars()] == ["openai"]
+    assert db_session.execute(select(ProviderCredential)).scalars().all() == []
+    [hosted] = db_session.execute(select(HostedProvider)).scalars().all()
+    assert (hosted.name, hosted.serves_unlisted_models) == ("openai", True)
 
 
 def test_a_name_a_hosted_provider_cannot_take_says_how_to_move_it(
@@ -210,11 +209,12 @@ def test_a_row_no_configured_key_reads_is_left_where_it_is(
     assert db_session.execute(select(HostedProvider)).scalars().all() == []
 
 
-def test_a_row_moved_twice_is_a_conflict_the_second_time(
+def test_a_row_stored_again_under_a_moved_name_is_a_conflict(
     client: TestClient, master_key_header: dict[str, str], dials: list[dict[str, Any]]
 ) -> None:
     _deployment_provider(client, master_key_header, "openai", api_key="sk-quiet-5555", api_base="https://silent.test")
     client.post(PATH, headers=master_key_header)
+    _deployment_provider(client, master_key_header, "openai", api_key="sk-again-6666")
 
     [row] = _rows(client.post(PATH, headers=master_key_header)).values()
 

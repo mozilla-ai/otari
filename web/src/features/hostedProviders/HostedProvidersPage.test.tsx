@@ -41,6 +41,7 @@ function hostedProvider(
     client_args: null,
     enabled: true,
     restricted_to_organization_id: null,
+    serves_unlisted_models: false,
     created_at: "2026-10-01T00:00:00Z",
     updated_at: null,
     ...overrides,
@@ -130,6 +131,10 @@ function mockApi(
     testResult?: HostedProviderTestResult
     /** The health records GET /providers/health answers. */
     health?: ProviderHealth[]
+    /** Whether the organization context reports a usable OTARI_SECRET_KEY. */
+    keyEncryption?: boolean
+    /** What GET /settings answers about pricing. */
+    pricing?: { require_pricing: boolean; default_pricing: boolean }
   } = {},
 ) {
   const granted = opts.granted ?? true
@@ -148,6 +153,14 @@ function mockApi(
 
     if (url.includes(`${API_ROOT}/admin/access`)) {
       return jsonResponse({ granted })
+    }
+    if (url.includes(`${API_ROOT}/organizations/me`)) {
+      return jsonResponse({
+        provider_key_encryption_available: opts.keyEncryption ?? true,
+      })
+    }
+    if (url.includes(`${API_ROOT}/settings`)) {
+      return jsonResponse(opts.pricing ?? {})
     }
     if (url.includes(`${API_ROOT}/providers/catalog/`)) {
       const id = url.split("/").pop() ?? ""
@@ -323,13 +336,213 @@ describe("HostedProvidersPage", () => {
     expect(requests).toEqual([])
   })
 
-  it("offers to add the first provider when none is configured", async () => {
+  it("walks the first provider in when none is configured", async () => {
     mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    expect(await screen.findByText("Welcome to Otari")).toBeInTheDocument()
+    // The panel owns the empty state, so no empty table sits under it.
+    expect(screen.queryByRole("grid", { name: "Hosted providers" })).toBeNull()
+    expect(screen.queryByText(/Enable default pricing/)).toBeNull()
+
+    await user.click(
+      screen.getByRole("button", { name: "Add your first provider" }),
+    )
+    expect(
+      await screen.findByRole("dialog", { name: "Add hosted provider" }),
+    ).toBeInTheDocument()
+  })
+
+  it("offers default pricing on first run while pricing is required and unset", async () => {
+    const requests = mockApi({
+      providers: [],
+      pricing: { require_pricing: true, default_pricing: false },
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Enable default pricing" }),
+    )
+    await waitFor(() =>
+      expect(
+        requests.filter(
+          (request) =>
+            request.url.endsWith("/settings") && request.method === "PATCH",
+        ),
+      ).toEqual([expect.objectContaining({ body: { default_pricing: true } })]),
+    )
+  })
+
+  it("disables adding a provider while OTARI_SECRET_KEY is not set", async () => {
+    mockApi({ providers: [], keyEncryption: false })
     await renderPage()
 
     expect(
-      await screen.findByText("No hosted providers configured"),
+      await screen.findByText(/is not set, so provider keys/),
     ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Add provider" })).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Add your first provider" }),
+    ).toBeDisabled()
+  })
+
+  it("says nothing about OTARI_SECRET_KEY while it is set", async () => {
+    mockApi()
+    await renderPage()
+
+    await screen.findByRole("grid", { name: "Hosted providers" })
+    expect(screen.queryByText(/OTARI_SECRET_KEY/)).toBeNull()
+    expect(screen.getByRole("button", { name: "Add provider" })).toBeEnabled()
+  })
+
+  it("links each provider to the models it serves", async () => {
+    mockApi({
+      providers: [hostedProvider({ name: "openai-eu" })],
+    })
+    await renderPage()
+
+    expect(
+      await screen.findByRole("link", { name: "openai-eu" }),
+    ).toHaveAttribute("href", "/models?provider=openai-eu")
+  })
+
+  it("tests a stored provider from its row, on what it stores", async () => {
+    const requests = mockApi({
+      providers: [hostedProvider({ name: "openai-eu" })],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Test openai-eu" }),
+    )
+
+    expect(
+      await screen.findByText(/Connected\. 3 models available\./),
+    ).toBeInTheDocument()
+    expect(hostedRequests(requests, "POST")).toEqual([
+      expect.objectContaining({
+        url: expect.stringContaining("/hosted-providers/test"),
+        body: { provider: "openai", name: "openai-eu" },
+      }),
+    ])
+  })
+
+  it("offers no row test for a key no secret reads, or for a config.yml provider", async () => {
+    mockApi({
+      providers: [
+        hostedProvider({ decryptable: false }),
+        hostedProvider({ id: "c", provider: "mistral", source: "config" }),
+      ],
+    })
+    await renderPage()
+
+    expect(
+      await screen.findByRole("button", { name: "Test openai" }),
+    ).toBeDisabled()
+    expect(screen.queryByRole("button", { name: "Test mistral" })).toBeNull()
+  })
+
+  it("summarizes reachability and re-checks every provider on demand", async () => {
+    const requests = mockApi({
+      health: [
+        {
+          instance: "openai",
+          ok: true,
+          model_count: 3,
+          error: null,
+          checked_at: "2026-10-19T00:00:00Z",
+          discovery_unsupported: false,
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    expect(
+      await screen.findByText("1 of 1 provider reachable"),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Re-check all" }))
+    await waitFor(() =>
+      expect(
+        requests.some((request) =>
+          request.url.endsWith("/providers/health?refresh=true"),
+        ),
+      ).toBe(true),
+    )
+  })
+
+  it("marks a provider that serves models not on its list", async () => {
+    mockApi({
+      providers: [
+        hostedProvider({ serves_unlisted_models: true }),
+        hostedProvider({ id: "m", provider: "mistral" }),
+      ],
+    })
+    await renderPage()
+
+    const table = await screen.findByRole("grid", { name: "Hosted providers" })
+    await within(table).findByText("Any model")
+    const row = (name: string) =>
+      within(table).getByRole("rowheader", { name: new RegExp(`^${name}`) })
+    expect(within(row("openai")).getByText("Any model")).toBeInTheDocument()
+    expect(within(row("mistral")).queryByText("Any model")).toBeNull()
+  })
+
+  it("adds a provider that serves models not on its list", async () => {
+    const requests = mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(within(dialog).getByLabelText("API key"), "sk-ant-secret")
+    await user.click(
+      within(dialog).getByRole("checkbox", {
+        name: "Serve models not on its list",
+      }),
+    )
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add provider" }),
+    )
+
+    await waitFor(() =>
+      expect(hostedRequests(requests, "POST")).toHaveLength(1),
+    )
+    expect(hostedRequests(requests, "POST")[0].body).toMatchObject({
+      serves_unlisted_models: true,
+    })
+  })
+
+  it("switches serving models not on its list from the edit dialog", async () => {
+    const requests = mockApi({
+      providers: [hostedProvider({ serves_unlisted_models: true })],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Edit openai" }))
+    const dialog = await screen.findByRole("dialog")
+    const box = within(dialog).getByRole("checkbox", {
+      name: "Serve models not on its list",
+    })
+    expect(box).toBeChecked()
+    await user.click(box)
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(hostedRequests(requests, "PATCH")).toHaveLength(1),
+    )
+    expect(hostedRequests(requests, "PATCH")[0].body).toEqual({
+      api_base: "",
+      serves_unlisted_models: false,
+    })
   })
 
   it("adds a provider with its key, leaving a blank endpoint out", async () => {
@@ -354,6 +567,7 @@ describe("HostedProvidersPage", () => {
     expect(hostedRequests(requests, "POST")[0].body).toEqual({
       provider: "anthropic",
       api_key: "sk-ant-secret",
+      serves_unlisted_models: false,
     })
   })
 

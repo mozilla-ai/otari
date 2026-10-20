@@ -53,7 +53,6 @@ from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.provider_kwargs import (
     missing_credential,
     no_candidate_configured_detail,
-    shared_managed_refusal,
     split_selector,
 )
 from gateway.services.sandbox_backend import SandboxNotReachableError
@@ -333,10 +332,6 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
         return None
     missing = [entry for entry in map(missing_credential, errors) if entry is not None]
     if len(missing) == len(errors):
-        if (managed := shared_managed_refusal(missing)) is not None:
-            return HTTPException(
-                status_code=managed.status_code, detail=managed.detail, headers=error_headers(managed.code)
-            )
         return HTTPException(
             status_code=missing[0].status_code,
             detail=no_candidate_configured_detail(missing),

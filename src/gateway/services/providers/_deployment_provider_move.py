@@ -2,8 +2,9 @@
 
 A ``provider_credentials`` row becomes a hosted provider of the same name, so
 an ``instance:model`` selector keeps reaching it, served by the implementation
-the row declares. This module plans one row; the service creates the hosted
-provider and removes the row.
+the row declares. It serves unlisted models, so every model the row served
+stays served whether or not the provider lists or prices it. This module plans
+one row; the service creates the hosted provider and removes the row.
 """
 
 from dataclasses import dataclass, field
@@ -97,6 +98,7 @@ def plan_move(credential: ProviderCredential, *, hosted_names: set[str], configu
         api_key=api_key,
         api_base=credential.api_base,
         client_args=credential.client_args or None,
+        serves_unlisted_models=True,
     )
     return PlannedMove(public, create=create, name=name, updated_at=credential.updated_at)
 

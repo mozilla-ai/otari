@@ -143,10 +143,10 @@ export function DeploymentProviderMigration() {
         body={
           <div className="flex flex-col gap-3">
             <p>
-              Each becomes a hosted provider of the same name, so requests
-              naming it keep working, and is removed from the Deployment
-              providers page once its models are offered here. An organization's
-              own key for the provider is now asked first.
+              Each becomes a hosted provider of the same name that serves any
+              model a request names, so requests naming it keep working, and is
+              removed from the Deployment providers page. An organization's own
+              key for the provider is now asked first.
             </p>
             <MigrationRows rows={rows} />
           </div>

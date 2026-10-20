@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, false, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base
@@ -214,6 +214,9 @@ class HostedProvider(Base):
     # protect a copy of the database.
     encrypted_client_args: Mapped[str | None] = mapped_column()
     enabled: Mapped[bool] = mapped_column(default=True)
+    # Serve a model the roster does not list, as a ``config.yml`` instance does.
+    # A model the roster switches off is still refused.
+    serves_unlisted_models: Mapped[bool] = mapped_column(default=False, server_default=false())
     # The one organization served on this provider, or None for every one. Any
     # other organization is answered as if the provider were not configured.
     # RESTRICT: SET NULL would open the provider to every organization, and
@@ -238,7 +241,8 @@ class HostedProviderModel(Base):
     no row of its own, and its roster still lives here.
 
     Dispatch serves only a model whose row is switched on: a row switched
-    off and a model with no row are both refused.
+    off is refused, and so is a model with no row unless the provider
+    ``serves_unlisted_models``.
     """
 
     __tablename__ = "hosted_provider_models"

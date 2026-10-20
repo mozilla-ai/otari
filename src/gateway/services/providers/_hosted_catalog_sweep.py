@@ -129,8 +129,13 @@ class HostedCatalogSweep:
                     answer.added = []
                     answer.error = REMOVED_MID_SWEEP
                 elif apply:
-                    answer.repriced = await self.offers.reseed(answer.provider, defaults[answer.provider])
-                    await self.offers.offer(answer.provider, answer.added, defaults[answer.provider])
+                    serves_unlisted = source.serves_unlisted_models
+                    answer.repriced = await self.offers.reseed(
+                        answer.provider, defaults[answer.provider], serves_unlisted=serves_unlisted
+                    )
+                    await self.offers.offer(
+                        answer.provider, answer.added, defaults[answer.provider], serves_unlisted=serves_unlisted
+                    )
             offered_keys = await self.models.offered_keys(defined)
             if not apply:
                 # What an apply would offer, folded in without writing it.
