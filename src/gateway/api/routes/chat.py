@@ -9,7 +9,7 @@ from any_llm.types.completion import (
     CompletionUsage,
 )
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -132,10 +132,11 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     doing where the wire contract is not guessable from the field itself.
     """
 
-    # A field beyond the ones below is kept rather than dropped, but goes to the
-    # provider only when its instance lists it in ``request_fields``; see
-    # ``with_request_fields``. Every other one is dropped before dispatch, as before.
-    model_config = ConfigDict(extra="allow")
+    # A field beyond the ones below is set aside here rather than kept on the
+    # model, so ``model_dump`` still never carries one (a caller's ``api_key``
+    # would otherwise override the gateway's). It reaches the provider only when
+    # its instance lists it in ``request_fields``; see ``with_request_fields``.
+    _extra_fields: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     messages: list[dict[str, Any]] = Field(min_length=1)
     # any-llm types this as ``dict | type | None``; the wire body only ever
@@ -199,6 +200,19 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # OpenAI's chat field, absent from ``CompletionParams``: read for request tags
     # and never forwarded, since a provider other than OpenAI would reject it.
     metadata: RequestMetadata = None
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _set_extra_fields_aside(cls, data: Any, handler: Any) -> "ChatCompletionRequest":
+        request: ChatCompletionRequest = handler(data)
+        if isinstance(data, dict):
+            request._extra_fields = {name: value for name, value in data.items() if name not in cls.model_fields}
+        return request
+
+    @property
+    def extra_fields(self) -> dict[str, Any]:
+        """The fields the request carried beyond its schema's."""
+        return dict(self._extra_fields)
 
 
 def _every_choice_finishes() -> Callable[[ChatCompletionChunk], bool]:
@@ -622,7 +636,7 @@ async def run_chat_completion(
         )
     except IdempotentReplay as replay:
         return replay.response()
-    ctx.request_extras = dict(request.model_extra or {})
+    ctx.request_extras = request.extra_fields
 
     tool_ctx = await prepare_gateway_tools(
         adapter=adapter,
@@ -662,7 +676,7 @@ async def run_chat_completion(
 
     def _request_fields(tools: ToolContext) -> dict[str, Any]:
         fields = _strip_gateway_fields(
-            request.model_dump(exclude_unset=True, exclude=set(request.model_extra or {})),
+            request.model_dump(exclude_unset=True),
             tools_extracted=tools.tools_extracted,
             remaining_user_tools=tools.remaining_user_tools,
             web_search_declared_name=tools.web_search_declared_name,

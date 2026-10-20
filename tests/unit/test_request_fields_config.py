@@ -27,7 +27,9 @@ def test_nothing_listed_or_sent_leaves_the_fields_alone() -> None:
     assert with_request_fields(_config(request_fields=["text"]), "missing", fields, {"text": True}) is fields
 
 
-@pytest.mark.parametrize("name", ["model", "messages", "stream", "api_key", "api_base", "extra_body", "temperature", "user"])
+@pytest.mark.parametrize(
+    "name", ["model", "messages", "stream", "api_key", "api_base", "extra_body", "temperature", "user"]
+)
 def test_a_field_the_gateway_sets_or_a_request_carries_cannot_be_listed(name: str) -> None:
     with pytest.raises(ValidationError, match=name):
         _config(request_fields=[name])
