@@ -296,6 +296,7 @@ class RequestTrace:
             api_key_id=self.api_key_id,
             session_source=self.session.source if self.session else "none",
             harness=self.harness,
+            name=self.session.name if self.session else None,
             spans=(step, *self._client_tool_spans(), *self.spans),
         )
 

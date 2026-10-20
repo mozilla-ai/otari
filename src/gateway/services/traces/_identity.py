@@ -7,7 +7,9 @@ two requests belong together from their content.
 
 The session's trace id hashes the workspace and the user in, so two people who
 choose the same label get two sessions, and an id a client chose can never land
-in another tenant's or another user's trace.
+in another tenant's or another user's trace. A key the client chose on purpose is
+also the session's name, where it is identifier-shaped, so a reader can find the
+session by the id the client knows it by.
 """
 
 import hashlib
@@ -55,6 +57,14 @@ class SessionRef:
         owner = user_id if user_id is not None else f"key:{api_key_id or ''}"
         material = "\x00".join((str(workspace_id), owner, self.source, self.key))
         return "s-" + hashlib.sha256(material.encode()).hexdigest()[:40]
+
+    @property
+    def name(self) -> str | None:
+        """The session's display name: the key a client chose on purpose, when it is identifier-shaped.
+
+        A harness's or an exporter's key is its own generated id, so it names nothing.
+        """
+        return self.key if self.source == "client" and is_identifier(self.key) else None
 
 
 def _clean(value: str | None) -> str | None:

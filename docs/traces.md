@@ -58,7 +58,13 @@ retries, since a request without it starts a trace of its own.
   customer or per automation for spend therefore groups every run under it into
   one session, unless each run also sends its own header.
 - The value is any string up to 512 characters. Otari hashes it into the trace
-  id and does not store it, so an internal id is fine to send.
+  id, so the id differs per workspace and user. When the value is
+  identifier-shaped (up to 128 letters, digits and `_ . : / @ + -`, and not
+  shaped like an email address, a file path or a credential), it is also stored
+  as the session's name: the Sessions list shows it, and its search box finds
+  the session by it (`hackbot-1234`, or a prefix such as `hackbot-`). Any other
+  value is not stored. A harness's own id and an OTLP session id are never
+  stored as a name.
 - Give each run its own id rather than reusing one for days: after
   `trace_session_max_age_days` a reused id starts a new trace anyway.
 - Give a subagent an id of its own. Under its parent's id, the task it was handed
@@ -132,9 +138,11 @@ backend. A span the gateway records itself has neither.
 | `GET /api/v1/organizations/me/traces`, and the same four | a signed-in member: an owner or admin reads every workspace of their active organization, anyone else the workspaces they belong to |
 
 A list read narrows to one workspace with `workspace_id`, inside the caller's
-scope and never beyond it. A trace is keyed by its workspace and its id, so a
-detail read takes the `workspace_id` its list entry names; without it, an id in
-more than one of the caller's workspaces answers 409 rather than a guess.
+scope and never beyond it. `q` matches the start of a session's trace id or of
+its name, case-sensitively, inside the same scope. A trace is keyed by its
+workspace and its id, so a detail read takes the `workspace_id` its list entry
+names; without it, an id in more than one of the caller's workspaces answers 409
+rather than a guess.
 `/requests/{request_id}` answers the session a gateway request was traced into,
 by the `Otari-Request-ID` it was sent (a usage row's `request_group_id`), and 404
 where the scope holds no trace of it. A trace outside the caller's scope answers

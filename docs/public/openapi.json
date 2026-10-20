@@ -36891,21 +36891,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "The start of a trace id, or of a session's name (the id its client chose).",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "The start of a trace id, or of a session's name (the id its client chose).",
               "title": "Q"
             }
           }
@@ -37121,21 +37121,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "The start of a trace id, or of a session's name (the id its client chose).",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "The start of a trace id, or of a session's name (the id its client chose).",
               "title": "Q"
             }
           }
@@ -37416,21 +37416,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "The start of a trace id, or of a session's name (the id its client chose).",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "The start of a trace id, or of a session's name (the id its client chose).",
               "title": "Q"
             }
           }
@@ -44276,21 +44276,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "The start of a trace id, or of a session's name (the id its client chose).",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "The start of a trace id, or of a session's name (the id its client chose).",
               "title": "Q"
             }
           }
@@ -44506,21 +44506,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "The start of a trace id, or of a session's name (the id its client chose).",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "The start of a trace id, or of a session's name (the id its client chose).",
               "title": "Q"
             }
           }
@@ -44801,21 +44801,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "The start of a trace id, or of a session's name (the id its client chose).",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "The start of a trace id, or of a session's name (the id its client chose).",
               "title": "Q"
             }
           }

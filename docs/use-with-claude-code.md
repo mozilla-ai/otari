@@ -83,6 +83,16 @@ key can split its cost by agent, run or requester. Percent-encode a `,` or `=`
 inside a value. Tags are recorded in standalone mode only. See
 [Request tags](api-reference.md#request-tags) for the format and limits.
 
+A headless run that should read as one session of its own sends a run id too,
+which the dashboard's Sessions list then shows and searches by:
+
+```bash
+export ANTHROPIC_CUSTOM_HEADERS=$'Otari-Conversation-Id: bug-fix-1234\nOtari-Tags: agent=bug-fix,run=1234'
+```
+
+It takes the place of Claude Code's own session id for grouping. See
+[Sessions from your own agent](traces.md#sessions-from-your-own-agent).
+
 ## Budgets
 
 A request a budget refuses answers `403` with `Otari-Error-Code: budget_exceeded`.
