@@ -152,12 +152,10 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
         await self.db.flush()
 
     async def imported_configured_names(self) -> set[str]:
-        """The ``providers:`` entries of config.yml already copied onto hosted providers."""
         result = await self.db.execute(select(ConfiguredProviderImport.name))
         return set(result.scalars().all())
 
     async def record_configured_import(self, name: str) -> None:
-        """Record that the ``providers:`` entry ``name`` was copied onto a hosted provider."""
         self.db.add(ConfiguredProviderImport(name=name))
         await self.db.flush()
 

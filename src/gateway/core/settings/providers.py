@@ -25,7 +25,7 @@ from typing import Annotated, Any
 from any_llm import LLMProvider
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
+from gateway.core.settings_view import OMITTED
 
 # What a ``hosted_providers:`` entry may not carry, with the reason it is refused.
 _REFUSED_KEYS = {
@@ -136,7 +136,8 @@ class ProviderSettings(BaseModel):
         ),
     )
 
-    import_configured_providers: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
+    # Read once at startup by the import it gates, so it is no setting the dashboard shows or changes.
+    import_configured_providers: Annotated[bool, OMITTED] = Field(
         default=True,
         description=(
             "Copy each providers: entry of config.yml onto a hosted provider of its name at startup, once, and serve "
