@@ -97,8 +97,9 @@ def end_user_identifier(
 
 
 def bind_upstream_user(request_fields: dict[str, Any], identifier: str | None) -> dict[str, Any]:
-    """Replace the caller's ``user`` with ``identifier``, in place."""
+    """Replace the caller's ``user`` and ``safety_identifier`` with ``identifier``, in place."""
     request_fields.pop("user", None)
+    request_fields.pop("safety_identifier", None)
     request_fields.pop(UPSTREAM_USER_FIELD, None)
     if identifier is not None:
         request_fields[UPSTREAM_USER_FIELD] = identifier

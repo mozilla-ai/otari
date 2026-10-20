@@ -164,6 +164,14 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
             "used to carry; either field is accepted, and this one wins when a request sends both."
         ),
     )
+    # Absent from ``CompletionParams``, so declared here or the derived base drops it.
+    safety_identifier: str | None = Field(
+        default=None,
+        description=(
+            "A stable id for the end user, as OpenAI defines it. Wins over `user` as the tag the "
+            "provider's end-user identifier is derived from, and never reaches the provider as sent."
+        ),
+    )
 
     @field_validator("messages")
     @classmethod
@@ -598,6 +606,7 @@ async def run_chat_completion(
             log_writer=log_writer,
             model=request.model,
             user_id_from_request=request.user,
+            end_user_tag=request.safety_identifier,
             estimate_prompt_chars=len(str(request.messages)),
             estimate_max_output_tokens=output_cap,
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,

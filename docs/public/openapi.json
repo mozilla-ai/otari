@@ -3890,6 +3890,18 @@
             ],
             "title": "Response Format"
           },
+          "safety_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A stable id for the end user, as OpenAI defines it. Wins over `user` as the tag the provider's end-user identifier is derived from, and never reaches the provider as sent.",
+            "title": "Safety Identifier"
+          },
           "seed": {
             "anyOf": [
               {

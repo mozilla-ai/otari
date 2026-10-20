@@ -2666,6 +2666,7 @@ async def resolve_request_context(
     tags: dict[str, str] | None = None,
     turn: TurnFacts | None = None,
     session_label: str | None = None,
+    end_user_tag: str | None = None,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
 
@@ -2701,6 +2702,11 @@ async def resolve_request_context(
     ``(prompt_chars, vision_usage)``; any vision describe side-call it made is
     metered and billed here as committed spend (the call already happened, so it
     is not gated or refundable).
+
+    ``end_user_tag`` is the caller's tag for its end user when the endpoint reads
+    one apart from ``user_id_from_request``, as OpenAI's ``safety_identifier`` is.
+    It wins over that field for the provider identifier only: billing still
+    resolves from ``user_id_from_request``.
     """
     # Earliest point in the shared handler preamble; anchors the request's
     # latency_ms (measured monotonically, so it is immune to wall-clock steps).
@@ -2761,7 +2767,9 @@ async def resolve_request_context(
             route.fallback_enabled,
             resolve_latency_ms,
         )
-        upstream_user = _end_user(adapter, config, route.workspace_id, user_id_from_request, route.user_id)
+        upstream_user = _end_user(
+            adapter, config, route.workspace_id, end_user_tag or user_id_from_request, route.user_id
+        )
     else:
         request_id = str(uuid.uuid4())
         set_request_id(raw_request, response, request_id)
@@ -2836,7 +2844,7 @@ async def resolve_request_context(
             adapter,
             config,
             str(workspace_id),
-            user_id_from_request,
+            end_user_tag or user_id_from_request,
             user_id,
             session=session_principal is not None,
         )
