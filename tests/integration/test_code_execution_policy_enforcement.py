@@ -418,10 +418,11 @@ def test_a_policy_read_that_fails_releases_the_budget_reservation(
         raise SQLAlchemyError("connection lost mid-admission")
 
     monkeypatch.setattr(WorkspaceCodeExecutionPolicies, "resolve", failing_resolve)
-    # TestClient re-raises a server exception rather than rendering a 500, so the
-    # failure arrives here; what matters is the state it left behind.
-    with pytest.raises(SQLAlchemyError):
-        _post(funded)
+    # The Messages route answers an unexpected failure as Anthropic's 500; what matters
+    # is the state it left behind.
+    failed = _post(funded)
+    assert failed.status_code == 500, failed.text
+    assert failed.json()["error"]["type"] == "api_error"
 
     session = db_session_factory()
     try:

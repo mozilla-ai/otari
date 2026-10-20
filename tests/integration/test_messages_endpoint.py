@@ -16,6 +16,8 @@ from fastapi.testclient import TestClient
 
 from gateway.api.routes.messages import CountTokensRequest
 from gateway.core.config import API_KEY_HEADER, API_ROOT, API_VERSION, GatewayConfig
+from gateway.exceptions import TenancyError
+from gateway.exceptions.control_plane_exceptions import ControlPlaneRefusedError
 
 
 def _make_message_response(**overrides: Any) -> MessageResponse:
@@ -154,6 +156,48 @@ def test_the_anthropic_sdk_reads_a_validation_failure(client: TestClient, test_c
     assert isinstance(refused.value.body, dict)
     assert refused.value.body["error"]["type"] == "invalid_request_error"
     assert refused.value.body["error"]["message"].startswith("messages: ")
+
+
+class _NotFound(TenancyError):
+    status_code = 404
+
+
+@pytest.mark.parametrize(
+    ("raised", "status_code", "error", "retry_after"),
+    [
+        (
+            ControlPlaneRefusedError("slow down", status_code=429, retry_after="30"),
+            429,
+            {"type": "rate_limit_error", "message": "slow down"},
+            "30",
+        ),
+        (_NotFound("no such workspace"), 404, {"type": "not_found_error", "message": "no such workspace"}, None),
+        (RuntimeError("secret internals"), 500, {"type": "api_error", "message": "Internal server error"}, None),
+    ],
+    ids=["control-plane", "tenancy", "unexpected"],
+)
+def test_an_error_no_one_rendered_still_answers_in_anthropic_s_envelope(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    raised: Exception,
+    status_code: int,
+    error: dict[str, str],
+    retry_after: str | None,
+) -> None:
+    with patch("gateway.api.routes.messages.resolve_request_context", new=AsyncMock(side_effect=raised)):
+        response = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet",
+                "max_tokens": 8,
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == status_code
+    assert response.json() == {"type": "error", "error": error}
+    assert response.headers.get("Retry-After") == retry_after
 
 
 def test_messages_endpoint_with_tools(

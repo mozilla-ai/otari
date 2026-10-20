@@ -53,6 +53,7 @@ from gateway.api.routes._pipeline import (
     ToolBackends,
     ToolContext,
     classify_provider_error,
+    control_plane_error,
     default_attempt_kwargs,
     domain_error,
     error_kind_for_status,
@@ -85,6 +86,8 @@ from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import INVALID_REQUEST, error_headers
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
+from gateway.exceptions import TenancyError
+from gateway.exceptions.control_plane_exceptions import ControlPlaneError
 from gateway.exceptions.files_exceptions import ProviderUploadFailedError
 from gateway.exceptions.tools_exceptions import ContainerOnManagedCredentialError
 from gateway.log_config import logger
@@ -157,6 +160,16 @@ class _AnthropicErrorRoute(APIRoute):
                 if enveloped is exc:
                     raise
                 raise enveloped from exc
+            except ControlPlaneError as exc:
+                raise control_plane_error(_ADAPTER, exc) from exc
+            except TenancyError as exc:
+                raise domain_error(_ADAPTER, exc) from exc
+            except Exception as exc:
+                # Not ``BaseException``: a cancelled request is a disconnected client, not a failure.
+                logger.exception("Messages request failed: %s", type(exc).__name__)
+                raise _anthropic_error(
+                    _ERR_API, "Internal server error", status.HTTP_500_INTERNAL_SERVER_ERROR
+                ) from exc
 
         return handle_in_anthropic_envelope
 

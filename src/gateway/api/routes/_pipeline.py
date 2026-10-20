@@ -1266,6 +1266,22 @@ def domain_error(adapter: FormatAdapter[Any, Any], exc: TenancyError) -> HTTPExc
     )
 
 
+def control_plane_error(adapter: FormatAdapter[Any, Any], exc: ControlPlaneError) -> HTTPException:
+    """A control plane peer's refusal in the error envelope of ``adapter``'s dialect.
+
+    Not :func:`domain_error`, which would drop a 429's ``Retry-After`` and read the
+    status as an invalid request. Both are the peer's answer, which
+    ``_control_plane_error_handler`` keeps whole for the same reason.
+    """
+    retry_after = getattr(exc, "retry_after", None)
+    return adapter.error(
+        exc.status_code,
+        exc.message,
+        error_kind_for_status(exc.status_code),
+        {"Retry-After": retry_after} if retry_after else None,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Request context (auth, budget reservation, platform route)
 # ---------------------------------------------------------------------------
@@ -3940,17 +3956,8 @@ async def prepare_gateway_tools(
     except ControlPlaneError as exc:
         # A peer's refusal of the web search, code execution or MCP resolve is a domain error,
         # so without this it would answer in `main.py`'s shape rather than this route's.
-        # Not `domain_error`: that one is right for the tenancy family it is named for, and
-        # would drop a 429's `Retry-After` and read the status as an invalid request. Both are
-        # the peer's answer, which `_control_plane_error_handler` keeps whole for the same reason.
         await release_reservation(ctx)
-        retry_after = getattr(exc, "retry_after", None)
-        raise adapter.error(
-            exc.status_code,
-            exc.message,
-            error_kind_for_status(exc.status_code),
-            {"Retry-After": retry_after} if retry_after else None,
-        ) from exc
+        raise control_plane_error(adapter, exc) from exc
     except TenancyError as exc:
         # The admission steps render their own refusals; this keeps the hold from leaking
         # should a new one escape them. After `ControlPlaneError`, which is a `TenancyError`.
