@@ -166,6 +166,7 @@ limits", order the models with the arrows, and add the limit under Settings,
 Rate limit rules, counted for "Each model". On an existing policy, pick "Spill
 over" in its Main selection section.
 
+## Learned routing (knn router)
 
 The `knn` router uses scored examples to rank candidates for each user's
 traffic:

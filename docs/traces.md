@@ -139,8 +139,8 @@ backend. A span the gateway records itself has neither.
 | `GET /api/v1/organizations/me/traces`, and the same four | a signed-in member: an owner or admin reads every workspace of their active organization, anyone else the workspaces they belong to |
 
 A list read narrows to one workspace with `workspace_id`, inside the caller's
-scope and never beyond it. `q` matches the start of a session's trace id or of
-its name, case-sensitively, inside the same scope. A trace is keyed by its
+scope and never beyond it. `q` matches any part of a session's trace id, name,
+agent or user, in any case, inside the same scope. A trace is keyed by its
 workspace and its id, so a detail read takes the `workspace_id` its list entry
 names; without it, an id in more than one of the caller's workspaces answers 409
 rather than a guess.
