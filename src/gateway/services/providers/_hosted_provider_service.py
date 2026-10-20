@@ -626,8 +626,8 @@ class HostedProviderService:
         """Copy the ``providers:`` entries of config.yml onto hosted providers of their names, once each.
 
         An entry copied by an earlier start is not copied again, so removing
-        its hosted provider sticks. Each is moved without asking it for its
-        models; see :meth:`create_provider`.
+        its hosted provider sticks. Each is asked for its models, which are
+        switched on, and one that lists none is not copied.
         """
         async with self.uow:
             done = await self.providers.imported_configured_names()
@@ -642,7 +642,7 @@ class HostedProviderService:
                 imports.kept[name] = plan.reason or "it cannot be copied"
                 continue
             try:
-                await self.create_provider(plan.create, discover=False)
+                await self.create_provider(plan.create, switch_on_listed=True)
             except TenancyError as exc:
                 # Another replica may have copied it first.
                 async with self.uow:
@@ -652,7 +652,20 @@ class HostedProviderService:
                         imports.kept[name] = str(exc)
                 continue
             async with self.uow:
-                await self.providers.record_configured_import(name)
+                if not await self.models.names_for_provider(name):
+                    # It would serve none of what the entry served, so the
+                    # entry keeps serving, and the next start asks again.
+                    row = await self.providers.get_by_name(name)
+                    if row is not None:
+                        await self.providers.delete_row(row)
+                    listed = False
+                else:
+                    await self.providers.record_configured_import(name)
+                    listed = True
+            if not listed:
+                forget_hosted_name(name)
+                imports.kept[name] = "the provider listed no models, so a hosted provider would serve none of them"
+                continue
             imports.imported.append(name)
         return imports
 

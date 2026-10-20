@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
+from any_llm.types.model import Model
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -43,12 +44,20 @@ def test_config(postgres_url: str) -> GatewayConfig:
     return config.model_copy(update={"import_configured_providers": True})
 
 
-@pytest.fixture(autouse=True)
-def _discovery(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _lists_nothing(impl_name: str, **_: object) -> ProviderDiscovery:
-        return ProviderDiscovery(provider=impl_name, models=[])
+LISTED: list[str] = ["gpt-4o"]
 
-    monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _lists_nothing)
+
+@pytest.fixture(autouse=True)
+def _discovery(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    async def _lists(impl_name: str, **_: object) -> ProviderDiscovery:
+        return ProviderDiscovery(
+            provider=impl_name,
+            models=[Model(id=model, object="model", created=0, owned_by=impl_name) for model in LISTED],
+        )
+
+    monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _lists)
+    yield
+    LISTED[:] = ["gpt-4o"]
 
 
 @pytest.fixture
@@ -96,7 +105,7 @@ def test_an_entry_is_copied_onto_a_hosted_provider_and_served_by_it(
     assert (sent["api_key"], sent["api_base"]) == (EU_KEY, EU_BASE)
     with db_session_factory() as db:
         row = db.execute(select(HostedProvider).where(HostedProvider.name == "openai-eu")).scalar_one()
-        assert (row.provider, row.api_base, row.serves_unlisted_models) == ("openai", EU_BASE, True)
+        assert (row.provider, row.api_base, row.serves_unlisted_models) == ("openai", EU_BASE, False)
         assert row.encrypted_api_key is not None and decrypt_secret(row.encrypted_api_key) == EU_KEY
         assert db.execute(select(ConfiguredProviderImport.name)).scalars().all() == ["openai-eu"]
 
@@ -128,3 +137,20 @@ def test_without_a_secret_key_the_entry_keeps_serving_from_config(
     assert sent["api_key"] == EU_KEY
     with db_session_factory() as db:
         assert db.execute(select(HostedProvider)).scalars().all() == []
+
+
+def test_an_entry_whose_provider_lists_nothing_keeps_serving_from_config(
+    start: Start, test_config: GatewayConfig, db_session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A copy would serve none of its models, so none is kept, and the next start asks again."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    LISTED.clear()
+
+    with start() as client:
+        status, sent = _chat(client, "openai-eu:gpt-4o")
+        assert "openai-eu" in test_config.providers
+
+    assert (status, sent["api_key"]) == (200, EU_KEY)
+    with db_session_factory() as db:
+        assert db.execute(select(HostedProvider)).scalars().all() == []
+        assert db.execute(select(ConfiguredProviderImport)).scalars().all() == []

@@ -416,9 +416,6 @@ async def _import_configured_providers(config: GatewayConfig) -> None:
         )
 
 
-            )
-
-
 # The periodic background workers a standalone deployment runs.
 # A new worker is one entry here.
 #
