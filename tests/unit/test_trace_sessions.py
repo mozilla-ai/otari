@@ -115,6 +115,8 @@ def test_the_same_label_from_two_users_is_two_sessions() -> None:
         (SessionRef(source="client", key="api-key-123456"), None),
         (SessionRef(source="client", key="API_KEY_0123456789abcdef0123456789abcdef"), None),
         (SessionRef(source="client", key="ASIAIOSFODNN7EXAMPLE"), None),
+        (SessionRef(source="client", key="alice@example.com:42"), None),
+        (SessionRef(source="client", key="src/secret/notes.txt:42"), None),
         (SessionRef(source="harness", key="b57732d4"), None),
         (SessionRef(source="otlp", key="chat-1"), None),
     ],
