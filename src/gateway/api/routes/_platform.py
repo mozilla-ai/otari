@@ -379,7 +379,7 @@ async def run_platform_attempts(
     run_attempt: Callable[[dict[str, Any], Callable[[], None]], Awaitable[T]],
     extract_usage: Callable[[T], Any],
     classify_error: Callable[[BaseException], tuple[bool, str]],
-    report_attempt_outcome: Callable[[ResolvedAttempt, str, Any, str | None, bool], None],
+    report_attempt_outcome: Callable[[ResolvedAttempt, str, Any, str | None, bool, BaseException | None], None],
     on_success: Callable[[ResolvedAttempt], None],
     max_tool_iterations: int,
     prepare_attempt: Callable[[ResolvedAttempt], dict[str, Any]] | None = None,
@@ -464,7 +464,7 @@ async def run_platform_attempts(
         except HTTPException:
             raise
         except MaxToolIterationsExceeded as exc:
-            report_attempt_outcome(attempt, "error", None, None, True)
+            report_attempt_outcome(attempt, "error", None, None, True, None)
             logger.warning(
                 "Tool loop iteration cap hit request_id=%s position=%d cap=%d",
                 route.request_id,
@@ -481,7 +481,7 @@ async def run_platform_attempts(
             # help. Report a terminal outcome without a provider error class,
             # then propagate raw so ``run_platform_non_stream`` maps it to a
             # 502 with the backend-specific detail.
-            report_attempt_outcome(attempt, "error", None, None, True)
+            report_attempt_outcome(attempt, "error", None, None, True, None)
             raise
         except asyncio.CancelledError:
             # The catch below is `BaseException` so a provider client raising
@@ -496,7 +496,7 @@ async def run_platform_attempts(
         except BaseException as exc:
             retryable, error_class = classify_error(exc)
             is_final_attempt = locked_in or not retryable or is_last_planned_attempt
-            report_attempt_outcome(attempt, "error", None, error_class, is_final_attempt)
+            report_attempt_outcome(attempt, "error", None, error_class, is_final_attempt, exc)
             logger.warning(
                 "Provider call failed request_id=%s position=%d provider=%s model=%s "
                 "error=%s retryable=%s locked_in=%s",
@@ -532,7 +532,7 @@ async def run_platform_attempts(
             continue
 
         # Success on this attempt.
-        report_attempt_outcome(attempt, "success", extract_usage(result), None, True)
+        report_attempt_outcome(attempt, "success", extract_usage(result), None, True, None)
         on_success(attempt)
         return result
 
@@ -749,16 +749,18 @@ async def _report_platform_usage(
     *,
     ttft_ms: int | None = None,
     units: Mapping[str, int] | None = None,
+    error_message: str | None = None,
     is_final_attempt: bool,
 ) -> SettledCost | None:
     """POST a usage record back to the platform with bounded retries.
 
     ``is_final_attempt`` tells the platform that no later planned fallback will
     run. ``units`` carries the counts a rate that is not per token bills a
-    successful attempt on, keyed by pricing unit. Failures are swallowed after ``max_retries`` so they don't impact the
-    user's response path. Non-retryable status codes (auth /
-    payment-required / not-found / conflict / unprocessable) short-circuit the
-    retry loop.
+    successful attempt on, keyed by pricing unit. ``error_message`` is a failed
+    attempt's provider text, already redacted by the caller. Failures are
+    swallowed after ``max_retries`` so they don't impact the user's response
+    path. Non-retryable status codes (auth / payment-required / not-found /
+    conflict / unprocessable) short-circuit the retry loop.
     """
     platform_base_url = config.platform.get("base_url")
     if not platform_base_url:
@@ -802,8 +804,11 @@ async def _report_platform_usage(
         # does not read ``units`` must keep seeing that.
         if units:
             payload["units"] = dict(units)
-    elif error_class is not None:
-        payload["error_class"] = error_class
+    else:
+        if error_class is not None:
+            payload["error_class"] = error_class
+        if error_message:
+            payload["error_message"] = error_message
 
     delay_seconds = 0.25
     for attempt in range(1, max_retries + 1):

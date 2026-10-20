@@ -565,6 +565,7 @@ class _PendingUsageReport(NamedTuple):
     usage: Any
     error_class: str | None
     is_final_attempt: bool
+    error_message: str | None = None
 
 
 def _is_unsupported_feature_error(exc: BaseException) -> bool:
@@ -649,6 +650,11 @@ def failure_error_message(exc: BaseException) -> str:
     if _is_image_input_rejection(exc):
         return unsupported_image_detail()
     return str(exc)
+
+
+def _reported_error_message(exc: BaseException) -> str | None:
+    """The text a hybrid error report carries: what a standalone usage row would store."""
+    return _stored_error_message(failure_error_message(exc))
 
 
 def _rejected_param(exc: BaseException, request_params: Collection[str] = _FORWARDED_PARAMS) -> str | None:
@@ -5921,6 +5927,7 @@ def build_streaming_response(
                     usage=None,
                     session_label=session_label,
                     ttft_ms=_ttft_ms(started_at, first_chunk_at),
+                    error_message=_reported_error_message(exc),
                     is_final_attempt=True,
                 ),
                 platform_correlation_id,
@@ -6416,6 +6423,7 @@ async def _flush_pending_usage_reports(
                         report.usage,
                         report.error_class,
                         session_label,
+                        error_message=report.error_message,
                         is_final_attempt=report.is_final_attempt,
                     )
                     for report in pending_error_reports
@@ -6549,6 +6557,7 @@ async def run_streaming_with_fallback(
     async def _on_attempt_failed(attempt: ResolvedAttempt, failure: StreamingAttemptFailure) -> None:
         attempt_errors.append(failure.exception)
         failed_attempts.append(attempt)
+        error_message = _reported_error_message(failure.exception)
         background_tasks.add_task(
             _report_platform_usage,
             config,
@@ -6557,6 +6566,7 @@ async def run_streaming_with_fallback(
             None,
             failure.error_class,
             session_label,
+            error_message=error_message,
             is_final_attempt=failure.is_final_attempt,
         )
         pending_error_reports.append(
@@ -6566,6 +6576,7 @@ async def run_streaming_with_fallback(
                 usage=None,
                 error_class=failure.error_class,
                 is_final_attempt=failure.is_final_attempt,
+                error_message=error_message,
             )
         )
         record_abandoned_attempt(attempt.provider, attempt.model, failure.reason, attempt.position)
@@ -6777,12 +6788,14 @@ async def run_platform_non_stream(
         usage: Any,
         error_class: str | None,
         is_final_attempt: bool,
+        error: BaseException | None,
     ) -> None:
         nonlocal successful_report, last_failed
         if outcome == "success":
             successful_report = (attempt, usage)
             return
         last_failed = attempt
+        error_message = _reported_error_message(error) if error is not None else None
         background_tasks.add_task(
             _report_platform_usage,
             config,
@@ -6791,6 +6804,7 @@ async def run_platform_non_stream(
             usage,
             error_class,
             session_label,
+            error_message=error_message,
             is_final_attempt=is_final_attempt,
         )
         pending_error_reports.append(
@@ -6800,6 +6814,7 @@ async def run_platform_non_stream(
                 usage=usage,
                 error_class=error_class,
                 is_final_attempt=is_final_attempt,
+                error_message=error_message,
             )
         )
 

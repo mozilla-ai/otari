@@ -62,6 +62,7 @@ from gateway.api.routes._pipeline import (
     _flush_pending_usage_reports,
     _PendingUsageReport,
     _raise_for_unresolvable_model,
+    _reported_error_message,
     _schedule_usage_report,
     classify_provider_error,
     failure_status_code,
@@ -949,7 +950,9 @@ async def _run_platform_passthrough(
     pending_error_reports: list[_PendingUsageReport] = []
     winner: ResolvedAttempt | None = None
 
-    def report_error(attempt: ResolvedAttempt, error_class: str | None, is_final_attempt: bool) -> None:
+    def report_error(
+        attempt: ResolvedAttempt, error_class: str | None, is_final_attempt: bool, error: BaseException | None = None
+    ) -> None:
         pending_error_reports.append(
             _PendingUsageReport(
                 attempt_id=attempt.attempt_id,
@@ -957,6 +960,7 @@ async def _run_platform_passthrough(
                 usage=None,
                 error_class=error_class,
                 is_final_attempt=is_final_attempt,
+                error_message=_reported_error_message(error) if error is not None else None,
             )
         )
 
@@ -980,16 +984,21 @@ async def _run_platform_passthrough(
             mapped = map_provider_error(exc) if map_provider_error else None
             if mapped is None:
                 raise
-            report_error(attempt, _classify_upstream_error(exc)[1], True)
+            report_error(attempt, _classify_upstream_error(exc)[1], True, exc)
             raise mapped from exc
 
     def report_attempt_outcome(
-        attempt: ResolvedAttempt, outcome: str, _result: Any, error_class: str | None, is_final_attempt: bool
+        attempt: ResolvedAttempt,
+        outcome: str,
+        _result: Any,
+        error_class: str | None,
+        is_final_attempt: bool,
+        error: BaseException | None,
     ) -> None:
         nonlocal position
         # The success report is sent below, once the result's usage is read.
         if outcome != "success":
-            report_error(attempt, error_class, is_final_attempt)
+            report_error(attempt, error_class, is_final_attempt, error)
             position += 1
 
     def on_success(attempt: ResolvedAttempt) -> None:
@@ -1028,6 +1037,7 @@ async def _run_platform_passthrough(
                 report.outcome,
                 None,
                 report.error_class,
+                error_message=report.error_message,
                 is_final_attempt=report.is_final_attempt,
             ),
             report.attempt_id,

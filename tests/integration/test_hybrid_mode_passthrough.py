@@ -214,6 +214,7 @@ def test_embeddings_falls_back_and_reports_the_failed_attempt(
         "status": "error",
         "is_final_attempt": False,
         "error_class": "unknown",
+        "error_message": "simulated upstream failure",
     }
     assert reports["att-b"]["status"] == "success"
 
@@ -533,6 +534,7 @@ def test_an_attempt_naming_a_provider_this_gateway_cannot_reach_falls_through(
         "status": "error",
         "is_final_attempt": False,
         "error_class": "unsupported_provider",
+        "error_message": "This gateway cannot reach provider 'brand-new-provider'",
     }
 
 
@@ -549,7 +551,13 @@ def test_a_lone_attempt_naming_an_unknown_provider_is_a_502_not_a_crash(
 
     assert response.status_code == 502
     assert plane.reports == [
-        {"correlation_id": "att-a", "status": "error", "is_final_attempt": True, "error_class": "unsupported_provider"}
+        {
+            "correlation_id": "att-a",
+            "status": "error",
+            "is_final_attempt": True,
+            "error_class": "unsupported_provider",
+            "error_message": "This gateway cannot reach provider 'brand-new-provider'",
+        }
     ]
 
 

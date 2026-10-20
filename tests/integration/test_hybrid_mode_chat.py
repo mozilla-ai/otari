@@ -673,6 +673,114 @@ def test_hybrid_mode_falls_through_on_sdk_wrapped_connection_error(
     assert error_reports[0]["error_class"] == "conn_err"
 
 
+@pytest.mark.parametrize("stream", [False, True], ids=["unstreamed", "streamed"])
+def test_hybrid_mode_reports_the_provider_message_of_an_unclassified_failure(
+    stream: bool,
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    """An attempt that fails with no status reports ``unknown`` and the provider's own text, redacted.
+
+    The OpenAI SDK raises a status-less ``APIError`` for an error event inside a 200
+    stream, which is what a provider reporting an overload mid-stream looks like.
+    """
+    import openai
+
+    usage_reports: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "unclassified-req",
+                    "fallback_enabled": True,
+                    "attempts": [
+                        {
+                            "attempt_id": "unclassified-att-broken",
+                            "position": 0,
+                            "provider": "fireworks",
+                            "model": "accounts/fireworks/models/deepseek-v4p1-flash",
+                            "api_key": "fw-broken",
+                            "managed": False,
+                        },
+                        {
+                            "attempt_id": "unclassified-att-good",
+                            "position": 1,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-openai-real",
+                            "managed": False,
+                        },
+                    ],
+                },
+            )
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    def _overloaded() -> openai.APIError:
+        return openai.APIError(
+            "Model is overloaded for key sk-fwsecret12345678, please retry",
+            request=httpx.Request("POST", "https://api.fireworks.ai/inference/v1/chat/completions"),
+            body=None,
+        )
+
+    async def _failing_stream() -> AsyncIterator[ChatCompletionChunk]:
+        raise _overloaded()
+        yield  # pragma: no cover - makes this an async generator
+
+    async def _success_stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield ChatCompletionChunk.model_validate(
+            {
+                "id": "chunk-1",
+                "object": "chat.completion.chunk",
+                "created": 1700000000,
+                "model": "gpt-4o-mini",
+                "choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6},
+            }
+        )
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        failing = kwargs["model"].startswith("fireworks:")
+        if stream:
+            return _failing_stream() if failing else _success_stream()
+        if failing:
+            raise _overloaded()
+        return ChatCompletion(
+            id="chatcmpl-fallback",
+            object="chat.completion",
+            created=1700000000,
+            model="gpt-4o-mini",
+            choices=[
+                Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hi"), finish_reason="stop")
+            ],
+            usage=CompletionUsage(prompt_tokens=5, completion_tokens=1, total_tokens=6),
+        )
+
+    control_plane_transport(fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "anything", "messages": [{"role": "user", "content": "hi"}], "stream": stream},
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Otari-Attempt-ID"] == "unclassified-att-good"
+    reports = {report["correlation_id"]: report for report in usage_reports}
+    assert reports["unclassified-att-broken"]["error_class"] == "unknown"
+    assert reports["unclassified-att-broken"]["error_message"] == "Model is overloaded for key [redacted], please retry"
+    assert "error_message" not in reports["unclassified-att-good"]
+
+
 def test_hybrid_mode_falls_through_when_a_provider_account_is_out_of_credit(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

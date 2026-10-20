@@ -742,6 +742,8 @@ Content-Type: application/json
   "error_class": "http_401",           // optional on error; omitted when the
                                        // Otari can't classify the failure
                                        // (e.g. mid-stream errors). See below.
+  "error_message": "Invalid API key",  // optional on error; the provider's own
+                                       // failure text, redacted. See below.
   "session_label": "my-run-personas",  // optional; the caller's cost-attribution
                                        // label (see below). Omitted when absent.
   "ttft_ms": 340                       // optional; milliseconds from request start
@@ -929,6 +931,15 @@ The field is **omitted entirely** when Otari can't map the failure to an
 exception class; this happens with mid-stream errors surfaced via the
 SSE channel, where only an error string is available. Treat a missing
 `error_class` as "uncategorised error" when aggregating.
+
+`error_message` is the failure text a person reads, where `error_class` is the
+tag a receiver aggregates on: the failure's text, usually the provider's own
+message, with credentials, hosts and echoed request content redacted, at most
+400 characters, or a fixed `LLM provider error` when nothing explanatory
+survives that. It is sent whether or not an `error_class` was, so an `unknown`
+or missing tag still arrives with the reason behind it. A few gateway-side
+outcomes omit it: a tool loop's iteration cap, an unreachable sandbox or search
+backend, and a refusal before any provider was called.
 
 ### Retry semantics
 

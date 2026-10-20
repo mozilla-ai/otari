@@ -298,10 +298,11 @@ async def test_locked_in_retryable_failure_marks_attempt_final() -> None:
     ]
     route = ResolvedRoute(request_id="r", fallback_enabled=True, attempts=attempts)
     reports: list[tuple[Any, ...]] = []
+    failure = RuntimeError("failed after lock-in")
 
     async def _run_attempt(_kwargs: dict[str, Any], on_first_response: Any) -> Any:
         on_first_response()
-        raise RuntimeError("failed after lock-in")
+        raise failure
 
     with pytest.raises(HTTPException):
         await run_platform_attempts(
@@ -316,7 +317,7 @@ async def test_locked_in_retryable_failure_marks_attempt_final() -> None:
             max_tool_iterations=1,
         )
 
-    assert reports == [(attempts[0], "error", None, "http_500", True)]
+    assert reports == [(attempts[0], "error", None, "http_500", True, failure)]
 
 
 @pytest.mark.asyncio
@@ -360,7 +361,7 @@ async def test_gateway_terminal_error_marks_current_attempt_final(
             max_tool_iterations=1,
         )
 
-    assert reports == [(attempts[0], "error", None, None, True)]
+    assert reports == [(attempts[0], "error", None, None, True, None)]
 
 
 @pytest.mark.asyncio
@@ -371,10 +372,11 @@ async def test_fallback_reports_nonfinal_error_and_final_success() -> None:
     ]
     route = ResolvedRoute(request_id="r", fallback_enabled=True, attempts=attempts)
     reports: list[tuple[Any, ...]] = []
+    failure = RuntimeError("primary failed")
 
     async def _run_attempt(kwargs: dict[str, Any], _on_first_response: Any) -> str:
         if kwargs["api_key"] == "bad":
-            raise RuntimeError("primary failed")
+            raise failure
         return "ok"
 
     result = await run_platform_attempts(
@@ -391,8 +393,8 @@ async def test_fallback_reports_nonfinal_error_and_final_success() -> None:
 
     assert result == "ok"
     assert reports == [
-        (attempts[0], "error", None, "http_500", False),
-        (attempts[1], "success", None, None, True),
+        (attempts[0], "error", None, "http_500", False, failure),
+        (attempts[1], "success", None, None, True, None),
     ]
 
 
@@ -406,9 +408,10 @@ async def test_nonretryable_error_marks_first_attempt_final() -> None:
     ]
     route = ResolvedRoute(request_id="r", fallback_enabled=True, attempts=attempts)
     reports: list[tuple[Any, ...]] = []
+    failure = RuntimeError("invalid request")
 
     async def _run_attempt(_kwargs: dict[str, Any], _on_first_response: Any) -> str:
-        raise RuntimeError("invalid request")
+        raise failure
 
     with pytest.raises(HTTPException):
         await run_platform_attempts(
@@ -423,7 +426,7 @@ async def test_nonretryable_error_marks_first_attempt_final() -> None:
             max_tool_iterations=1,
         )
 
-    assert reports == [(attempts[0], "error", None, "http_400", True)]
+    assert reports == [(attempts[0], "error", None, "http_400", True, failure)]
 
 
 def _usage_config() -> GatewayConfig:
@@ -771,6 +774,49 @@ async def test_report_platform_usage_forwards_ttft_ms(
         assert "ttft_ms" not in body
     else:
         assert body["ttft_ms"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("outcome", "error_class", "error_message", "expected"),
+    [
+        ("error", "unknown", "Model is overloaded", {"error_class": "unknown", "error_message": "Model is overloaded"}),
+        ("error", None, "stream ended early", {"error_message": "stream ended early"}),
+        ("error", "http_500", None, {"error_class": "http_500"}),
+        ("error", "http_500", "", {"error_class": "http_500"}),
+        ("success", None, "never on a success", {}),
+    ],
+    ids=["with-class", "without-class", "absent", "blank", "success"],
+)
+async def test_report_platform_usage_forwards_error_message(
+    outcome: str,
+    error_class: str | None,
+    error_message: str | None,
+    expected: dict[str, str],
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    config = cast(
+        GatewayConfig,
+        SimpleNamespace(
+            platform={"base_url": "http://platform", "usage_max_retries": 3},
+            platform_token="gw-test",
+        ),
+    )
+    post_mock = AsyncMock(return_value=httpx.Response(204))
+    control_plane_transport(post_mock)
+
+    await _platform._report_platform_usage(
+        config,
+        "corr-1",
+        outcome,
+        None,
+        error_class,
+        error_message=error_message,
+        is_final_attempt=True,
+    )
+
+    body = post_mock.call_args.kwargs["body"]
+    assert {key: body[key] for key in ("error_class", "error_message") if key in body} == expected
 
 
 @pytest.mark.asyncio
