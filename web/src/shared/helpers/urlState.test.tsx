@@ -1,3 +1,4 @@
+import { useLocation } from "@tanstack/react-router"
 import { act, renderHook } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 
@@ -160,5 +161,26 @@ describe("useUrlState with untracked keys", () => {
     expect(renders()).toBeGreaterThan(before)
     expect(result.current.get("peek")).toBe("t-2")
     expect(result.current.get("span")).toBe("s-2")
+  })
+
+  it("keeps an untracked key's current value when a tracked key is patched", async () => {
+    const { result } = renderHook(
+      () => ({
+        url: useUrlState(PEEK_DEFAULTS, { untracked: UNTRACKED }),
+        searchStr: useLocation({ select: (location) => location.searchStr }),
+      }),
+      { wrapper: withRouter({ url: "/?peek=t-1" }) },
+    )
+    await flushRouter()
+
+    await act(async () => {
+      result.current.url.patch({ span: "s-2" })
+    })
+    await act(async () => {
+      result.current.url.patch({ peek: "t-2" })
+    })
+    const params = new URLSearchParams(result.current.searchStr)
+    expect(params.get("peek")).toBe("t-2")
+    expect(params.get("span")).toBe("s-2")
   })
 })
