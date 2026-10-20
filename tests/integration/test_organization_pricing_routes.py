@@ -760,6 +760,21 @@ def test_a_tool_kind_override_is_per_call_and_named_as_its_instance(
     assert refused.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, refused.text
 
 
+def test_a_lookup_with_no_kind_finds_a_tool_override_by_its_bare_name(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The key is normalized as a model's only when it has a separator, which a tool's name never does."""
+    for name in ("exa", "team fetch", "deepseek"):
+        kind = "fetch" if " " in name else "search"
+        created = client.post(_ENDPOINT, json=_body(kind=kind, model_key=name), headers=master_key_header)
+        assert created.status_code == status.HTTP_201_CREATED, created.text
+
+        listed = client.get(_ENDPOINT, params={"model_key": name}, headers=master_key_header)
+        assert listed.status_code == status.HTTP_200_OK, listed.text
+        assert [(row["kind"], row["model_key"]) for row in listed.json()["data"]] == [(kind, name)]
+
+
 @pytest.mark.asyncio
 async def test_an_override_stored_before_the_rule_cannot_be_edited_by_an_organization(
     async_db: AsyncSession,
