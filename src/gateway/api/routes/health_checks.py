@@ -2,8 +2,8 @@
 
 Every model the deployment's hosted providers serve is sent one small
 completion on a schedule, and what each answered is kept for 48 hours. Not
-``/health``, which answers whether this process is up. Operator-gated and
-standalone only, and listed in ``CORE_FEATURES`` as ``FEATURE`` below.
+``/health``, which answers whether this process is up. Operator-gated, and
+listed in ``CORE_FEATURES`` as ``FEATURE`` below.
 
 A failed check's error is the provider's message cut to its first line, with
 anything shaped like a key or a bearer token replaced, and at most 300
@@ -82,9 +82,8 @@ async def _poll(config: GatewayConfig) -> None:
 
 FEATURE = CoreFeature(
     name="health_checks",
-    surface=Surface("health_checks", hosted=False),
-    # A hosted control plane sends no inference of its own to check, so the deployment mode is asked too.
-    enabled=lambda config: config.health_checks_enabled and not config.is_hosted_mode,
+    surface=Surface("health_checks"),
+    enabled=lambda config: config.health_checks_enabled,
     routers=lambda config: (router,),
     worker=_poll,
 )

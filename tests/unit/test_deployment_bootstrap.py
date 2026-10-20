@@ -22,7 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from gateway.api.deps import reset_config
 from gateway.api.routes import bootstrap as bootstrap_route
 from gateway.api.routes.bootstrap import HOSTED_SURFACES, STANDALONE_SURFACES, published_surfaces
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
 
@@ -413,6 +413,7 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     # Everything else is standalone's set, so a surface added there is not
     # silently withheld from a control plane.
     assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
+        "health_checks",
         "playground",
         "traces",
     }
@@ -435,7 +436,18 @@ def test_hosted_publishes_the_playground_once_it_knows_its_data_plane(tmp_path: 
     assert "playground" in answered["surfaces"]
     # The rest of the hosted set is unchanged by the address: this is one row's
     # availability, not a different edition.
-    assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {"traces"}
+    assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {"health_checks", "traces"}
+
+
+def test_hosted_publishes_the_health_page(tmp_path: Path) -> None:
+    """A check goes straight to the provider on the hosted provider's own key, so a control plane can run it."""
+    app = create_app(_hosted(tmp_path))
+
+    with TestClient(app) as client:
+        assert "health_checks" in client.get(f"{API_ROOT}/bootstrap").json()["surfaces"]
+        assert (
+            client.get(f"{API_ROOT}/health-checks", headers={API_KEY_HEADER: f"Bearer {MASTER_KEY}"}).status_code == 200
+        )
 
 
 def test_hosted_answers_everything_below_the_edition_the_way_standalone_does(tmp_path: Path) -> None:
