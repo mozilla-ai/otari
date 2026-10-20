@@ -6,7 +6,8 @@ listing.md and README.md, plus the README's example versions: the upgrade
 example names the next minor release and the auto-update example the new
 version's minor line (``0.28.0`` to ``0.28.1``). Every file is rewritten as
 text, so template.json keeps its formatting, and none is written unless every
-pattern was found, so a reworded README fails the run instead of half-bumping.
+pattern was found exactly as often as expected, so a reworded README fails the
+run instead of half-bumping.
 
 A version not above the pinned one changes nothing: a patch to an older minor
 line must not move new deploys backward.
@@ -76,6 +77,20 @@ def _sub(pattern: re.Pattern[str], repl: str, text: str, where: str) -> str:
     return new_text
 
 
+def _sub_once(pattern: re.Pattern[str], repl: str, text: str, where: str) -> str:
+    """Replace the one match, refusing text that holds none or several.
+
+    The example patterns match a shape of prose rather than the pinned version,
+    so a second one would be rewritten without anybody having asked.
+    """
+    new_text, count = pattern.subn(repl, text)
+    if not count:
+        raise BumpError(f"{where}: found no match for {pattern.pattern!r}")
+    if count > 1:
+        raise BumpError(f"{where}: found {count} matches for {pattern.pattern!r}, expected one")
+    return new_text
+
+
 def bump_texts(texts: dict[str, str], old: str, new: Version) -> dict[str, str]:
     """Return each file's text moved from ``old`` to ``new``, keyed like ``texts``."""
     image_re = re.compile(rf"{re.escape(f'{IMAGE}:{old}')}(?![\w.-])")
@@ -84,8 +99,8 @@ def bump_texts(texts: dict[str, str], old: str, new: Version) -> dict[str, str]:
 
     major, minor, _ = new
     readme = bumped["README.md"]
-    readme = _sub(UPGRADE_EXAMPLE_RE, rf"\g<1>{major}.{minor + 1}.0\g<2>", readme, "README.md")
-    readme = _sub(PATCH_EXAMPLE_RE, f"(`{major}.{minor}.0` to `{major}.{minor}.1`)", readme, "README.md")
+    readme = _sub_once(UPGRADE_EXAMPLE_RE, rf"\g<1>{major}.{minor + 1}.0\g<2>", readme, "README.md")
+    readme = _sub_once(PATCH_EXAMPLE_RE, f"(`{major}.{minor}.0` to `{major}.{minor}.1`)", readme, "README.md")
     bumped["README.md"] = readme
     return bumped
 

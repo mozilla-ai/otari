@@ -118,6 +118,18 @@ def test_a_missing_pattern_writes_nothing(root: Path, capsys: pytest.CaptureFixt
     assert _read(root) == before
 
 
+def test_a_second_example_match_writes_nothing(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    readme = root / "deploy" / "railway" / "README.md"
+    readme.write_text(readme.read_text() + "\nPick a target release (for example `9.9.9`).\n")
+    before = _read(root)
+    major, minor, _ = _pinned()
+
+    assert bump.main([f"{major}.{minor + 1}.0", "--root", str(root)]) == 1
+
+    assert "README.md: found 2 matches" in capsys.readouterr().err
+    assert _read(root) == before
+
+
 def test_image_match_does_not_extend_into_a_longer_version() -> None:
     texts = {name: "mzdotai/otari:0.2.10 (for example `0.3.0`) (`0.2.0` to `0.2.1`)" for name in _FILES}
 
