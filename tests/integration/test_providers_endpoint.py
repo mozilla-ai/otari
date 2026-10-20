@@ -83,6 +83,18 @@ def test_providers_carries_metadata_and_capabilities(
     }
 
 
+def test_providers_says_each_instance_is_defined_in_the_configuration(
+    providers_client: TestClient,
+    master_header: dict[str, str],
+) -> None:
+    resp = providers_client.get(f"{API_ROOT}/providers", headers=master_header)
+
+    assert {p["instance"]: p["source"] for p in resp.json()["providers"]} == {
+        "anthropic": "config",
+        "openai": "config",
+    }
+
+
 def test_providers_requires_master_key(
     providers_client: TestClient,
 ) -> None:

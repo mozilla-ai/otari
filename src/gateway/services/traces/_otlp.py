@@ -24,7 +24,7 @@ from gateway.log_config import logger
 from gateway.services.traces._collector import identifier_or_none
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._writer import SPANS_DROPPED, TraceWriter
-from gateway.types.traces import SpanRecord, TraceWrite, is_identifier
+from gateway.types.traces import LIST_SEPARATOR, SpanRecord, TraceWrite, is_identifier, is_identifier_list
 
 # ``gen_ai.operation.name`` values, by the span kind they are.
 _LLM_OPERATIONS = frozenset({"chat", "text_completion", "generate_content", "embeddings"})
@@ -106,6 +106,23 @@ def _int(attributes: Mapping[str, Any], key: str) -> int | None:
     return min(value, _INT32_MAX)
 
 
+def _joined(attributes: Mapping[str, Any], key: str) -> str | None:
+    """An array-of-strings attribute joined for storage, or None unless every element is an identifier.
+
+    A bare string is read as an array of one.
+    """
+    value = attributes.get(key)
+    items = (value,) if isinstance(value, str) else value
+    if not isinstance(items, list | tuple) or not items or not all(isinstance(item, str) for item in items):
+        return None
+    stripped = [item.strip() for item in items]
+    # Each element is checked before the join, which would split one that held the separator.
+    if not all(is_identifier(item) for item in stripped):
+        return None
+    joined = LIST_SEPARATOR.join(stripped)
+    return joined if is_identifier_list(joined) else None
+
+
 def _kind(operation: str | None) -> str:
     if operation in _LLM_OPERATIONS:
         return "llm"
@@ -134,6 +151,11 @@ def _span_id(otel_trace_id: str, otel_span_id: str) -> str:
     return f"otlp-{digest}"
 
 
+def _first_int(attributes: Mapping[str, Any], *keys: str) -> int | None:
+    """The first of ``keys`` that holds a count, keeping a reported zero."""
+    return next((count for key in keys if (count := _int(attributes, key)) is not None), None)
+
+
 def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
     attributes = span.attributes
     operation = identifier_or_none(_str(attributes, "gen_ai.operation.name"))
@@ -153,6 +175,26 @@ def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
     duration = (
         min(round((end - start).total_seconds() * 1000), _INT32_MAX) if start is not None and end is not None else None
     )
+    projected: dict[str, str | int | float | bool] = {}
+    if span.failed and error_type:
+        projected["error.type"] = error_type
+    if (finish_reasons := _joined(attributes, "gen_ai.response.finish_reasons")) is not None:
+        projected["gen_ai.response.finish_reasons"] = finish_reasons
+    if (max_tokens := _int(attributes, "gen_ai.request.max_tokens")) is not None:
+        projected["gen_ai.request.max_tokens"] = max_tokens
+    input_tokens = _int(attributes, "gen_ai.usage.input_tokens")
+    cache_read = _first_int(
+        attributes,
+        "gen_ai.usage.cache_read_tokens",
+        "gen_ai.usage.cache_read.input_tokens",
+        "gen_ai.usage.cached_tokens",
+    )
+    cache_write = _first_int(attributes, "gen_ai.usage.cache_creation.input_tokens", "gen_ai.usage.cache_write_tokens")
+    cached = (cache_read or 0) + (cache_write or 0)
+    # The GenAI conventions count cached tokens inside ``input_tokens``, so cached
+    # tokens that outnumber it were reported on top of it instead.
+    if input_tokens is not None and cached > input_tokens:
+        input_tokens = min(input_tokens + cached, _INT32_MAX)
     return SpanRecord(
         span_id=_span_id(span.trace_id, span.span_id),
         parent_span_id=_span_id(span.trace_id, span.parent_span_id) if span.parent_span_id else None,
@@ -167,14 +209,17 @@ def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
         duration_ms=duration,
         model=identifier_or_none(_str(attributes, "gen_ai.response.model", "gen_ai.request.model")),
         provider=identifier_or_none(_str(attributes, "gen_ai.provider.name", "gen_ai.system")),
-        input_tokens=_int(attributes, "gen_ai.usage.input_tokens"),
+        input_tokens=input_tokens,
         output_tokens=_int(attributes, "gen_ai.usage.output_tokens"),
+        cache_read_tokens=cache_read,
+        cache_write_tokens=cache_write,
+        reasoning_tokens=_int(attributes, "gen_ai.usage.reasoning.output_tokens"),
         tool_name=tool_name,
         tool_type=identifier_or_none(_str(attributes, "gen_ai.tool.type")),
         tool_call_id=identifier_or_none(_str(attributes, "gen_ai.tool.call.id")),
         otel_trace_id=span.trace_id[:64],
         otel_span_id=span.span_id[:64],
-        attributes={"error.type": error_type} if span.failed and error_type else {},
+        attributes=projected,
     )
 
 

@@ -21,8 +21,12 @@ When the model emits an MCP tool call, Otari:
 - appends the tool result to the conversation
 - calls the model again
 
-The loop stops when the model returns a normal assistant response or hits
-`max_tool_iterations`.
+The loop stops when the model returns a normal assistant response. Its last
+allowed round, the one `max_tool_iterations` names, offers the model none of
+Otari's tools and tells it to answer from the results it already has, so a model
+that would keep calling tools still ends with an answer. Your own tools stay on
+offer in that round. The request fails only if the model calls one of Otari's
+tools anyway.
 
 ## Caller-orchestrated MCP
 
@@ -409,13 +413,46 @@ an owner/admin of that workspace.
   with a `400` naming what was wrong with it.
 - A workspace may configure up to 50 servers.
 
+#### Connection checks
+
+Creating a server connects to it once, lists its tools, and returns the outcome
+as `health`. So does a `PATCH` that changes the URL, the token, or
+`allowed_tools`; other edits leave `health` as it was.
+`POST /{server_id}/check` runs the check again on demand, with the same
+permissions as an update.
+
+A server that fails its check is still stored. `health.status` is `failing` and
+`health.error` names the cause: `unreachable`, `tls_failed`, `timeout`,
+`redirected`, `unauthorized` (401), `forbidden` (403), `not_found` (404 or
+405), `server_error` (5xx), `http_error` (another status), `not_mcp` (the URL
+answered, but not as a streamable HTTP MCP server), `limits_exceeded`,
+`unsafe_url`, `credentials_unavailable` (the stored token will not decrypt), or
+`connection_failed`. `health.http_status` carries the status where the server
+refused with one. A passing check reports `tools`, every tool name the server
+offers whatever the allow-list says (up to 200), `tool_count`, the number of
+those the allow-list admits, and `missing_allowed_tools`, the allow-listed names
+the server does not offer.
+
+`POST /check` (on the collection, with no server id) checks connection details
+without storing anything, which is what the dashboard's **Test connection**
+button calls before a save. It takes `url`, `authorization_token` and
+`allowed_tools`, and answers with what `health` would say. Pass `server_id` and
+omit `authorization_token` to test with that server's stored token; `""` tests
+with none. An unsafe URL is refused with the same `400` a create gets.
+
+`health` is `null` until a check has run. It is also `null` after a connection
+change when every check slot on the gateway was busy; `POST /{server_id}/check`
+answers `429` in that case and records nothing. The value describes the server
+as of `health.checked_at`; a request still checks the URL again, and nothing is
+skipped because a check once passed.
+
 In hybrid mode these routes are not mounted: the servers live in otari.ai and
 are managed there.
 
 ## Limits and safety
 
 - `mcp_servers` and `mcp_server_ids` may be combined with Otari's built-in tools in one request, as [Combining tools](tools.md#combining-tools) describes. A server tool named like a built-in the request declares (`web_search`, `web_fetch` or `code_execution`) is refused with a `400`
-- `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`
+- `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`. The last round answers rather than calling Otari's tools (see above)
 - `mcp_server_ids` accepts at most 50 ids, which is also the most servers a workspace can have; a repeated id resolves once
 - Server names must be unique across everything one request uses, because Otari routes each tool call to its server by name. Two `mcp_servers` entries sharing a name are refused with a `400` naming it, the way a bad request-body URL is. An `mcp_servers` name colliding with one of your workspace's stored servers is a `400` too, but a fixed one that repeats neither name, since a stored server is not yours to read. Two stored servers sharing a name is a `500` with the names in the log, on the same grounds as a stored URL that fails its safety check
 - MCP URLs are validated to reduce SSRF risk; by default, private and reserved addresses are blocked, loopback is allowed, and `http://` is rejected when `authorization_token` is present

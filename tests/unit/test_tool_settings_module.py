@@ -141,6 +141,30 @@ def test_a_dangling_default_falls_through_to_the_single_instance() -> None:
     assert default.name == "exa"
 
 
+@pytest.mark.parametrize(
+    ("settings", "configured"),
+    [
+        pytest.param({"search_tools": {"exa": _EXA}}, True, id="one-served-instance"),
+        pytest.param({"search_tools": {"exa": _EXA, "other": _EXA}}, False, id="two-and-no-default"),
+        pytest.param(
+            {"search_tools": {"exa": _EXA, "other": _EXA}, "web_search_default_tool": "other"}, True, id="named"
+        ),
+        pytest.param({"search_tools": {"local": _SEARXNG}}, False, id="one-instance-without-an-adapter"),
+        pytest.param({"web_search_url": "http://searxng:8080"}, True, id="legacy-url"),
+        pytest.param({"web_search_provider": "tavily", "web_search_provider_api_key": "tvly-k"}, True, id="pair"),
+        pytest.param({"web_search_url": "http://searxng:8080", "web_search_default_tool": "none"}, False, id="none"),
+        pytest.param({}, False, id="nothing"),
+    ],
+)
+def test_search_is_configured_when_the_in_loop_default_yields_one(settings: dict[str, Any], configured: bool) -> None:
+    assert GatewayConfig(**settings).web_search_configured() is configured
+
+
+def test_a_legacy_url_in_the_environment_alone_configures_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
+    assert GatewayConfig().web_search_configured() is True
+
+
 def test_a_stored_instance_counts_like_a_configured_one() -> None:
     """Stored rows are overlaid onto search_tools, so the maps see them the same way."""
     config = GatewayConfig()
@@ -290,6 +314,14 @@ def test_validate_refuses_a_credentialed_searxng_tool_inheriting_http() -> None:
         config.validate_search_tools()
 
 
+@pytest.mark.parametrize("price", [-0.01, float("nan"), float("inf"), "0.005", True])
+def test_validate_refuses_a_price_per_call_that_is_not_a_finite_amount(price: object) -> None:
+    """NaN would bill nothing and add a version on every restart; infinity would stop startup at the write."""
+    config = GatewayConfig(search_tools={"exa": {**_EXA, "price_per_call": price}})
+    with pytest.raises(ValueError, match="price_per_call must be a finite, non-negative number of USD"):
+        config.validate_search_tools()
+
+
 def test_a_searxng_tool_with_no_backend_url_anywhere_is_reported() -> None:
     """Startup warns instead of failing: a dashboard-stored URL lands after load."""
     config = GatewayConfig(search_tools={"local": {"provider": "searxng"}, "exa": {"api_key": "k"}})
@@ -371,14 +403,15 @@ def test_a_fetch_entry_named_like_a_stored_search_tool_is_left_out(caplog: pytes
     )
 
 
-def test_the_fetch_providers_are_the_fetch_instances_own_builtin_included() -> None:
-    """The prefixes of the fetch instances' rate keys, which the configuration's prices may use."""
-    assert GatewayConfig().fetch_tool_providers() == {"builtin"}
+def test_the_legacy_tool_keys_name_each_instance_under_its_provider() -> None:
+    """The keys tool prices and allow-list entries were written under before tools had a namespace."""
+    assert GatewayConfig().legacy_fetch_tool_keys() == {"builtin:builtin_fetch"}
     config = GatewayConfig(
         fetch_tools={"tabstack": {"provider": "tabstack", "api_key": "k"}, "exa-fetch": {"provider": "exa"}},
-        search_tools={"exa": _EXA},
+        search_tools={"exa": _EXA, "exa-search": _EXA},
     )
-    assert config.fetch_tool_providers() == {"builtin", "tabstack", "exa"}
+    assert config.legacy_search_tool_keys() == {"exa:exa", "exa:exa-search"}
+    assert config.legacy_fetch_tool_keys() == {"builtin:builtin_fetch", "tabstack:tabstack", "exa:exa-fetch"}
 
 
 def test_a_search_entry_named_builtin_fetch_loads_beside_the_implicit_instance(

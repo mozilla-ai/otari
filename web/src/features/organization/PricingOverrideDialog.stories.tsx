@@ -21,6 +21,7 @@ function override(
   return {
     id: "018f0000-0000-4000-8000-000000000001",
     organization_id: "018f0000-0000-4000-8000-0000000000ff",
+    kind: "model",
     model_key: "openai:gpt-4o-mini",
     input_price_per_million: 0.15,
     output_price_per_million: 0.6,

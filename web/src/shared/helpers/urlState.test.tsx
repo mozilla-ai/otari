@@ -1,3 +1,4 @@
+import { useLocation } from "@tanstack/react-router"
 import { act, renderHook } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 
@@ -120,5 +121,66 @@ describe("useUrlState.patch with arrays", () => {
       result.current.patch({ model: [] })
     })
     expect(result.current.getAll("model")).toEqual([])
+  })
+})
+
+describe("useUrlState with untracked keys", () => {
+  const PEEK_DEFAULTS = { peek: "", span: "" } as const
+  const UNTRACKED = ["span"] as const
+
+  async function countedState(url: string) {
+    let renders = 0
+    const { result } = renderHook(
+      () => {
+        renders += 1
+        return useUrlState(PEEK_DEFAULTS, { untracked: UNTRACKED })
+      },
+      { wrapper: withRouter({ url }) },
+    )
+    await flushRouter()
+    return { result, renders: () => renders }
+  }
+
+  it("reads an untracked key from the URL it starts on", async () => {
+    const { result } = await countedState("/?peek=t-1&span=s-1")
+    expect(result.current.get("span")).toBe("s-1")
+  })
+
+  it("writes an untracked key without re-rendering, and reads it at the next tracked change", async () => {
+    const { result, renders } = await countedState("/?peek=t-1")
+    const before = renders()
+
+    await act(async () => {
+      result.current.patch({ span: "s-2" })
+    })
+    expect(renders()).toBe(before)
+
+    await act(async () => {
+      result.current.patch({ peek: "t-2" })
+    })
+    expect(renders()).toBeGreaterThan(before)
+    expect(result.current.get("peek")).toBe("t-2")
+    expect(result.current.get("span")).toBe("s-2")
+  })
+
+  it("keeps an untracked key's current value when a tracked key is patched", async () => {
+    const { result } = renderHook(
+      () => ({
+        url: useUrlState(PEEK_DEFAULTS, { untracked: UNTRACKED }),
+        searchStr: useLocation({ select: (location) => location.searchStr }),
+      }),
+      { wrapper: withRouter({ url: "/?peek=t-1" }) },
+    )
+    await flushRouter()
+
+    await act(async () => {
+      result.current.url.patch({ span: "s-2" })
+    })
+    await act(async () => {
+      result.current.url.patch({ peek: "t-2" })
+    })
+    const params = new URLSearchParams(result.current.searchStr)
+    expect(params.get("peek")).toBe("t-2")
+    expect(params.get("span")).toBe("s-2")
   })
 })

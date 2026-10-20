@@ -21,7 +21,9 @@ from types import ModuleType
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
+from any_llm.types.batch import Batch
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -30,6 +32,9 @@ from any_llm.types.completion import (
     ChoiceDelta,
     ChunkChoice,
     CompletionUsage,
+    CreateEmbeddingResponse,
+    Embedding,
+    Usage,
 )
 from fastapi import status
 from fastapi.testclient import TestClient
@@ -40,6 +45,7 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS
 from gateway.log_config import logger as gateway_logger
+from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
 
 from .conftest import build_test_client
@@ -163,6 +169,22 @@ def billed(
         model_discovery=False,
         # The gateway's own key for one provider, which the fleet must never displace.
         providers={"anthropic": {"api_key": "sk-ant"}},
+        routing=RoutingConfig.model_validate(
+            {
+                "policies": {
+                    # A fleet candidate first, then the gateway's own key.
+                    "fleet_first": {
+                        "select": [{"default": "openai:gpt-4o"}],
+                        "on_failure": ["anthropic:claude-opus-4"],
+                    },
+                    # The gateway's own key first, then a fleet candidate.
+                    "fleet_second": {
+                        "select": [{"default": "anthropic:claude-opus-4"}],
+                        "on_failure": ["openai:gpt-4o"],
+                    },
+                }
+            }
+        ),
         bootstrap=f"{name}:register",
     )
     try:
@@ -405,3 +427,121 @@ def test_a_failed_charge_still_serves_and_settles_the_budget(
     assert user["reserved"] == pytest.approx(0.0)
     errors = [r.getMessage() for r in gateway_logs.records if r.levelno == logging.ERROR]
     assert any("deployment-paid" in message and "request_id=" in message for message in errors), errors
+
+
+def _routed(client: TestClient, key: dict[str, Any], policy: str, *, failing: str) -> tuple[Any, AsyncMock]:
+    async def acompletion(**kwargs: Any) -> Any:
+        if kwargs["model"] == failing:
+            request = httpx.Request("POST", "http://upstream")
+            raise httpx.HTTPStatusError("down", request=request, response=httpx.Response(503, request=request))
+        return _completion(kwargs["model"].split(":", 1)[1])
+
+    provider = AsyncMock(side_effect=acompletion)
+    with patch("gateway.api.routes.chat.acompletion", new=provider):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": policy, "messages": [{"role": "user", "content": "Hi"}]},
+            headers=_auth(key),
+        )
+    return response, provider
+
+
+def test_a_policy_falls_over_onto_a_deployment_paid_candidate_and_charges_it(
+    billed: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
+) -> None:
+    client, probe = billed
+    _price(client, "openai:gpt-4o")
+    _price(client, "anthropic:claude-opus-4")
+    key = _key(client)
+
+    response, provider = _routed(client, key, "fleet_second", failing="anthropic:claude-opus-4")
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert [call.kwargs["api_key"] for call in provider.call_args_list] == ["sk-ant", "fleet-key"]
+    assert [(entry[0], entry[2], entry[3]) for entry in probe.LEDGER] == [("charge", COST, "openai:gpt-4o")]
+    assert _user(client)["reserved"] == pytest.approx(0.0)
+    with db_session_factory() as db:
+        served = db.scalars(select(UsageLog.deployment_paid).where(UsageLog.status == "success")).all()
+    assert served == [True]
+
+
+def test_a_policy_skips_a_deployment_paid_candidate_its_organization_cannot_fund(
+    billed: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
+) -> None:
+    client, probe = billed
+    _price(client, "openai:gpt-4o")
+    _price(client, "anthropic:claude-opus-4")
+    key = _key(client)
+    probe.FUNDS["available"] = Decimal("0")
+
+    response, provider = _routed(client, key, "fleet_first", failing="none")
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert [call.kwargs["api_key"] for call in provider.call_args_list] == ["sk-ant"]
+    assert probe.LEDGER == []
+    with db_session_factory() as db:
+        served = db.scalars(select(UsageLog.deployment_paid).where(UsageLog.status == "success")).all()
+    assert served == [False]
+
+
+def test_embeddings_on_a_deployment_paid_credential_are_gated_then_charged(
+    billed: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
+) -> None:
+    client, probe = billed
+    _price(client, "openai:text-embedding-3-small")
+    key = _key(client)
+    embedded = CreateEmbeddingResponse(
+        data=[Embedding(embedding=[0.1], index=0, object="embedding")],
+        model="text-embedding-3-small",
+        object="list",
+        usage=Usage(prompt_tokens=15, total_tokens=15),
+    )
+
+    with patch("gateway.api.routes.embeddings.aembedding", new=AsyncMock(return_value=embedded)) as call:
+        response = client.post(
+            f"{API_ROOT}/embeddings", json={"model": "openai:text-embedding-3-small", "input": "hi"}, headers=_auth(key)
+        )
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert call.await_args is not None
+    assert call.await_args.kwargs["api_key"] == "fleet-key"
+    assert [gate for gate, _ in probe.GATES] == ["apply_due_credit", "require_funds_on_deposit"]
+    assert [(entry[0], entry[3]) for entry in probe.LEDGER] == [("charge", "openai:text-embedding-3-small")]
+    assert _deployment_paid_flags(db_session_factory) == [True]
+
+    probe.FUNDS["available"] = Decimal("0")
+    with patch("gateway.api.routes.embeddings.aembedding", new=AsyncMock(return_value=embedded)) as refused_call:
+        refused = client.post(
+            f"{API_ROOT}/embeddings", json={"model": "openai:text-embedding-3-small", "input": "hi"}, headers=_auth(key)
+        )
+
+    assert refused.status_code == status.HTTP_402_PAYMENT_REQUIRED, refused.text
+    assert refused.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    refused_call.assert_not_called()
+    assert _user(client)["reserved"] == pytest.approx(0.0)
+
+
+class _SupportsBatch:
+    SUPPORTS_BATCH = True
+
+
+def test_a_batch_on_a_deployment_paid_credential_is_refused_without_funds(
+    billed: tuple[TestClient, ModuleType],
+) -> None:
+    client, probe = billed
+    key = _key(client)
+    probe.FUNDS["available"] = Decimal("0")
+    body = {
+        "model": "openai:gpt-4o",
+        "requests": [{"custom_id": "r1", "body": {"messages": [{"role": "user", "content": "Hi"}]}}],
+    }
+
+    with (
+        patch("gateway.api.routes.batches.AnyLLM.get_provider_class", return_value=_SupportsBatch),
+        patch("gateway.api.routes.batches.acreate_batch", new=AsyncMock(spec=Batch)) as create,
+    ):
+        response = client.post(f"{API_ROOT}/batches", json=body, headers=_auth(key))
+
+    assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
+    assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    create.assert_not_called()

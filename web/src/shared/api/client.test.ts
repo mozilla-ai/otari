@@ -193,9 +193,9 @@ describe("apiFetch", () => {
   })
 
   it("does not quote its own 30s deadline at a caller that set a longer one", async () => {
-    // The bulk usage delete and reprice run on longRequestSignal(); telling an
-    // operator who waited five minutes that nothing answered "within 30s" would
-    // point them at the wrong thing.
+    // A refresh on longRequestSignal() can run for minutes; telling an operator
+    // who waited five minutes that nothing answered "within 30s" would point
+    // them at the wrong thing.
     const controller = new AbortController()
     vi.spyOn(globalThis, "fetch").mockRejectedValue(
       new DOMException("timed out", "TimeoutError"),

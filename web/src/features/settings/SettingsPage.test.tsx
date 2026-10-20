@@ -8,9 +8,9 @@ import type {
   ConfigField,
   DeploymentBootstrap,
   GatewaySettings,
+  HostedProvider,
   MailSettings,
-  ReencryptProviderCredentialsResult,
-  StoredProvider,
+  ReencryptHostedProvidersResult,
 } from "@/client"
 import { AuthProvider } from "@/features/auth/AuthContext"
 import {
@@ -201,20 +201,17 @@ const MAIL_SETTINGS: MailSettings = {
   missing: ["smtp_host", "mail_from_email", "public_base_url"],
 }
 
-function storedProvider(
-  instance: string,
-  last4: string | null,
-  decryptable = true,
-): StoredProvider {
+function storedProvider(name: string, decryptable = true): HostedProvider {
   return {
-    instance,
-    provider_type: null,
-    api_base: null,
-    last4,
-    client_args: {},
-    created_at: null,
-    updated_at: "2026-01-01T00:00:00+00:00",
+    name,
+    provider: name,
+    enabled: true,
+    has_api_key: true,
+    api_key_last4: "1234",
     decryptable,
+    serves_unlisted_models: false,
+    shadows_config: false,
+    source: "database",
   }
 }
 
@@ -246,8 +243,8 @@ function jsonResponse(body: unknown): Response {
 // change after a round trip, like the real backend.
 function mockApi(
   initial: GatewaySettings = SETTINGS,
-  stored: StoredProvider[] = [],
-  reencryptResult: ReencryptProviderCredentialsResult = {
+  stored: HostedProvider[] = [],
+  reencryptResult: ReencryptHostedProvidersResult = {
     reencrypted: 1,
     skipped: 0,
     unreadable: 0,
@@ -261,7 +258,7 @@ function mockApi(
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
       if (
-        url.includes(`${API_ROOT}/provider-credentials/reencrypt`) &&
+        url.includes(`${API_ROOT}/hosted-providers/reencrypt`) &&
         method === "POST"
       ) {
         storedList = storedList.map((provider) => ({
@@ -270,8 +267,8 @@ function mockApi(
         }))
         return jsonResponse(reencryptResult)
       }
-      if (url.includes(`${API_ROOT}/provider-credentials`)) {
-        return jsonResponse(storedList)
+      if (url.includes(`${API_ROOT}/hosted-providers`)) {
+        return jsonResponse({ data: storedList, count: storedList.length })
       }
       // Ahead of the /v1/settings branch below, which would otherwise answer
       // the mail card's request with the whole settings payload.
@@ -470,7 +467,7 @@ describe("SettingsPage", () => {
   })
 
   it("re-encrypts stored provider keys from the Credential security category", async () => {
-    const fetchMock = mockApi(SETTINGS, [storedProvider("openai", "1234")])
+    const fetchMock = mockApi(SETTINGS, [storedProvider("openai")])
     const user = userEvent.setup()
 
     renderWithClient(<SettingsPage />)
@@ -482,7 +479,7 @@ describe("SettingsPage", () => {
 
     const call = fetchMock.mock.calls.find(
       ([url, init]) =>
-        String(url).endsWith(`${API_ROOT}/provider-credentials/reencrypt`) &&
+        String(url).endsWith(`${API_ROOT}/hosted-providers/reencrypt`) &&
         (init?.method ?? "") === "POST",
     )
     expect(call).toBeDefined()
@@ -491,8 +488,32 @@ describe("SettingsPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("does not report the rotation complete while the provider keys failed to re-encrypt", async () => {
+    const fetchMock = mockApi(SETTINGS, [storedProvider("openai")])
+    const answer = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes(`${API_ROOT}/hosted-providers/reencrypt`)) {
+        return new Response(JSON.stringify({ detail: "boom" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      return answer ? answer(input, init) : jsonResponse({})
+    })
+    const user = userEvent.setup()
+
+    renderWithClient(<SettingsPage />)
+    await screen.findByText("Credential security")
+    await user.click(
+      screen.getByRole("button", { name: "Re-encrypt provider keys" }),
+    )
+
+    expect(await screen.findByText("boom")).toBeInTheDocument()
+    expect(screen.queryByText(/Re-encrypted \d+ provider key/)).toBeNull()
+  })
+
   it("shows unreadable provider key recovery guidance in the Credential security category", async () => {
-    mockApi(SETTINGS, [storedProvider("openai", "1234", false)])
+    mockApi(SETTINGS, [storedProvider("openai", false)])
 
     renderWithClient(<SettingsPage />)
 

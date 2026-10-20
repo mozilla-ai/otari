@@ -282,6 +282,19 @@ listed and never edited here.
 
 Built in the target shape from the start.
 
+### health-checks
+
+The scheduled checks an operator turns on from the Health page: every model the
+deployment's hosted providers serve is sent one small completion, and what
+each answered is kept for 48 hours and folded into one line per provider. A
+probe is a side call on the hosted provider's own credential, so it writes no
+usage row and holds no budget. The models come from the providers domain's
+serveable roster, never from the price list, and switching failing models off
+goes through the providers domain too. An outage that ends is kept for 90 days. Every replica
+polls, and the conditional update on the settings row decides which one runs.
+
+Built in the target shape from the start.
+
 ### alerts
 
 Alert destinations, rules, send-once delivery and the test send. It knows

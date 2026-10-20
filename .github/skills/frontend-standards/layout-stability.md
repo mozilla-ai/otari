@@ -79,8 +79,8 @@ throws away the drawer's open state. A route renders its page and nothing around
 `window.location.reload()` in response to a stale-looking UI throws away every cache the
 operator has warmed and re-runs the bootstrap round trip. Invalidate the affected query keys
 instead. The one legitimate reload is at the root error boundary, where the app cannot know
-what state it is in. `UpdatePrompt` is a separate case: it asks first, because it is telling
-the operator a new build exists rather than recovering from an error.
+what state it is in. `AutoUpdate` is a separate case: it loads a new build, not lost state, and
+only when the operator is leaving the page anyway.
 
 ## Anti-patterns
 

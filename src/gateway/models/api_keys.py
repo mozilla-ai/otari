@@ -113,6 +113,9 @@ class APIKey(Base):
     # as a list rather than a join table because it is read only when a request
     # names a budget; deleting a budget removes it from every list.
     end_user_budget_ids: Mapped[list[str] | None] = mapped_column(JSON)
+    # The most live end users this key may have on the budgets it assigns: a
+    # request that would create or revive one more is refused. NULL is no cap.
+    max_end_users: Mapped[int | None] = mapped_column(default=None)
 
     # Set only on a key this deployment mints for itself and has to present
     # again later, which today is the one the hosted Playground forwards with
@@ -123,8 +126,12 @@ class APIKey(Base):
     # credential anybody manages, and no endpoint ever returns the value itself.
     internal_secret: Mapped[str | None] = mapped_column()
     # The name config.yml declares this key under, set only while it does. Every
-    # start finds the key by it and writes the declared settings and secret back.
+    # start finds the key by it, and writes the declared settings and secret back
+    # when the entry's digest differs from ``declared_digest``.
     config_name: Mapped[str | None] = mapped_column(default=None)
+    # A digest of the config.yml entry last written over this key, its secret's
+    # hash included, so changing the entry or the secret writes it back.
+    declared_digest: Mapped[str | None] = mapped_column(String(64), default=None)
 
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
 
@@ -156,6 +163,7 @@ class APIKey(Base):
             "is_service_key": self.is_service_key,
             "end_user_budget_id": self.end_user_budget_id,
             "end_user_budget_ids": self.assignable_end_user_budgets(),
+            "max_end_users": self.max_end_users,
             "config_name": self.config_name,
             "metadata": self.metadata_,
         }

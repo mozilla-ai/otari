@@ -23,6 +23,7 @@ from gateway.types.traces import (
     TraceFilter,
     TracePage,
     TraceScope,
+    TraceSort,
     TraceSummary,
     TraceWrite,
     WriteResult,
@@ -93,10 +94,12 @@ class TraceService:
             await self._traces.add_totals([_growth(key, spans, written_at) for key, spans in grown.items()])
         return WriteResult(accepted=accepted, duplicate=duplicate, rejected=rejected)
 
-    async def search(self, scope: TraceScope, filters: TraceFilter, *, limit: int, offset: int) -> TracePage:
-        """Return one page of the scope's traces, newest activity first."""
+    async def search(
+        self, scope: TraceScope, filters: TraceFilter, *, limit: int, offset: int, sort: TraceSort = TraceSort()
+    ) -> TracePage:
+        """Return one page of the scope's traces in ``sort`` order, newest activity first by default."""
         async with self._uow:
-            rows = await self._traces.page(_workspace_ids(scope), filters, limit=limit + 1, offset=offset)
+            rows = await self._traces.page(_workspace_ids(scope), filters, limit=limit + 1, offset=offset, sort=sort)
             return TracePage(items=tuple(_summary(row) for row in rows[:limit]), has_more=len(rows) > limit)
 
     async def count(self, scope: TraceScope, filters: TraceFilter) -> int:
@@ -225,12 +228,16 @@ def _key(trace: TraceWrite) -> TraceKey:
 def _growth(key: TraceKey, spans: list[SpanRecord], written_at: datetime) -> TraceGrowth:
     moments = [_span_moment(span, written_at) for span in spans]
     llm = [span for span in spans if span.kind == "llm"]
+    errors = [span for span in spans if span.outcome == "error" and not span.recovered]
     return TraceGrowth(
         workspace_id=key[0],
         trace_id=key[1],
         steps=sum(1 for span in spans if span.kind == "step"),
         spans=len(spans),
-        errors=sum(1 for span in spans if span.outcome == "error" and not span.recovered),
+        errors=len(errors),
+        # A tool's error goes back to the model, which usually carries on, so it does not fail the session.
+        # An MCP tool's too, a transport failure included; a failed MCP connection is not a tool's and does.
+        failing_errors=sum(1 for span in errors if span.kind != "tool"),
         input_tokens=sum(span.input_tokens or 0 for span in llm),
         output_tokens=sum(span.output_tokens or 0 for span in llm),
         cost=sum((span.cost_snapshot or Decimal(0) for span in llm), Decimal(0)),
@@ -260,6 +267,9 @@ def _span_values(trace: TraceWrite, span: SpanRecord) -> dict[str, Any]:
         "provider": span.provider,
         "input_tokens": span.input_tokens,
         "output_tokens": span.output_tokens,
+        "cache_read_tokens": span.cache_read_tokens,
+        "cache_write_tokens": span.cache_write_tokens,
+        "reasoning_tokens": span.reasoning_tokens,
         "cost_snapshot": span.cost_snapshot,
         "tool_name": span.tool_name,
         "tool_type": span.tool_type,
@@ -290,6 +300,9 @@ def _span_record(row: TraceSpan) -> SpanRecord:
         provider=row.provider,
         input_tokens=row.input_tokens,
         output_tokens=row.output_tokens,
+        cache_read_tokens=row.cache_read_tokens,
+        cache_write_tokens=row.cache_write_tokens,
+        reasoning_tokens=row.reasoning_tokens,
         cost_snapshot=row.cost_snapshot,
         tool_name=row.tool_name,
         tool_type=row.tool_type,

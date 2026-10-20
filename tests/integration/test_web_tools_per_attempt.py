@@ -46,6 +46,9 @@ from gateway.services.tools import (
     WEB_SEARCH_HEADER,
     WEB_SEARCH_TOOL_NAME,
     ToolUseBudget,
+    WebFetchBackend,
+    WebSearchBackend,
+    owning_backend,
 )
 
 from .conftest import declared_test_providers
@@ -64,7 +67,7 @@ _RESULT_BLOCKS = {"search": "web_search_tool_result", "fetch": "web_fetch_tool_r
 @pytest.fixture(scope="module")
 def test_config(postgres_url: str) -> GatewayConfig:
     return GatewayConfig(
-        providers=declared_test_providers(),
+        providers={**declared_test_providers(), "deepseek": {"api_key": "test-deepseek-key"}},
         database_url=postgres_url,
         master_key="test-master-key",
         host="127.0.0.1",
@@ -90,6 +93,11 @@ def test_config(postgres_url: str) -> GatewayConfig:
                     "openai-then-mistral": {
                         "select": [{"default": "openai:gpt-4o-mini"}],
                         "on_failure": ["mistral:mistral-small-latest"],
+                    },
+                    # One provider whose two models disagree: only deepseek-v4-pro runs web_search on Responses.
+                    "deepseek-pro-then-flash": {
+                        "select": [{"default": "deepseek:deepseek-v4-pro"}],
+                        "on_failure": ["deepseek:deepseek-flash"],
                     },
                 }
             }
@@ -199,7 +207,7 @@ class _FakeWebBackend:
         return [{"url": "https://example.com", "title": "Example"}]
 
     def take_last_fetch(self) -> Any:
-        return SimpleNamespace(text="page text", final_url=SimpleNamespace(display_url="https://example.com"))
+        return SimpleNamespace(text="page text", final_url="https://example.com")
 
 
 @dataclass
@@ -208,6 +216,7 @@ class _Seen:
 
     provider_calls: list[dict[str, Any]] = field(default_factory=list)
     loop_calls: list[tuple[dict[str, Any], dict[str, Any]]] = field(default_factory=list)
+    pools: list[Any] = field(default_factory=list)
     web_backends: list[_FakeWebBackend] = field(default_factory=list)
     sandboxes: list[dict[str, Any]] = field(default_factory=list)
 
@@ -261,6 +270,7 @@ def _post_messages(
 
     async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int, **extra: Any) -> MessageResponse:
         seen.loop_calls.append((completion_kwargs, extra))
+        seen.pools.append(pool)
         if loop_fails and len(seen.loop_calls) == 1:
             raise _unavailable()
         return _reply("via-otari")
@@ -647,6 +657,35 @@ def test_caps_are_shared_by_attempts_that_run_different_tools(
     assert not budget.exhausted(WEB_SEARCH_TOOL_NAME)
 
 
+def test_attempts_searching_on_an_instance_share_one_call_allowance(
+    client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig
+) -> None:
+    """Each attempt opens its own search and fetch backends, all on the request's one ``web_search_max_calls``.
+
+    A request locks in to its attempt once it has answered or reported a call, so a
+    search never runs on two attempts in a row; what holds the cap is that they share it.
+    """
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL")
+    monkeypatch.setattr(test_config, "search_tools", {"fake-search": {"provider": "fake"}})
+    monkeypatch.setattr(test_config, "web_search_default_tool", "fake-search")
+    headers = {**api_key_header, WEB_SEARCH_HEADER: "otari", WEB_FETCH_HEADER: "otari"}
+
+    response, seen = _post_messages(
+        client, headers, _messages_body("claude-then-vertex", _SEARCH, _FETCH), loop_fails=True
+    )
+
+    assert response.status_code == 200, response.text
+    head, fallback = seen.pools
+    assert head is not fallback
+    caps = set()
+    for pool in seen.pools:
+        search, fetch = owning_backend(pool, WEB_SEARCH_TOOL_NAME), owning_backend(pool, WEB_FETCH_TOOL_NAME)
+        assert isinstance(search, WebSearchBackend) and isinstance(fetch, WebFetchBackend)
+        caps |= {id(search._cap), id(fetch._cap)}
+    assert len(caps) == 1, "every attempt's search and fetch draw on one allowance"
+    assert seen.web_backends == [], "the old backend served none of them"
+
+
 def test_gateway_minted_blocks_are_dropped_and_native_ones_forwarded_to_each_attempt(
     client: TestClient, api_key_header: dict[str, str]
 ) -> None:
@@ -733,5 +772,19 @@ def test_responses_runs_otaris_search_for_a_fallback_without_one(
     loop_kwargs, loop_extra = seen.loop_calls[0]
     assert seen.tool_types(loop_kwargs) == set()
     # A ``web_search_call`` item back, as OpenAI would have answered.
+    assert loop_extra.get("native_tools") == frozenset({WEB_SEARCH_TOOL_NAME})
+    assert len(seen.web_backends) == 1
+
+
+def test_responses_decides_two_models_of_one_provider_apart(client: TestClient, api_key_header: dict[str, str]) -> None:
+    body = {**_responses_body(), "model": "deepseek-pro-then-flash"}
+    response, seen = _post_responses(client, _auto(api_key_header, "search"), body, provider_fails=True)
+
+    assert response.status_code == 200, response.text
+    # deepseek-v4-pro is sent the keyword; deepseek-flash, which ignores it, runs Otari's search.
+    assert [seen.tool_types(call) for call in seen.provider_calls] == [{"web_search"}]
+    loop_kwargs, loop_extra = seen.loop_calls[0]
+    assert loop_kwargs["model"] == "deepseek-flash"
+    assert seen.tool_types(loop_kwargs) == set()
     assert loop_extra.get("native_tools") == frozenset({WEB_SEARCH_TOOL_NAME})
     assert len(seen.web_backends) == 1

@@ -30,7 +30,8 @@ def strict_pricing_client(postgres_url: str) -> Generator[TestClient]:
     in isolation: otherwise models.dev would price well-known models (gpt-4o)
     and the 402 branch would never be reached. OpenAI and Cohere hold a credential,
     because an unpriced model whose provider has none is refused as unconfigured
-    instead, and the chat provider call fails in place of reaching OpenAI.
+    instead, and the chat provider call fails in place of reaching OpenAI. One
+    unpriced ``fake`` search tool stands for the direct search endpoint.
     """
     config = GatewayConfig(
         database_url=postgres_url,
@@ -43,6 +44,7 @@ def strict_pricing_client(postgres_url: str) -> Generator[TestClient]:
         web_fetch_enabled=True,
         model_discovery=False,
         providers={"openai": {"api_key": "sk-test"}, "cohere": {"api_key": "co-test"}},
+        search_tools={"fake-search": {"provider": "fake"}},
     )
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=RuntimeError("provider down"))):
         yield from build_test_client(config)
@@ -139,12 +141,13 @@ def test_passthrough_missing_pricing_rejection_is_recorded_too(strict_pricing_cl
         ("embeddings", {"model": "openai:text-embedding-3-small", "input": "hi"}),
         ("rerank", {"model": "cohere:rerank-v3.5", "query": "q", "documents": ["a", "b"]}),
         ("images/generations", {"model": "openai:dall-e-3", "prompt": "a cat"}),
+        ("search/fake-search", {"query": "q"}),
     ],
 )
 def test_missing_pricing_refusal_carries_its_code_on_every_route(
     strict_pricing_client: TestClient, path: str, body: dict[str, Any]
 ) -> None:
-    """Chat and the pass-through routes name the refusal the same way, in the body and the header."""
+    """Chat, the pass-through routes and direct search name the refusal the same way, in the body and the header."""
     c = strict_pricing_client
     c.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
     resp = c.post(f"{API_ROOT}/{path}", json={**body, "user": "priced-user"}, headers=_MASTER_HEADER)
@@ -265,10 +268,20 @@ def test_priced_model_passes_the_gate(strict_pricing_client: TestClient) -> None
     assert _chat(strict_pricing_client, model="openai:gpt-4o", user="priced-user") != 402
 
 
-def test_budget_exempt_key_skips_pricing_gate(strict_pricing_client: TestClient) -> None:
+# An unpriced model, and an unpriced search tool on the direct endpoint.
+_UNPRICED_CALLS = [
+    ("chat/completions", {"model": "openai:gpt-4o", "messages": _MESSAGES}),
+    ("search/fake-search", {"query": "q"}),
+]
+
+
+@pytest.mark.parametrize(("path", "body"), _UNPRICED_CALLS)
+def test_budget_exempt_key_skips_pricing_gate(
+    strict_pricing_client: TestClient, path: str, body: dict[str, Any]
+) -> None:
     """A key exempt from budget clears the require_pricing gate: unpriced usage is
-    allowed through (logged with cost=null), not 402, since there is no budget to
-    protect. The call then fails as a provider error, never a 402."""
+    allowed through, not 402, since there is no budget to protect. A chat call
+    then fails as a provider error, never a 402; a search is served."""
     c = strict_pricing_client
     c.post(f"{API_ROOT}/users", json={"user_id": "exempt-user"}, headers=_MASTER_HEADER)
     key = c.post(
@@ -276,25 +289,31 @@ def test_budget_exempt_key_skips_pricing_gate(strict_pricing_client: TestClient)
         json={"key_name": "exempt", "user_id": "exempt-user", "exclude_from_budget": True},
         headers=_MASTER_HEADER,
     ).json()["key"]
-    resp = c.post(
-        f"{API_ROOT}/chat/completions",
-        json={"model": "openai:gpt-4o", "messages": _MESSAGES},
-        headers={API_KEY_HEADER: f"Bearer {key}"},
-    )
+    resp = c.post(f"{API_ROOT}/{path}", json=body, headers={API_KEY_HEADER: f"Bearer {key}"})
     assert resp.status_code != 402
 
 
-def test_blocked_user_takes_precedence_over_missing_pricing(strict_pricing_client: TestClient) -> None:
+@pytest.mark.parametrize(("path", "body"), _UNPRICED_CALLS)
+def test_blocked_user_takes_precedence_over_missing_pricing(
+    strict_pricing_client: TestClient, path: str, body: dict[str, Any]
+) -> None:
     """A blocked user gets 403, not 402 — budget/state is checked before pricing."""
     strict_pricing_client.post(
         f"{API_ROOT}/users", json={"user_id": "blocked-user", "blocked": True}, headers=_MASTER_HEADER
     )
-    assert _chat(strict_pricing_client, model="openai:gpt-4o", user="blocked-user") == 403
+    resp = strict_pricing_client.post(
+        f"{API_ROOT}/{path}", json={**body, "user": "blocked-user"}, headers=_MASTER_HEADER
+    )
+    assert resp.status_code == 403
 
 
-def test_missing_user_takes_precedence_over_missing_pricing(strict_pricing_client: TestClient) -> None:
+@pytest.mark.parametrize(("path", "body"), _UNPRICED_CALLS)
+def test_missing_user_takes_precedence_over_missing_pricing(
+    strict_pricing_client: TestClient, path: str, body: dict[str, Any]
+) -> None:
     """A nonexistent user gets 404, not 402 — user existence is checked before pricing."""
-    assert _chat(strict_pricing_client, model="openai:gpt-4o", user="ghost-user") == 404
+    resp = strict_pricing_client.post(f"{API_ROOT}/{path}", json={**body, "user": "ghost-user"}, headers=_MASTER_HEADER)
+    assert resp.status_code == 404
 
 
 def test_missing_pricing_rejection_row_carries_the_request_tags(strict_pricing_client: TestClient) -> None:

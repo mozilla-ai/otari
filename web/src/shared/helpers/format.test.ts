@@ -15,8 +15,10 @@ import {
   formatReleaseDate,
   formatScore,
   formatTokens,
+  formatTokensCompact,
   formatUnitRate,
   formatUsd,
+  formatUsdCompact,
   formatUsdHeadline,
 } from "@/shared/helpers/format"
 
@@ -55,6 +57,16 @@ describe("formatScore", () => {
     expect(formatScore(0.97)).toBe("0.97")
     expect(formatScore(0.123456)).toBe("0.123")
     expect(formatScore(87)).toBe("87")
+  })
+})
+
+describe("formatTokensCompact and formatUsdCompact", () => {
+  it("keep three significant figures", () => {
+    expect(formatTokensCompact(1_234_567_890)).toBe("1.23B")
+    expect(formatTokensCompact(98_765_432)).toBe("98.8M")
+    expect(formatTokensCompact(10_000_000)).toBe("10M")
+    expect(formatUsdCompact(12_345_678.9)).toBe("$12.3M")
+    expect(formatUsdCompact(100_000)).toBe("$100K")
   })
 })
 
@@ -293,11 +305,10 @@ describe("formatters are locale-pinned", () => {
       )
     })
     expect([...new Set(offenders)].sort()).toEqual([
-      // The two date call sites this sweep does not decide. Both render a
+      // The date call site this sweep does not decide. It renders a
       // timestamp, where the open question is US versus the reader's own, and
-      // both are a `new Date(...)` rather than a number.
+      // it is a `new Date(...)` rather than a number.
       "features/keys/KeysPage.tsx",
-      "features/overview/OverviewPage.tsx",
       "shared/helpers/format.ts",
     ])
   })

@@ -31,7 +31,7 @@ describe("CodeBlock", () => {
   })
 
   it("copies the value rather than what is rendered, and says so", async () => {
-    // The two differ on purpose: the bundled guide renders react-markdown's own
+    // The two differ on purpose: a Markdown page renders react-markdown's own
     // nodes while the clipboard gets the raw fence, and the setup guide renders
     // a concealed key while the clipboard gets the real one.
     const user = userEvent.setup()

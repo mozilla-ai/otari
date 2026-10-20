@@ -6,7 +6,8 @@ is forwarded to the upstream provider unless ``web_search_intercept`` is on or
 :data:`WEB_SEARCH_HEADER` asks otherwise. The header takes ``CodeExecutor``'s
 vocabulary: ``auto`` claims the keyword for each attempt whose provider cannot
 run it (Anthropic's dated keyword on Messages, OpenAI's on Responses are the
-native pairings), ``otari`` always, ``provider`` never, and none of them can
+native pairings, and DeepSeek runs either on the matching API, the Responses one
+with deepseek-v4-pro only), ``otari`` always, ``provider`` never, and none of them can
 undo interception. Interception is off by default because turning it on
 silently takes a search away from a provider that would have run it (see
 ``docs/tools.md``). An OpenAI ``function`` named ``web_search`` is deliberately
@@ -84,9 +85,16 @@ def _is_any_web_search_tool_type(type_value: Any) -> bool:
 # Where a provider-named web-search keyword is the provider's own: Anthropic's
 # dated keyword on Messages, OpenAI's bare and preview keywords on Responses.
 # Every other pairing, a keyword in the other provider's words included, names a
-# search the dispatched provider cannot run.
+# search the dispatched provider cannot run, with one exception below.
 _ANTHROPIC_WEB_SEARCH_TYPE = re.compile(r"web_search_\d{8}")
 _OPENAI_WEB_SEARCH_PREVIEW_PREFIX = "web_search_preview"
+
+# DeepSeek runs both providers' keywords on its compatible APIs: Anthropic's dated
+# one on Messages with every model, and the bare one on Responses with
+# deepseek-v4-pro only. deepseek-flash ignores it there and answers without
+# searching, so the gateway runs the search for it.
+_DEEPSEEK = "deepseek"
+_DEEPSEEK_RESPONSES_SEARCH_MODEL = "deepseek-v4-pro"
 
 
 def _native_web_search_pairing(type_value: Any) -> tuple[str, Dialect] | None:
@@ -106,7 +114,7 @@ def first_provider_web_search_tool(tools: list[dict[str, Any]] | None) -> dict[s
 
 
 def provider_runs_web_search_natively(
-    tool_entry: dict[str, Any] | None, *, provider: str | None, dialect: Dialect
+    tool_entry: dict[str, Any] | None, *, provider: str | None, dialect: Dialect, model: str | None = None
 ) -> bool:
     """Whether the dispatched provider would run this web-search declaration itself.
 
@@ -115,8 +123,17 @@ def provider_runs_web_search_natively(
     """
     if provider is None or tool_entry is None:
         return False
-    native = _native_web_search_pairing(tool_entry.get("type"))
-    return native is not None and native == (provider.lower(), dialect)
+    type_value = tool_entry.get("type")
+    native = _native_web_search_pairing(type_value)
+    if native is None:
+        return False
+    if native == (provider.lower(), dialect):
+        return True
+    if provider.lower() != _DEEPSEEK or native[1] is not dialect:
+        return False
+    return dialect is Dialect.MESSAGES or (
+        type_value == _BARE_WEB_SEARCH_TYPE and model == _DEEPSEEK_RESPONSES_SEARCH_MODEL
+    )
 
 
 def _parse_executor_header(value: str | None, header: str) -> CodeExecutor | None:
@@ -168,7 +185,7 @@ def first_provider_web_fetch_tool(tools: list[dict[str, Any]] | None) -> dict[st
 
 
 def provider_runs_web_fetch_natively(
-    tool_entry: dict[str, Any] | None, *, provider: str | None, dialect: Dialect
+    tool_entry: dict[str, Any] | None, *, provider: str | None, dialect: Dialect, model: str | None = None
 ) -> bool:
     """Whether the dispatched provider would run this web-fetch declaration itself."""
     if provider is None or tool_entry is None:

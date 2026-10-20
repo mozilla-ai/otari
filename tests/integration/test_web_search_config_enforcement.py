@@ -30,6 +30,8 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.tools import WorkspaceWebSearchConfig
+from gateway.services.tools import WebSearchBackend
+from gateway.services.web_retrieval_policy import canonicalize_domain_rules
 
 _SEARCH_URL = "http://127.0.0.1:9998/search"
 _REQUEST = {
@@ -373,6 +375,49 @@ def test_a_request_cannot_shed_the_workspace_block_list(
 
     assert response.status_code == 200
     assert set(seen.backend_kwargs["blocked_domains"]) == {"noise.example", "banned.example"}
+
+
+def test_a_search_on_an_instance_is_narrowed_as_one_on_the_old_backend(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    """The ceiling and the block list reach the search backend on any-search, as they reach the old one.
+
+    A workspace option the provider does not take is dropped with a warning, and the
+    request's own options are layered over the instance's.
+    """
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    monkeypatch.setattr(test_config, "search_tools", {"fake-search": {"provider": "fake"}})
+    monkeypatch.setattr(test_config, "web_search_default_tool", "fake-search")
+    workspace_id = _default_workspace_id(client, master_key_header)
+    _set_config(
+        client,
+        master_key_header,
+        workspace_id,
+        enabled=True,
+        max_results=2,
+        blocked_domains=["banned.example"],
+        provider_options={"no_such_option": 1},
+    )
+    pools: list[Any] = []
+
+    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int, **_extra: Any) -> MessageResponse:
+        pools.append(pool)
+        return _text_response("via-search-loop")
+
+    tool = {"type": "otari_web_search", "max_results": 15, "provider_options": {"cost": 0.01}}
+    with patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop):
+        response = client.post(f"{API_ROOT}/messages", json={**_REQUEST, "tools": [tool]}, headers=api_key_header)
+
+    assert response.status_code == 200, response.text
+    [search] = pools
+    assert isinstance(search, WebSearchBackend)
+    assert search._max_results == 2
+    assert search._policy.blocked == canonicalize_domain_rules(["banned.example"])
+    assert dict(search._search.options) == {"cost": 0.01}
 
 
 def test_a_request_allow_list_is_intersected_with_the_workspace_one(

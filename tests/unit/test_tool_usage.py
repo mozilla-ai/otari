@@ -53,7 +53,7 @@ def test_a_reported_zero_is_a_reported_cost() -> None:
 
     entry = _only(tally)
     assert (entry.calls, entry.unreported_calls, entry.reported_cost) == (1, 0, Decimal(0))
-    assert tally.billable_calls() == {"web_search": 1}
+    assert tally.meters() == {"web_search": {"billed": 1, "errors": 0}}
 
 
 def test_an_unreported_zero_hit_search_is_billed_at_the_rate() -> None:

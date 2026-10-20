@@ -21,14 +21,23 @@ from gateway.types.tool_charges import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     ORGANIZATION_KEY_LABEL_PREFIX,
     LabelCalls,
+    RateKey,
     gateway_tool_pricing_key,
 )
+
+# Published per-search prices of searches a provider runs itself, keyed by label.
+# Default pricing prices a provider-run search at its list price when the operator
+# set no rate, as models.dev prices a model. Anthropic: $10 per 1,000 searches
+# (https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool), read 2026-10-17.
+PROVIDER_TOOL_LIST_PRICES: Mapping[str, Decimal] = {
+    "anthropic:web_search": Decimal("0.01"),
+}
 
 
 class ToolRate(NamedTuple):
     """The rate a call with no reported cost is priced at, and where it was found."""
 
-    rate_key: str
+    rate_key: RateKey
     #: USD per call.
     unit_rate: Decimal
     source: PriceSource
@@ -37,7 +46,7 @@ class ToolRate(NamedTuple):
 class ToolRateLookup(NamedTuple):
     """What a label's calls with no reported cost are priced under."""
 
-    rate_keys: tuple[str, ...]
+    rate_keys: tuple[RateKey, ...]
     #: True for a call the deployment pays for, which only the operator's override prices.
     operator_set_only: bool
 
@@ -48,7 +57,7 @@ class UnpricedToolLabel(NamedTuple):
     tool: str
     label: str
     #: The row an operator would add: the label's first rate key.
-    rate_key: str
+    rate_key: RateKey
     #: The calls that went unpriced: those that reported no cost.
     calls: int
 
@@ -90,7 +99,10 @@ def tool_rate_lookup(entry: LabelCalls) -> ToolRateLookup | None:
     if entry.calls <= 0 or entry.unreported_calls <= 0:
         return None
     rate_keys = entry.rate_keys if entry.rate_keys is not None else (gateway_tool_pricing_key(entry.tool),)
-    return ToolRateLookup(rate_keys, paid_by_the_deployment(entry.label))
+    deployment_paid = (
+        entry.deployment_paid if entry.deployment_paid is not None else paid_by_the_deployment(entry.label)
+    )
+    return ToolRateLookup(rate_keys, deployment_paid)
 
 
 def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup, ToolRate | None]) -> ToolCharges:
@@ -113,7 +125,7 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
     # Keyed by tool and label, so two records of one label with different rate
     # keys still settle as one line.
     by_label: dict[tuple[str, str], tuple[int, Decimal]] = {}
-    unpriced: dict[tuple[str, str, str], UnpricedToolLabel] = {}
+    unpriced: dict[tuple[str, str, RateKey], UnpricedToolLabel] = {}
     for entry in calls:
         if entry.calls <= 0:
             continue

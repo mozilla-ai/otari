@@ -24,6 +24,7 @@ function mockApi({
   modelsStatus = 200,
   operator = false,
   providers = [] as string[],
+  hosted = [] as string[],
   aliases = [] as { name: string; target: string }[],
 } = {}) {
   const urls: string[] = []
@@ -41,6 +42,12 @@ function mockApi({
     }
     if (operator && url.endsWith(`${API_ROOT}/providers`)) {
       return json({ providers: providers.map((instance) => ({ instance })) })
+    }
+    if (operator && url.includes(`${API_ROOT}/hosted-providers?`)) {
+      return json({
+        data: hosted.map((name) => ({ name, provider: "openai" })),
+        count: hosted.length,
+      })
     }
     if (url.endsWith(`${API_ROOT}/models`)) {
       if (modelsStatus !== 200) return json({ detail: "nope" }, modelsStatus)
@@ -139,6 +146,23 @@ describe("ModelScopeControl", () => {
       }),
     ).toBeInTheDocument()
     expect(urls.some((url) => url.endsWith(`${API_ROOT}/providers`))).toBe(true)
+  })
+
+  it("offers an operator a wildcard for a hosted provider /models cannot list", async () => {
+    mockApi({
+      operator: true,
+      models: ["byok-openai:gpt-4o-mini"],
+      hosted: ["my-vllm"],
+    })
+    const user = userEvent.setup()
+    renderControl()
+
+    await user.type(screen.getByLabelText("Add a model"), "m")
+    expect(
+      await screen.findByRole("option", {
+        name: "my-vllm:* · all my-vllm models",
+      }),
+    ).toBeInTheDocument()
   })
 
   it("says nothing is configured only when the catalog is really empty", async () => {

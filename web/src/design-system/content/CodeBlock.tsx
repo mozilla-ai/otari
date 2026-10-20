@@ -17,7 +17,7 @@ import { copyToClipboard } from "../helpers/clipboard"
  * is also what keeps it off the first line of the snippet.
  *
  * `value` is the exact text a copy yields, which is not always what is
- * rendered: the bundled guide hands this the raw fence while `children` carries
+ * rendered: a Markdown page hands this the raw fence while `children` carries
  * react-markdown's own nodes. With no `value` there is nothing to copy and the
  * control is absent rather than dead.
  *
@@ -135,7 +135,7 @@ export function CodeBlock({
             type="button"
             onClick={copy}
             // Named for the block it copies, because these come in runs: the
-            // bundled guide puts twenty on one page and the setup sheet puts
+            // a long Markdown page can carry twenty and the setup sheet puts
             // one beside the key field's own. "Copy" twenty times over is a
             // list a screen reader cannot choose from. The visible word stays
             // inside the name, which is what keeps voice control working.

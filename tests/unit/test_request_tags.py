@@ -35,27 +35,27 @@ def test_null_values_are_dropped() -> None:
 
 
 @pytest.mark.parametrize(
-    "metadata",
+    ("metadata", "reason"),
     [
-        {"purpose": 1},
-        {"purpose": ["chat"]},
-        {"spend_logs_metadata": {"purpose": {"nested": "deeper"}}},
-        {"spend_logs_metadata": "chat"},
-        {"": "chat"},
-        {"k" * (MAX_TAG_KEY_LENGTH + 1): "chat"},
-        {"purpose": "v" * (MAX_TAG_VALUE_LENGTH + 1)},
-        {f"k{i}": "v" for i in range(MAX_REQUEST_TAGS + 1)},
+        ({"purpose": 1}, "must be a string"),
+        ({"purpose": ["chat"]}, "must be a string"),
+        ({"spend_logs_metadata": {"purpose": {"nested": "deeper"}}}, "must be a string"),
+        ({"spend_logs_metadata": "chat"}, "must be an object"),
+        ({"": "chat"}, "tag key must be"),
+        ({"k" * (MAX_TAG_KEY_LENGTH + 1): "chat"}, "tag key must be"),
+        ({"purpose": "v" * (MAX_TAG_VALUE_LENGTH + 1)}, f"at most {MAX_TAG_VALUE_LENGTH} characters"),
+        ({f"k{i}": "v" for i in range(MAX_REQUEST_TAGS + 1)}, f"at most {MAX_REQUEST_TAGS} tags"),
     ],
 )
-def test_anything_but_bounded_string_tags_is_refused(metadata: dict[str, object]) -> None:
-    with pytest.raises(ValueError):
+def test_anything_but_bounded_string_tags_is_refused(metadata: dict[str, object], reason: str) -> None:
+    with pytest.raises(ValueError, match=reason):
         request_tags(metadata)
 
 
 def test_the_bound_counts_tags_after_merging() -> None:
     flat = {f"k{i}": "v" for i in range(MAX_REQUEST_TAGS)}
     assert request_tags({**flat, "spend_logs_metadata": {"k0": "w"}}) is not None
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=f"at most {MAX_REQUEST_TAGS} tags"):
         request_tags({**flat, "spend_logs_metadata": {"extra": "w"}})
 
 

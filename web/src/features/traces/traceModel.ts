@@ -88,10 +88,11 @@ export function traceKind(summary: TraceSummary): "Session" | "Request" {
   return summary.session_source === "none" ? "Request" : "Session"
 }
 
-// What a session is called in the list: the agent that ran it, and a short id
-// to tell two runs of one agent apart.
+// What a session is called in the list: the id its client chose for it where
+// one was stored, otherwise the agent that ran it. A short id beside it tells
+// two runs of one agent apart.
 export function sessionName(summary: TraceSummary): string {
-  return summary.harness ?? traceKind(summary)
+  return summary.name ?? summary.harness ?? traceKind(summary)
 }
 
 export function shortId(traceId: string): string {

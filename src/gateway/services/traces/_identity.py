@@ -7,7 +7,9 @@ two requests belong together from their content.
 
 The session's trace id hashes the workspace and the user in, so two people who
 choose the same label get two sessions, and an id a client chose can never land
-in another tenant's or another user's trace.
+in another tenant's or another user's trace. A key the client chose on purpose is
+also the session's name, where it is identifier-shaped, so a reader can find the
+session by the id the client knows it by.
 """
 
 import hashlib
@@ -23,8 +25,19 @@ SESSION_TAG = "session_id"
 
 # Headers in which an agent harness sends its own session id, and the harness each
 # one belongs to. Claude Code sends ``x-claude-code-session-id`` on every request of
-# a session. Other harnesses are added as their requests are confirmed.
+# a session.
 HARNESS_SESSION_HEADERS: Mapping[str, str] = {"x-claude-code-session-id": "claude-code"}
+
+# Headers a harness sends only on a subagent's requests. A subagent shares its parent's
+# session id and works inside the parent's turn, so the task it was handed is no new prompt.
+HARNESS_SUBAGENT_HEADERS = frozenset({"x-claude-code-agent-id"})
+
+# Codex sends its thread id as ``thread-id`` and its root thread's id as ``session-id``.
+# The thread is the session, so a subagent gets one of its own; ``session-id`` is read
+# only without a ``thread-id``. Both names are generic, so they count only on a request
+# whose ``originator`` or ``User-Agent`` starts with ``codex``.
+_CODEX_SESSION_HEADERS = ("thread-id", "session-id")
+_CODEX_MARKER_HEADERS = ("originator", "user-agent")
 
 # ``User-Agent`` product names a harness is known by, where it differs from the name shown.
 _HARNESS_PRODUCTS: Mapping[str, str] = {"claude-cli": "claude-code"}
@@ -45,12 +58,24 @@ class SessionRef:
         material = "\x00".join((str(workspace_id), owner, self.source, self.key))
         return "s-" + hashlib.sha256(material.encode()).hexdigest()[:40]
 
+    @property
+    def name(self) -> str | None:
+        """The session's display name: the key a client chose on purpose, when it is identifier-shaped.
+
+        A harness's or an exporter's key is its own generated id, so it names nothing.
+        """
+        return self.key if self.source == "client" and is_identifier(self.key) else None
+
 
 def _clean(value: str | None) -> str | None:
     if value is None:
         return None
     value = value.strip()
     return value[:_MAX_KEY_LENGTH] if value else None
+
+
+def _is_codex(headers: Mapping[str, str]) -> bool:
+    return any((headers.get(header) or "").strip().lower().startswith("codex") for header in _CODEX_MARKER_HEADERS)
 
 
 def resolve_session(
@@ -67,7 +92,16 @@ def resolve_session(
     for header in HARNESS_SESSION_HEADERS:
         if (key := _clean(headers.get(header))) is not None:
             return SessionRef(source="harness", key=key)
+    if _is_codex(headers):
+        for header in _CODEX_SESSION_HEADERS:
+            if (key := _clean(headers.get(header))) is not None:
+                return SessionRef(source="harness", key=key)
     return None
+
+
+def is_subagent(headers: Mapping[str, str]) -> bool:
+    """Whether the request's harness marked it as one of a subagent's."""
+    return any(_clean(headers.get(header)) is not None for header in HARNESS_SUBAGENT_HEADERS)
 
 
 def harness_of(headers: Mapping[str, str]) -> str | None:
@@ -80,6 +114,8 @@ def harness_of(headers: Mapping[str, str]) -> str | None:
     for header, harness in HARNESS_SESSION_HEADERS.items():
         if headers.get(header):
             return harness
+    if _is_codex(headers):
+        return "codex"
     agent = (headers.get("user-agent") or "").strip()
     if not agent:
         return None

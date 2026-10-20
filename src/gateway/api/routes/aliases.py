@@ -36,6 +36,7 @@ from gateway.models.providers import ModelAlias
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.alias_service import all_alias_names, list_stored_aliases, refresh_alias_cache
 from gateway.services.policy_store import all_policy_names
+from gateway.services.providers import hosted_implementation
 
 router = APIRouter(
     prefix="/aliases",
@@ -136,7 +137,7 @@ def _validate(config: GatewayConfig, name: str, target: str, user_id: str | None
         )
     alias_names = all_alias_names(config) | {name}
     try:
-        config.validate_alias(name, target, alias_names=alias_names)
+        config.validate_alias(name, target, alias_names=alias_names, hosted_implementation=hosted_implementation)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

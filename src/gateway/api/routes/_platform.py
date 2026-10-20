@@ -50,7 +50,11 @@ from gateway.services.inference import (
     upstream_exception_shape,
 )
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
-from gateway.services.provider_kwargs import missing_credential, no_candidate_configured_detail, split_selector
+from gateway.services.provider_kwargs import (
+    missing_credential,
+    no_candidate_configured_detail,
+    split_selector,
+)
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 

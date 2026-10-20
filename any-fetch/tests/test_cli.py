@@ -130,6 +130,7 @@ def test_describe_shows_the_allowed_values_the_documented_defaults_and_the_base_
     assert "API base: https://api.tabstack.ai/v1, or TABSTACK_BASE_URL when set" in out
     assert '  effort (string), default "standard"\n      One of: min, standard, max.' in out
     assert "Renders JavaScript: yes" in out
+    assert "Final URL: the URL as asked, even after a redirect" in out
 
 
 def test_describe_shows_defaults_as_json_and_the_test_tier(capsys: pytest.CaptureFixture[str]) -> None:
