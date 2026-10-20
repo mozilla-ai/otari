@@ -210,9 +210,13 @@ When changing the template:
    (otari service, **Source image**), which nothing can automate, and the PR's
    `railway-template` check fails until it is done. Review the release notes on
    that PR too: a release that newly requires a variable needs it added in the
-   editor and in `template.json` on the same branch. Dispatch the workflow with a
-   tag to open the PR again. A new tag does not touch existing deploys: each
-   keeps the tag it was deployed with until its operator upgrades.
+   editor and in `template.json` on the same branch. Every release uses one
+   branch, `chore/railway-template-bump`, so a release that lands while the PR
+   is open updates it in place, and one not above the PR's pin leaves it alone.
+   Once the branch holds a commit besides the bump, the next release's run
+   fails rather than drop it: merge the PR, then dispatch the workflow with the
+   newer tag. A new tag does not touch existing deploys: each keeps the tag it
+   was deployed with until its operator upgrades.
 4. The deploy link is `https://railway.com/deploy/<code>`, where the code is
    set in the template editor (it is `otari`). If it changes, update every
    **Deploy on Railway** button (`grep -rn railway.com/deploy`) and the

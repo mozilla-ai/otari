@@ -10,7 +10,9 @@ pattern was found exactly as often as expected, so a reworded README fails the
 run instead of half-bumping.
 
 A version not above the pinned one changes nothing: a patch to an older minor
-line must not move new deploys backward.
+line must not move new deploys backward. ``--pending-template`` names the
+template.json of an open bump PR, whose pin counts the same way, so an older
+release cannot overwrite a newer one still waiting to merge.
 
 Standard library only, so the release workflow runs it with no environment.
 Prints ``changed=`` and ``previous=`` lines for ``$GITHUB_OUTPUT`` on stdout
@@ -18,6 +20,7 @@ and diagnostics on stderr. Exits 0 when bumped or already current, 1 on error.
 
 Usage:
     python scripts/bump_railway_template.py 0.29.0
+    python scripts/bump_railway_template.py 0.29.0 --pending-template pr-template.json
 """
 
 from __future__ import annotations
@@ -105,15 +108,18 @@ def bump_texts(texts: dict[str, str], old: str, new: Version) -> dict[str, str]:
     return bumped
 
 
-def bump(root: Path, version: str) -> str | None:
-    """Bump the files under ``root``. Return the previous version, or None when already current."""
+def bump(root: Path, version: str, pending: str | None = None) -> str | None:
+    """Bump the files under ``root``. Return the previous version, or None when already current.
+
+    ``pending`` is the pin of an open bump PR; a version not above it changes nothing either.
+    """
     directory = root / RAILWAY_DIR
     paths = {name: directory / name for name in ("template.json", "listing.md", "README.md")}
     texts = {name: path.read_text(encoding="utf-8") for name, path in paths.items()}
 
     new = parse_version(version)
     old = pinned_version(json.loads(texts["template.json"]))
-    if new <= parse_version(old):
+    if new <= parse_version(old) or (pending is not None and new <= parse_version(pending)):
         return None
 
     bumped = bump_texts(texts, old, new)
@@ -126,16 +132,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("version", help="the release to pin, X.Y.Z or vX.Y.Z")
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help="the repository root")
+    parser.add_argument("--pending-template", type=Path, help="template.json of an open bump PR")
     args = parser.parse_args(argv)
 
     try:
-        previous = bump(args.root, args.version)
+        pending = None
+        if args.pending_template:
+            pending = pinned_version(json.loads(args.pending_template.read_text(encoding="utf-8")))
+        previous = bump(args.root, args.version, pending)
     except BumpError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
     if previous is None:
-        print(f"The Railway template already pins {args.version} or later; nothing to do.", file=sys.stderr)
+        where = "main or the open bump PR" if pending else "The Railway template"
+        print(f"{where} already pins {args.version} or later; nothing to do.", file=sys.stderr)
         print("changed=false")
     else:
         print(f"Moved the Railway template from {previous} to {args.version.removeprefix('v')}.", file=sys.stderr)

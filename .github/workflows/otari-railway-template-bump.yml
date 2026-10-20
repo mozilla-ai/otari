@@ -3,8 +3,8 @@ name: Otari Railway Template Bump
 # Opens a PR that moves deploy/railway to the release just published: the
 # image tag in template.json, listing.md and the README, plus the README's
 # example versions (scripts/bump_railway_template.py). A pre-release opens
-# nothing, and neither does a release not above the pinned version, such as a
-# patch to an older minor line.
+# nothing, and neither does a release not above the version main or the open
+# bump PR pins, such as a patch to an older minor line.
 #
 # The PR cannot finish the job. Railway's public API has no mutation that
 # writes a template's services or variables, so the live template's image tag
@@ -28,6 +28,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: otari-railway-template-bump
@@ -63,12 +64,43 @@ jobs:
           ref: main
           persist-credentials: false
 
+      # The open bump PR's pin is a floor too, so an older release cannot
+      # overwrite a newer one still waiting to merge. Its commit count is read
+      # because an update rebuilds the branch from main: anything pushed there
+      # besides the bot's one commit would be lost, so that update is refused.
+      - name: Read the open bump PR
+        id: pending
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NUMBER=$(gh pr list --repo "$GITHUB_REPOSITORY" --head chore/railway-template-bump --base main \
+            --state open --json number --jq '.[0].number // empty')
+          if [ -z "$NUMBER" ]; then
+            exit 0
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/contents/deploy/railway/template.json?ref=chore/railway-template-bump" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/pending-template.json"
+          COMMITS=$(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" --json commits --jq '.commits | length')
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+          echo "commits=$COMMITS" >> "$GITHUB_OUTPUT"
+          echo "template=$RUNNER_TEMP/pending-template.json" >> "$GITHUB_OUTPUT"
+
       # Standard library only, so the runner's Python needs no project install.
       - name: Bump the image tag
         id: bump
         env:
           VERSION: ${{ steps.ver.outputs.version }}
-        run: python3 scripts/bump_railway_template.py "$VERSION" >> "$GITHUB_OUTPUT"
+          PENDING: ${{ steps.pending.outputs.template }}
+        run: python3 scripts/bump_railway_template.py "$VERSION" ${PENDING:+--pending-template "$PENDING"} >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to drop commits on the open bump PR
+        if: steps.bump.outputs.changed == 'true' && steps.pending.outputs.number && steps.pending.outputs.commits != '1'
+        env:
+          NUMBER: ${{ steps.pending.outputs.number }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          echo "::error::Bump PR #$NUMBER has commits besides the bump, and updating it rebuilds the branch from main, which would drop them. Merge or close #$NUMBER, then dispatch this workflow with v$VERSION."
+          exit 1
 
       - name: Write the PR body
         if: steps.bump.outputs.changed == 'true'
@@ -86,6 +118,8 @@ jobs:
           3. In the Railway template editor on the mozilla-ai account, open the **otari** service and set **Source image** to \`mzdotai/otari:$VERSION\`. Save the template.
           4. Deploy the template once to a throwaway project; check \`/api/v1/health/readiness\` and one \`/api/v1/chat/completions\` request.
           5. Re-run the \`railway-template\` check. The image line should be gone; the README diff stays until merge, when \`otari-railway-listing.yml\` publishes \`listing.md\` to the live template.
+
+          A later release updates this PR in place. Once a commit besides the bump is pushed here, it refuses to, rather than drop that commit; merge this PR, then dispatch the workflow with the newer tag.
 
           ## PR Type
 

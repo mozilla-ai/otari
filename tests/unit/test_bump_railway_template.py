@@ -97,6 +97,39 @@ def test_version_not_above_the_pin_changes_nothing(
     assert _read(root) == before
 
 
+def _pending_template(tmp_path: Path, version: str) -> Path:
+    template = json.loads((_RAILWAY_DIR / "template.json").read_text(encoding="utf-8"))
+    template["services"]["otari"]["source"]["image"] = f"mzdotai/otari:{version}"
+    path = tmp_path / "pending-template.json"
+    path.write_text(json.dumps(template), encoding="utf-8")
+    return path
+
+
+def test_a_version_not_above_the_open_prs_pin_changes_nothing(
+    root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    major, minor, _ = _pinned()
+    pending = _pending_template(tmp_path, f"{major}.{minor + 2}.0")
+    before = _read(root)
+
+    assert bump.main([f"{major}.{minor + 1}.0", "--root", str(root), "--pending-template", str(pending)]) == 0
+
+    assert capsys.readouterr().out.splitlines() == ["changed=false"]
+    assert _read(root) == before
+
+
+def test_a_version_above_the_open_prs_pin_bumps_from_main(
+    root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    major, minor, patch = _pinned()
+    pending = _pending_template(tmp_path, f"{major}.{minor + 1}.0")
+
+    assert bump.main([f"{major}.{minor + 2}.0", "--root", str(root), "--pending-template", str(pending)]) == 0
+
+    assert capsys.readouterr().out.splitlines() == ["changed=true", f"previous={major}.{minor}.{patch}"]
+    assert f"mzdotai/otari:{major}.{minor + 2}.0" in _read(root)["template.json"]
+
+
 @pytest.mark.parametrize("version", ["1.0.0-rc1", "1.0", "latest", "v1.0.0.1"])
 def test_non_release_versions_are_refused(root: Path, version: str) -> None:
     before = _read(root)
