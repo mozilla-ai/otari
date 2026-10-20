@@ -28,7 +28,7 @@ const OUTCOME_LABELS: Record<
   failed: "Not moved: failed",
 }
 
-// Copied, but its original entry still serves until the copy offers a model.
+// Copied, but its original entry changed during the move and was kept for review.
 function isRetained(row: DeploymentProviderMigrationRow) {
   return row.outcome === "migrated" && !row.source_removed
 }
@@ -138,7 +138,7 @@ export function DeploymentProviderMigration() {
           <p role="status">
             Moved {moved} of {report.length} stored providers.
             {retained > 0
-              ? ` ${retained} copied, with the original still serving until ${retained === 1 ? "its" : "their"} models are offered here.`
+              ? ` ${retained} copied, with the original kept because it changed during the move. Compare the two, then discard one.`
               : ""}
           </p>
           <div className="mt-2">
