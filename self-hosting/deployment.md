@@ -1,7 +1,7 @@
 # Deployment
 
 Otari publishes `mzdotai/otari` on Docker Hub. Use the
-[Quickstart](../home/quickstart.md) for local setup; this page covers production choices
+[Self-hosted quickstart](self-hosted-quickstart.md) for local setup; this page covers production choices
 and hybrid gateways.
 
 ## Standalone checklist
@@ -57,7 +57,7 @@ are in [Database connections](../reference/configuration.md#database-connections
 ## Docker Compose
 
 The repository Compose stack runs Otari and PostgreSQL. The
-[Quickstart](../home/quickstart.md) walks through its first start, including the
+[Self-hosted quickstart](self-hosted-quickstart.md) walks through its first start, including the
 `.env` secrets it needs.
 
 Use `docker-compose.build.yml` when testing source changes:

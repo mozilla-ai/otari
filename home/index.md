@@ -28,12 +28,12 @@ the gateway and where its data lives, not in the API your applications call.
 
 ## Where to go next
 
-- **Home**: the [Quickstart](quickstart.md) runs Otari on your machine and sends
-  a first request through it.
+- **Home**: the [Quickstart](quickstart.md) sends a first request through
+  otari.ai in a few minutes.
 - **Guides**: how to do one thing with Otari, such as give each end user their
   own budget, add guardrails, or read agent traces.
-- **Self-Hosting**: deploying and operating your own gateway, and connecting it
-  to providers.
+- **Self-Hosting**: running your own gateway, starting with the
+  [Self-hosted quickstart](../self-hosting/self-hosted-quickstart.md), and connecting it to providers.
 - **Reference**: every setting, endpoint, error code and limit.
 
 ### Integrations

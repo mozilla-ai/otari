@@ -1,5 +1,6 @@
 # Summary
 
+* [Self-hosted quickstart](self-hosted-quickstart.md)
 * [Deployment](deployment.md)
 * [Runtime modes](modes.md)
 

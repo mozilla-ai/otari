@@ -1,5 +1,5 @@
 root: ./
 
 structure:
-  readme: deployment.md
+  readme: self-hosted-quickstart.md
   summary: SUMMARY.md
