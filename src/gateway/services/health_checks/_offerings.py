@@ -4,8 +4,7 @@ from typing import Any
 
 from gateway.core.config import GatewayConfig
 from gateway.services.catalog import metadata_entry
-from gateway.services.health_checks._probe import is_chat_model
-from gateway.services.health_checks._service import HealthCheckOffering
+from gateway.services.health_checks._probe import HealthCheckOffering, is_chat_model
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.provider_kwargs import keyless_placeholder_api_key
 from gateway.services.providers import HostedProviderService, ResolvedHostedProvider, hosted_implementation
@@ -41,7 +40,7 @@ async def list_hosted_offerings(hosted: HostedProviderService, config: GatewayCo
             offerings.append(
                 HealthCheckOffering(
                     selector=f"{name}:{model}",
-                    instance=name,
+                    provider=name,
                     reasoning=bool(metadata and metadata.reasoning),
                     chat=is_chat_model(model, metadata.output_modalities if metadata else []),
                     implementation=implementation,

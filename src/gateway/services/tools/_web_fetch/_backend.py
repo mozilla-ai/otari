@@ -51,7 +51,7 @@ from gateway.services.tools._web_names import (
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     web_fetch_tool_definition,
 )
-from gateway.services.tools._web_tool_failure import CALL_LIMIT_TAG, WebToolFailure
+from gateway.services.tools._web_tool_failure import CALL_LIMIT_TAG, WebToolFailure, failed_text
 from gateway.services.web_retrieval_network import truncate_utf8
 from gateway.services.web_retrieval_policy import DomainPolicy
 
@@ -225,8 +225,7 @@ class WebFetchBackend:
         """
         self._last_failure = failure
         if not self._builtin:
-            detail = failure.tag if status is None else f"{failure.tag}, HTTP {status}"
-            return f"[tool error] {failure.provider} fetch failed ({detail})"
+            return f"[tool error] {failed_text(failure.provider, 'fetch', failure.tag, status)}"
         if failure.tag == HTTP_STATUS_TAG and status is not None:
             return f"[tool error] destination returned HTTP {status}"
         return _BUILTIN_TEXTS.get(failure.tag, _BUILTIN_FAILED_TEXT)

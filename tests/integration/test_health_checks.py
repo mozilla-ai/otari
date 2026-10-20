@@ -101,7 +101,7 @@ class _Roster:
     def __init__(self) -> None:
         self.served: dict[str, set[str]] = defaultdict(set)
         for offering in _OFFERINGS:
-            self.served[offering.instance].add(offering.model)
+            self.served[offering.provider].add(offering.model)
         self.switched_off: list[dict[str, set[str]]] = []
 
     async def serveable_models(self, *, organization_id: uuid.UUID | None) -> dict[str, frozenset[str]]:
@@ -465,7 +465,7 @@ async def test_a_reasoning_model_no_longer_served_leaves_the_page(
         return object()
 
     async def without_mistral() -> Sequence[HealthCheckOffering]:
-        return [offering for offering in _OFFERINGS if offering.instance != "mistral"]
+        return [offering for offering in _OFFERINGS if offering.provider != "mistral"]
 
     with patch(f"{_PROBE}.acompletion", new=mistral_fails):
         await service.request_run()
@@ -511,7 +511,7 @@ async def test_a_run_checks_what_the_hosted_providers_serve_on_their_own_keys(
         build_hosted_provider_service(UnitOfWork(async_db), config=test_config), test_config
     )
 
-    assert [(o.selector, o.instance, o.implementation, o.model) for o in offerings] == [
+    assert [(o.selector, o.provider, o.implementation, o.model) for o in offerings] == [
         ("openai-eu:gpt-test", "openai-eu", "openai", "gpt-test")
     ]
     assert offerings[0].call_kwargs == {"api_key": "sk-hosted-eu-1234", "api_base": "https://eu.example.com/v1"}

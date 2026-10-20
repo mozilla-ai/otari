@@ -6,10 +6,10 @@ from unittest.mock import patch
 
 import pytest
 
-from gateway.services.health_checks._probe import ProbeTarget, is_chat_model, probe
+from gateway.services.health_checks._probe import HealthCheckOffering, is_chat_model, probe
 
 _PROBE = "gateway.services.health_checks._probe"
-_TARGET = ProbeTarget(
+_TARGET = HealthCheckOffering(
     "openai:gpt-test",
     "openai",
     reasoning=False,
@@ -26,7 +26,7 @@ class _StatusError(Exception):
         self.status_code = status_code
 
 
-async def _run(completion: Any, target: ProbeTarget = _TARGET, timeout: float = 5.0) -> Any:
+async def _run(completion: Any, target: HealthCheckOffering = _TARGET, timeout: float = 5.0) -> Any:
     with patch(f"{_PROBE}.acompletion", new=completion):
         return await probe(target, prompt="ping", max_tokens=8, timeout=timeout)
 
@@ -84,7 +84,7 @@ async def test_a_model_that_is_not_for_chat_is_skipped_without_a_call() -> None:
         raise AssertionError
 
     outcome = await _run(
-        never, ProbeTarget("openai:text-embedding-3", "openai", False, False, "openai", "text-embedding-3")
+        never, HealthCheckOffering("openai:text-embedding-3", "openai", False, False, "openai", "text-embedding-3")
     )
 
     assert outcome.status == "skip"
