@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router"
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 import {
   FiActivity,
   FiEdit2,
@@ -12,6 +12,7 @@ import type {
   HostedCatalogRefresh,
   HostedProvider,
   ProviderHealth,
+  ProviderInfo,
 } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
@@ -47,7 +48,6 @@ import { UnavailableHere } from "@/shared/components/access/UnavailableHere"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 import { AddHostedProviderForm } from "./AddHostedProviderForm"
-import { ConfiguredInstancesSection } from "./ConfiguredInstancesSection"
 import { DeploymentProviderMigration } from "./DeploymentProviderMigration"
 import { EditHostedProviderForm } from "./EditHostedProviderForm"
 import { HostedProviderModelsPanel } from "./HostedProviderModelsPanel"
@@ -73,7 +73,14 @@ import {
 //
 // A provider defined in the configuration's `hosted_providers:` block is listed
 // with a `config.yml` badge and changed only there: its key, endpoint and switch
-// are read-only here, while its models are administered as any other's.
+// are read-only here, while its models are administered as any other's. A
+// `providers:` instance is listed beside them, wholly read-only: it serves
+// every model a request names on it, ahead of every hosted provider.
+
+/** A row of the table: a hosted provider, or a `providers:` instance from config.yml. */
+type ProviderRow =
+  | { kind: "hosted"; name: string; hosted: HostedProvider }
+  | { kind: "instance"; name: string; instance: ProviderInfo }
 
 /**
  * What the last sweep did, stated rather than implied by the table redrawing.
@@ -354,11 +361,24 @@ function HostedProvidersContent() {
     configuredNames === undefined || configuredNames.has(name)
       ? undefined
       : healthByName.get(name)
+  const tableRows: ProviderRow[] = [
+    ...(configured.data?.providers ?? []).map(
+      (instance): ProviderRow => ({
+        kind: "instance",
+        name: instance.instance,
+        instance,
+      }),
+    ),
+    ...rows.map(
+      (hosted): ProviderRow => ({ kind: "hosted", name: hosted.name, hosted }),
+    ),
+  ].sort((a, b) => a.name.localeCompare(b.name))
   // A failed list is not an empty one: rendering "none configured" over a 500
   // would tell an operator their live providers are gone.
-  const isEmpty = !providers.error && !providers.isPending && rows.length === 0
+  const isEmpty =
+    !providers.error && !providers.isPending && tableRows.length === 0
 
-  const columns: DataTableColumn<HostedProvider>[] = [
+  const hostedColumns: DataTableColumn<HostedProvider>[] = [
     {
       id: "provider",
       header: "Provider",
@@ -476,6 +496,44 @@ function HostedProvidersContent() {
       ),
     },
   ]
+  const instanceCells: Record<string, (row: ProviderInfo) => ReactNode> = {
+    provider: (row) => (
+      <span className="flex flex-wrap items-center gap-2">
+        <Link
+          to="/models"
+          search={{ provider: row.instance }}
+          className="font-medium text-foreground hover:text-link hover:underline"
+        >
+          {row.instance}
+        </Link>
+        {row.instance === row.provider_type ? null : (
+          <span className="text-caption">{row.provider_type}</span>
+        )}
+        <Badge tone="muted">config.yml</Badge>
+        <Badge tone="muted">Any model</Badge>
+      </span>
+    ),
+    key: (row) =>
+      row.env_key ? (
+        <span className="text-muted">From config.yml</span>
+      ) : (
+        <span className="text-muted">None needed</span>
+      ),
+    health: (row) => <HealthPill health={healthByName.get(row.instance)} />,
+    api_base: () => <span className="text-muted">Set in config.yml</span>,
+    scope: () => <span className="text-muted">Every organization</span>,
+    enabled: () => <span className="text-caption">Always</span>,
+    actions: () => <span className="text-caption">Edit in config.yml</span>,
+  }
+  const columns: DataTableColumn<ProviderRow>[] = hostedColumns.map(
+    (column) => ({
+      ...column,
+      cell: (row: ProviderRow) =>
+        row.kind === "hosted"
+          ? column.cell(row.hosted)
+          : instanceCells[column.id]?.(row.instance),
+    }),
+  )
 
   return (
     <div className="flex flex-col">
@@ -507,9 +565,10 @@ function HostedProvidersContent() {
         }
       >
         The providers this deployment serves inference on, and the keys it
-        serves them with. Used only for requests that bring no credential of
-        their own, after an organization's own keys and the configured
-        providers.
+        serves them with. Those marked config.yml are declared in the
+        configuration and changed there; a <code>providers:</code> instance
+        serves first, and the others only requests that bring no credential of
+        their own, after an organization's own keys.
       </PageIntro>
 
       <ErrorBanner
@@ -547,7 +606,7 @@ function HostedProvidersContent() {
         />
       ) : (
         <>
-          {rows.length > 0 && health.data && health.data.total > 0 ? (
+          {tableRows.length > 0 && health.data && health.data.total > 0 ? (
             <HealthSummary
               healthy={health.data.healthy}
               degraded={health.data.degraded}
@@ -559,9 +618,10 @@ function HostedProvidersContent() {
             <DataTable
               ariaLabel="Hosted providers"
               columns={columns}
-              rows={rows}
-              // The name, not the id: a configured provider has no row id.
-              getRowKey={(row) => row.name}
+              rows={tableRows}
+              // The kind and the name, not the id: a configured provider has no
+              // row id, and a hosted provider may share a configured instance's name.
+              getRowKey={(row) => `${row.kind}:${row.name}`}
               isLoading={providers.isLoading}
             />
           </TableScrollFrame>
@@ -580,8 +640,6 @@ function HostedProvidersContent() {
           <HostedProviderModelsPanel provider={expanded} />
         </section>
       ) : null}
-
-      <ConfiguredInstancesSection />
 
       <AddHostedProviderForm
         key={addOpenCount}

@@ -154,9 +154,9 @@ gateway process rather than to any organization on it:
   provider yet, the page walks through adding the first one, and offers to
   enable default pricing when pricing is required and nothing sets it. Adding
   a provider is disabled, with a banner saying why, while the server has no
-  `OTARI_SECRET_KEY` to encrypt its key with. Below
-  the table, Configured providers lists the `providers:` instances of
-  `config.yml` read-only, with their reachability. Providers stored on the
+  `OTARI_SECRET_KEY` to encrypt its key with. The
+  table also lists the `providers:` instances of `config.yml`, marked
+  config.yml and read-only, with their reachability. Providers stored on the
   retired Deployment providers page are moved here under the same names
   automatically at startup. Any that could not be moved are listed in a banner
   with the reason: once the cause is fixed, move it from there, or Discard it,

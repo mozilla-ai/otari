@@ -1154,14 +1154,23 @@ describe("HostedProvidersPage, named providers and the move", () => {
     await renderPage()
 
     const table = await screen.findByRole("grid", { name: "Hosted providers" })
-    await screen.findByRole("grid", { name: "Configured providers" })
-    const row = (name: string) =>
-      within(table).getByRole("rowheader", { name: new RegExp(`^${name}`) })
-        .parentElement as HTMLElement
+    const rows = (name: string) =>
+      within(table)
+        .getAllByRole("rowheader", { name: new RegExp(`^${name}`) })
+        .map((header) => header.parentElement as HTMLElement)
+    await within(table).findByText("Edit in config.yml")
+    const [configuredOpenai, hostedOpenai] = [...rows("openai")].sort(
+      (a, b) =>
+        Number(within(b).queryByText("Edit in config.yml") !== null) -
+        Number(within(a).queryByText("Edit in config.yml") !== null),
+    )
     // The configured instance's record is the one dialed under "openai".
-    expect(within(row("openai")).queryByText("Reachable")).toBeNull()
     expect(
-      await within(row("mistral")).findByText("Reachable"),
+      await within(configuredOpenai).findByText("Reachable"),
+    ).toBeInTheDocument()
+    expect(within(hostedOpenai).queryByText("Reachable")).toBeNull()
+    expect(
+      await within(rows("mistral")[0]).findByText("Reachable"),
     ).toBeInTheDocument()
   })
 
@@ -1296,17 +1305,24 @@ describe("HostedProvidersPage, named providers and the move", () => {
     expect(within(table).getByText("Key unreadable")).toBeInTheDocument()
   })
 
-  it("lists the configured providers read-only beside the hosted ones", async () => {
+  it("lists the configured providers read-only in the same table", async () => {
     mockApi({
+      providers: [hostedProvider({ name: "openai" })],
       configured: [providerInfo("anthropic")],
     })
     await renderPage()
 
-    const table = await screen.findByRole("grid", {
-      name: "Configured providers",
+    const table = await screen.findByRole("grid", { name: "Hosted providers" })
+    const header = await within(table).findByRole("rowheader", {
+      name: /^anthropic/,
     })
+    const row = header.parentElement as HTMLElement
+    expect(within(row).getByText("config.yml")).toBeInTheDocument()
+    expect(within(row).getByText("Edit in config.yml")).toBeInTheDocument()
+    expect(within(row).queryByRole("button")).toBeNull()
+    expect(within(row).queryByRole("switch")).toBeNull()
     expect(
-      within(table).getByRole("rowheader", { name: "anthropic" }),
+      within(table).getByRole("button", { name: "Edit openai" }),
     ).toBeInTheDocument()
   })
 
