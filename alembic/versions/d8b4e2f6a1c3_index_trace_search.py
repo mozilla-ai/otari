@@ -7,7 +7,7 @@ from the two together. SQLite ignores the operator class and indexes the columns
 plainly.
 
 Revision ID: d8b4e2f6a1c3
-Revises: f0f9d05dafc6
+Revises: a8c2e4f6b0d1
 Create Date: 2026-10-19
 """
 
@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "d8b4e2f6a1c3"
-down_revision: str | Sequence[str] | None = "f0f9d05dafc6"
+down_revision: str | Sequence[str] | None = "a8c2e4f6b0d1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
