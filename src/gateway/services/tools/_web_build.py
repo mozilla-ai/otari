@@ -1,11 +1,12 @@
-"""One request's web tool backends on the libraries (design H).
+"""One request's web tool backends on the libraries.
 
 The search backend, and the fetch backend when the request declared the fetch
 tool, share the request's call allowance and open as two members of the
 request's pool, so each rendering reads the backend that ran its call. A
 request whose search runs on the old backend, or that declared only the fetch
 tool, keeps the old backend's own builder, which takes its fetch backend from
-:func:`build_web_fetch_backend`.
+:func:`build_web_fetch_backend`. What each backend runs on was resolved when
+the request was admitted, so nothing here resolves.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from gateway.core.env import otari_env
 from gateway.services.tools._web_fetch import WebFetchBackend
-from gateway.services.tools._web_search import WebSearchBackend, builtin_fetch_resolved, resolve_fetch
+from gateway.services.tools._web_search import WebSearchBackend
 from gateway.services.tools._web_search_results import web_search_max_results_baseline
 from gateway.services.web_retrieval_policy import DomainPolicy, canonicalize_domain_rules
 
@@ -24,10 +25,9 @@ if TYPE_CHECKING:
     import httpx
 
     from gateway.core.config import GatewayConfig
-    from gateway.core.settings.tools import ToolSettings
     from gateway.services.tool_usage import ToolUsageTally
     from gateway.services.tools._web_call_cap import WebToolCallCap
-    from gateway.services.tools._web_search import InLoopSearch
+    from gateway.services.tools._web_search import InLoopSearch, ResolvedFetch
     from gateway.services.traces import RequestTrace
 
 
@@ -36,7 +36,7 @@ def build_web_search_backends(
     search: InLoopSearch,
     *,
     search_tool_entry: Mapping[str, Any],
-    fetch_declared: bool,
+    fetch: ResolvedFetch | None,
     fetch_policy: DomainPolicy,
     cap: WebToolCallCap,
     purpose_hint: str | None,
@@ -44,7 +44,7 @@ def build_web_search_backends(
     tally: ToolUsageTally | None,
     trace: RequestTrace | None,
 ) -> list[WebSearchBackend | WebFetchBackend]:
-    """The search backend on ``search``, and the fetch backend when the fetch tool was declared.
+    """The search backend on ``search``, and the fetch backend on ``fetch`` when the fetch tool was declared.
 
     ``search_tool_entry`` is the search declaration once the workspace's policy
     narrowed it: its count and domain rules.
@@ -68,10 +68,10 @@ def build_web_search_backends(
             trace=trace,
         )
     ]
-    if fetch_declared:
+    if fetch is not None:
         backends.append(
             build_web_fetch_backend(
-                config,
+                fetch,
                 policy=fetch_policy,
                 trust_env_proxy=trust_env_proxy,
                 web_provider_client=web_provider_client,
@@ -84,7 +84,7 @@ def build_web_search_backends(
 
 
 def build_web_fetch_backend(
-    config: ToolSettings | None,
+    resolved: ResolvedFetch,
     *,
     policy: DomainPolicy | None,
     trust_env_proxy: bool,
@@ -93,15 +93,11 @@ def build_web_fetch_backend(
     trace: RequestTrace | None = None,
     cap: WebToolCallCap | None = None,
 ) -> WebFetchBackend:
-    """One request's fetch tool, on the fetch instance the resolver chooses, or on ``builtin_fetch`` without a config.
+    """One request's fetch tool, on the fetch instance ``resolved``.
 
-    No workspace policy is passed to the resolver yet, so no fetch credential serves the call.
     ``cap`` is the request's shared search and fetch allowance, ``None`` where the old
     backend claims its own counter before delegating.
     """
-    resolved = (
-        resolve_fetch(config, None, requested=None, for_search=None) if config is not None else builtin_fetch_resolved()
-    )
     return WebFetchBackend(
         resolved,
         policy=policy,
@@ -114,7 +110,7 @@ def build_web_fetch_backend(
 
 
 def _max_results(config: GatewayConfig, entry: Mapping[str, Any], resolved: int | None) -> int:
-    """The declaration's count, else the deployment's, lowered by a count the resolved options name (design G)."""
+    """The declaration's count, else the deployment's, lowered by a count the resolved options name."""
     requested = entry.get("max_results")
     if not isinstance(requested, int) or isinstance(requested, bool) or requested <= 0:
         requested = web_search_max_results_baseline(config)

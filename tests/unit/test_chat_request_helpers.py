@@ -21,18 +21,18 @@ from typing import Any
 import pytest
 
 from gateway.api.routes._pipeline import ToolContext
-from gateway.api.routes._tools import (
-    _retargeted_tool_choice,
-    _strip_gateway_fields,
-)
+from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.services.tools import (
+    AdmittedWebTools,
     Dialect,
     extract_code_execution_tool,
     read_web_search_max_uses,
+    retargeted_tool_choice,
     web_search_intercept_enabled,
 )
 from gateway.services.tools._web_declarations import extract_web_fetch_tool, extract_web_search_tool
+from gateway.services.web_retrieval_policy import DomainPolicy
 
 
 def test_extracts_otari_code_execution() -> None:
@@ -274,7 +274,7 @@ def test_config_false_wins_over_a_truthy_env(monkeypatch: Any) -> None:
 
 
 def test_retargets_anthropic_tool_choice_to_the_canonical_name() -> None:
-    assert _retargeted_tool_choice({"type": "tool", "name": "my_search"}, "my_search") == {
+    assert retargeted_tool_choice({"type": "tool", "name": "my_search"}, "my_search") == {
         "type": "tool",
         "name": "web_search",
     }
@@ -282,14 +282,14 @@ def test_retargets_anthropic_tool_choice_to_the_canonical_name() -> None:
 
 def test_retargets_chat_completions_tool_choice() -> None:
     choice = {"type": "function", "function": {"name": "my_search"}}
-    assert _retargeted_tool_choice(choice, "my_search") == {
+    assert retargeted_tool_choice(choice, "my_search") == {
         "type": "function",
         "function": {"name": "web_search"},
     }
 
 
 def test_retargets_responses_flat_function_tool_choice() -> None:
-    assert _retargeted_tool_choice({"type": "function", "name": "my_search"}, "my_search") == {
+    assert retargeted_tool_choice({"type": "function", "name": "my_search"}, "my_search") == {
         "type": "function",
         "name": "web_search",
     }
@@ -297,26 +297,26 @@ def test_retargets_responses_flat_function_tool_choice() -> None:
 
 def test_retarget_is_a_noop_when_the_declared_name_is_already_canonical() -> None:
     choice = {"type": "tool", "name": "web_search"}
-    assert _retargeted_tool_choice(choice, "web_search") is choice
+    assert retargeted_tool_choice(choice, "web_search") is choice
 
 
 def test_retarget_leaves_auto_and_any_untouched() -> None:
     for choice in ({"type": "auto"}, {"type": "any"}, {"type": "none"}):
-        assert _retargeted_tool_choice(choice, "my_search") == choice
+        assert retargeted_tool_choice(choice, "my_search") == choice
 
 
 def test_retarget_leaves_a_choice_naming_a_different_tool_untouched() -> None:
     choice = {"type": "tool", "name": "get_weather"}
-    assert _retargeted_tool_choice(choice, "my_search") is choice
+    assert retargeted_tool_choice(choice, "my_search") is choice
 
 
 def test_retarget_leaves_string_tool_choice_untouched() -> None:
-    assert _retargeted_tool_choice("required", "my_search") == "required"
+    assert retargeted_tool_choice("required", "my_search") == "required"
 
 
 def test_retarget_does_not_mutate_the_callers_dict() -> None:
     choice = {"type": "function", "function": {"name": "my_search"}}
-    _retargeted_tool_choice(choice, "my_search")
+    retargeted_tool_choice(choice, "my_search")
     assert choice == {"type": "function", "function": {"name": "my_search"}}
 
 
@@ -351,10 +351,12 @@ def _capped_context(entry: dict[str, Any] | None) -> ToolContext:
         use_sandbox=False,
         sandbox_tool_entry=None,
         code_execution_port=None,
-        use_web_search=True,
-        web_search_tool_entry=entry,
-        web_search_url="http://search.invalid",
-        web_search_auth_token=None,
+        web=AdmittedWebTools(
+            search_tool_entry=entry,
+            fetch_tool_entry=None,
+            fetch_policy=DomainPolicy(),
+            search_url="http://search.invalid",
+        ),
         remaining_user_tools=None,
         max_tool_iterations=10,
         tools_header=None,
