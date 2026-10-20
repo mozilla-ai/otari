@@ -401,9 +401,6 @@ function HostedProvidersContent() {
           {row.shadows_config ? (
             <Badge tone="muted">Overrides config.yml</Badge>
           ) : null}
-          {row.serves_unlisted_models ? (
-            <Badge tone="muted">Any model</Badge>
-          ) : null}
         </span>
       ),
     },
@@ -510,7 +507,6 @@ function HostedProvidersContent() {
           <span className="text-caption">{row.provider_type}</span>
         )}
         <Badge tone="muted">config.yml</Badge>
-        <Badge tone="muted">Any model</Badge>
       </span>
     ),
     key: (row) =>

@@ -98,7 +98,6 @@ test.describe("hosted provider setup", () => {
 
     const provider = hostedRow(page)
     await expect(provider).toBeVisible()
-    await expect(provider).toContainText("Any model")
 
     // Testing has to come back with a reported outcome, not just stop spinning:
     // an assertion that it merely does not say "Connected." would also pass if

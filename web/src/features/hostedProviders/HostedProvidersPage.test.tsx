@@ -471,23 +471,6 @@ describe("HostedProvidersPage", () => {
     )
   })
 
-  it("marks a provider that serves models not on its list", async () => {
-    mockApi({
-      providers: [
-        hostedProvider({ serves_unlisted_models: true }),
-        hostedProvider({ id: "m", provider: "mistral" }),
-      ],
-    })
-    await renderPage()
-
-    const table = await screen.findByRole("grid", { name: "Hosted providers" })
-    await within(table).findByText("Any model")
-    const row = (name: string) =>
-      within(table).getByRole("rowheader", { name: new RegExp(`^${name}`) })
-    expect(within(row("openai")).getByText("Any model")).toBeInTheDocument()
-    expect(within(row("mistral")).queryByText("Any model")).toBeNull()
-  })
-
   it("adds a provider that serves models not on its list", async () => {
     const requests = mockApi({ providers: [] })
     const user = userEvent.setup()
