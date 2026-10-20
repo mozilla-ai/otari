@@ -93,7 +93,7 @@ from gateway.exceptions.tools_exceptions import ContainerOnManagedCredentialErro
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.schemas.inference import SettledCost
+from gateway.schemas.inference import AnthropicErrorResponse, SettledCost
 from gateway.services.code_execution import ContainerLease, check_container_on_credential, gateway_container_value
 from gateway.services.content_normalizer import stage_container_blocks
 from gateway.services.files import StagedFile
@@ -351,21 +351,6 @@ class CountTokensResponse(BaseModel):
     """Anthropic ``/v1/messages/count_tokens`` response."""
 
     input_tokens: int
-
-
-class AnthropicError(BaseModel):
-    """What went wrong, in Anthropic's terms."""
-
-    type: str = Field(description="Anthropic's error type, such as `invalid_request_error` or `rate_limit_error`.")
-    message: str
-
-
-class AnthropicErrorResponse(BaseModel):
-    """Anthropic's error envelope, which every error on a Messages route is answered in."""
-
-    type: Literal["error"] = "error"
-    error: AnthropicError
-    code: str | None = Field(default=None, description="The refusal's `Otari-Error-Code`, where it has one.")
 
 
 _ANTHROPIC_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
