@@ -209,10 +209,12 @@ once, in the request preamble, and reused at admission; the same decision says
 where a referenced upload goes, staged for the gateway's sandbox or copied, for
 each candidate as it is dispatched, into the provider account whose container
 will read it (`FileService.provider_file_ids`). The tool loop is in
-`services/mcp_loop.py`, sandbox and search backends under `services/`, and
-outbound URL checks in `services/url_safety.py`. A request that declares several
+`services/mcp_loop.py`, the sandbox and the older search backend under `services/`,
+the web search and fetch backends on any-search and any-fetch under `services/tools/`,
+and outbound URL checks in `services/url_safety.py`. A request that declares several
 tools gets one loop over all of them: `_open_tool_backends` in `_pipeline.py`
-opens each declared backend into a `CombinedToolBackend` (`services/tools/_combined_backend.py`).
+opens each declared backend into a `CombinedToolBackend` (`services/tools/_combined_backend.py`),
+web search and web fetch as two of them when a search instance serves the request.
 
 Deployment settings establish available backends. Workspace code-execution and
 web-search policy can disable or narrow those settings but cannot widen them.
@@ -234,10 +236,13 @@ for example, enforces the workspace search disable switch.
 
 ## Provider and search credential stores
 
-`provider_store_service.py` and `search_tool_store_service.py` overlay
-encrypted stored rows on a preserved config baseline and refresh them across
-workers. Stored values win over config values of the same name; config entries
-remain read-only through the management API.
+`search_tool_store_service.py` overlays encrypted stored rows on a preserved
+config baseline and refreshes them across workers. Stored values win over config
+values of the same name; config entries remain read-only through the management
+API. A provider credential the deployment stores is a hosted provider (below);
+the `provider_credentials` rows the Deployment providers page used to store are
+moved onto hosted providers at startup (`_move_deployment_providers` in
+`main.py`), and nothing else reads them.
 
 `secret_box.py` owns encryption through `OTARI_SECRET_KEY`. Public responses
 return metadata such as `last4`, never plaintext credentials.
@@ -250,9 +255,22 @@ budgets and dials them only through the pinned, no-redirect client in
 `_owned_endpoint_network.py`. Their `api_base` is a tenant's, so it is held to
 public addresses whatever `provider_allow_private_hosts` says.
 
-Provider resolution asks `ModelProviderPort` for a deployment-owned managed
-credential only after local and tenant BYO sources fail. Managed credentials
-must never move ahead of BYO or leave their trusted gateway.
+Provider resolution asks `ModelProviderPort` for a deployment-owned credential
+only after local and tenant BYO sources fail. The core adapter answers from the
+deployment's hosted providers (`services/providers`, the `hosted_providers`
+tables, `/api/v1/hosted-providers`), built on the request's Unit of Work. A
+hosted credential must never move ahead of BYO or leave its trusted gateway.
+
+A provider's own SDK variable (`OPENAI_API_KEY`) is never a credential: a key
+reaches a call only from the kwargs `get_provider_kwargs` builds (an entry's
+`api_key`, `${VAR}` included, a stored key, an organization key, or the keyless
+placeholder). Every provider needs a declaration, keyless local backends and
+ambient cloud credentials included; those two skip only the key. When a call
+has neither and the port serves nothing, every dispatch path refuses it before
+any-llm is called (`require_declared_credential`, raising any-llm's
+`MissingApiKeyError` for the path to map), because any-llm would otherwise read
+the variable, or reach the deployment's local server or cloud role, for every
+tenant.
 
 ## Mail
 

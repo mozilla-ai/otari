@@ -55,6 +55,8 @@ class TabstackProvider(AnyFetch):
         max_urls_per_call=1,
         # With effort "max", which renders the page in a headless browser.
         renders_javascript=True,
+        # Tabstack answers with the URL as asked, even after a redirect.
+        reports_final_url=False,
         formats=["markdown"],
         options=[
             OptionSpec(

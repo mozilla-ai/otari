@@ -71,6 +71,8 @@ class ExaProvider(AnyFetch):
         max_urls_per_call=100,
         # Exa does not document whether its crawler runs a page's scripts.
         renders_javascript=False,
+        # Exa answers with the URL as asked, even after a redirect (checked 2026-10-19).
+        reports_final_url=False,
         formats=["markdown"],
         options=[
             OptionSpec(

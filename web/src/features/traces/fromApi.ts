@@ -130,6 +130,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
               : undefined,
           promptTokens: turn.input_tokens,
           completionTokens: turn.output_tokens,
+          cachedTokens: turn.cache_read_tokens,
           metadata: {
             State: turn.state,
             "LLM calls": String(turn.llm_calls),
@@ -167,6 +168,9 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         provider: span.provider ?? undefined,
         promptTokens: span.input_tokens ?? undefined,
         completionTokens: span.output_tokens ?? undefined,
+        cachedTokens: span.cache_read_tokens ?? undefined,
+        cacheWriteTokens: span.cache_write_tokens ?? undefined,
+        reasoningTokens: span.reasoning_tokens ?? undefined,
         cost: span.cost ?? undefined,
         metadata: spanMetadata(span),
       })

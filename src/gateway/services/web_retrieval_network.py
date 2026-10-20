@@ -134,7 +134,8 @@ class ValidatedTarget:
         return self.canonical_url.display_url
 
 
-def _blocked_address_reason(address: IPAddress) -> str | None:
+def blocked_address_reason(address: IPAddress) -> str | None:
+    """Why the retrieval clients may not reach ``address``, or ``None`` for a public one."""
     if address.is_unspecified:
         return "unspecified"
     if address.is_loopback:
@@ -218,7 +219,7 @@ async def validate_retrieval_target(
     seen: set[IPAddress] = set()
     for address in resolved:
         canonical_address = ipaddress.ip_address(str(address))
-        reason = _blocked_address_reason(canonical_address)
+        reason = blocked_address_reason(canonical_address)
         if reason is not None and not allow_private:
             raise RetrievalAddressError(f"destination resolves to a disallowed {reason} address")
         if canonical_address not in seen:

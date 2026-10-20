@@ -96,11 +96,11 @@ The workspace view contains day-to-day gateway operations:
 
 The organization view contains tenant-wide administration:
 
-- Organization-wide usage, in hosted mode
+- Organization-wide usage
 - Workspaces and organization members
 - Email domains, for joining colleagues automatically
 - Spend and budgets
-- General: Providers, followed by Deployment providers and Org settings.
+- General: Providers, followed by Guardrails and Org settings.
   Providers is the organization's own upstream credentials, the models each one
   reaches, and what this organization pays for them: adding a key offers every
   model the provider lists on it, each carrying a switch that decides whether
@@ -109,9 +109,61 @@ The organization view contains tenant-wide administration:
   deployment price list, then the community defaults. A model nothing prices is
   offered and left unserved. Each key's row counts how many of its offered
   models are serving, and a key serving none of them is marked, because every
-  request through it is refused until a switch is on. Deployment providers is
-  the process-wide credential list, which a deployment operator manages and
-  which is served to every organization; it appears in standalone mode only.
+  request through it is refused until a switch is on. The star on a key makes
+  it the organization's default for its provider, and clicking a filled star
+  removes that. For a provider the deployment has no credential of its own
+  for, a workspace uses the key it set to "Always use this key", otherwise the
+  organization's default, otherwise the oldest key; a key it set to "Never use
+  this key" is passed over at every step. The deployment's own provider
+  credentials, served to every organization, are managed on Hosted providers
+  in the deployment view, or in `config.yml`.
+
+The deployment view, opened from the account menu, holds what belongs to the
+gateway process rather than to any organization on it:
+
+- Settings, the running configuration.
+- Accounts, every account on the deployment.
+- Hosted providers, the keys the deployment serves inference on for a request
+  that brings no credential of its own. A request is served on one only after
+  the organization's own keys and the configured providers have not answered.
+  Adding a provider offers every model it lists on the key; each model carries a
+  serving switch and a price, set per million tokens or per 1,000 requests or
+  images, and a model nothing prices arrives switched off. Refresh models asks
+  one provider again, and Refresh and purge asks every provider and then removes
+  priced models nothing on the deployment serves, along with the model lists of
+  providers nothing configures any more, listing them before anything is
+  removed. A provider kept to one organization shows which; that restriction
+  is set through `/api/v1/hosted-providers`. A provider defined in the
+  `hosted_providers:` block of `config.yml` carries a `config.yml` badge and
+  cannot be edited, switched or removed here, while its models can; adding a
+  provider of the same name overrides it, which the form warns about.
+  A provider takes an optional name, which defaults to its implementation; a
+  name of its own (`openai-eu`) serves a second endpoint of one implementation,
+  reached as `openai-eu:<model>`. The key is optional for a provider that needs
+  none and for one pointed at an endpoint of its own. Test connection, in the
+  add and edit dialogs, asks the provider what it lists on the dialog's values
+  without saving them, the stored key standing in for a blank key box; Test on
+  a provider's row asks the same of what it stores. Serve models not on its
+  list, in both dialogs, makes a provider serve any model a request names, as
+  a `config.yml` provider does, priced or not, while a model switched off on
+  its list is still refused. It is off by default; a provider moved from the
+  retired Deployment providers page starts with it off and every model it lists
+  switched on, priced or not.
+  A provider's name opens Models filtered to it, and above the table a summary
+  counts the providers reachable, with Re-check all to ask them again. With no
+  provider yet, the page walks through adding the first one, and offers to
+  enable default pricing when pricing is required and nothing sets it. Adding
+  a provider is disabled, with a banner saying why, while the server has no
+  `OTARI_SECRET_KEY` to encrypt its key with. The
+  table also lists the `providers:` instances of `config.yml`, marked
+  config.yml and read-only, with their reachability. Providers stored on the
+  retired Deployment providers page are moved here under the same names
+  automatically at startup. Any that could not be moved are listed in a banner
+  with the reason: once the cause is fixed, move it from there, or Discard it,
+  since a row left behind serves nothing.
+
+Accounts and Hosted providers are listed only for a deployment operator, and
+answer anyone else that they are not available to them.
 
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the
@@ -134,7 +186,13 @@ each model is billed at. An organization may set its own rate for a model it
 supplies the provider key for. A model reached through one of the deployment's
 own provider instances is not one of those: the deployment holds that credential
 and settles its upstream bill, so its rate is the deployment price list's, which
-is `/api/v1/pricing` and has no page of its own. The models.dev defaults are
+is `/api/v1/pricing` and has no page of its own. The same holds for a model the
+deployment serves on one of its hosted providers: a request served there is
+priced only from a rate the deployment operator set, either the price list or a
+rate the operator set for this organization, never from one the organization
+wrote itself, even one written while its own key still covered the model. A rate
+the operator set for an organization is listed beside the organization's own,
+and only the operator may change or remove it. The models.dev defaults are
 likewise kept current through `/api/v1/pricing/refresh` rather than from the
 dashboard.
 
@@ -220,12 +278,17 @@ not offer the page at all.
 
 Activity is the per-request log. Sessions lists [agent sessions](traces.md)
 where the deployment records traces (`trace_capture_enabled`, on by default; a
-hybrid gateway records none), and has no entry where it does not. A session
+hybrid gateway records none), and has no entry where it does not. Its chart
+counts sessions per hour or day as succeeded or failed, and its Levels column
+counts each session's errors, tools' errors included; a tool's error alone does
+not fail a session (see [Sessions and failures](traces.md#sessions-and-failures)). A session
 opens in a side panel as a tree of its turns, LLM calls and tool calls, a
-timeline of the same spans, or a flat log; before a span is picked, the panel
+timeline of the same spans, or a flat log. The token count in its header breaks
+down into input, the share of it the prompt cache served, and output, for the
+session or the span picked. Before a span is picked, the panel
 shows what the session cost against its key's own spend ceiling and where the
 gateway stepped in. A request in Activity whose session was recorded links to it:
-**View trace** in the request's detail opens the session on that LLM call. Usage provides aggregates and time series. Routed requests share a request-group ID, so the
+**View trace** in the request's detail opens the session on that LLM call. Usage provides aggregates and time series; its spend by session groups requests by the same sessions, keyed by trace id. Routed requests share a request-group ID, so the
 request log can show the attempted models and the model that served the
 response. Imported usage is labeled by
 source and does not consume a budget.
@@ -290,11 +353,10 @@ daily invitation mail limit), you get the accept link to share,
 and an invitee new to the deployment chooses a password on the page it opens,
 so a deployment without SMTP can still bring people in. See [Configuration](configuration.md#mail).
 
-## Bundled guide and custom documentation
+## Custom documentation
 
-This guide is bundled into the dashboard at `/#/docs`. Set `docs_url` to make
-the dashboard's Documentation link open a different site. The bundled route
-remains available.
+The dashboard's Documentation link opens [docs.otari.ai](https://docs.otari.ai/).
+Set `docs_url` to make it open a different site.
 
 ## Legal pages
 

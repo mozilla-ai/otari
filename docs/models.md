@@ -31,7 +31,7 @@ configuration, pricing, aliases, and routing policies.
 ## Configuring a provider
 
 Declare a provider under `providers` in `config.yml`, or add it on the
-standalone Providers page. Either way it serves requests and its models are
+Hosted providers page. Either way it serves requests and its models are
 discovered. Supply the key from the environment with a `${VAR}` reference:
 
 ```yaml
@@ -40,10 +40,32 @@ providers:
     api_key: ${OPENAI_API_KEY}
 ```
 
-A provider that is not declared is still called when its native variable (such
-as `OPENAI_API_KEY`) is set, but its models are not listed. That fallback is
-deprecated: the gateway logs a warning naming the provider, and a future
-release will refuse the request.
+A key reaches a provider only from where a declaration names it: an entry's own
+`api_key` (a `${VAR}` reference included), a hosted provider's key, or
+an organization's own provider key, which declares the provider for that
+organization's requests. A provider's native variable (such as `OPENAI_API_KEY`)
+is never read for it otherwise, so an entry with no `api_key`, or one carrying
+only `client_args`, has no credential. A request it cannot serve is refused with
+a `424` and the `provider_not_configured` code. Otherwise a variable present on
+the server would serve every caller that has no credential of its own.
+
+Keyless local backends (`ollama`, `llamacpp`, `llamafile`, `lmstudio`, `vllm`)
+and providers authenticating from ambient cloud credentials (`bedrock`,
+`sagemaker`, `vertexai`) need a declaration too, but no key: a bare entry
+declares one. Undeclared, they are refused like any other provider, because the
+local server and the cloud role belong to the deployment.
+
+```yaml
+providers:
+  ollama:
+  bedrock:
+```
+
+The one exception is a build whose extension serves the request on a credential
+the deployment owns (`ModelProviderPort`, asked only after every other source
+missed); a plain deployment has none. The gateway logs a warning at startup
+naming each `<PROVIDER>_API_KEY` variable that is set and that no entry's
+`api_key` reads, and ignores an entry for a keyed provider that names no key.
 
 Provider support is endpoint-specific. A provider that supports chat may not
 support Responses, images, audio, rerank, or batches. Unsupported combinations
@@ -101,6 +123,17 @@ offered alongside its chat models. A provider that pages its listing, as Cohere
 does, is read to the last page.
 Discovery is cached and bounded; an unreachable provider does not block the
 catalog indefinitely.
+
+A [hosted provider](modes.md#hosted-providers-and-byo-credentials) lists its
+roster, the models switched on under it, rather than everything its upstream
+lists. The operator's `GET /api/v1/models/discoverable` and provider health
+dial it on its stored key beside the configured instances. A hosted provider
+serves only its roster unless it serves models not on its roster
+(`serves_unlisted_models`, off by default): it then also serves any model a
+request names, the way a `providers:` instance does, switches on every model
+it offers whether or not something prices it, and still refuses a model its
+roster switches off. A provider moved from the retired Deployment providers page
+starts with it off and every model it lists switched on.
 
 Each listed model carries the rate a request from the caller would be billed at,
 and `pricing_source` says which price list it came from: `organization` for the
@@ -364,6 +397,15 @@ signup is closed), and the dashboard reopens that model on their first sign-in.
 curl http://localhost:8000/api/v1/models \
   -H "Authorization: Bearer $OTARI_API_KEY"
 ```
+
+On a deployment that hosts at least one provider, an organization API key is
+shown a priced model only where something would
+serve it from the key's workspace: a configured instance, the organization's own
+provider key, a hosted provider the deployment serves the organization, or the
+provider's own environment variable. A hosted provider the operator switched
+off or deleted leaves its rates on the price list, and its models leave this
+listing. The master key and an operator session still list the whole price
+list.
 
 ## HuggingFace provider routing
 

@@ -52,10 +52,13 @@ inference, files, batches, or other data-plane operations. Those paths return a
 descriptive `404`. Set `data_plane_url` so the error and dashboard snippets
 point clients to the correct gateway.
 
-The dashboard hides deployment-wide provider management, leaving the
-organization-scoped provider keys that a standalone deployment also has. It also hides the Playground, whose
-whole purpose is to dispatch a completion. Deployment-wide APIs still require
-operator authority; organization-scoped APIs apply membership and role checks.
+The dashboard keeps the organization-scoped provider keys that a standalone
+deployment also has, and the Hosted providers page, where an
+operator configures the credentials the deployment pays for (see
+[Hosted providers and BYO credentials](#hosted-providers-and-byo-credentials)).
+It also hides the Playground, whose whole purpose is to dispatch a completion.
+Deployment-wide APIs still require operator authority; organization-scoped APIs
+apply membership and role checks.
 
 A hosted control plane and its hybrid gateways form one system: the gateway
 resolves credentials from the control plane and reports usage back so the
@@ -94,36 +97,97 @@ tries retryable fallbacks before a response begins, and reports each outcome.
 Workspace MCP and web-search configuration are resolved through the same control
 plane.
 
-## Managed models and BYO credentials
+## Hosted providers and BYO credentials
 
-Hybrid mode can receive two kinds of provider credential:
+A request is served on the first credential the ladder finds. A provider
+instance configured on the deployment, in `config.yml` or through the Providers
+page, serves every request that names it, including a bare `provider:model`
+request whose provider spells that instance's name. Where no instance answers,
+the organization's own provider key serves the request. Where that is missing
+too, one of the deployment's **hosted providers** does.
+
+A hosted provider is a credential the deployment's operator configures for the
+deployment to serve requests on, under a name that defaults to its provider
+(a name of its own, such as `openai-eu`, lets two endpoints of one provider
+be served side by side), with a roster of the models offered on it and the rate
+each is charged at on the deployment price list. A hosted provider named after its
+provider is reached by a bare `provider:model` request once neither a
+`providers:` instance nor the organization's own key answers. One with a name
+of its own is reached only by that name (`openai-eu:gpt-4o`): an organization's
+key for the provider never serves it, because that key belongs to another
+endpoint. A request whose workspace belongs to no organization is served only
+on a hosted provider restricted to no organization.
+Only a model switched on in that roster is served on the hosted credential: a
+model switched off, or one the roster does not list, is refused with `424`. The
+deployment settles the upstream bill for a hosted model, which is why its rate
+belongs to the deployment and not to any one organization. A hosted provider
+can be restricted to one organization, and every other organization is then
+served as if it did not exist. Any standalone or hosted deployment configures
+them on the Hosted providers page, through `/api/v1/hosted-providers`, or in the
+`hosted_providers:` block of `config.yml` (see
+[Configuration](configuration.md#hosted-providers-in-configyml)), where a stored
+provider of the same name wins over the configured one.
+
+What a hosted provider contributes to the catalog is its roster: the models
+switched on under it, answered for the caller's organization. It also takes part
+in the operator's views of the deployment's credentials, beside the configured
+instances. `GET /api/v1/models/discoverable` lists what each hosted provider's
+stored key can reach, and `GET /api/v1/providers/health` reports whether it
+answers, each under the provider's name. Both are the deployment's view, so a
+provider restricted to one organization is included, a provider defined in
+`config.yml` is too, and a provider switched off is not. A hosted provider whose
+stored key cannot be decrypted with the configured `OTARI_SECRET_KEY` is
+reported unhealthy with that reason rather than dialed. A configured instance
+named like a hosted provider shadows it here as it does at dispatch, so only the
+instance is listed.
+
+Being in those views means a hosted provider's model listing is dialed upstream
+on the deployment's stored key, at its `api_base` when one is set. The
+background discovery refresher does so as the gateway starts and then on every
+tick, every `model_cache_ttl_seconds` (sooner, every
+`model_discovery_negative_ttl_seconds`, after a round with a failure), for as
+long as `model_discovery` is on and that TTL is above 0. A `refresh=true` read
+of either view dials at once, and changing or deleting a hosted provider drops
+its cached listing so the next read dials the credential as it now stands. A
+provider switched off and one whose key cannot be decrypted are never dialed.
+
+otari.ai is one deployment of this feature: its hosted control plane holds the
+hosted providers that serve its managed models. Hybrid mode can therefore
+receive two kinds of provider credential:
 
 - A workspace's own provider key. The upstream provider bills that workspace.
   Any hybrid gateway can use it, including a self-hosted one.
-- A mozilla.ai-managed credential. Usage is billed through otari.ai. Only
-  otari.ai's own gateway receives it.
+- A control plane's hosted-provider credential. Usage is billed by the control
+  plane. On otari.ai, only otari.ai's own gateway receives it.
 
-Managed model identifiers use the catalog values published by otari.ai. otari.ai
-refuses a managed credential to a self-hosted gateway, so platform-owned secrets
-never leave mozilla.ai's infrastructure.
+Managed model identifiers use the catalog values the control plane publishes.
+otari.ai refuses a hosted credential to a self-hosted gateway, so platform-owned
+secrets never leave mozilla.ai's infrastructure.
 
 ## Deployment-paid credentials in standalone
 
-A build that binds `ModelProviderPort` through `OTARI_BOOTSTRAP` can serve a
-model on a credential the deployment owns, once an organization's own key, a
-stored provider and `config.yml` have all missed. The deployment pays that
+A deployment can serve a model on a credential it owns, once an organization's
+own key and `config.yml` have both missed: the core serves it
+on one of the deployment's hosted providers, and a build may rebind
+`ModelProviderPort` through `OTARI_BOOTSTRAP` to decide differently. The deployment pays that
 upstream bill, so the request also goes through `BillingPort`. Before the
 provider call, the organization is granted any credit it is owed and refused
 with `402` (`insufficient_funds`) when it has no funds paid in. When the
 request settles, its cost, including the cost an abandoned or failed request
 still owes, is charged to the organization. No funds are held while the
 request runs, so concurrent requests can take an organization below zero. A
-request on any other credential never reaches either port, and the core's
-billing adapter does nothing, so a deployment with no overlay is unaffected.
+request on any other credential never reaches either port. The core's billing
+adapter does nothing, so with no overlay a hosted-provider request is served
+and recorded as deployment-paid on its usage row, and no organization is
+charged.
 
-Today this covers Chat Completions, Messages, Responses and the Playground for a
-plain model or a single-target alias or policy. A routing policy with fallback
-candidates and the pass-through endpoints never reach `ModelProviderPort`.
+This covers every path that calls a provider: Chat Completions, Messages,
+Responses and the Playground, each candidate of a routing policy with fallbacks,
+the pass-through endpoints (embeddings, images, audio, rerank, moderations) and
+batches. A routing policy asks for each candidate as it reaches it, so the one
+that serves is the one that settles, and one the organization cannot fund is
+skipped. A batch is admitted when it is created and charged when its results
+are accounted.
 
 ## Internal protocol
 

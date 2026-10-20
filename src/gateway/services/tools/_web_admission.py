@@ -10,7 +10,7 @@ policy, read once for the whole request.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from gateway.exceptions.tools_exceptions import WebSearchInterceptedError, WebToolDeclarationError
@@ -33,6 +33,7 @@ from gateway.services.tools._web_declarations import (
     web_search_intercept_enabled,
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
+from gateway.services.tools._web_search import resolve_in_loop_search
 from gateway.services.web_retrieval_policy import MAX_WEB_SEARCH_DOMAINS, read_domain_list
 
 if TYPE_CHECKING:
@@ -298,16 +299,32 @@ def admit_web_access(
     policy: ResolvedWebSearchConfig | None,
     config: GatewayConfig,
 ) -> WebAccessGrant:
-    """Narrow the declared web tools to what the workspace's web search ``policy`` permits.
+    """Narrow the declared web tools to what the workspace's web search ``policy`` permits, and resolve the search.
+
+    A declared search is resolved here, once for the candidates the answer
+    serves, so a credential the resolver cannot use refuses them before any
+    attempt runs.
 
     Raises:
         WebAccessRefusedError: the policy refuses the request, and the subclass says why.
         WorkspaceWebSearchDomainsExcludedError: the request's domains share nothing with the workspace's.
+        WebSearchOptionRefusedError: the request names an option its search's provider does not take.
+        WebSearchCredentialRefusedError: the search's credential lacks what its provider needs.
+        SearchToolMisconfiguredError: the search's instance cannot be run.
     """
-    return apply_web_access_policy(
+    grant = apply_web_access_policy(
         policy,
         requested_tools=web.requested_tools,
         search_tool_entry=web.search_tool_entry,
         fetch_tool_entry=web.fetch_tool_entry,
         config=config,
     )
+    if grant.search_tool_entry is None:
+        return grant
+    # The request's own options, apart from the workspace's the narrowing merged into its
+    # entry, so the resolver refuses a key the provider does not take from a request.
+    request_options = (web.search_tool_entry or {}).get("provider_options")
+    in_loop_search = resolve_in_loop_search(
+        config, policy, request_options=request_options if isinstance(request_options, dict) else None
+    )
+    return replace(grant, in_loop_search=in_loop_search)

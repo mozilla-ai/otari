@@ -57,10 +57,16 @@ from gateway.services.workspace_scope import (
     reset_key_workspace_cache,
 )
 
-from .conftest import build_test_client
+from .conftest import build_test_client, shared_test_config
 
 _ENDPOINT = f"{API_ROOT}/organizations/me/pricing"
 _MODEL_KEY = "openai:gpt-4o"
+
+
+@pytest.fixture(scope="module")
+def test_config(postgres_url: str) -> GatewayConfig:
+    """The shared configuration declaring no provider, so a bare selector reaches the organization's key."""
+    return shared_test_config(postgres_url, {})
 
 
 @pytest.fixture(autouse=True)
@@ -852,7 +858,7 @@ async def test_an_unusable_default_key_does_not_fall_back_to_a_usable_one(
     async def dispatch_falls_through_to_the_port() -> bool:
         await refresh_org_provider_cache(async_db)
         kwargs = get_provider_kwargs(GatewayConfig(), LLMProvider.OPENAI, workspace_id=workspace.id)
-        return credential_ladder_exhausted(LLMProvider.OPENAI, kwargs)
+        return credential_ladder_exhausted(LLMProvider.OPENAI, kwargs, declared=False)
 
     try:
         usable.is_org_default = True

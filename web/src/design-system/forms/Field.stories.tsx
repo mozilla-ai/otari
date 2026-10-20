@@ -100,6 +100,19 @@ export const AutoFocused: Story = {
 }
 
 /**
+ * `inputMode` picks the keyboard a phone offers without changing what the field
+ * accepts: a rate keeps its text box, so "1.50" is never reformatted, but the
+ * keyboard opens on digits and a decimal point.
+ */
+export const DecimalKeyboard: Story = {
+  args: {
+    label: "Input, per 1M tokens",
+    inputMode: "decimal",
+    placeholder: "0.00",
+  },
+}
+
+/**
  * `isDisabled` for a field the operator may read but not set: a value the
  * deployment fixes, or one that belongs to a plan they are not on. It stays in
  * the tab order's reading path but takes no input, which is why the value is

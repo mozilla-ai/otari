@@ -25,11 +25,11 @@ def test_the_credential_is_the_one_the_dispatch_carries(monkeypatch: pytest.Monk
     assert credential.api_base == "https://a"
 
 
-def test_a_dispatch_carrying_no_key_uses_the_sdk_environment_variable(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+def test_a_dispatch_carrying_no_key_never_uses_the_sdk_environment_variable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-env")
 
-    assert effective_credential(LLMProvider.ANTHROPIC, {}).api_key == "sk-from-env"
+    with pytest.raises(LookupError):
+        effective_credential(LLMProvider.ANTHROPIC, {})
 
 
 def test_no_key_anywhere_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -41,8 +41,8 @@ import json
 import os
 import re
 import uuid
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from any_llm import AnyLLM, LLMProvider
@@ -71,7 +71,7 @@ if TYPE_CHECKING:
 
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
-_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries")
+_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries", "messages_api")
 
 # Providers whose any-llm client is built by an SDK that takes ``max_retries``
 # in its constructor (OpenAI's, Anthropic's and the SDKs generated the same
@@ -150,11 +150,12 @@ _PROVIDER_NAMES: frozenset[str] = frozenset(
     {provider.value for provider in LLMProvider} | set(PROVIDER_TYPE_ALIASES) | RESERVED_PROVIDER_INSTANCE_NAMES
 )
 
+
 # Providers authenticating from cloud SDK credentials this gateway cannot see:
 # an EC2 instance profile, an SSO session, or an ambient boto3 chain. They are
 # the same category as Vertex AI's application default credentials, which
-# ``docs/configuration.md`` already groups with Bedrock, and they only reach here
-# with nothing configured, which is precisely the ambient case. Splitting the
+# ``docs/configuration.md`` already groups with Bedrock, and an entry naming one
+# with nothing configured is precisely the ambient case. Splitting the
 # category on whether any-llm happens to declare a variable name would be an
 # accident of upstream spelling rather than a difference in kind.
 #
@@ -162,7 +163,7 @@ _PROVIDER_NAMES: frozenset[str] = frozenset(
 # key resolves, so it genuinely needs one) and azure/azureopenai (an Entra ID
 # deployment still needs an endpoint from config, so an empty ``kwargs`` means
 # nothing is configured and nothing can serve it anyway).
-_AMBIENT_CREDENTIAL_PROVIDERS = frozenset({"bedrock", "sagemaker"})
+AMBIENT_CREDENTIAL_PROVIDERS = frozenset({"bedrock", "sagemaker"})
 
 # Keys ``get_provider_kwargs`` can return that credential nothing on their own:
 # transport tuning an operator attached to an instance. An instance carrying only
@@ -170,10 +171,6 @@ _AMBIENT_CREDENTIAL_PROVIDERS = frozenset({"bedrock", "sagemaker"})
 # that answered. ``api_base`` is deliberately absent: an instance with a base URL
 # and no key takes the keyless placeholder, so it never reaches a caller alone.
 _NON_CREDENTIAL_KWARGS = frozenset({"client_args"})
-
-# Providers already warned about reaching any-llm on their env var alone, so the
-# deprecation is logged once per provider per process rather than per request.
-_undeclared_env_warned: set[str] = set()
 
 
 def _kwargs_carry_a_credential(kwargs: dict[str, Any]) -> bool:
@@ -187,101 +184,116 @@ def _kwargs_carry_a_credential(kwargs: dict[str, Any]) -> bool:
     return any(value for key, value in kwargs.items() if key not in _NON_CREDENTIAL_KWARGS)
 
 
-def _provider_env_key_present(provider: LLMProvider) -> bool:
-    """Whether the provider's native API-key env var (e.g. OPENAI_API_KEY) is set.
-
-    Read directly from the environment because these are any-llm's own SDK
-    variables, not otari config: any-llm falls back to them before raising, so
-    the placeholder must not shadow a key the operator supplied that way. The
-    candidate names come from :func:`provider_credential_env_names`, shared with
-    the config layer so both agree on which variables carry a credential.
-    """
-    return any(os.getenv(name) for name in provider_credential_env_names(provider.value) or ())
-
-
-def _warn_undeclared_env_provider(config: GatewayConfig, provider: LLMProvider) -> None:
-    """Log, once per provider, that a standalone call rides the env-var fallback.
-
-    Reached when nothing declares the provider (no ``config.providers`` entry, no
-    organization-scoped key) and any-llm will authenticate from the provider's
-    native variable instead. That fallback is deprecated: such a provider serves
-    requests but is missing from model discovery. Hybrid mode resolves every
-    credential from the platform and hosted mode serves no inference, so neither
-    warns.
-    """
-    if config.is_hybrid_mode or config.is_hosted_mode or provider.value in _undeclared_env_warned:
-        return
-    env_name = next((name for name in provider_credential_env_names(provider.value) or () if os.getenv(name)), None)
-    if env_name is None:
-        return
-    _undeclared_env_warned.add(provider.value)
-    logger.warning(
-        "Provider '%s' is not declared under providers: and is being called with its %s environment variable. "
-        "This fallback is deprecated and will stop working in a future release, and the provider's models are "
-        "not listed meanwhile. Declare it in config.yml (providers: {%s: {api_key: ${%s}}}) or on the "
-        "dashboard's Providers page.",
-        provider.value,
-        # codeql[py/clear-text-logging-sensitive-data]
-        env_name,
-        provider.value,
-        # codeql[py/clear-text-logging-sensitive-data]
-        env_name,
-    )
-
-
-def keyless_placeholder_api_key(provider: LLMProvider, api_base: Any, api_key: Any) -> str | None:
+def keyless_placeholder_api_key(api_base: Any, api_key: Any) -> str | None:
     """Return a placeholder key for a keyless custom endpoint, else ``None``.
 
     A custom endpoint is one with an ``api_base`` set; it is keyless when no key
-    is configured for it and the provider's native env var is unset. Only that
-    case (which any-llm would otherwise reject) gets a placeholder, so this never
-    overrides a real key or the documented env-var fallback.
+    is configured for it. Only that case (which any-llm would otherwise reject,
+    or answer with the provider's own environment variable) gets a placeholder,
+    so this never overrides a real key and the deployment's variable is never
+    sent to an endpoint someone configured.
     """
-    if api_base and not api_key and not _provider_env_key_present(provider):
+    if api_base and not api_key:
         return _KEYLESS_PLACEHOLDER_API_KEY
     return None
 
 
-def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any]) -> bool:
-    """Whether a credential was needed for ``provider`` and none was found.
+def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any], *, declared: bool) -> bool:
+    """Whether a call to ``provider`` with ``kwargs`` has nothing to authenticate with.
 
     For a caller that has somewhere else to ask once every rung has missed; the
     ladder itself is unchanged and still the only thing consulted first.
 
-    Both halves of that sentence are load-bearing. **None was found** means
-    :func:`get_provider_kwargs` produced no credential for the candidate: no
-    organization-scoped key, no stored instance, nothing usable from a
-    ``config.yml`` entry (one declaring only ``provider_type``/``models`` leaves
-    nothing behind once the meta keys are stripped, and one carrying only
-    ``client_args`` leaves nothing that can authenticate a call, per
-    :func:`_kwargs_carry_a_credential`), and so no keyless placeholder either,
-    *and* the provider's own SDK environment variable is
-    unset, which any-llm would otherwise fall back to before raising. That env
-    check is the same one the keyless placeholder makes, so both agree on what
-    counts as a credential already in hand.
+    A call is served on what :func:`get_provider_kwargs` produced and nothing
+    else: an organization-scoped key, a stored instance's key, a ``config.yml``
+    entry's own ``api_key`` (``${VAR}`` interpolation included), or the keyless
+    placeholder for an ``api_base``. An entry carrying only ``client_args`` or
+    instance metadata carries no credential, per :func:`_kwargs_carry_a_credential`.
+    The provider's own SDK environment variable never counts, because any-llm
+    reads it whenever no key is passed, and a variable is not a statement that
+    the deployment serves anyone on it.
 
-    **Was needed** excludes the providers any-llm calls with no credential at
-    all, because an empty ``kwargs`` for one of those is not a missing key, and
-    reporting it as exhausted would hand a request that already works to a
-    caller that might serve it from somewhere else. A deployment pointing at its
-    own backends is served upstream of anything reading this. They come in two
-    shapes: those declaring no credential variable at all (the keyless local
-    backends ollama and llamafile, and Vertex AI, which authenticates
-    through the cloud SDK), and those declaring one any-llm does not insist on
-    (``KEYLESS_SELF_HOSTED_PROVIDERS`` and ``_AMBIENT_CREDENTIAL_PROVIDERS``).
+    Without a credential, only a provider a ``providers:`` entry names
+    (``declared``) may still be called, and only one any-llm calls with no key at
+    all: the keyless local backends (those declaring no credential variable, and
+    ``KEYLESS_SELF_HOSTED_PROVIDERS``) and the providers authenticating from
+    ambient cloud credentials (Vertex AI and ``AMBIENT_CREDENTIAL_PROVIDERS``).
+    For those the entry is the whole declaration. Undeclared, they are exhausted
+    like any other, because the local server or the instance role is the
+    deployment's own.
 
     ``provider_credential_env_names`` returns ``None`` rather than ``()`` for a
     provider it cannot inspect at all, and that stays exhausted: nothing is known
-    to serve the candidate, which is the same position an uncredentialed provider
-    with a declared variable is in.
+    to serve the candidate.
     """
     if _kwargs_carry_a_credential(kwargs):
         return False
-    if provider.value in KEYLESS_SELF_HOSTED_PROVIDERS or provider.value in _AMBIENT_CREDENTIAL_PROVIDERS:
-        return False
-    if provider_credential_env_names(provider.value) == ():
-        return False
-    return not _provider_env_key_present(provider)
+    return not (declared and _needs_no_key(provider))
+
+
+def _needs_no_key(provider: LLMProvider) -> bool:
+    """Whether any-llm calls ``provider`` with no key: a keyless local backend or an ambient-credential provider."""
+    if provider.value in KEYLESS_SELF_HOSTED_PROVIDERS or provider.value in AMBIENT_CREDENTIAL_PROVIDERS:
+        return True
+    return provider_credential_env_names(provider.value) == ()
+
+
+def missing_declared_credential(
+    config: GatewayConfig, instance: str, provider: LLMProvider, kwargs: dict[str, Any]
+) -> "MissingCredential | None":
+    """The credential a call to ``instance`` lacks once every rung has missed, or ``None``.
+
+    For a dispatch path with nowhere else to ask: ``None`` means any-llm may be
+    called with ``kwargs``. Otherwise the call must be refused rather than sent,
+    because any-llm would read the provider's own environment variable, or call
+    the deployment's local backend or cloud role, on nobody's say-so.
+    """
+    if not credential_ladder_exhausted(provider, kwargs, declared=instance in config.providers):
+        return None
+    env_names = provider_credential_env_names(provider.value)
+    return MissingCredential(provider=instance, env_var="/".join(env_names) if env_names else None)
+
+
+def require_declared_credential(
+    config: GatewayConfig, instance: str, provider: LLMProvider, kwargs: dict[str, Any]
+) -> None:
+    """Raise what any-llm raises for a missing key when :func:`missing_declared_credential` finds one.
+
+    Raised before the call rather than left to any-llm, so every caller that
+    already handles a missing key handles this one the same way.
+
+    Raises:
+        MissingApiKeyError: nothing declared serves ``instance``.
+    """
+    missing = missing_declared_credential(config, instance, provider, kwargs)
+    if missing is not None:
+        raise MissingApiKeyError(missing.provider, missing.env_var or "")
+
+
+@dataclass(frozen=True, slots=True)
+class HostedLookup:
+    """How a candidate may be served by the deployment's hosted providers.
+
+    ``own_name_only`` marks a provider any-llm calls with no key, which only
+    the hosted provider of its own name may serve: anything else would answer
+    a request for the caller's named backend with a different one.
+    """
+
+    own_name_only: bool
+
+    def accepts(self, response_provider: str, instance: str) -> bool:
+        """Whether a hosted answer for ``response_provider`` may serve the ``instance`` candidate."""
+        return not self.own_name_only or response_provider == instance
+
+
+def hosted_lookup(provider: LLMProvider) -> HostedLookup:
+    """How the hosted providers may serve a candidate :func:`require_declared_credential` refused.
+
+    Asked only for such a candidate, so BYO precedence holds, and a declared
+    keyless provider keeps its own connection even when all its entry sets is
+    an SDK option such as Bedrock's region.
+    """
+    return HostedLookup(own_name_only=_needs_no_key(provider))
 
 
 # Instances already reported as ignored, so the warning is logged once per
@@ -289,15 +301,31 @@ def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any]) -
 _uncredentialed_warned: set[str] = set()
 
 
+def _no_hosted_names(_name: str) -> str | None:
+    return None
+
+
+# The implementation serving a hosted provider whose name is not an
+# implementation's own (``openai-eu``), registered at startup by the
+# composition root (``configure_hosted_names``) as pricing's provider types
+# are: the names live in ``services/providers``, which imports this module.
+_hosted_names: Callable[[str], str | None] = _no_hosted_names
+
+
+def configure_hosted_names(resolver: Callable[[str], str | None] | None) -> None:
+    """Register the lookup from a hosted provider's name to its implementation; None unregisters it."""
+    global _hosted_names  # noqa: PLW0603
+    _hosted_names = resolver or _no_hosted_names
+
+
 def uncredentialed_env_names(config: GatewayConfig, instance: str, entry: Mapping[str, Any]) -> tuple[str, ...] | None:
     """The variables a ``providers:`` entry could have taken its credential from, or ``None``.
 
     ``None`` means the entry can be called as it stands: it carries a credential
     or an ``api_base`` (which takes the keyless placeholder), its provider needs
-    no key, the provider's own variable is set, or the provider cannot be
-    inspected at all. A tuple means the entry declares nothing a call could
-    authenticate with: ``api_key: ${VAR}`` with ``VAR`` set but empty is the
-    usual way to get here.
+    no key, or the provider cannot be inspected at all. A tuple means the entry
+    declares nothing a call could authenticate with: a bare entry for a keyed
+    provider, or ``api_key: ${VAR}`` with ``VAR`` unset.
     """
     try:
         provider = LLMProvider(config.provider_instance_type(instance))
@@ -309,9 +337,8 @@ def uncredentialed_env_names(config: GatewayConfig, instance: str, entry: Mappin
     if _entry_declares_a_credential(entry):
         return None
     # Asked with no kwargs: the entry contributes nothing that authenticates, so
-    # the provider's own rules (keyless, ambient credentials, its variable being
-    # set) decide whether the call could still go out.
-    if not credential_ladder_exhausted(provider, {}):
+    # whether the provider needs a key at all decides.
+    if not credential_ladder_exhausted(provider, {}, declared=True):
         return None
     return tuple(env_names)
 
@@ -350,14 +377,33 @@ def _mapping_declares_a_credential(mapping: Mapping[str, Any]) -> bool:
     return False
 
 
+def configured_instances(config: GatewayConfig) -> frozenset[str]:
+    """The ``providers:`` instances the configuration declares, a dropped uncredentialed one included."""
+    baseline = config._provider_baseline
+    return frozenset(config.providers if baseline is None else baseline)
+
+
+def settle_configured_providers(config: GatewayConfig) -> None:
+    """Rebuild ``providers:`` from what the configuration declares, then drop the entries that declare no credential.
+
+    The baseline is captured on the first start and kept, so a later start on
+    the same config begins from the declaration again, and a dropped entry's
+    name stays reserved (see :func:`configured_instances`).
+    """
+    if config._provider_baseline is None:
+        config._provider_baseline = {name: dict(entry) for name, entry in config.providers.items()}
+    config.providers = {name: dict(entry) for name, entry in config._provider_baseline.items()}
+    prune_uncredentialed_providers(config)
+
+
 def prune_uncredentialed_providers(config: GatewayConfig) -> dict[str, tuple[str, ...]]:
     """Drop every ``providers:`` entry that declares no credential, and say so once.
 
     A hollow entry is worse than no entry: an ``instance:model`` selector that
     matches it never consults an organization's own key for the same provider,
     and a bare ``provider:model`` selector is gated and priced as if the
-    deployment served it, so the credential an operator stored on the dashboard
-    goes unused while every request fails upstream. Returns what was dropped,
+    deployment served it, so a hosted provider of the same name goes unused
+    while every request fails upstream. Returns what was dropped,
     keyed by instance, with the variables that would have filled each.
     """
     pruned = {
@@ -371,13 +417,62 @@ def prune_uncredentialed_providers(config: GatewayConfig) -> dict[str, tuple[str
             continue
         _uncredentialed_warned.add(instance)
         logger.warning(
-            "providers.%s declares no credential and none of %s is set, so the entry is ignored. A credential "
-            "stored for the provider through the dashboard serves its requests instead.",
+            "providers.%s declares no credential, so the entry is ignored. Name the key it reads "
+            "(api_key: ${%s}), or add the provider on the Hosted providers page.",
             instance,
             # codeql[py/clear-text-logging-sensitive-data]
-            ", ".join(env_names),
+            env_names[0],
         )
     return pruned
+
+
+def warn_about_ignored_provider_variables(config: GatewayConfig) -> None:
+    """Warn once that a provider's own key variable is set and no ``providers:`` entry reads it.
+
+    Such a variable serves no request, which an operator upgrading from a release
+    that fell back to it would otherwise learn only from refused requests. An
+    entry reads it when its ``api_key`` holds the variable's value, which is what
+    ``${VAR}`` interpolation leaves behind. It is a match on values, because the
+    loader keeps no record of which variable filled an entry, so the same key
+    pasted in literally also counts as read. Only the ``<PROVIDER>_API_KEY``
+    spelling is checked, because confirming any other name means importing every
+    provider's SDK. Names only, never values.
+    """
+    keys_in_use = {
+        entry.get("api_key")
+        for entry in config.providers.values()
+        if isinstance(entry, Mapping) and entry.get("api_key")
+    }
+    ignored: list[tuple[str, str]] = []
+    for provider in LLMProvider:
+        name = provider.value
+        variable = f"{name.upper()}_API_KEY"
+        value = os.getenv(variable)
+        if value and value not in keys_in_use and variable in (provider_credential_env_names(name) or ()):
+            ignored.append((name, variable))
+    if not ignored:
+        return
+    name, variable = ignored[0]
+    logger.warning(
+        "Ignoring %s: no providers: entry reads it, and a provider's own environment variable serves nothing "
+        "on its own. Name it in the entry that should use it (providers: {%s: {api_key: ${%s}}}) or store the "
+        "key on the dashboard's Providers page.",
+        # codeql[py/clear-text-logging-sensitive-data]
+        ", ".join(variable for _, variable in ignored),
+        name,
+        # codeql[py/clear-text-logging-sensitive-data]
+        variable,
+    )
+
+
+def reaches_organization_key(config: GatewayConfig, instance: str) -> bool:
+    """Whether a selector naming ``instance`` can be served on an organization's own key.
+
+    Neither a ``providers:`` instance nor a hosted provider named otherwise than
+    its implementation ever consults one, so neither is subject to an
+    organization key's model restrictions.
+    """
+    return instance not in config.providers and _hosted_names(instance) is None
 
 
 def get_provider_kwargs(
@@ -434,8 +529,6 @@ def get_provider_kwargs(
             kwargs = {k: v for k, v in provider_config.items() if k != "client_args"}
             if "client_args" in provider_config:
                 kwargs["client_args"] = provider_config["client_args"]
-    else:
-        _warn_undeclared_env_provider(config, provider)
 
     # boto3 reads AWS_DEFAULT_REGION, while some AWS runtimes expose only AWS_REGION.
     if provider == LLMProvider.BEDROCK:
@@ -457,7 +550,7 @@ def get_provider_kwargs(
     if max_retries is not None:
         kwargs = with_provider_retries(provider, kwargs, max_retries)
 
-    placeholder = keyless_placeholder_api_key(provider, kwargs.get("api_base"), kwargs.get("api_key"))
+    placeholder = keyless_placeholder_api_key(kwargs.get("api_base"), kwargs.get("api_key"))
     if placeholder is not None:
         kwargs["api_key"] = placeholder
 
@@ -516,20 +609,12 @@ def with_failover_retries(provider: LLMProvider, kwargs: dict[str, Any]) -> dict
 
 
 def effective_credential(provider: LLMProvider, kwargs: Mapping[str, Any]) -> ResolvedCredential:
-    """The credential a call made with ``kwargs`` authenticates with.
-
-    That is the key the kwargs carry, or else the provider SDK's own environment
-    variable, which a call carrying no key authenticates with.
+    """The credential a call made with ``kwargs`` authenticates with: the key they carry.
 
     Raises:
-        LookupError: neither holds a key.
+        LookupError: the kwargs hold no key.
     """
     api_key = kwargs.get("api_key")
-    if not api_key:
-        api_key = next(
-            (value for name in provider_credential_env_names(provider.value) or () if (value := os.getenv(name))),
-            None,
-        )
     if not api_key:
         raise LookupError(f"no credential configured for provider '{provider.value}'")
     return ResolvedCredential(
@@ -781,7 +866,12 @@ def resolve_provider_selector(
         # organization's own offerings may answer. Relabeled like an alias: the
         # caller sees the spelling they sent, and pricing keys on the target.
         alias = resolve_catalog_selector(model_selector, workspace_id=workspace_id)
-    if alias is None and (written := split_selector(model_selector)) is not None and written[0] not in config.providers:
+    if (
+        alias is None
+        and (written := split_selector(model_selector)) is not None
+        and written[0] not in config.providers
+        and _hosted_names(written[0]) is None
+    ):
         # An organization key serves only the ids it offers, so a provider's
         # undated name reaches its one dated build there. A ``providers:``
         # instance sends any id as written and is never rewritten.
@@ -803,6 +893,21 @@ def resolve_provider_selector(
     if split is not None and split[0] in config.providers:
         instance, model = split
         provider = LLMProvider(config.provider_instance_type(instance))
+        return ResolvedProvider(
+            instance=instance,
+            provider=provider,
+            model=model,
+            kwargs=get_provider_kwargs(config, provider, instance=instance),
+            alias=model_selector if alias is not None else None,
+        )
+
+    if split is not None and (implementation := _hosted_names(split[0])) is not None:
+        # A hosted provider named otherwise than its implementation. Reached by
+        # its name alone: an organization key for the implementation would send
+        # the request to another endpoint, so none is consulted, and the
+        # credential is the hosted rung's to resolve.
+        instance, model = split
+        provider = LLMProvider(implementation)
         return ResolvedProvider(
             instance=instance,
             provider=provider,
@@ -890,7 +995,9 @@ class MissingCredential:
 
     Nothing reached the provider, so the failure is the deployment's
     configuration rather than the provider's, and it is named in Otari's terms.
-    The variable is a name, never a value, so it is safe to show.
+    The variable is a name, never a value, so it is safe to show. A request that
+    named an alias is told the ``alias`` instead of the provider and its
+    variable, both of which give away the target the alias hides.
 
     Answered with a 424 rather than a 502: clients retry a 5xx, and no retry can
     supply a key. ``code`` lets a caller tell it from a provider's own 424.
@@ -898,16 +1005,35 @@ class MissingCredential:
 
     provider: str
     env_var: str | None
+    alias: str | None = None
     status_code: ClassVar[int] = 424
     code: ClassVar[str] = PROVIDER_NOT_CONFIGURED
 
+    @classmethod
+    def from_error(cls, exc: MissingApiKeyError) -> "MissingCredential":
+        return cls(provider=exc.provider_name or "unknown", env_var=exc.env_var_name or None)
+
+    def behind_alias(self, alias: str | None) -> "MissingCredential":
+        """This credential as a caller who named ``alias`` may be told about it."""
+        return self if alias is None else replace(self, alias=alias)
+
     @property
     def detail(self) -> str:
-        detail = (
+        if self.alias is not None:
+            return (
+                f"No credential is configured for the provider behind model '{self.alias}'. "
+                "Declare it under providers: in config.yml, add it on the Hosted providers page, "
+                "or add an organization provider key."
+            )
+        # The variable is offered as what a declaration reads its key from: set
+        # alone, it serves nothing.
+        variable = self.env_var.split("/")[0] if self.env_var else None
+        declare = f" (api_key: ${{{variable}}})" if variable else ""
+        return (
             f"No credential is configured for provider '{self.provider}'. "
-            "Add one in config.yml or through the dashboard"
+            f"Declare it under providers: in config.yml{declare}, add it on the Hosted providers page, "
+            "or add an organization provider key."
         )
-        return f"{detail}, or set {self.env_var}." if self.env_var else f"{detail}."
 
 
 def missing_credential(exc: BaseException) -> MissingCredential | None:
@@ -917,7 +1043,7 @@ def missing_credential(exc: BaseException) -> MissingCredential | None:
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         if isinstance(current, MissingApiKeyError):
-            return MissingCredential(provider=current.provider_name or "unknown", env_var=current.env_var_name)
+            return MissingCredential.from_error(current)
         current = getattr(current, "original_exception", None)
     return None
 

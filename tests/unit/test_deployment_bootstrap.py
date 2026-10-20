@@ -22,7 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from gateway.api.deps import reset_config
 from gateway.api.routes import bootstrap as bootstrap_route
 from gateway.api.routes.bootstrap import HOSTED_SURFACES, STANDALONE_SURFACES, published_surfaces
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
 
@@ -103,8 +103,9 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
     assert response.json() == {
         "deployment_type": "standalone",
         "session_type": "local_operator",
-        # The trace explorer is a core feature, published on top of the declared surfaces while it is on.
-        "surfaces": sorted({*STANDALONE_SURFACES, "traces"}),
+        # The trace explorer and the Health page are core features, published on top of the declared surfaces
+        # while they are on.
+        "surfaces": sorted({*STANDALONE_SURFACES, "health_checks", "traces"}),
         "sign_in_methods": ["master_key"],
         "management_url": None,
         "data_plane_url": None,
@@ -301,6 +302,8 @@ def test_open_signup_is_published_only_with_mail_to_carry_the_verification(tmp_p
 # check is for is a surface whose API went away, and a name that reaches one
 # mounted route has not.
 SURFACE_ROUTE_PREFIXES = {
+    "hosted_providers": f"{API_ROOT}/hosted-providers",
+    "health_checks": f"{API_ROOT}/health-checks",
     "organization_guardrails": f"{API_ROOT}/organizations/me/guardrails",
     "organization_providers": f"{API_ROOT}/organizations/me/provider-keys",
     "organization_usage": f"{API_ROOT}/organizations/me/usage",
@@ -325,6 +328,22 @@ def test_both_editions_publish_the_organization_guardrail_surface(tmp_path: Path
 
     assert any(path.startswith(f"{API_ROOT}/organizations/me/guardrails") for path in mounted)
     assert any(path.startswith(f"{API_ROOT}/organizations/me/guardrail-definitions") for path in mounted)
+
+
+@pytest.mark.parametrize("build", [_standalone, _hosted], ids=["standalone", "hosted"])
+def test_both_editions_publish_the_organization_usage_surface(
+    tmp_path: Path, build: Callable[[Path], GatewayConfig]
+) -> None:
+    """The organization-wide Usage page, which no other page answers on either edition.
+
+    ``/usage`` reads the workspace the sidebar selected, so a standalone
+    deployment serving several organizations needs this page as much as a hosted
+    one does.
+    """
+    with TestClient(create_app(build(tmp_path))) as client:
+        answered = client.get(f"{API_ROOT}/bootstrap").json()
+
+    assert "organization_usage" in answered["surfaces"]
 
 
 @pytest.mark.parametrize(
@@ -368,9 +387,9 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     ``organization_providers`` is published by both topologies, because the page
     behind it is where an organization's models are offered, priced and switched,
     which is a tenant's question whether or not the deployment has more than one
-    tenant. ``organization_usage`` is the row that exists only where tenants do:
-    standalone's organization is the deployment, so ``/usage`` already answers it
-    whole (otari-ai#1963).
+    tenant. ``organization_usage`` is on both for the same reason: the ``/usage``
+    page reads the sidebar's selected workspace, so neither edition has another
+    page answering for the organization as a whole.
 
     ``playground`` is the one row withheld for a reason that is not about
     credentials or scope at all, and not about the topology either: the page
@@ -394,9 +413,8 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     # Everything else is standalone's set, so a surface added there is not
     # silently withheld from a control plane.
     assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
-        "organization_usage",
+        "health_checks",
         "playground",
-        "providers",
         "traces",
     }
 
@@ -418,11 +436,18 @@ def test_hosted_publishes_the_playground_once_it_knows_its_data_plane(tmp_path: 
     assert "playground" in answered["surfaces"]
     # The rest of the hosted set is unchanged by the address: this is one row's
     # availability, not a different edition.
-    assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
-        "organization_usage",
-        "providers",
-        "traces",
-    }
+    assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {"health_checks", "traces"}
+
+
+def test_hosted_publishes_the_health_page(tmp_path: Path) -> None:
+    """A check goes straight to the provider on the hosted provider's own key, so a control plane can run it."""
+    app = create_app(_hosted(tmp_path))
+
+    with TestClient(app) as client:
+        assert "health_checks" in client.get(f"{API_ROOT}/bootstrap").json()["surfaces"]
+        assert (
+            client.get(f"{API_ROOT}/health-checks", headers={API_KEY_HEADER: f"Bearer {MASTER_KEY}"}).status_code == 200
+        )
 
 
 def test_hosted_answers_everything_below_the_edition_the_way_standalone_does(tmp_path: Path) -> None:

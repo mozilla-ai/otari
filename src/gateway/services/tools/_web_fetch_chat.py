@@ -37,11 +37,17 @@ class ChatWebFetchRendering:
     def ran(self, call: NativeCall, pool: ToolBackend) -> list[Any]:
         """The ended entry, ``failed`` or ``completed``.
 
-        ``pool`` carries no part of it. A fetch that failed on the old backend carries
-        no ``error``: that backend returns only a text, and the text is the model's.
+        A failed fetch's ``error`` is the failure the fetch backend kept, which the
+        old search backend forwards: the provider, its status, the tag and whether
+        a retry may help. A pool that keeps none, such as an MCP server's, gives a
+        failed entry without one.
         """
-        del pool
-        return [_entry(call, "failed" if call.failed else "completed")]
+        take_last_failure = getattr(pool, "take_last_failure", None)
+        failure = take_last_failure() if take_last_failure is not None else None
+        if not call.failed:
+            return [_entry(call, "completed")]
+        error = OtariToolCallError.model_validate(failure.as_dict()) if failure is not None else None
+        return [_entry(call, "failed", error=error)]
 
     def refused(self, call: NativeCall) -> list[Any]:
         """The ended entry for a fetch the use cap refused before it ran."""

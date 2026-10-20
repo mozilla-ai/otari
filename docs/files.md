@@ -317,8 +317,12 @@ Otari must know whether the target model is natively multimodal. It uses,
 in order:
 
 1. `model_capabilities` **config override**: authoritative.
-2. **any-llm provider metadata**: trusted only for hosted providers.
-3. **Default: extract**, safe, since a needless extraction still yields a
+2. **Known model exceptions**: a hosted model its provider's flag over-reports
+  and that drops the file silently rather than refusing it. Today that is
+  DeepSeek's `deepseek-v4-pro`, which answers as if no image came, while its
+  provider takes images on `deepseek-flash`; its images are read as text.
+3. **any-llm provider metadata**: trusted only for hosted providers.
+4. **Default: extract**, safe, since a needless extraction still yields a
   correct answer while a wrong passthrough silently drops the file.
 
 > any-llm's capability flags are set per provider *class*, so they over-report

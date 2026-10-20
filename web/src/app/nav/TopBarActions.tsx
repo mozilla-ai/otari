@@ -6,6 +6,7 @@ import type { RefObject } from "react"
 import { WalletNavSlot } from "@/app/nav/overlayWalletSlot"
 import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
 import { useNavVisibility } from "@/app/nav/useNavVisibility"
+import { documentationHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // Desktop destinations; the account menu keeps them reachable on mobile.
@@ -23,7 +24,8 @@ export function TopBarActions({
   /** So the shell can return focus here when the dialog closes. */
   feedbackTriggerRef?: RefObject<HTMLButtonElement | null>
 }) {
-  const { docs_url, feedback_enabled } = useDeployment()
+  const deployment = useDeployment()
+  const { feedback_enabled } = deployment
   const isNavVisible = useNavVisibility()
 
   return (
@@ -37,20 +39,14 @@ export function TopBarActions({
           {PLAYGROUND_NAV_ITEM.label}
         </Link>
       )}
-      {docs_url ? (
-        <a
-          href={docs_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={ACTION}
-        >
-          Documentation
-        </a>
-      ) : (
-        <Link to="/docs" className={ACTION}>
-          Documentation
-        </Link>
-      )}
+      <a
+        href={documentationHref(deployment)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={ACTION}
+      >
+        Documentation
+      </a>
       {/* A button beside two links, so it takes their class and the pointer a
           link gets for free. */}
       {feedback_enabled && onOpenFeedback ? (

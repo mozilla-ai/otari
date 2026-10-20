@@ -347,9 +347,9 @@ describe("OrganizationProvidersPage", () => {
   })
 
   it("reads the organization's own keys, not the deployment's credentials", async () => {
-    // The whole reason this page exists: /api/v1/provider-credentials is keyed on
-    // an instance name and belongs to the process, so a page that read it would
-    // be showing every tenant the same rows.
+    // The whole reason this page exists: /api/v1/hosted-providers belongs to
+    // the process, so a page that read it would be showing every tenant the
+    // same rows.
     const requests = mockApi({ keys: [orgProviderKey()] })
     await renderPage(<OrganizationProvidersPage />)
 
@@ -361,7 +361,7 @@ describe("OrganizationProvidersPage", () => {
     ).toBe(true)
     expect(
       requests.some((request) =>
-        request.url.includes(`${API_ROOT}/provider-credentials`),
+        request.url.includes(`${API_ROOT}/hosted-providers`),
       ),
     ).toBe(false)
   })
@@ -639,13 +639,36 @@ describe("OrganizationProvidersPage", () => {
     await renderPage(<OrganizationProvidersPage />)
 
     await user.click(
-      await screen.findByRole("button", { name: "Make default" }),
+      await screen.findByRole("button", { name: "Make default provider" }),
     )
 
     await waitFor(() => {
       expect(requests.some((request) => request.url.endsWith("/default"))).toBe(
         true,
       )
+    })
+  })
+
+  it("removes the organization default from the key that holds it", async () => {
+    const requests = mockApi({
+      keys: [orgProviderKey({ is_org_default: true })],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Default provider, click to remove",
+      }),
+    )
+
+    await waitFor(() => {
+      expect(
+        requests.some(
+          (request) =>
+            request.method === "DELETE" && request.url.endsWith("/default"),
+        ),
+      ).toBe(true)
     })
   })
 

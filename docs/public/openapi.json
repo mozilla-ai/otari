@@ -2260,7 +2260,7 @@
                 "type": "null"
               }
             ],
-            "description": "'config' while config.yml declares this budget, in which case every start writes the declared values back over any change made through the API; null otherwise",
+            "description": "'config' while config.yml declares this budget, in which case a start writes the declared values back over any change made through the API when the budget's entry in config.yml changed, and once on the first start after upgrading to a version that tracks this; null otherwise",
             "title": "Origin"
           },
           "request_limit": {
@@ -5264,69 +5264,6 @@
         "title": "CreateSessionRequest",
         "type": "object"
       },
-      "CreateStoredProviderRequest": {
-        "description": "Create a stored provider. ``api_key`` is write-only and requires OTARI_SECRET_KEY.",
-        "properties": {
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base"
-          },
-          "api_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Provider API key. Stored encrypted; never returned.",
-            "title": "Api Key"
-          },
-          "client_args": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Args"
-          },
-          "instance": {
-            "description": "Routing key, e.g. 'openai' or a named instance like 'home_lab'.",
-            "minLength": 1,
-            "title": "Instance",
-            "type": "string"
-          },
-          "provider_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "any-llm implementation when the instance name is not itself one.",
-            "title": "Provider Type"
-          }
-        },
-        "required": [
-          "instance"
-        ],
-        "title": "CreateStoredProviderRequest",
-        "type": "object"
-      },
       "CreateUserRequest": {
         "description": "Request model for creating a new user.",
         "properties": {
@@ -5850,7 +5787,7 @@
                 "type": "null"
               }
             ],
-            "description": "Where this deployment's documentation lives, when it is not the operator guide bundled with the gateway. Set, the dashboard's Documentation links open it in a new tab; null, they go to the bundled guide at /#/docs, which stays served either way. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.",
+            "description": "Where this deployment's documentation lives, when it is not docs.otari.ai. Set, the dashboard's Documentation links open it in a new tab; null, they open https://docs.otari.ai/. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.",
             "title": "Docs Url"
           },
           "feedback_enabled": {
@@ -5997,6 +5934,174 @@
           "mail_ready"
         ],
         "title": "DeploymentBootstrap",
+        "type": "object"
+      },
+      "DeploymentProviderMigrationPublic": {
+        "description": "The deployment providers the retired dashboard page stored, and how each moves onto a hosted provider.",
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/DeploymentProviderMigrationRowPublic"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "title": "DeploymentProviderMigrationPublic",
+        "type": "object"
+      },
+      "DeploymentProviderMigrationRequest": {
+        "description": "Which deployment providers to move: the ones the caller reviewed, as reviewed.\n\n``rows`` names the rows of the preview the caller saw, each with the\n``updated_at`` it was shown at. A row the preview did not show, or one\nchanged since, is left where it is, so nothing moves that nobody reviewed.\nOmitted, every row that can move does.",
+        "example": {
+          "rows": [
+            {
+              "instance": "openai-eu",
+              "updated_at": "2026-10-19T09:00:00Z"
+            }
+          ]
+        },
+        "properties": {
+          "rows": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DeploymentProviderMigrationReviewedRow"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows"
+          }
+        },
+        "title": "DeploymentProviderMigrationRequest",
+        "type": "object"
+      },
+      "DeploymentProviderMigrationReviewedRow": {
+        "description": "One row of the preview the caller reviewed: its instance and the version it was shown at.",
+        "properties": {
+          "instance": {
+            "title": "Instance",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "DeploymentProviderMigrationReviewedRow",
+        "type": "object"
+      },
+      "DeploymentProviderMigrationRowPublic": {
+        "description": "What moving one deployment provider onto a hosted provider does, or did.\n\n``instance`` is the deployment provider's name, which the hosted provider\nkeeps, so ``instance:model`` selectors keep working. ``outcome`` is\n``migrate`` in a preview and ``migrated`` once applied; ``conflict``,\n``unreadable``, ``invalid`` and ``failed`` leave the row where it is, with\n``detail`` saying why. ``source_removed`` says whether the deployment\nprovider was removed: it is kept while the hosted provider offers no model,\nand when it changed while the move ran. ``notes`` are what an operator\nshould check afterwards.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "instance": {
+            "title": "Instance",
+            "type": "string"
+          },
+          "models": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Models"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "outcome": {
+            "enum": [
+              "migrate",
+              "migrated",
+              "conflict",
+              "unreadable",
+              "invalid",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "source_removed": {
+            "default": false,
+            "title": "Source Removed",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The deployment provider's version, which an apply names to move this row as shown.",
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "instance",
+          "outcome"
+        ],
+        "title": "DeploymentProviderMigrationRowPublic",
         "type": "object"
       },
       "DeploymentUserOrganizationPublic": {
@@ -6704,6 +6809,21 @@
         "title": "EndUserUpdate",
         "type": "object"
       },
+      "EndUsersDeleted": {
+        "description": "How many end users a delete removed.",
+        "properties": {
+          "deleted": {
+            "description": "End users deleted by this call. A page as full as the limit may leave more.",
+            "title": "Deleted",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "EndUsersDeleted",
+        "type": "object"
+      },
       "ExecutionState": {
         "description": "Whether the remote tool may have run.\n\nA retry-safety classification, not a description of how the HTTP request\nwent. ``NOT_STARTED`` is Otari saying it knows the tool did not run;\n``OUTCOME_UNKNOWN`` is Otari saying it cannot know, which is the only honest\nanswer once the transport has begun writing ``tools/call``.",
         "enum": [
@@ -7173,6 +7293,234 @@
         "title": "FallbackOfferingPublic",
         "type": "object"
       },
+      "FederationRuleCreate": {
+        "additionalProperties": false,
+        "description": "An OpenID Connect identity that may authenticate as the key, in place of its secret.\n\nA token matches when it is signed by ``issuer``, names ``audience`` among its audiences, and carries each of\n``subject`` and ``email`` that the rule sets; an email matches only when the token marks it verified. At least\none of the two is required.",
+        "example": {
+          "audience": "https://otari.example.com",
+          "email": "hackbot-api@my-project.iam.gserviceaccount.com",
+          "issuer": "https://accounts.google.com"
+        },
+        "properties": {
+          "audience": {
+            "description": "A value the token's 'aud' must contain.",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Audience",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The token's verified 'email', when the rule names one. Compared without regard to case.",
+            "title": "Email"
+          },
+          "issuer": {
+            "description": "The token's 'iss', one of the deployment's federation_issuers.",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Issuer",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The token's 'sub', when the rule names one.",
+            "title": "Subject"
+          }
+        },
+        "required": [
+          "issuer",
+          "audience"
+        ],
+        "title": "FederationRuleCreate",
+        "type": "object"
+      },
+      "FederationRulePublic": {
+        "description": "A federation rule of an API key.",
+        "properties": {
+          "api_key_id": {
+            "title": "Api Key Id",
+            "type": "string"
+          },
+          "audience": {
+            "title": "Audience",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          }
+        },
+        "required": [
+          "id",
+          "api_key_id",
+          "issuer",
+          "audience",
+          "subject",
+          "email",
+          "created_at"
+        ],
+        "title": "FederationRulePublic",
+        "type": "object"
+      },
+      "FederationTokenRequest": {
+        "description": "An RFC 7523 ``jwt-bearer`` token request, as the Anthropic SDKs and Claude Code send it.\n\nEvery field is optional here so that a missing one is answered in the RFC 6749 error shape rather than as a\nvalidation error. Fields the request does not use are ignored.",
+        "example": {
+          "assertion": "<identity token>",
+          "federation_rule_id": "7d0c7a52-9a2e-4b55-8f3a-2f1f6c0d2a11",
+          "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+          "organization_id": "5b3f8e0e-1c2d-4e7f-9a8b-0c1d2e3f4a5b"
+        },
+        "properties": {
+          "assertion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The identity token.",
+            "title": "Assertion"
+          },
+          "federation_rule_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The id of the federation rule the identity token must match.",
+            "title": "Federation Rule Id"
+          },
+          "grant_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "title": "Grant Type"
+          },
+          "organization_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When set, the UUID of the organization of the rule's key.",
+            "title": "Organization Id"
+          },
+          "service_account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When set, the id of the rule's key.",
+            "title": "Service Account Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When set, the UUID of the rule's key's workspace.",
+            "title": "Workspace Id"
+          }
+        },
+        "title": "FederationTokenRequest",
+        "type": "object"
+      },
+      "FederationTokenResponse": {
+        "description": "An access token, as RFC 6749 section 5.1 shapes it. Present it as a bearer token in place of the key.",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_in": {
+            "description": "Seconds until the access token expires.",
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "token_type": {
+            "default": "Bearer",
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "expires_in"
+        ],
+        "title": "FederationTokenResponse",
+        "type": "object"
+      },
       "GateResultResponse": {
         "properties": {
           "detail": {
@@ -7546,6 +7894,1381 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthCheckDisabled": {
+        "description": "What switching off the failing models did.",
+        "properties": {
+          "disabled": {
+            "description": "How many models were switched off on their hosted provider.",
+            "title": "Disabled",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "disabled"
+        ],
+        "title": "HealthCheckDisabled",
+        "type": "object"
+      },
+      "HealthCheckResultPublic": {
+        "description": "What one offering answered in the latest finished run.",
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "failed_runs": {
+            "default": 0,
+            "description": "How many runs in a row it has failed.",
+            "title": "Failed Runs",
+            "type": "integer"
+          },
+          "failing_since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a failing model's unbroken run of failures began, as far back as results are kept (48 hours). Null when it answered.",
+            "title": "Failing Since"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "selector": {
+            "title": "Selector",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pass",
+              "fail",
+              "skip"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Code"
+          }
+        },
+        "required": [
+          "selector",
+          "provider",
+          "status",
+          "status_code",
+          "error",
+          "latency_ms",
+          "checked_at"
+        ],
+        "title": "HealthCheckResultPublic",
+        "type": "object"
+      },
+      "HealthCheckRunPublic": {
+        "description": "One pass over every offering.",
+        "properties": {
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "included_reasoning": {
+            "title": "Included Reasoning",
+            "type": "boolean"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "started_at",
+          "finished_at",
+          "included_reasoning",
+          "total",
+          "passed",
+          "failed"
+        ],
+        "title": "HealthCheckRunPublic",
+        "type": "object"
+      },
+      "HealthCheckSettingsPublic": {
+        "description": "Whether the checks run, how often, and what they send.",
+        "properties": {
+          "alert_emails": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Alert Emails",
+            "type": "array"
+          },
+          "interval_minutes": {
+            "title": "Interval Minutes",
+            "type": "integer"
+          },
+          "max_tokens": {
+            "title": "Max Tokens",
+            "type": "integer"
+          },
+          "next_run_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Run At"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "reasoning_every_runs": {
+            "title": "Reasoning Every Runs",
+            "type": "integer"
+          },
+          "reasoning_max_tokens": {
+            "title": "Reasoning Max Tokens",
+            "type": "integer"
+          },
+          "run_requested": {
+            "title": "Run Requested",
+            "type": "boolean"
+          },
+          "schedule_enabled": {
+            "title": "Schedule Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schedule_enabled",
+          "interval_minutes",
+          "prompt",
+          "max_tokens",
+          "reasoning_max_tokens",
+          "reasoning_every_runs",
+          "next_run_at",
+          "run_requested",
+          "alert_emails"
+        ],
+        "title": "HealthCheckSettingsPublic",
+        "type": "object"
+      },
+      "HealthCheckSettingsUpdate": {
+        "additionalProperties": false,
+        "description": "Settings to change. An omitted field keeps its value.",
+        "example": {
+          "interval_minutes": 60,
+          "schedule_enabled": true
+        },
+        "properties": {
+          "alert_emails": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who is emailed when a model stops answering and when it answers again. An empty list emails nobody.",
+            "items": {
+              "format": "email",
+              "type": "string"
+            },
+            "title": "Alert Emails"
+          },
+          "interval_minutes": {
+            "anyOf": [
+              {
+                "maximum": 1440.0,
+                "minimum": 15.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Minutes between scheduled runs.",
+            "title": "Interval Minutes"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "maximum": 4096.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Output cap for a model that does not reason.",
+            "title": "Max Tokens"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The user message every model is sent. A check passes on any answer, whatever it says.",
+            "title": "Prompt"
+          },
+          "reasoning_every_runs": {
+            "anyOf": [
+              {
+                "maximum": 48.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Include reasoning models every Nth run; 0 leaves them out.",
+            "title": "Reasoning Every Runs"
+          },
+          "reasoning_max_tokens": {
+            "anyOf": [
+              {
+                "maximum": 8192.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Output cap for a reasoning model.",
+            "title": "Reasoning Max Tokens"
+          },
+          "schedule_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Run the checks on a schedule.",
+            "title": "Schedule Enabled"
+          }
+        },
+        "title": "HealthCheckSettingsUpdate",
+        "type": "object"
+      },
+      "HealthCheckStatus": {
+        "description": "The Health page: settings, the run in progress, and the latest finished run by provider.",
+        "properties": {
+          "last_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HealthCheckRunPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderHealthSummary"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/HealthCheckResultPublic"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HealthCheckRunPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settings": {
+            "$ref": "#/components/schemas/HealthCheckSettingsPublic"
+          }
+        },
+        "required": [
+          "settings",
+          "running",
+          "last_run",
+          "providers",
+          "results"
+        ],
+        "title": "HealthCheckStatus",
+        "type": "object"
+      },
+      "HostedAvailableModelsPublic": {
+        "description": "What the provider says it serves on the stored credential.\n\nFailure is a field rather than a status: an unreachable upstream, or a\nprovider with no model listing, is an answer about the provider rather than\nabout this request, and the form still has to render a plain text box when\nthe list cannot be fetched.",
+        "properties": {
+          "discovery_unsupported": {
+            "default": false,
+            "title": "Discovery Unsupported",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "HostedAvailableModelsPublic",
+        "type": "object"
+      },
+      "HostedCatalogKeptGroupPublic": {
+        "description": "Priced models a sweep left in place, grouped by the reason it did.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "count",
+          "models"
+        ],
+        "title": "HostedCatalogKeptGroupPublic",
+        "type": "object"
+      },
+      "HostedCatalogProviderRefreshPublic": {
+        "description": "What one hosted provider newly lists, as a catalog sweep found it.\n\nPer provider rather than one total, because a dial that failed is a fact\nabout that provider, and the operator has to be told which one went quiet\nrather than read a smaller number than they expected.",
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "credential_unreadable": {
+            "default": false,
+            "title": "Credential Unreadable",
+            "type": "boolean"
+          },
+          "discovery_unsupported": {
+            "default": false,
+            "title": "Discovery Unsupported",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "repriced": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repriced",
+            "type": "array"
+          },
+          "source": {
+            "default": "database",
+            "enum": [
+              "database",
+              "config"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "added"
+        ],
+        "title": "HostedCatalogProviderRefreshPublic",
+        "type": "object"
+      },
+      "HostedCatalogRefreshPublic": {
+        "description": "What a catalog sweep did, or would do.\n\n``removed`` is a sample and ``removed_count`` the total, so a deployment\nthat has never been swept does not answer one button press with a few\nthousand strings. ``orphaned_rosters`` names the providers that still have\na model list but nothing defining them, such as a removed ``config.yml``\nentry: nothing serves them, and an apply deletes their model lists.",
+        "properties": {
+          "kept": {
+            "items": {
+              "$ref": "#/components/schemas/HostedCatalogKeptGroupPublic"
+            },
+            "title": "Kept",
+            "type": "array"
+          },
+          "orphaned_rosters": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Orphaned Rosters",
+            "type": "array"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/HostedCatalogProviderRefreshPublic"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "removed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed",
+            "type": "array"
+          },
+          "removed_count": {
+            "title": "Removed Count",
+            "type": "integer"
+          },
+          "removed_override_rows": {
+            "title": "Removed Override Rows",
+            "type": "integer"
+          },
+          "removed_price_rows": {
+            "title": "Removed Price Rows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "providers",
+          "removed",
+          "removed_count",
+          "removed_price_rows",
+          "removed_override_rows",
+          "kept"
+        ],
+        "title": "HostedCatalogRefreshPublic",
+        "type": "object"
+      },
+      "HostedModelCreateRequest": {
+        "description": "Offer a model on a hosted provider, optionally at a custom price.\n\nOmitting the rates means the deployment serves the model at whatever the\nprice ladder already answers: a stored deployment price, else the community\ndefault, which the offer stores as the deployment's own rate. ``unit`` is\nwhat the rates are per, as on ``POST /pricing``: a request or image rate is\nstill stored per million.",
+        "example": {
+          "input_price_per_million": 2.5,
+          "model": "gpt-4o",
+          "output_price_per_million": 10
+        },
+        "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Price Per Million"
+          },
+          "input_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Price Per Million"
+          },
+          "model": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "output_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Price Per Million"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "tokens",
+                  "requests",
+                  "images"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "HostedModelCreateRequest",
+        "type": "object"
+      },
+      "HostedModelPublic": {
+        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``defaults`` for the\ncommunity-maintained rate, whether this surface stored it or the fallback\nsupplies it, and None when nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off.",
+        "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Price Per Million"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Price Per Million"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "output_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Price Per Million"
+          },
+          "price_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "organization",
+                  "deployment",
+                  "defaults"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Source"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "model",
+          "enabled",
+          "created_at"
+        ],
+        "title": "HostedModelPublic",
+        "type": "object"
+      },
+      "HostedModelUpdateRequest": {
+        "description": "Reprice an offered model, toggle whether it is served, or both.\n\nA price is the input/output pair or nothing: sending the pair writes a new\npricing version, and the cache rates then follow ``POST /pricing``'s own\nsemantics (a field the caller omits inherits the most recent stored value,\nan explicit null clears it). An omitted ``unit`` carries the stored one\nforward. ``enabled`` travels alone freely, so a toggle never re-sends rates\nit did not change.",
+        "example": {
+          "enabled": false
+        },
+        "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Price Per Million"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "input_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Price Per Million"
+          },
+          "output_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Price Per Million"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "tokens",
+                  "requests",
+                  "images"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "title": "HostedModelUpdateRequest",
+        "type": "object"
+      },
+      "HostedModelsPublic": {
+        "description": "A page of one hosted provider's offered models, and how many there are in total.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/HostedModelPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "HostedModelsPublic",
+        "type": "object"
+      },
+      "HostedModelsRefreshPublic": {
+        "description": "What a refresh did: the models newly offered, the seeded rates it moved, and the list's new size.\n\nFailure is a field rather than a status, for the reason\n``HostedAvailableModelsPublic`` gives: the list is still standing, and the\npanel renders the reason beside it.",
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "discovery_unsupported": {
+            "default": false,
+            "title": "Discovery Unsupported",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "repriced": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repriced",
+            "type": "array"
+          }
+        },
+        "required": [
+          "added",
+          "repriced",
+          "count"
+        ],
+        "title": "HostedModelsRefreshPublic",
+        "type": "object"
+      },
+      "HostedProviderCreateRequest": {
+        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``provider`` is the any-llm implementation. ``name`` is what requests\naddress it by (``name:model``), defaulting to ``provider``; a name of its\nown lets two endpoints of one implementation coexist. ``api_key`` may be\nleft out for a backend that needs none, or for an endpoint of its own\n(``api_base``), which is called with a placeholder key.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.\n``serves_unlisted_models`` serves a model the roster does not list, as a\n``config.yml`` instance does, and switches on every model it offers\nwhether or not something prices it.",
+        "example": {
+          "api_key": "<your OpenAI API key>",
+          "provider": "openai"
+        },
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "provider": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "restricted_to_organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restricted To Organization Id"
+          },
+          "serves_unlisted_models": {
+            "default": false,
+            "title": "Serves Unlisted Models",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "HostedProviderCreateRequest",
+        "type": "object"
+      },
+      "HostedProviderPublic": {
+        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.\n``serves_unlisted_models`` is true for one that serves a model its roster\ndoes not list.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key_last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Last4"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "decryptable": {
+            "default": true,
+            "title": "Decryptable",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_api_key": {
+            "default": true,
+            "title": "Has Api Key",
+            "type": "boolean"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "restricted_to_organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restricted To Organization Id"
+          },
+          "serves_unlisted_models": {
+            "default": false,
+            "title": "Serves Unlisted Models",
+            "type": "boolean"
+          },
+          "shadows_config": {
+            "default": false,
+            "title": "Shadows Config",
+            "type": "boolean"
+          },
+          "source": {
+            "default": "database",
+            "enum": [
+              "database",
+              "config"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "name",
+          "provider",
+          "enabled"
+        ],
+        "title": "HostedProviderPublic",
+        "type": "object"
+      },
+      "HostedProviderTestPublic": {
+        "description": "What a connection test found: whether the provider answered, and how many models it lists.\n\n``discovery_unsupported`` is set for a provider with no model listing,\nwhich a test cannot reach that way although it may still serve.",
+        "properties": {
+          "discovery_unsupported": {
+            "default": false,
+            "title": "Discovery Unsupported",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "model_count": {
+            "default": 0,
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "HostedProviderTestPublic",
+        "type": "object"
+      },
+      "HostedProviderTestRequest": {
+        "description": "Credentials to try against a provider without storing them.\n\nThe fields the create body takes. ``name`` naming an existing stored\nprovider lets a field left out fall back to what it stores, so an edit form\ncan test without re-entering the key; pointing the stored key at another\norigin still needs the key typed again, as an update does.",
+        "example": {
+          "api_key": "<your OpenAI API key>",
+          "provider": "openai"
+        },
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "provider": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "HostedProviderTestRequest",
+        "type": "object"
+      },
+      "HostedProviderUpdateRequest": {
+        "description": "Rotate the key, repoint the base, or turn a provider off.\n\n``provider`` and ``name`` are immutable: changing either is a delete plus a\ncreate, because the key belongs to the provider it was issued by and\nrequests address the name. Omitting ``api_key`` leaves the stored\ncredential untouched, so a toggle never re-sends a secret the caller does\nnot have; an explicit null removes it, where the provider can be served\nwithout one. ``client_args`` omitted is left alone; an explicit\nnull clears it, and an entry echoed back as the mask keeps the stored value.\n``restricted_to_organization_id`` reads the same way: omitted keeps the\nrestriction, null lifts it.",
+        "example": {
+          "enabled": false
+        },
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "restricted_to_organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restricted To Organization Id"
+          },
+          "serves_unlisted_models": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serves Unlisted Models"
+          }
+        },
+        "title": "HostedProviderUpdateRequest",
+        "type": "object"
+      },
+      "HostedProvidersPublic": {
+        "description": "A page of hosted providers, and how many there are in total.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/HostedProviderPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "HostedProvidersPublic",
+        "type": "object"
+      },
+      "HostedProvidersReencryptPublic": {
+        "description": "What re-encrypting the stored hosted provider credentials did.\n\n``unreadable`` counts providers no configured key reads, left as they were\nto be re-entered; ``skipped`` those edited while the rotation ran, already\nwritten under the primary key.",
+        "properties": {
+          "reencrypted": {
+            "title": "Reencrypted",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "unreadable": {
+            "title": "Unreadable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reencrypted",
+          "unreadable",
+          "skipped"
+        ],
+        "title": "HostedProvidersReencryptPublic",
         "type": "object"
       },
       "Icon": {
@@ -8246,7 +9969,7 @@
           },
           "env_key_present": {
             "default": false,
-            "description": "True when env_key is already set on the server, so a pasted key is optional (env fallback).",
+            "description": "True when env_key is set on the server. Informational: a stored provider never reads it, so a key the provider requires must still be supplied.",
             "title": "Env Key Present",
             "type": "boolean"
           },
@@ -8261,7 +9984,7 @@
             "type": "string"
           },
           "requires_api_key": {
-            "description": "False for keyless local backends (Ollama, llama.cpp).",
+            "description": "False for providers that need no key: keyless local backends (Ollama, llama.cpp) and ambient cloud credentials (Bedrock, Vertex AI).",
             "title": "Requires Api Key",
             "type": "boolean"
           }
@@ -9010,6 +10733,19 @@
           "model": {
             "title": "Model",
             "type": "string"
+          },
+          "output_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Anthropic's output configuration (`effort`, `format`). Forwarded to the provider as `output_config`. An alternative to `output_format`; send one or the other.",
+            "title": "Output Config"
           },
           "output_format": {
             "anyOf": [
@@ -9791,6 +11527,26 @@
           "state"
         ],
         "title": "OAuthCallbackRequest",
+        "type": "object"
+      },
+      "OAuthErrorResponse": {
+        "description": "A refused token request, as RFC 6749 section 5.2 shapes it.",
+        "properties": {
+          "error": {
+            "description": "invalid_request, unsupported_grant_type, invalid_grant or temporarily_unavailable",
+            "title": "Error",
+            "type": "string"
+          },
+          "error_description": {
+            "title": "Error Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "error_description"
+        ],
+        "title": "OAuthErrorResponse",
         "type": "object"
       },
       "OAuthSessionResponse": {
@@ -14474,6 +16230,92 @@
         "title": "ProviderHealthSchema",
         "type": "object"
       },
+      "ProviderHealthSummary": {
+        "description": "One provider's offerings in the latest finished run.\n\n``down`` when none answered, ``degraded`` when some did not, ``ok`` when all did.",
+        "properties": {
+          "answered": {
+            "title": "Answered",
+            "type": "integer"
+          },
+          "history": {
+            "description": "Every finished run in the last 24 hours, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/ProviderHistoryPoint"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded",
+              "down"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "top_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The most common failure, with the model id taken out.",
+            "title": "Top Error"
+          },
+          "top_error_count": {
+            "title": "Top Error Count",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider",
+          "status",
+          "answered",
+          "total",
+          "top_error",
+          "top_error_count",
+          "history"
+        ],
+        "title": "ProviderHealthSummary",
+        "type": "object"
+      },
+      "ProviderHistoryPoint": {
+        "description": "How one provider did in one run.",
+        "properties": {
+          "answered": {
+            "title": "Answered",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "started_at",
+          "answered",
+          "total"
+        ],
+        "title": "ProviderHistoryPoint",
+        "type": "object"
+      },
       "ProviderInfoSchema": {
         "description": "Static, network-free metadata for one configured provider instance.",
         "properties": {
@@ -14534,6 +16376,13 @@
           "provider_type": {
             "description": "Underlying any-llm provider type.",
             "title": "Provider Type",
+            "type": "string"
+          },
+          "source": {
+            "const": "config",
+            "default": "config",
+            "description": "Where the instance is defined: 'config' for config.yml (or OTARI_CONFIG_YAML).",
+            "title": "Source",
             "type": "string"
           }
         },
@@ -15015,33 +16864,6 @@
           "warm"
         ],
         "title": "RecordedPool",
-        "type": "object"
-      },
-      "ReencryptProviderCredentialsResponse": {
-        "description": "Result of re-encrypting stored provider keys with the primary secret key.",
-        "properties": {
-          "reencrypted": {
-            "description": "Number of stored provider keys re-encrypted.",
-            "title": "Reencrypted",
-            "type": "integer"
-          },
-          "skipped": {
-            "default": 0,
-            "description": "Number of rows whose stored key changed between the read and the write, so the re-encryption was not applied. They already hold whoever wrote them last.",
-            "title": "Skipped",
-            "type": "integer"
-          },
-          "unreadable": {
-            "description": "Number of encrypted keys left untouched because they could not be decrypted.",
-            "title": "Unreadable",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "reencrypted",
-          "unreadable"
-        ],
-        "title": "ReencryptProviderCredentialsResponse",
         "type": "object"
       },
       "ReencryptSearchToolsResponse": {
@@ -16623,6 +18445,18 @@
             "description": "Fetch: true when the provider runs a page's JavaScript before reading it.",
             "title": "Renders Javascript"
           },
+          "reports_final_url": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fetch: true when the provider reports where a page was found after redirects. When false it answers with the URL as asked, so a redirect it follows is not checked against the domain policy.",
+            "title": "Reports Final Url"
+          },
           "requires_api_base": {
             "description": "True when this provider has no endpoint of its own, so the tool must say where the backend is.",
             "title": "Requires Api Base",
@@ -17406,6 +19240,30 @@
             "title": "Attributes",
             "type": "object"
           },
+          "cache_read_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Input tokens read from the prompt cache.",
+            "title": "Cache Read Tokens"
+          },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Input tokens written to the prompt cache.",
+            "title": "Cache Write Tokens"
+          },
           "cost": {
             "anyOf": [
               {
@@ -17460,6 +19318,7 @@
                 "type": "null"
               }
             ],
+            "description": "The whole prompt, cached tokens included.",
             "title": "Input Tokens"
           },
           "kind": {
@@ -17504,6 +19363,30 @@
             "title": "Origin",
             "type": "string"
           },
+          "otel_span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The OpenTelemetry span id an OTLP span was exported with, in lowercase hex. Null on a span the gateway recorded itself.",
+            "title": "Otel Span Id"
+          },
+          "otel_trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The OpenTelemetry trace id an OTLP span was exported with, in lowercase hex. Null on a span the gateway recorded itself.",
+            "title": "Otel Trace Id"
+          },
           "outcome": {
             "enum": [
               "ok",
@@ -17545,6 +19428,18 @@
               }
             ],
             "title": "Provider"
+          },
+          "reasoning_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Output tokens spent reasoning.",
+            "title": "Reasoning Tokens"
           },
           "recovered": {
             "title": "Recovered",
@@ -17630,93 +19525,19 @@
           "provider",
           "input_tokens",
           "output_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens",
+          "reasoning_tokens",
           "cost",
           "tool_name",
           "tool_type",
           "tool_call_id",
           "request_id",
+          "otel_trace_id",
+          "otel_span_id",
           "attributes"
         ],
         "title": "SpanPublic",
-        "type": "object"
-      },
-      "StoredProviderResponse": {
-        "description": "A runtime-stored provider. The API key is never returned, only ``last4``.",
-        "properties": {
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base"
-          },
-          "client_args": {
-            "additionalProperties": true,
-            "title": "Client Args",
-            "type": "object"
-          },
-          "created_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
-          },
-          "decryptable": {
-            "default": true,
-            "title": "Decryptable",
-            "type": "boolean"
-          },
-          "instance": {
-            "title": "Instance",
-            "type": "string"
-          },
-          "last4": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last4"
-          },
-          "provider_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider Type"
-          },
-          "updated_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Updated At"
-          }
-        },
-        "required": [
-          "instance"
-        ],
-        "title": "StoredProviderResponse",
         "type": "object"
       },
       "StoredSearchToolSchema": {
@@ -17902,106 +19723,6 @@
         "title": "TaskPool",
         "type": "object"
       },
-      "TestProviderRequest": {
-        "description": "Credentials to test before saving (from the add-provider form).",
-        "properties": {
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base"
-          },
-          "api_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Key"
-          },
-          "client_args": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Args"
-          },
-          "instance": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Provider/instance name; the impl when no provider_type.",
-            "title": "Instance"
-          },
-          "provider_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider Type"
-          }
-        },
-        "title": "TestProviderRequest",
-        "type": "object"
-      },
-      "TestProviderResponse": {
-        "description": "Result of a live provider connection test.",
-        "properties": {
-          "discovery_unsupported": {
-            "default": false,
-            "description": "True when the test failed only because this backend serves no model-listing endpoint, so the credentials could not be verified this way but may still work for requests.",
-            "title": "Discovery Unsupported",
-            "type": "boolean"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "model_count": {
-            "title": "Model Count",
-            "type": "integer"
-          },
-          "ok": {
-            "title": "Ok",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "ok",
-          "model_count"
-        ],
-        "title": "TestProviderResponse",
-        "type": "object"
-      },
       "TestServiceRequest": {
         "description": "A (typically unsaved) URL to probe for reachability.",
         "properties": {
@@ -18161,6 +19882,53 @@
           "cost"
         ],
         "title": "TokenChargeLine",
+        "type": "object"
+      },
+      "ToolChargeLine": {
+        "additionalProperties": true,
+        "description": "A gateway-run tool's charge line, one per tool and label.\n\nA subclass with ``label`` required, rather than a defaulted field on\n:class:`UnitChargeLine`, so the per-request, rerank and image lines, and a\nstored tool line without a label, serialize back without a\n``\"label\": null`` they never had.",
+        "properties": {
+          "cost": {
+            "description": "USD charged for this line.",
+            "title": "Cost",
+            "type": "number"
+          },
+          "label": {
+            "description": "What served the calls: '<provider>:<instance>' for a search or fetch instance, 'builtin:builtin_fetch' for the built-in fetcher, 'org:<provider>' for an organization's own key, or 'otari:<tool>' for any other gateway-run tool.",
+            "title": "Label",
+            "type": "string"
+          },
+          "meter": {
+            "description": "What was metered, e.g. 'request' or 'web_search_calls'.",
+            "title": "Meter",
+            "type": "string"
+          },
+          "unit_rate": {
+            "description": "USD per call.",
+            "title": "Unit Rate",
+            "type": "number"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "Calls billed on this meter.",
+            "title": "Units"
+          }
+        },
+        "required": [
+          "meter",
+          "units",
+          "unit_rate",
+          "cost",
+          "label"
+        ],
+        "title": "ToolChargeLine",
         "type": "object"
       },
       "ToolMeter": {
@@ -18327,10 +20095,12 @@
             "type": "string"
           },
           "failed": {
+            "description": "Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.",
             "title": "Failed",
             "type": "integer"
           },
           "succeeded": {
+            "description": "Sessions that started in the bucket and did not fail.",
             "title": "Succeeded",
             "type": "integer"
           }
@@ -18465,7 +20235,7 @@
             "type": "number"
           },
           "error_count": {
-            "description": "Spans that ended in an error no fallback recovered.",
+            "description": "Spans that ended in an error no fallback recovered, including tools' errors, which do not fail the session.",
             "title": "Error Count",
             "type": "integer"
           },
@@ -18574,6 +20344,10 @@
       "TurnPublic": {
         "description": "One user prompt and the steps it caused.",
         "properties": {
+          "cache_read_tokens": {
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
           "continued": {
             "description": "True for steps a session started with before any prompt was seen.",
             "title": "Continued",
@@ -18661,6 +20435,7 @@
           "errors",
           "input_tokens",
           "output_tokens",
+          "cache_read_tokens",
           "cost"
         ],
         "title": "TurnPublic",
@@ -19441,71 +21216,6 @@
         "title": "UpdateSettingsRequest",
         "type": "object"
       },
-      "UpdateStoredProviderRequest": {
-        "description": "Update a stored provider. Omitted fields are unchanged; ``api_key`` rotates in place.",
-        "properties": {
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base"
-          },
-          "api_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "New API key. Omit to keep the existing one. Never returned.",
-            "title": "Api Key"
-          },
-          "client_args": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Args"
-          },
-          "expected_updated_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.",
-            "title": "Expected Updated At"
-          },
-          "provider_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider Type"
-          }
-        },
-        "title": "UpdateStoredProviderRequest",
-        "type": "object"
-      },
       "UpdateToolSettingsRequest": {
         "description": "Change one or more tool settings. Omitted fields are left unchanged; an\nexplicit ``null`` clears a field back to the configured env/YAML default.",
         "example": {
@@ -20136,6 +21846,9 @@
               {
                 "items": {
                   "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ToolChargeLine"
+                    },
                     {
                       "$ref": "#/components/schemas/TokenChargeLine"
                     },
@@ -25875,7 +27588,7 @@
     },
     "/api/v1/catalog/models": {
       "get": {
-        "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the models.dev default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances and the hosted\nmodels at the deployment's rates, and nothing that belongs to a tenant.",
+        "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the models.dev default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances and the hosted\nmodels every organization reaches, at the deployment's rates, and nothing\nthat belongs to a tenant.",
         "operationId": "catalog-list_catalog",
         "parameters": [
           {
@@ -26280,6 +27993,24 @@
               "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
               "title": "Idempotency-Key"
             }
+          },
+          {
+            "description": "Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider.",
+            "in": "header",
+            "name": "Otari-Tags",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider.",
+              "title": "Otari-Tags"
+            }
           }
         ],
         "requestBody": {
@@ -26461,6 +28192,98 @@
       }
     },
     "/api/v1/end-users": {
+      "delete": {
+        "description": "Delete one end user of the calling service key, or a page of those created before a time.\n\nRequires a service key, and exactly one of ``external_id`` and ``created_before``. ``external_id`` deletes that\nend user, any id, one containing '/' included, and answers 404 when it has none. ``created_before`` deletes up\nto ``limit`` of the oldest end users created before then; call again until ``deleted`` is 0. An end user's\ntelemetry and agent traces are erased with it. The end user's row and spend are kept: a request naming it again\nrevives it with what it had spent, so deleting one cannot clear its budget. A deleted end user is neither listed\nnor counted.",
+        "operationId": "end-users-delete_end_users",
+        "parameters": [
+          {
+            "description": "Delete the end user the service names with this `user` value.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Delete the end user the service names with this `user` value.",
+              "title": "External Id"
+            }
+          },
+          {
+            "description": "Delete the end users created before this time, oldest first, up to `limit` of them.",
+            "in": "query",
+            "name": "created_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Delete the end users created before this time, oldest first, up to `limit` of them.",
+              "title": "Created Before"
+            }
+          },
+          {
+            "description": "The most end users one call deletes with `created_before`.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "The most end users one call deletes with `created_before`.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUsersDeleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete End Users",
+        "tags": [
+          "end-users"
+        ]
+      },
       "get": {
         "description": "List the end users of the calling service key, oldest first.\n\nRequires a service key. End users belong to the key's user, so every service key of one user lists the same\nend users. A deleted end user is not listed. ``external_id`` reads one end user by any id, one containing '/'\nincluded, as a list of zero or one.",
         "operationId": "end-users-list_end_users",
@@ -26731,6 +28554,50 @@
       }
     },
     "/api/v1/end-users/{external_id}": {
+      "delete": {
+        "description": "Delete an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no live end user of the key's user goes by answers 404. The end user's telemetry\nand agent traces are erased; its row and spend are kept, so a request naming it again revives it with what it had\nspent. An id with a '.' or '..' segment is refused with 400; ``DELETE /end-users?external_id=`` takes any id.",
+        "operationId": "end-users-delete_end_user",
+        "parameters": [
+          {
+            "description": "The id the service names the end user by in a request's user field",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field",
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete End User",
+        "tags": [
+          "end-users"
+        ]
+      },
       "get": {
         "description": "Get an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no end user of the key's user goes by answers 404. An id with a '.' or '..'\nsegment is refused with 400; ``GET /end-users?external_id=`` reads any end user.",
         "operationId": "end-users-get_end_user",
@@ -27464,6 +29331,174 @@
         ]
       }
     },
+    "/api/v1/health-checks": {
+      "get": {
+        "description": "The settings, the run in progress, and the latest finished run by provider and by offering.",
+        "operationId": "health-checks-get_health_check_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Health Check Status",
+        "tags": [
+          "health-checks"
+        ]
+      }
+    },
+    "/api/v1/health-checks/disable-failing": {
+      "post": {
+        "description": "Stop serving every model the latest run found failing, on its hosted provider.\n\nEach stays listed on the Hosted providers page, priced, to be switched back on there.",
+        "operationId": "health-checks-disable_failing_models",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckDisabled"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Disable Failing Models",
+        "tags": [
+          "health-checks"
+        ]
+      }
+    },
+    "/api/v1/health-checks/run": {
+      "post": {
+        "description": "Start a run within a minute, whether or not the schedule is on.",
+        "operationId": "health-checks-run_health_checks",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckSettingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Run Health Checks",
+        "tags": [
+          "health-checks"
+        ]
+      }
+    },
+    "/api/v1/health-checks/settings": {
+      "get": {
+        "description": "Whether the checks run on a schedule, how often, and what they send.",
+        "operationId": "health-checks-get_health_check_settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckSettingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Health Check Settings",
+        "tags": [
+          "health-checks"
+        ]
+      },
+      "patch": {
+        "description": "Change the settings. Turning the schedule on starts a run within a minute.",
+        "operationId": "health-checks-update_health_check_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HealthCheckSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckSettingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Health Check Settings",
+        "tags": [
+          "health-checks"
+        ]
+      }
+    },
     "/api/v1/health/liveness": {
       "get": {
         "description": "Liveness probe endpoint.\n\nSimple check to verify the process is alive and responding.\nUsed by Kubernetes/container orchestrators for liveness probes.\n\nReturns:\n    Plain text \"I'm alive!\" message",
@@ -27558,6 +29593,856 @@
         "summary": "Check Policy",
         "tags": [
           "hooks"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers": {
+      "get": {
+        "description": "List the providers this deployment serves hosted inference on.\n\nStored providers and those defined in the configuration's\n``hosted_providers:`` block alike, each marked with its ``source``.",
+        "operationId": "hosted-providers-list_hosted_providers",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedProvidersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Hosted Providers",
+        "tags": [
+          "hosted-providers"
+        ]
+      },
+      "post": {
+        "description": "Configure a provider with the key this deployment will serve it on.\n\nEverything the provider lists on that key is offered at once; a provider\nthat will not say yields a provider with no models, not an error. A\nprovider the configuration defines may be created too, and the stored one\nthen serves instead.",
+        "operationId": "hosted-providers-create_hosted_provider",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedProviderCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedProviderPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Hosted Provider",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/migration": {
+      "get": {
+        "description": "What moving the deployment providers the retired dashboard page stored onto hosted providers would do.\n\nThe gateway moves them at startup, so this lists the ones it could not\nmove, each with the reason. Writes nothing and dials nothing.",
+        "operationId": "hosted-providers-preview_deployment_provider_migration",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentProviderMigrationPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Preview Deployment Provider Migration",
+        "tags": [
+          "hosted-providers"
+        ]
+      },
+      "post": {
+        "description": "Move the deployment providers the retired dashboard page stored onto hosted providers of the same name.\n\nEach is created as a hosted provider that serves models not on its roster,\noffering what it lists as a create does, and the deployment provider is\nremoved. One that cannot move is reported and left in place. ``rows``\nlimits the move to the rows of the preview the caller reviewed, at the\nversions it was shown them.",
+        "operationId": "hosted-providers-apply_deployment_provider_migration",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeploymentProviderMigrationRequest",
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentProviderMigrationPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Apply Deployment Provider Migration",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/migration/{instance}": {
+      "delete": {
+        "description": "Remove a deployment provider the move could not take, which serves nothing.",
+        "operationId": "hosted-providers-discard_deployment_provider",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "title": "Instance",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Discard Deployment Provider",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/reencrypt": {
+      "post": {
+        "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nRun after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
+        "operationId": "hosted-providers-reencrypt_hosted_providers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedProvidersReencryptPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reencrypt Hosted Providers",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/refresh": {
+      "post": {
+        "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. A model list whose\nprovider nothing defines any more, such as a removed ``config.yml`` entry,\ngoes too, and is named in ``orphaned_rosters``. Where no provider offers a\nmodel, only those lists go and every price stays; with none of them either,\nthe sweep answers 409. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
+        "operationId": "hosted-providers-refresh_catalog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Refresh Catalog",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/refresh/preview": {
+      "get": {
+        "description": "What a catalog sweep would remove, without removing it.\n\nA GET, and a truthful one: it writes nothing. It does dial every enabled\nprovider, as ``available-models`` does, because a model the provider still\nlists would survive the sweep and previewing it as doomed would be a lie.",
+        "operationId": "hosted-providers-preview_catalog_refresh",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Preview Catalog Refresh",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/test": {
+      "post": {
+        "description": "Ask a provider what it lists on the given credentials, storing nothing.\n\nBacks the form's \"Test connection\". With ``name`` naming a stored provider,\na field left out is read from it, so an edit can be tested without typing\nthe key again; pointing the stored key at another origin still needs it.\nFailure comes back in the body.",
+        "operationId": "hosted-providers-test_hosted_provider",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedProviderTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedProviderTestPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Hosted Provider",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/{provider}": {
+      "delete": {
+        "description": "Remove a provider and its roster, leaving the runtime with no hosted path for it.\n\nA provider defined in configuration answers 409. A stored provider that\noverrides a configured one keeps the roster, which the configured one\nserves again.",
+        "operationId": "hosted-providers-delete_hosted_provider",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Hosted Provider",
+        "tags": [
+          "hosted-providers"
+        ]
+      },
+      "patch": {
+        "description": "Rotate the key, repoint the base, or turn a provider off.\n\nA provider defined in configuration answers 409: it is changed there.",
+        "operationId": "hosted-providers-update_hosted_provider",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedProviderUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedProviderPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Hosted Provider",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/{provider}/available-models": {
+      "get": {
+        "description": "Ask the provider what it serves on its credential.\n\nDials the upstream on every call rather than caching: the caller is the\nadmin form's model picker, opened rarely and entitled to a current answer.\nFailure comes back in the body, so the picker can fall back to a text box.",
+        "operationId": "hosted-providers-list_available_models",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedAvailableModelsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Available Models",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/{provider}/models": {
+      "get": {
+        "description": "List the models offered on one provider, with the price each currently serves at.",
+        "operationId": "hosted-providers-list_hosted_models",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedModelsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Hosted Models",
+        "tags": [
+          "hosted-providers"
+        ]
+      },
+      "post": {
+        "description": "Offer a model on a provider, optionally at a custom price.",
+        "operationId": "hosted-providers-add_hosted_model",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedModelCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedModelPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Add Hosted Model",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/{provider}/models/refresh": {
+      "post": {
+        "description": "Ask the provider again and offer whatever is newly listed.\n\nNothing already offered is removed, even when the provider no longer lists\nit. New models follow the offer rule, seeded with the community default\nprice and off when nothing prices them. A seeded price nobody changed moves\nwith the default. An offered model whose stored price has since been\ndeleted is seeded again, or switched off where the default does not price\nit, even one an operator switched on: a refresh never switches a model on.",
+        "operationId": "hosted-providers-refresh_hosted_models",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedModelsRefreshPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Refresh Hosted Models",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/{provider}/models/{model_id}": {
+      "delete": {
+        "description": "Stop offering a model on a provider. Its pricing history stays.",
+        "operationId": "hosted-providers-remove_hosted_model",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Remove Hosted Model",
+        "tags": [
+          "hosted-providers"
+        ]
+      },
+      "patch": {
+        "description": "Reprice one offered model, toggle whether it is served, or both.",
+        "operationId": "hosted-providers-update_hosted_model",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedModelUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedModelPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Hosted Model",
+        "tags": [
+          "hosted-providers"
         ]
       }
     },
@@ -28489,6 +31374,173 @@
         ]
       }
     },
+    "/api/v1/keys/{key_id}/federation-rules": {
+      "get": {
+        "description": "List the identities that may authenticate as this key, oldest first.",
+        "operationId": "keys-list_federation_rules",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FederationRulePublic"
+                  },
+                  "title": "Response Keys-List Federation Rules",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Federation Rules",
+        "tags": [
+          "keys"
+        ]
+      },
+      "post": {
+        "description": "Let an OpenID Connect identity token authenticate as this key, in place of its secret.\n\nThe issuer must be one of the deployment's ``federation_issuers``, else 400. A token authenticates when it is\nsigned by that issuer, its ``aud`` contains ``audience``, and it carries the rule's ``subject`` and verified\n``email``, whichever the rule sets. A rule naming the identity of an existing rule answers 409: the same issuer,\naudience, subject and email on this key, or on another key the same issuer and audience with a subject or email\nin common and no contradicting value.",
+        "operationId": "keys-create_federation_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FederationRuleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FederationRulePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Federation Rule",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/federation-rules/{rule_id}": {
+      "delete": {
+        "description": "Remove a federation rule. Tokens it matched stop authenticating with the next request.",
+        "operationId": "keys-delete_federation_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Federation Rule",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
     "/api/v1/keys/{key_id}/rotate": {
       "post": {
         "description": "Rotate an API key's secret in place, within the caller's organization.\n\nRequires master key authentication.\n\nGenerates a new secret for the same key row (id, user, name, expiry, and\nmetadata are preserved) and returns the new raw key once, using the same\nresponse shape as key creation. The previous secret stops authenticating\nimmediately; there is no grace window.",
@@ -28864,6 +31916,24 @@
               "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
               "title": "Idempotency-Key"
             }
+          },
+          {
+            "description": "Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider.",
+            "in": "header",
+            "name": "Otari-Tags",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider.",
+              "title": "Otari-Tags"
+            }
           }
         ],
         "requestBody": {
@@ -29022,7 +32092,7 @@
     },
     "/api/v1/models/discoverable": {
       "get": {
-        "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /api/v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\noperator-gated because a provider error message describes the gateway's own\nconfiguration.\n\nAnswers from the discovery cache, which a background refresher keeps warm, so\nthe call does not wait on a slow or unreachable provider. Each provider\ncarries the ``checked_at`` its result was produced at; a null one has not been\ndialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.",
+        "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /api/v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\noperator-gated because a provider error message describes the gateway's own\nconfiguration.\n\nCovers the configured provider instances and every hosted provider switched\non, whatever organization it is restricted to. A hosted provider that a\nconfigured instance of the same name shadows is not listed.\n\nAnswers from the discovery cache, which a background refresher keeps warm, so\nthe call does not wait on a slow or unreachable provider. Each provider\ncarries the ``checked_at`` its result was produced at; a null one has not been\ndialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.",
         "operationId": "models-list_discoverable_models",
         "parameters": [
           {
@@ -29217,6 +32287,86 @@
         ]
       }
     },
+    "/api/v1/oauth/token": {
+      "post": {
+        "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must verify against an issuer on ``federation_issuers`` and match the federation rule\n``federation_rule_id`` names. ``organization_id``, ``workspace_id`` and ``service_account_id``, where set, must\nbe the UUIDs of the rule's key's organization and workspace and the key's id. The access token authenticates as\nthat key until ``expires_in`` runs out, the rule is deleted or the key stops passing its checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
+        "operationId": "oauth-exchange_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FederationTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FederationTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_request or unsupported_grant_type"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_grant"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "temporarily_unavailable"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Exchange Token",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
     "/api/v1/organizations": {
       "post": {
         "description": "Create an organization with the caller as its owner.\n\nTakes a name; the slug is derived from it with a random suffix, so two\norganizations may share a name and a later rename does not move the slug.\nA default workspace is provisioned alongside, because an organization\nwithout one has nowhere to hold a key, a budget or a usage row.\n\nThe caller is **not** moved into it. Switching is a separate call\n(``POST /me/switch``), so creating an organization does not change what the\nrest of the caller's session is looking at.\n\nWhere signup is closed, the caller must already be an active member of an\norganization; a caller with none is refused with a 403.",
@@ -29278,6 +32428,64 @@
       }
     },
     "/api/v1/organizations/me": {
+      "delete": {
+        "description": "Delete the caller's active organization, if it has no usage, and move the caller out of it.\n\nOwners and admins only. Its workspaces, memberships, invitations and\norganization-level settings go with it. Refused for the deployment's default\norganization, for the only organization the caller belongs to, and for one\nwhose workspaces still hold usage, API keys, aliases or routing policies, so\na deletion never takes spend history with it.\n\nAnswers with the caller's context in the organization they are moved to,\ntheir oldest other one.",
+        "operationId": "organizations-delete_active_organization",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMembershipContextPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRefusal"
+                }
+              }
+            },
+            "description": "It is the deployment's default organization, or the only one the caller belongs to."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRefusal"
+                }
+              }
+            },
+            "description": "The caller is not an owner or admin of the organization."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRefusal"
+                }
+              }
+            },
+            "description": "The organization still holds usage, API keys, aliases or routing policies."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Active Organization",
+        "tags": [
+          "organizations"
+        ]
+      },
       "get": {
         "description": "Get the caller's active organization and their standing in it.",
         "operationId": "organizations-get_active_organization_context",
@@ -31730,6 +34938,12 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "The deployment holds the credential that serves the model."
+          },
+          "409": {
+            "description": "The period overlaps one already stored for the model."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -31757,7 +34971,7 @@
     },
     "/api/v1/organizations/me/pricing/{pricing_id}": {
       "delete": {
-        "description": "Remove an override, returning the model to the deployment price list.",
+        "description": "Remove an override, returning the model to the deployment price list.\n\nRefused with a 403 for a rate the deployment operator set, which only the\noperator may remove.",
         "operationId": "organization-pricing-delete_organization_pricing",
         "parameters": [
           {
@@ -31774,6 +34988,9 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "The deployment operator set the rate."
           },
           "422": {
             "content": {
@@ -31800,7 +35017,7 @@
         ]
       },
       "put": {
-        "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.\n\nRefused with a 403 on the same deployment-supplied-model rule the create path\ncarries, so a row stored before that rule existed cannot be edited into a rate\nnobody could create today.",
+        "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.\n\nRefused with a 403 on the same deployment-supplied-model rule the create path\ncarries, so a row stored before that rule existed cannot be edited into a rate\nnobody could create today, and with a 403 for a rate the deployment operator\nset, which only the operator may change.",
         "operationId": "organization-pricing-replace_organization_pricing",
         "parameters": [
           {
@@ -31834,6 +35051,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "The deployment serves the model, or the deployment operator set the rate."
           },
           "422": {
             "content": {
@@ -32206,6 +35426,56 @@
       }
     },
     "/api/v1/organizations/me/provider-keys/{key_id}/default": {
+      "delete": {
+        "description": "Stop a key being the organization's default for its provider. Organization owners and admins only.\n\nIdempotent: a key that is not the default is returned unchanged. With no default, a request\nthat names no instance gets the provider's earliest-created key the workspace has not disabled.",
+        "operationId": "provider-keys-unset_org_provider_key_default",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Unset Org Provider Key Default",
+        "tags": [
+          "provider-keys"
+        ]
+      },
       "post": {
         "description": "Make a key the organization's default for its provider. Organization owners and admins only.",
         "operationId": "provider-keys-set_org_provider_key_default",
@@ -33153,7 +36423,7 @@
     },
     "/api/v1/organizations/me/traces": {
       "get": {
-        "description": "List agent sessions, most recently active first.",
+        "description": "List agent sessions, most recently active first unless ``sort`` says otherwise.",
         "operationId": "organization-traces-list_traces",
         "parameters": [
           {
@@ -33177,6 +36447,41 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "What to order by. Latency runs from a session's start to its last activity.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "last_activity",
+              "description": "What to order by. Latency runs from a session's start to its last activity.",
+              "enum": [
+                "last_activity",
+                "latency",
+                "tokens",
+                "cost",
+                "errors"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The direction of `sort`.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "description": "The direction of `sort`.",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Order",
+              "type": "string"
             }
           },
           {
@@ -33349,21 +36654,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -33579,21 +36884,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -33687,7 +36992,7 @@
     },
     "/api/v1/organizations/me/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
+        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
         "operationId": "organization-traces-trace_series",
         "parameters": [
           {
@@ -33874,21 +37179,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -34177,7 +37482,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -34190,7 +37495,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -34581,7 +37886,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -34594,7 +37899,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -34975,7 +38280,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -34988,7 +38293,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -35346,7 +38651,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -35359,7 +38664,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -36971,7 +40276,7 @@
     },
     "/api/v1/pricing": {
       "get": {
-        "description": "List all model pricing.",
+        "description": "List all model pricing.\n\nA hosted provider restricted to another organization than the caller's is\nleft out, as it is from the catalog.",
         "operationId": "pricing-list_pricing",
         "parameters": [
           {
@@ -37088,7 +40393,7 @@
     },
     "/api/v1/pricing/current": {
       "get": {
-        "description": "List the rate each priced model is metered at, one row per model key.\n\nListing prices answers the stored history, one row per ``effective_at``, so a\npage of that is a page of revisions rather than a page of models. This\nanswers one row per key: the newest rate that has taken effect, or the\nearliest scheduled rate for a key that has none yet. ``count`` is the number\nof priced models, so a caller can page without reading the collection to\nlearn how long it is.",
+        "description": "List the rate each priced model is metered at, one row per model key.\n\nListing prices answers the stored history, one row per ``effective_at``, so a\npage of that is a page of revisions rather than a page of models. This\nanswers one row per key: the newest rate that has taken effect, or the\nearliest scheduled rate for a key that has none yet. ``count`` is the number\nof priced models, so a caller can page without reading the collection to\nlearn how long it is. A hosted provider restricted to another organization\nthan the caller's is left out of both.",
         "operationId": "pricing-list_current_pricing",
         "parameters": [
           {
@@ -37503,7 +40808,7 @@
         ]
       },
       "get": {
-        "description": "Get pricing for a specific model as of a timestamp.",
+        "description": "Get pricing for a specific model as of a timestamp.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
         "operationId": "pricing-get_pricing",
         "parameters": [
           {
@@ -37546,6 +40851,9 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "description": "Nothing prices the model, or its hosted provider is restricted to another organization."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -37573,7 +40881,7 @@
     },
     "/api/v1/pricing/{model_key}/history": {
       "get": {
-        "description": "Return the full pricing history for a model.",
+        "description": "Return the full pricing history for a model.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
         "operationId": "pricing-get_pricing_history",
         "parameters": [
           {
@@ -37601,6 +40909,9 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "description": "Nothing prices the model, or its hosted provider is restricted to another organization."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -37623,322 +40934,6 @@
         "summary": "Get Pricing History",
         "tags": [
           "pricing"
-        ]
-      }
-    },
-    "/api/v1/provider-credentials": {
-      "get": {
-        "description": "List runtime-stored providers. Keys are never returned, only ``last4``.",
-        "operationId": "providers-list_stored_providers",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/StoredProviderResponse"
-                  },
-                  "title": "Response Providers-List Stored Providers",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "List Stored Providers",
-        "tags": [
-          "providers"
-        ]
-      },
-      "post": {
-        "description": "Add a provider at runtime. Storing a key requires OTARI_SECRET_KEY.",
-        "operationId": "providers-create_stored_provider",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateStoredProviderRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StoredProviderResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Create Stored Provider",
-        "tags": [
-          "providers"
-        ]
-      }
-    },
-    "/api/v1/provider-credentials/reencrypt": {
-      "post": {
-        "description": "Re-encrypt stored provider keys with the primary OTARI_SECRET_KEY.\n\nOperators rotate ``OTARI_SECRET_KEY`` by setting it to ``new,old`` first,\nrestarting, running this endpoint, then removing the old key and restarting\nagain. Rows that cannot be decrypted are left untouched and must be recovered\nby replacing the affected provider keys.",
-        "operationId": "providers-reencrypt_stored_provider_keys",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReencryptProviderCredentialsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Reencrypt Stored Provider Keys",
-        "tags": [
-          "providers"
-        ]
-      }
-    },
-    "/api/v1/provider-credentials/test": {
-      "post": {
-        "description": "Test provider credentials without storing them (for the add/edit form).\n\nResolves the implementation from ``provider_type`` (honoring the\n``*-compatible`` aliases) or the ``instance`` name, then lists the provider's\nmodels with the supplied credentials. Nothing is persisted and the key is\nnever echoed.",
-        "operationId": "providers-test_provider_connection",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TestProviderRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TestProviderResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Test Provider Connection",
-        "tags": [
-          "providers"
-        ]
-      }
-    },
-    "/api/v1/provider-credentials/{instance}": {
-      "delete": {
-        "description": "Delete a stored provider. A config.yml provider cannot be deleted here.",
-        "operationId": "providers-delete_stored_provider",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance",
-            "required": true,
-            "schema": {
-              "title": "Instance",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Delete Stored Provider",
-        "tags": [
-          "providers"
-        ]
-      },
-      "patch": {
-        "description": "Update a stored provider. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it. The row is locked ``FOR UPDATE``\nso the ``expected_updated_at`` check and the write it guards are atomic.",
-        "operationId": "providers-update_stored_provider",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance",
-            "required": true,
-            "schema": {
-              "title": "Instance",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateStoredProviderRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StoredProviderResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Update Stored Provider",
-        "tags": [
-          "providers"
-        ]
-      }
-    },
-    "/api/v1/provider-credentials/{instance}/test": {
-      "post": {
-        "description": "Verify a stored provider's key by listing its models, without exposing the key.",
-        "operationId": "providers-test_stored_provider",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance",
-            "required": true,
-            "schema": {
-              "title": "Instance",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TestProviderResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Test Stored Provider",
-        "tags": [
-          "providers"
         ]
       }
     },
@@ -38368,7 +41363,7 @@
     },
     "/api/v1/providers/health": {
       "get": {
-        "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
+        "description": "Report every configured provider's reachability, with a last-checked time.\n\nCovers the configured provider instances and every hosted provider switched\non, each hosted provider under its provider name. A hosted provider that a\nconfigured instance of the same name shadows is not reported. One whose\nstored key cannot be decrypted with the configured `OTARI_SECRET_KEY` is\nreported unreachable with that reason.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
         "operationId": "providers-provider_health",
         "parameters": [
           {
@@ -38670,6 +41665,24 @@
               ],
               "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
               "title": "Idempotency-Key"
+            }
+          },
+          {
+            "description": "Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider.",
+            "in": "header",
+            "name": "Otari-Tags",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider.",
+              "title": "Otari-Tags"
             }
           }
         ],
@@ -39662,7 +42675,7 @@
     },
     "/api/v1/search-tools/reencrypt": {
       "post": {
-        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/provider-credentials/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
+        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
         "operationId": "search-tools-reencrypt_stored_search_tool_keys",
         "responses": {
           "200": {
@@ -39845,7 +42858,7 @@
     },
     "/api/v1/search-tools/{name}/test": {
       "post": {
-        "description": "Test a configured or stored instance with one search or one fetch.\n\nTakes ``query`` for a search instance or ``url`` for a fetch instance, and\nanswers as ``POST /search-tools/test`` does. ``builtin_fetch`` has no test\nyet, and answers a 400.",
+        "description": "Test a configured or stored instance with one search or one fetch.\n\nTakes ``query`` for a search instance or ``url`` for a fetch instance, and\nanswers as ``POST /search-tools/test`` does. ``builtin_fetch``, the built-in\nfetcher, fetches as a fetch tool call does, with no domain policy.",
         "operationId": "search-tools-test_search_tool",
         "parameters": [
           {
@@ -40514,7 +43527,7 @@
     },
     "/api/v1/traces": {
       "get": {
-        "description": "List agent sessions, most recently active first.",
+        "description": "List agent sessions, most recently active first unless ``sort`` says otherwise.",
         "operationId": "traces-list_traces",
         "parameters": [
           {
@@ -40538,6 +43551,41 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "What to order by. Latency runs from a session's start to its last activity.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "last_activity",
+              "description": "What to order by. Latency runs from a session's start to its last activity.",
+              "enum": [
+                "last_activity",
+                "latency",
+                "tokens",
+                "cost",
+                "errors"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The direction of `sort`.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "description": "The direction of `sort`.",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Order",
+              "type": "string"
             }
           },
           {
@@ -40710,21 +43758,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -40940,21 +43988,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -41048,7 +44096,7 @@
     },
     "/api/v1/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
+        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
         "operationId": "traces-trace_series",
         "parameters": [
           {
@@ -41235,21 +44283,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -41586,7 +44634,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -41599,7 +44647,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -41990,7 +45038,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -42003,7 +45051,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -42516,7 +45564,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -42529,7 +45577,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },
@@ -42937,7 +45985,7 @@
             }
           },
           {
-            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
             "in": "query",
             "name": "source_label",
             "required": false,
@@ -42950,7 +45998,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
               "title": "Source Label"
             }
           },

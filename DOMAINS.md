@@ -123,14 +123,17 @@ snapshots, and the rule that says what a rate bills: its unit chooses the meter
 it prices (`price_usage` in `services/pricing/`). Standalone settlement and a
 hybrid gateway's control plane both price through it.
 
-It also owns `models/pricing_schemas.py`, and `UNIT_METERS` in
-`models/pricing.py`, the meters a count is reported under.
+`services/pricing/` also holds the deployment price list's service, which is how
+another domain reads a current rate or stores one. It also owns
+`models/pricing_schemas.py`, and `UNIT_METERS` in `models/pricing.py`, the
+meters a count is reported under.
 
 ### providers
 
 Provider credentials: instances configured at runtime, organization-scoped
-provider keys, endpoints a workspace or a user owns, their health, and what a
-dispatch needs to reach a provider.
+provider keys, endpoints a workspace or a user owns, the hosted providers the
+deployment serves on its own credentials with the models it offers on them,
+their health, and what a dispatch needs to reach a provider.
 
 `tenancy/org_provider_key_service.py` has three divider sections (organization
 keys, workspace overrides, model restrictions) and splits along them.
@@ -232,8 +235,6 @@ the hook evaluates in process and never calls this route.
 
 Usage rows, the usage log writer, OTLP ingest and coding-agent telemetry.
 
-It also owns the route helper `api/routes/_billing_schemas.py`.
-
 ### traces
 
 Agent traces: one agent session, its turns, and the spans inside them (each
@@ -278,6 +279,19 @@ stored rules in `config.rate_limits`, and the request path reads that list on
 every request, so this domain holds no enforcement. Counting stays in
 `gateway/rate_limit.py`, over the rate-limit store port. A config.yml rule is
 listed and never edited here.
+
+Built in the target shape from the start.
+
+### health-checks
+
+The scheduled checks an operator turns on from the Health page: every model the
+deployment's hosted providers serve is sent one small completion, and what
+each answered is kept for 48 hours and folded into one line per provider. A
+probe is a side call on the hosted provider's own credential, so it writes no
+usage row and holds no budget. The models come from the providers domain's
+serveable roster, never from the price list, and switching failing models off
+goes through the providers domain too. An outage that ends is kept for 90 days. Every replica
+polls, and the conditional update on the settings row decides which one runs.
 
 Built in the target shape from the start.
 

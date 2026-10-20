@@ -44,12 +44,13 @@ in different directions. See ``web/src/features/auth/OAuthCallbackPage.tsx``.
 import hashlib
 import hmac
 import secrets
+import string
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
 from apron_auth import OAuthClient, ProviderConfig
-from apron_auth.errors import INVALID_GRANT, StateError, TokenExchangeError
+from apron_auth.errors import INVALID_GRANT, NonceValidationError, StateError, TokenExchangeError
 from apron_auth.models import OAuthPendingState as PendingState
 from apron_auth.providers import github as apron_github
 from apron_auth.providers import google as apron_google
@@ -103,6 +104,7 @@ FLOW_COOKIE_PATH = f"{API_ROOT}{OAUTH_ROUTE_PREFIX}"
 # What ``secrets.token_urlsafe(32)`` produces; anything else in the cookie is
 # not ours and is replaced rather than reused.
 _FLOW_SECRET_LENGTH = 43
+_URLSAFE_CHARACTERS = frozenset(string.ascii_letters + string.digits + "-_")
 
 _PROVIDERS: dict[str, _Provider] = {
     "google": _Provider(label="Google", scopes=("openid", "email", "profile"), email_claim_trusted=True),
@@ -217,6 +219,7 @@ class _DatabaseStateStore:
                 provider=self._provider,
                 flow_hash=self._flow_hash,
                 code_verifier=state.code_verifier,
+                nonce=state.nonce,
                 redirect_uri=state.redirect_uri,
                 expires_at=now + timedelta(seconds=OAUTH_STATE_TTL_SECONDS),
             )
@@ -249,6 +252,7 @@ class _DatabaseStateStore:
                     col(OAuthPendingState.provider),
                     col(OAuthPendingState.flow_hash),
                     col(OAuthPendingState.code_verifier),
+                    col(OAuthPendingState.nonce),
                     col(OAuthPendingState.redirect_uri),
                     col(OAuthPendingState.created_at),
                     col(OAuthPendingState.expires_at),
@@ -257,7 +261,7 @@ class _DatabaseStateStore:
         ).first()
         if row is None:
             return None
-        provider, flow_hash, code_verifier, redirect_uri, created_at, expires_at = row
+        provider, flow_hash, code_verifier, nonce, redirect_uri, created_at, expires_at = row
         if provider != self._provider:
             logger.warning("OAuth state minted for %s was returned to %s", provider, self._provider)
             return None
@@ -266,10 +270,17 @@ class _DatabaseStateStore:
             return None
         if expires_at <= datetime.now(UTC):
             return None
+        if nonce is None and "openid" in _PROVIDERS[provider].scopes:
+            # Minted before the column existed. apron-auth would refuse it as a
+            # nonce failure; as a state no longer pending, the person is told to
+            # start again.
+            logger.warning("OAuth %s state carried no nonce for an OpenID sign-in", provider)
+            return None
         return PendingState(
             state=state_key,
             redirect_uri=redirect_uri,
             code_verifier=code_verifier,
+            nonce=nonce,
             created_at=created_at.timestamp(),
         )
 
@@ -303,7 +314,7 @@ def flow_secret_for(existing: str | None) -> str:
 
 
 def _is_urlsafe(value: str) -> bool:
-    return all(character.isalnum() or character in "-_" for character in value)
+    return all(character in _URLSAFE_CHARACTERS for character in value)
 
 
 def apply_flow_cookie(response: Response, secret: str, *, secure: bool) -> None:
@@ -369,8 +380,8 @@ async def exchange_code(
             credentials for ``provider``, or does not know its own address.
         OAuthStateError: If ``state`` names no authorization this deployment is
             still waiting on, for ``provider``, from this browser.
-        OAuthExchangeError: If the provider says the code is invalid, expired or spent, or the identity does not
-            fit the link table.
+        OAuthExchangeError: If the provider says the code is invalid, expired or spent, the ID token does not
+            carry the nonce the authorization request sent, or the identity does not fit the link table.
         OAuthProviderUnavailableError: If the provider fails or cannot be reached during the exchange or the
             identity fetch.
             The provider's own words stay on the traceback and out of the response, as that error's docstring says.
@@ -389,6 +400,11 @@ async def exchange_code(
         # operator looking at a provider that was never contacted.
         logger.warning("Refused a %s callback whose state matched no pending sign-in", provider)
         raise OAuthStateError from error
+    except NonceValidationError as error:
+        # Also ahead of the catch-all: a token response that does not answer the
+        # request this deployment made is a refused sign-in, not an outage.
+        logger.warning("Refused a %s token response whose ID token did not carry the request's nonce", provider)
+        raise OAuthExchangeError(provider_label(provider)) from error
     except Exception as error:
         # Logged with the exception so an operator can see the provider's own
         # error and description, which the response deliberately does not carry.
@@ -457,7 +473,7 @@ def _client(config: GatewayConfig, provider: str, db: AsyncSession, flow_secret:
     identity_handler = (
         apron_google.GoogleIdentityHandler() if provider == "google" else apron_github.GitHubIdentityHandler()
     )
-    provider_config, _revocation_handler = preset(
+    provider_config, revocation_handler = preset(
         client_id=client_id,
         client_secret=client_secret,
         scopes=list(_PROVIDERS[provider].scopes),
@@ -467,6 +483,8 @@ def _client(config: GatewayConfig, provider: str, db: AsyncSession, flow_secret:
         _as_configured_here(provider_config, provider),
         state_store=_DatabaseStateStore(db, provider, _flow_hash(flow_secret)),
         identity_handler=identity_handler,
+        # Used when apron-auth revokes the tokens of a response it refused.
+        revocation_handler=revocation_handler,
     )
 
 

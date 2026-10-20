@@ -78,10 +78,26 @@ jobs:
             exit 1
           fi
 
+      # The release workflow regenerates CHANGELOG.md on a release/v* branch,
+      # which `no-hand-edited-changelog` refuses by design. Exempt only that: a
+      # same-repository release/v* branch whose whole change is CHANGELOG.md.
+      - name: Recognize a release pull request
+        id: release
+        working-directory: pr
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          changed=$(git diff --cached --name-only --no-renames)
+          if [ "$SAME_REPO" = "true" ] && [[ "$HEAD_REF" == release/v* ]] && [ "$changed" = "CHANGELOG.md" ]; then
+            echo "only_changelog=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Guardrails check skipped::A release pull request that regenerates CHANGELOG.md alone."
+          fi
+
       # --base names the base commit even though HEAD is already the merge
       # base, so the range stays right if the staging step changes.
       - name: Run the path and verifier gates
-        if: steps.cli.outputs.ready == 'true'
+        if: steps.cli.outputs.ready == 'true' && steps.release.outputs.only_changelog != 'true'
         working-directory: pr
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

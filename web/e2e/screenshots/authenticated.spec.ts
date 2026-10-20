@@ -64,7 +64,6 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     heading: /parity/i,
   },
   { route: "/routing", name: "routing", heading: /routing/i },
-  { route: "/providers", name: "providers", heading: /provider/i },
   { route: "/keys", name: "keys", heading: /keys/i },
   // The selected workspace's roster, which is not the organization one below:
   // this page is on the workspace rail and stops at the workspace it names.
@@ -111,7 +110,7 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "tools-mcp-servers",
     heading: /mcp servers/i,
   },
-  // The deployment's own two pages, reached from the account menu rather than
+  // The deployment's own pages, reached from the account menu rather than
   // from a rail, and covered here all the same for the reason /account below
   // is: this matrix is about how a page renders, not about which control opens
   // it. Accounts is not the members roster above, which stops at this
@@ -122,6 +121,11 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "admin-accounts",
     heading: /accounts/i,
   },
+  {
+    route: "/admin/hosted-providers",
+    name: "admin-hosted-providers",
+    heading: /hosted providers/i,
+  },
   // Reached from the account menu rather than the rail, and covered here all
   // the same: what this matrix is for is how a page renders on a phone and in
   // the dark, which does not depend on which control opens it.
@@ -131,7 +135,6 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   // a seeded deployment has: the operator identity holds no invitation, and
   // there is no second organization to send it one.
   { route: "/invitations", name: "invitations", heading: /invitations/i },
-  { route: "/docs", name: "docs", heading: /./ },
 ]
 
 async function open(page: Page, route: string, heading: RegExp): Promise<void> {
@@ -229,23 +232,6 @@ test.describe("organization rail", () => {
   })
 
   test("organization usage", async ({ page }) => {
-    // This gateway is standalone, whose bootstrap does not report the
-    // organization_usage surface (its organization is the deployment, so /usage
-    // already answers it whole). The surface is patched in before the shell
-    // boots, which is why the stub precedes `login` here: `gotoRoute` changes
-    // only the hash, so the boot-time bootstrap read is the one that counts.
-    // Everything behind the route is served for real, because
-    // /v1/organizations/me/usage is mounted on both editions.
-    await page.route("**/v1/bootstrap", async (route) => {
-      const response = await route.fetch()
-      const bootstrap = await response.json()
-      await route.fulfill({
-        json: {
-          ...bootstrap,
-          surfaces: [...bootstrap.surfaces, "organization_usage"],
-        },
-      })
-    })
     await login(page)
     await gotoRoute(page, "/organization/usage")
     await expect(
@@ -575,34 +561,36 @@ test.describe("the workspace dialogs", () => {
   })
 })
 
-test.describe("the provider dialog", () => {
-  // The `lg` size with a tab row under the header, which no other dialog in the
-  // product has: both ways to attach a provider share one frame.
-  test("the add dialog, on the known-provider tab", async ({ page }) => {
+test.describe("the hosted provider dialog", () => {
+  test("the add dialog, empty", async ({ page }) => {
     await login(page)
-    await gotoRoute(page, "/providers")
+    await gotoRoute(page, "/admin/hosted-providers")
     await expect(
-      page.getByRole("heading", { name: /providers/i }).first(),
+      page.getByRole("heading", { name: /hosted providers/i }).first(),
     ).toBeVisible()
     await page.getByRole("button", { name: "Add provider" }).first().click()
-    const dialog = page.getByRole("dialog", { name: "New provider" })
+    const dialog = page.getByRole("dialog", { name: "Add hosted provider" })
     await expect(
-      dialog.getByRole("button", { name: "Known provider" }),
+      dialog.getByRole("combobox", { name: "Provider" }),
     ).toBeVisible()
-    await captureScreenshot(page, "providers-add-dialog")
+    await captureScreenshot(page, "hosted-providers-add-dialog")
   })
 
-  test("the add dialog, on the custom-endpoint tab", async ({ page }) => {
+  test("the add dialog, on a custom endpoint", async ({ page }) => {
     await login(page)
-    await gotoRoute(page, "/providers")
+    await gotoRoute(page, "/admin/hosted-providers")
     await expect(
-      page.getByRole("heading", { name: /providers/i }).first(),
+      page.getByRole("heading", { name: /hosted providers/i }).first(),
     ).toBeVisible()
     await page.getByRole("button", { name: "Add provider" }).first().click()
-    const dialog = page.getByRole("dialog", { name: "New provider" })
-    await dialog.getByRole("button", { name: "Custom endpoint" }).click()
-    await expect(dialog.getByLabel("API base")).toBeVisible()
-    await captureScreenshot(page, "providers-add-dialog-custom")
+    const dialog = page.getByRole("dialog", { name: "Add hosted provider" })
+    await dialog.getByRole("combobox", { name: "Provider" }).fill("OpenAI")
+    await page.getByRole("option", { name: "OpenAI", exact: true }).click()
+    await dialog
+      .getByRole("textbox", { name: "API base URL" })
+      .fill("http://127.0.0.1:9/v1")
+    await dialog.getByText("Serve models not on its list").click()
+    await captureScreenshot(page, "hosted-providers-add-dialog-custom")
   })
 })
 

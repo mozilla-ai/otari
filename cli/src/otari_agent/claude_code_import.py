@@ -121,11 +121,7 @@ class ScanResult:
         totals: dict[str, int] = {}
         for event in self.events:
             totals[event.model] = totals.get(event.model, 0) + (
-                event.input_tokens
-                + event.output_tokens
-                + event.cache_read_tokens
-                + event.cache_write_tokens
-                + event.cache_write_1h_tokens
+                event.input_tokens + event.output_tokens + event.cache_read_tokens + event.cache_write_tokens
             )
         return totals
 
@@ -228,9 +224,8 @@ def _usage_event(record: dict[str, Any], label: str) -> UsageEvent | None:
     timestamp = record.get("timestamp")
     if not isinstance(usage, dict) or not isinstance(response_id, str) or not isinstance(timestamp, str):
         return None
-    # Anthropic splits cache writes by TTL. ``cache_creation_input_tokens`` is the
-    # total; the 1h share is priced differently, so it is reported separately and
-    # subtracted rather than counted twice.
+    # ``cache_creation_input_tokens`` is the write total across both TTLs, and the
+    # endpoint reads ``cache_write_1h_tokens`` as the share of it written for 1h.
     cache_creation = usage.get("cache_creation")
     write_1h = 0
     if isinstance(cache_creation, dict):
@@ -245,8 +240,8 @@ def _usage_event(record: dict[str, Any], label: str) -> UsageEvent | None:
         input_tokens=_int(usage.get("input_tokens")),
         output_tokens=_int(usage.get("output_tokens")),
         cache_read_tokens=_int(usage.get("cache_read_input_tokens")),
-        cache_write_tokens=max(write_total - write_1h, 0),
-        cache_write_1h_tokens=write_1h,
+        cache_write_tokens=write_total,
+        cache_write_1h_tokens=min(write_1h, write_total),
         session_label=label,
     )
 

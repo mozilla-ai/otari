@@ -141,6 +141,30 @@ def test_a_dangling_default_falls_through_to_the_single_instance() -> None:
     assert default.name == "exa"
 
 
+@pytest.mark.parametrize(
+    ("settings", "configured"),
+    [
+        pytest.param({"search_tools": {"exa": _EXA}}, True, id="one-served-instance"),
+        pytest.param({"search_tools": {"exa": _EXA, "other": _EXA}}, False, id="two-and-no-default"),
+        pytest.param(
+            {"search_tools": {"exa": _EXA, "other": _EXA}, "web_search_default_tool": "other"}, True, id="named"
+        ),
+        pytest.param({"search_tools": {"local": _SEARXNG}}, False, id="one-instance-without-an-adapter"),
+        pytest.param({"web_search_url": "http://searxng:8080"}, True, id="legacy-url"),
+        pytest.param({"web_search_provider": "tavily", "web_search_provider_api_key": "tvly-k"}, True, id="pair"),
+        pytest.param({"web_search_url": "http://searxng:8080", "web_search_default_tool": "none"}, False, id="none"),
+        pytest.param({}, False, id="nothing"),
+    ],
+)
+def test_search_is_configured_when_the_in_loop_default_yields_one(settings: dict[str, Any], configured: bool) -> None:
+    assert GatewayConfig(**settings).web_search_configured() is configured
+
+
+def test_a_legacy_url_in_the_environment_alone_configures_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
+    assert GatewayConfig().web_search_configured() is True
+
+
 def test_a_stored_instance_counts_like_a_configured_one() -> None:
     """Stored rows are overlaid onto search_tools, so the maps see them the same way."""
     config = GatewayConfig()
@@ -369,6 +393,16 @@ def test_a_fetch_entry_named_like_a_stored_search_tool_is_left_out(caplog: pytes
         record.levelno == logging.ERROR and "fetch_tools.shared is left out" in record.getMessage()
         for record in caplog.records
     )
+
+
+def test_the_fetch_providers_are_the_fetch_instances_own_builtin_included() -> None:
+    """The prefixes of the fetch instances' rate keys, which the configuration's prices may use."""
+    assert GatewayConfig().fetch_tool_providers() == {"builtin"}
+    config = GatewayConfig(
+        fetch_tools={"tabstack": {"provider": "tabstack", "api_key": "k"}, "exa-fetch": {"provider": "exa"}},
+        search_tools={"exa": _EXA},
+    )
+    assert config.fetch_tool_providers() == {"builtin", "tabstack", "exa"}
 
 
 def test_a_search_entry_named_builtin_fetch_loads_beside_the_implicit_instance(

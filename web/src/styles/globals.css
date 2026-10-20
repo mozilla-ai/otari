@@ -2385,8 +2385,8 @@ main {
   border-top: 0;
 }
 /* Only the breakdown tables freeze a lane, and the Overview preview is ruled
-   *out* rather than pending: it is five rows of six narrow lanes and never
-   scrolls, and Time leading is right for a chronology preview even though the
+   *out* rather than pending: it is a few rows of narrow lanes that fit the
+   page, and Time leading is right for a chronology preview even though the
    identity is Model. Where a table does scroll and its identity is not the
    first lane, the frozen region runs from the first lane through the row header
    inclusive; if that exceeds about a third of the table's width, the column
@@ -2418,9 +2418,6 @@ main {
   min-width: 6.25rem;
 }
 .otari-breakdown .table__column:first-child {
-  min-width: 11.25rem;
-}
-.otari-overview-activity .table__column[data-key="model"] {
   min-width: 11.25rem;
 }
 
@@ -2479,104 +2476,97 @@ main {
   border-right: 1px solid var(--color-control-border);
 }
 
-/* The activity log. Nine lanes plus selection, and the only table so far whose
-   identity is not its first column: a request is named by what ran, but a log
-   is read chronologically, so Time leads and Model is third.
+/* The activity log. Ten lanes, and the only table so far whose identity is
+   not its first column: a request is named by what ran, but a log is read
+   chronologically, so Time leads and Model is third.
 
    The frozen region therefore runs from the first lane through the row header
    inclusive, Time + User + Model, which is the general rule rather than a
    special case here: everything up to and including the identity is held,
    because holding only the identity would leave it floating away from the
-   columns that qualify it. 120 + 150 + 204 is 474px, about a third of the
-   table, which is the ceiling the rule sets; past that the column order is the
-   thing to fix, not the pin.
+   columns that qualify it. It is about a third of the table at any width,
+   which is the ceiling the rule sets.
 
-   Rows are 59px rather than the 45 an activity preview uses, because the
-   Routing cell is two lines by design: it names the policy the caller asked for
-   and then what actually served, and the tail is the part that matters. */
+   The table fits the pane rather than scrolling in it. Every row is one line
+   and nothing in a cell or a header wraps; the lanes are fixed, the numbers
+   and Status each sized to their longest value, and Model, Routing and API key
+   share what is left, cut short with their full text as a title. Below 60rem
+   the table holds that width and scrolls, which is what the pins are for. */
 .otari-activity-table .otari-table.table-root {
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
 }
-.otari-activity-table .table__row .table__cell {
-  min-height: 3.6875rem;
+/* The Overview's recent requests are this log a few rows long, built from the
+   same columns, so the two tables share these rules. It sits beside the
+   workspace rail and holds a smaller floor. */
+.otari-activity-table .table__content,
+.otari-overview-activity .table__content {
+  table-layout: fixed;
+  width: 100%;
 }
-.otari-activity-table .table__column[data-key="time"] {
-  width: 7.5rem;
-  min-width: 7.5rem;
+.otari-activity-table .table__content {
+  min-width: 60rem;
+}
+.otari-overview-activity .table__content {
+  min-width: 40rem;
+}
+.otari-activity-table .table__row .table__cell,
+.otari-overview-activity .table__row .table__cell {
+  height: 1.75rem;
+  padding-block: 0;
+}
+/* Tighter than the base 1rem, which across ten lanes is 320px of padding. */
+.otari-activity-table .table__column,
+.otari-activity-table .table__cell[data-column],
+.otari-overview-activity .table__column,
+.otari-overview-activity .table__cell[data-column] {
+  padding-inline: 0.75rem;
+  white-space: nowrap;
+}
+.otari-activity-table .table__column[data-key="time"],
+.otari-overview-activity .table__column[data-key="time"] {
+  width: 5.25rem;
 }
 .otari-activity-table .table__column[data-key="user"] {
-  width: 9.375rem;
-  min-width: 9.375rem;
+  width: 8rem;
 }
-.otari-activity-table .table__column[data-key="model"] {
-  min-width: 12.75rem;
+.otari-activity-table .table__column[data-key="input_tokens"],
+.otari-overview-activity .table__column[data-key="input_tokens"] {
+  width: 6rem;
 }
-.otari-activity-table .table__column[data-key="routing"] {
-  min-width: 12.5rem;
+.otari-activity-table .table__column[data-key="output_tokens"],
+.otari-overview-activity .table__column[data-key="output_tokens"] {
+  width: 5.5rem;
 }
-.otari-activity-table .table__column[data-key="api_key"] {
-  width: 9.375rem;
-  min-width: 9.375rem;
+.otari-activity-table .table__column[data-key="cost"],
+.otari-activity-table .table__column[data-key="latency"],
+.otari-overview-activity .table__column[data-key="cost"] {
+  width: 5.75rem;
 }
-.otari-activity-table .table__column[data-key="tokens"],
-.otari-activity-table .table__column[data-key="latency"] {
-  width: 7.5rem;
-  min-width: 7.5rem;
-}
-.otari-activity-table .table__column[data-key="cost"] {
-  width: 6.875rem;
-  min-width: 6.875rem;
-}
-.otari-activity-table .table__column[data-key="status"] {
-  width: 7.5rem;
-  min-width: 7.5rem;
+.otari-activity-table .table__column[data-key="status"],
+.otari-overview-activity .table__column[data-key="status"] {
+  width: 6.5rem;
 }
 
-/* The frozen region: the selection box and the three lanes up to and including
-   the identity, each offset by the width of everything pinned before it.
-   Measured on the page, the held lanes are 474px of a 1416px table, 33%, under
-   the third-of-the-width ceiling the rule sets.
-
-   The selection box is held with them rather than left to scroll: it acts on the
-   row, and a checkbox that has slid away from the row it selects is worse than
-   no pin at all.
-
-   The box is only there when some row on the page is bulk-editable, so the
-   offsets start from a variable that drops to zero when Time is the first
-   column. Fixed offsets pushed every held lane a box-width right of where it
-   sits, and Model then covered the start of Routing. */
-.otari-activity-table {
-  --activity-pin-start: 3rem;
-}
-.otari-activity-table:has(.table__column[data-key="time"]:first-child) {
-  --activity-pin-start: 0rem;
-}
-.otari-activity-table .table__column:first-child,
-.otari-activity-table .table__row .table__cell:first-child {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  background-color: var(--color-background);
-}
+/* Each pin is offset by the width of everything pinned before it. */
 .otari-activity-table .table__column[data-key="time"],
 .otari-activity-table .table__cell[data-column="time"] {
   position: sticky;
-  left: var(--activity-pin-start);
+  left: 0;
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="user"],
 .otari-activity-table .table__cell[data-column="user"] {
   position: sticky;
-  left: calc(var(--activity-pin-start) + 7.5rem);
+  left: 5.25rem;
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="model"],
 .otari-activity-table .table__cell[data-column="model"] {
   position: sticky;
-  left: calc(var(--activity-pin-start) + 16.875rem);
+  left: 13.25rem;
   z-index: 1;
   background-color: var(--color-background);
 }
@@ -3092,30 +3082,6 @@ main {
   width: 6.25rem;
 } /* Header background and edges: see the divided-surface table block above, which
    is now the only place they are declared. */
-.otari-overview-activity .table__column[data-key="time"] {
-  /* Back to 120. This was widened to 130 because "6 minutes ago" did not fit,
-     which was a layout fix for a copy problem; the copy is compact now ("6m
-     ago") and the lane no longer has to pay for the phrase. */
-  width: 7.5rem;
-}
-/* A relative time is short but wraps at this lane width ("4 minutes ago" is
-   three words), and a wrapped cell is the one thing that can break the row
-   pitch below. */
-.otari-overview-activity .table__cell[data-column="time"] {
-  white-space: nowrap;
-}
-.otari-overview-activity .table__column[data-key="key"] {
-  width: 12.5rem;
-}
-.otari-overview-activity .table__column[data-key="tokens"],
-.otari-overview-activity .table__column[data-key="cost"],
-.otari-overview-activity .table__column[data-key="status"] {
-  width: 6.875rem;
-}
-.otari-overview-activity .table__row .table__cell {
-  height: 2.8125rem;
-  padding-block: 0;
-}
 
 /* The rail's footprint, published by the shell (`data-rail`) so a fixed overlay
  * can center on the content beside the rail instead of on the viewport. Zero by

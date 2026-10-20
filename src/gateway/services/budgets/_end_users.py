@@ -124,11 +124,18 @@ class _EndUsers:
         blocked: bool | None,
         skip: int,
         limit: int,
+        created_before: datetime | None = None,
     ) -> list[EndUserPublic]:
         """A page of the key owner's end users."""
         _require_service_key(api_key)
         users = await self._repositories.end_users.page(
-            str(api_key.user_id), external_id=external_id, budget_id=budget_id, blocked=blocked, skip=skip, limit=limit
+            str(api_key.user_id),
+            external_id=external_id,
+            budget_id=budget_id,
+            blocked=blocked,
+            skip=skip,
+            limit=limit,
+            created_before=created_before,
         )
         return [EndUserPublic.from_model(user) for user in users]
 
@@ -180,6 +187,16 @@ class _EndUsers:
         if budget_id not in api_key.assignable_end_user_budgets():
             raise EndUserBudgetNotAllowedError(budget_id)
         return await self._assignable_budget(budget_id)
+
+    async def delete(self, api_key: APIKey, user_ids: list[str]) -> int:
+        """Soft-delete these end users of the key's owner, and return how many were deleted.
+
+        The rows stay, with what they spent: an end user named again is revived
+        with its counters, as ``resolve`` does, so deleting one cannot clear its
+        spend. A deleted end user is neither listed nor counted.
+        """
+        _require_service_key(api_key)
+        return await self._repositories.end_users.soft_delete(str(api_key.user_id), user_ids, datetime.now(UTC))
 
     async def _existing(self, api_key: APIKey, external_id: str) -> User:
         _require_service_key(api_key)

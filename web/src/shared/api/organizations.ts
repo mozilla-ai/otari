@@ -2,6 +2,7 @@ import {
   hashKey,
   keepPreviousData,
   type Query,
+  type QueryClient,
   useMutation,
   useQuery,
   useQueryClient,
@@ -235,9 +236,50 @@ export function useCreateOrganization() {
 // step with every future query, and the one it missed would render another
 // organization's rows under this one's name.
 //
-// The context is the exception to the invalidation: it is what the switch
-// itself answers with, and what a role gate reads. Queries keyed on one of the
+// The context is the exception to the invalidation: it is what the switch (or
+// the delete) answers with, and what a role gate reads. Queries keyed on one of the
 // left organization's workspaces are invalidated without a refetch.
+function enterOrganization(
+  queryClient: QueryClient,
+  context: OrganizationContext,
+) {
+  const leftWorkspaceIds = (
+    queryClient.getQueryData<OrganizationContext>(ORGANIZATION_CONTEXT)
+      ?.workspace_memberships ?? []
+  ).map((membership) => membership.workspace_id)
+  // A query keyed on a workspace of the organization just left stays
+  // mounted under that id until the selection follows the new context on
+  // the next render, so refetching it here asks for a workspace the caller
+  // no longer acts in and earns a 404. It is only marked stale, and the
+  // page asks for the new workspace once the selection moves. Such a query
+  // is found by the workspace it declares (`workspaceMeta`), not by
+  // searching its key, which also holds ids that are not workspaces.
+  const isKeyedOnLeftWorkspace = (query: Query) => {
+    const workspaceId = query.meta?.workspaceId
+    return (
+      typeof workspaceId === "string" &&
+      workspaceId !== "" &&
+      leftWorkspaceIds.includes(workspaceId)
+    )
+  }
+  // Written, not invalidated, and written first: the invalidation below is
+  // where every query decides whether to refetch, and one gated on the role
+  // in here would decide it against the organization just left, asking for
+  // a read the new one refuses (otari#1300). Refetching the context instead
+  // would hold the caller's new role a round trip behind the reads already
+  // being made in it.
+  queryClient.setQueryData(ORGANIZATION_CONTEXT, context)
+  void queryClient.invalidateQueries({
+    predicate: (query) =>
+      query.queryHash !== ORGANIZATION_CONTEXT_HASH &&
+      !isKeyedOnLeftWorkspace(query),
+  })
+  void queryClient.invalidateQueries({
+    predicate: isKeyedOnLeftWorkspace,
+    refetchType: "none",
+  })
+}
+
 export function useSwitchOrganization() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -253,43 +295,19 @@ export function useSwitchOrganization() {
         body: JSON.stringify(body),
       })
     },
-    onSuccess: (context) => {
-      const leftWorkspaceIds = (
-        queryClient.getQueryData<OrganizationContext>(ORGANIZATION_CONTEXT)
-          ?.workspace_memberships ?? []
-      ).map((membership) => membership.workspace_id)
-      // A query keyed on a workspace of the organization just left stays
-      // mounted under that id until the selection follows the new context on
-      // the next render, so refetching it here asks for a workspace the caller
-      // no longer acts in and earns a 404. It is only marked stale, and the
-      // page asks for the new workspace once the selection moves. Such a query
-      // is found by the workspace it declares (`workspaceMeta`), not by
-      // searching its key, which also holds ids that are not workspaces.
-      const isKeyedOnLeftWorkspace = (query: Query) => {
-        const workspaceId = query.meta?.workspaceId
-        return (
-          typeof workspaceId === "string" &&
-          workspaceId !== "" &&
-          leftWorkspaceIds.includes(workspaceId)
-        )
-      }
-      // Written, not invalidated, and written first: the invalidation below is
-      // where every query decides whether to refetch, and one gated on the role
-      // in here would decide it against the organization just left, asking for
-      // a read the new one refuses (otari#1300). Refetching the context instead
-      // would hold the caller's new role a round trip behind the reads already
-      // being made in it.
-      queryClient.setQueryData(ORGANIZATION_CONTEXT, context)
-      void queryClient.invalidateQueries({
-        predicate: (query) =>
-          query.queryHash !== ORGANIZATION_CONTEXT_HASH &&
-          !isKeyedOnLeftWorkspace(query),
-      })
-      void queryClient.invalidateQueries({
-        predicate: isKeyedOnLeftWorkspace,
-        refetchType: "none",
-      })
-    },
+    onSuccess: (context) => enterOrganization(queryClient, context),
+  })
+}
+
+// Deleting the active organization moves the caller into another one on the
+// server, and answers with that one's context, so the cache is left exactly as
+// a switch leaves it.
+export function useDeleteOrganization() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<OrganizationContext>("/organizations/me", { method: "DELETE" }),
+    onSuccess: (context) => enterOrganization(queryClient, context),
   })
 }
 
@@ -612,10 +630,8 @@ function invalidateOrgProviderModels(
 }
 
 // The organization's own upstream provider credentials (#670), which every
-// workspace under it inherits. A different table from `/provider-credentials`
-// above: that one is keyed on an instance name and belongs to the process, this
-// one belongs to the tenant. Only a hosted deployment reports the surface these
-// hooks serve (`organization_providers`).
+// workspace under it inherits. A different table from `/hosted-providers`:
+// that one belongs to the process, this one belongs to the tenant.
 //
 // Archived keys are fetched too, and filtered in the page rather than by a
 // second query: archiving is reversible, the list is small, and a toggle that
@@ -720,6 +736,18 @@ export function useSetOrgProviderKeyDefault() {
     onSuccess: () =>
       // Which key dispatches, not which models exist.
       invalidateOrgProviderKeys(queryClient),
+  })
+}
+
+export function useUnsetOrgProviderKeyDefault() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (keyId: string) =>
+      apiFetch<OrgProviderKey>(
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/default`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => invalidateOrgProviderKeys(queryClient),
   })
 }
 

@@ -64,7 +64,7 @@ from gateway.api.routes._pipeline import (
     stream_final_attempt_extra_seconds,
     stream_first_chunk_timeout_seconds,
 )
-from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
+from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.tools_exceptions import (
@@ -82,6 +82,7 @@ from gateway.ports.code_execution_policy_port import CodeExecutionPolicyScope
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import RateLimitInfo
+from gateway.schemas.inference import SettledCost
 from gateway.services.budgets import ReservationHandle
 from gateway.services.inference import DeploymentCharge
 from gateway.services.pricing_service import ResolvedPricing
@@ -92,6 +93,7 @@ from gateway.services.tools._mcp_admission import (
     duplicate_mcp_server_name_detail,
 )
 from gateway.services.tools._web_admission import WEB_FETCH_NOT_ENABLED_DETAIL
+from gateway.services.traces import SessionRef
 
 ADAPTERS = [
     pytest.param(chat._ADAPTER, id="chat"),
@@ -564,6 +566,7 @@ def _build(
     request_id: str | None = None,
     deployment_charge: DeploymentCharge | None = None,
     db: Any = None,
+    source_label: str | None = None,
 ) -> Any:
     return build_streaming_response(
         adapter=chat._ADAPTER,
@@ -582,6 +585,7 @@ def _build(
         tool_tally=tool_tally,
         request_id=request_id,
         deployment_charge=deployment_charge,
+        source_label=source_label,
     )
 
 
@@ -829,6 +833,20 @@ async def test_completed_stream_row_carries_the_request_id(monkeypatch: pytest.M
     assert logged["request_id"] == "req-1"
 
 
+@pytest.mark.asyncio
+async def test_completed_stream_row_carries_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(_PARTIAL_USAGE)
+
+    await _drain(_build(stream(), GatewayConfig(), source_label="s-abc"))
+
+    (logged,) = settlement.logged
+    assert logged["source_label"] == "s-abc"
+
+
 def _no_pricing(monkeypatch: pytest.MonkeyPatch) -> None:
     """A successful row resolves its model's rate even without usage, in case it is priced per request."""
 
@@ -904,6 +922,39 @@ async def test_log_usage_stores_the_request_id_as_the_group_of_an_unrouted_row(
     (row,) = writer.put_rows
     assert row.request_group_id == "req-1"
     assert row.policy_name is None
+
+
+def test_a_usage_row_names_its_session_by_the_trace_id_it_is_traced_under() -> None:
+    session = SessionRef(source="client", key="chat-42")
+    workspace_id = uuid.uuid4()
+
+    assert pipeline._session_trace_id(session, workspace_id, "user-1", "key-1") == session.trace_id(
+        workspace_id, "user-1", "key-1"
+    )
+    assert pipeline._session_trace_id(None, workspace_id, "user-1", "key-1") is None
+    # A hybrid request has no local workspace, and so no trace to name.
+    assert pipeline._session_trace_id(session, None, "user-1", "key-1") is None
+
+
+@pytest.mark.asyncio
+async def test_log_usage_stores_the_session_as_the_source_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A gateway row names its session, so usage groups by the sessions the Sessions page lists."""
+    _no_pricing(monkeypatch)
+    writer = _FakeLogWriter()
+
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, writer),
+        api_key_id=None,
+        model="gpt-4",
+        provider="openai",
+        endpoint="/v1/chat/completions",
+        workspace_id=uuid.uuid4(),
+        source_label="s-abc",
+    )
+
+    (row,) = writer.put_rows
+    assert row.source_label == "s-abc"
 
 
 @pytest.mark.parametrize("paid", [False, True])
@@ -1879,7 +1930,8 @@ async def test_cancellation_while_settling_leaves_the_report_running(
     async def stream() -> AsyncIterator[ChatCompletionChunk]:
         yield _usage_chunk("u1", 10, finishes=True)
 
-    iterator = _build_platform_stream(stream())
+    # The canceled stream lets its settlement wait out the inline budget before the cancellation surfaces.
+    iterator = _build_platform_stream(stream(), config=GatewayConfig(platform={"usage_inline_timeout_ms": 50}))
     pending = asyncio.ensure_future(iterator.__anext__())
     await asyncio.wait_for(reporter.started.wait(), timeout=1)
 

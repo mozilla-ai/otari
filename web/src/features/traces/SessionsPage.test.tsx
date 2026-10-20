@@ -7,7 +7,6 @@ import type { ScopedBudget } from "@/client"
 import { SessionsPage } from "@/features/traces/SessionsPage"
 import { jsonResponse, mockApi, renderPage } from "@/tests/activity"
 import { scopedBudget } from "@/tests/fixtures"
-import { pickOption } from "@/tests/select"
 import { traceDetail, traceSummary } from "@/tests/traceFixtures"
 
 afterEach(() => {
@@ -203,6 +202,40 @@ describe("SessionsPage", () => {
     )
   })
 
+  it("shows how much of the session's and a call's prompt came from the cache", async () => {
+    const detail = traceDetail()
+    const spans = detail.spans.map((span) =>
+      span.span_id === "llm-1"
+        ? {
+            ...span,
+            input_tokens: 48_210,
+            cache_read_tokens: 41_900,
+            cache_write_tokens: 6_010,
+            reasoning_tokens: 12,
+          }
+        : span,
+    )
+    mockApi({ traces: [traceSummary()], traceDetail: { ...detail, spans } })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    await userEvent.hover(
+      await within(peek).findByRole("button", { name: "48,212 tokens" }),
+    )
+    expect(await screen.findByText("Cached")).toBeInTheDocument()
+    expect(screen.getByText("86.9%")).toBeInTheDocument()
+    await userEvent.click(
+      within(peek).getAllByRole("button", { name: /^Generation, gpt-5/ })[0],
+    )
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: "Attributes" }),
+    )
+    expect(within(peek).getByText("48,210 (41,900 cached)")).toBeInTheDocument()
+    expect(within(peek).getByText("Cache write tokens")).toBeInTheDocument()
+    expect(within(peek).getByText("Reasoning tokens")).toBeInTheDocument()
+  })
+
   it("opens the span a gateway decision is about", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
@@ -312,22 +345,31 @@ describe("SessionsPage", () => {
     )
   })
 
-  it("narrows the list to sessions with errors from the first page", async () => {
+  it("stops the search at the 128 characters the API accepts", async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions?page=2")
-    await vi.waitFor(() => expect(listReads(calls)[0]?.get("skip")).toBe("100"))
-    await pickOption(user, "Level", "Errors")
+    renderPage(<SessionsPage />, "/sessions")
+    const search = await screen.findByRole("searchbox", {
+      name: "Search sessions",
+    })
+    await user.click(search)
+    await user.paste("x".repeat(150))
 
+    expect(search).toHaveValue("x".repeat(128))
     await vi.waitFor(() =>
-      expect(
-        listReads(calls).some(
-          (params) =>
-            params.get("has_error") === "true" && params.get("skip") === "0",
-        ),
-      ).toBe(true),
+      expect(listReads(calls).at(-1)?.get("q")).toBe("x".repeat(128)),
     )
+  })
+
+  it("names the search when nothing matches it", async () => {
+    mockApi({ traces: [] })
+
+    renderPage(<SessionsPage />, "/sessions?q=codex")
+
+    expect(
+      await screen.findByText("No sessions in this window match “codex”."),
+    ).toBeInTheDocument()
   })
 
   it("reads the window a link names", async () => {
@@ -369,6 +411,55 @@ describe("SessionsPage", () => {
             params.get("skip") === "25" && params.get("limit") === "25",
         ),
       ).toBe(true),
+    )
+  })
+
+  it("sorts by a column from the first page, largest first, and flips on a second press", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?page=2")
+    await vi.waitFor(() =>
+      expect(listReads(calls)[0]?.get("sort")).toBe("last_activity"),
+    )
+    const cost = await screen.findByRole("columnheader", { name: /Total cost/ })
+    await user.click(cost)
+
+    await vi.waitFor(() =>
+      expect(listReads(calls).at(-1)?.toString()).toMatch(
+        /skip=0.*sort=cost&order=desc/,
+      ),
+    )
+    expect(cost).toHaveAttribute("aria-sort", "descending")
+
+    await user.click(cost)
+
+    await vi.waitFor(() =>
+      expect(listReads(calls).at(-1)?.get("order")).toBe("asc"),
+    )
+    expect(cost).toHaveAttribute("aria-sort", "ascending")
+  })
+
+  it("reads the sort a link names", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?sort=errors&order=asc")
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    expect(listReads(calls)[0].toString()).toMatch(/sort=errors&order=asc/)
+    expect(
+      await screen.findByRole("columnheader", { name: /Levels/ }),
+    ).toHaveAttribute("aria-sort", "ascending")
+  })
+
+  it("asks for the default order when a link names a sort it does not offer", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?sort=name&order=sideways")
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    expect(listReads(calls)[0].toString()).toMatch(
+      /sort=last_activity&order=desc/,
     )
   })
 

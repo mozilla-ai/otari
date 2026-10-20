@@ -25,7 +25,7 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work_if_needed,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content
+from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
@@ -54,13 +54,11 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import (
     ResolvedAttempt,
-    SettledCost,
     UnsupportedAttemptProviderError,
     attempt_provider,
     build_attempt_client_args,
-    with_retry_hint,
 )
-from gateway.api.routes._request_tags import RequestMetadata, forwarded_metadata, request_tags
+from gateway.api.routes._request_tags import RequestMetadata, RequestTagsHeader, forwarded_metadata, resolved_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
@@ -68,10 +66,12 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.schemas.inference import SettledCost
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
     bind_upstream_user,
     call_responses,
+    provider_failure,
     responses_user_fields,
     serves_responses,
     strip_gateway_minted_items,
@@ -95,7 +95,7 @@ from gateway.services.tools import (
     ToolUseBudget,
 )
 from gateway.services.traces import read_turn
-from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat, openai_error_event
+from gateway.streaming import RESPONSES_STREAM_FORMAT, RESPONSES_TERMINAL_EVENTS, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 
@@ -252,6 +252,16 @@ def _usage_to_completion_usage(
     )
 
 
+def _ends_a_response(chunk: Any) -> bool:
+    """Whether ``chunk`` is an event that ends a response.
+
+    A stream is complete when its last chunk is one: a provider sends nothing after
+    it, and the gateway's tool loop forwards only its final round's, after
+    everything else.
+    """
+    return getattr(chunk, "type", None) in RESPONSES_TERMINAL_EVENTS
+
+
 def _ensure_provider_supports_responses(provider: LLMProvider) -> None:
     if not serves_responses(provider):
         raise HTTPException(
@@ -297,12 +307,18 @@ class _ResponsesAdapter:
         )
 
     def stream_completion(self) -> Callable[[Any], bool] | None:
-        # Not checked yet: the chat-completions bridge synthesizes the terminal
-        # event whatever the upstream sent, so it cannot tell a cut stream here.
-        return None
+        # The chat-completions bridge emits a terminal event whatever its upstream
+        # sent, so this catches a cut native stream and not a cut bridged one.
+        return _ends_a_response
 
-    def stream_error_payload(self, exc: BaseException) -> str:
-        return openai_error_event(self.stream_format, stream_error_code(exc), stream_error_message(exc))
+    def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
+        failure = provider_failure(exc, provider)
+        return openai_error_event(
+            self.stream_format,
+            stream_error_code(exc),
+            stream_error_message(exc),
+            failure.as_dict() if failure is not None else None,
+        )
 
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
         return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
@@ -493,6 +509,7 @@ async def create_response(
     billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
+    tags_header: RequestTagsHeader,
 ) -> dict[str, Any] | FastAPIResponse:
     """OpenAI-compatible Responses endpoint.
 
@@ -562,7 +579,7 @@ async def create_response(
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if bool(request_body.stream) else idempotency,
-            tags=request_tags(request_body.metadata),
+            tags=resolved_tags(tags_header, request_body.metadata),
             turn=read_turn("responses", request_body.input),
             session_label=request_body.session_label,
         )

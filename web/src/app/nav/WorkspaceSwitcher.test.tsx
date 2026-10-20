@@ -404,6 +404,24 @@ describe("the organization half of the scope switcher", () => {
       within(menu).queryByRole("button", { name: "Create workspace" }),
     ).toBeNull()
   })
+
+  it("offers Create organization in the organization group, above the workspaces", async () => {
+    // Below the workspace list it read as a workspace action, and people made an
+    // organization when they meant a workspace (#1386).
+    mockApi()
+    await renderSwitcher()
+
+    const { menu } = await openMenu()
+    const create = within(menu).getByRole("button", {
+      name: /Create organization/,
+    })
+    const workspaces = await within(menu).findByText(/^Workspaces/)
+
+    expect(
+      create.compareDocumentPosition(workspaces) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
 })
 
 // The workspace half's create flow, which ends inside the workspace it made.

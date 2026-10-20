@@ -31,6 +31,7 @@ import {
   isNoOrganizationError,
   useOrganizationContext,
 } from "@/shared/api/organizations"
+import { documentationHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useTheme } from "@/shared/hooks/useTheme"
 import {
@@ -486,22 +487,12 @@ export function AccountMenu({
               className="md:hidden"
             />
           )}
-          {docs_url ? (
-            <MenuExternalLink
-              label="Documentation"
-              icon={FiBookOpen}
-              href={docs_url}
-              className="md:hidden"
-            />
-          ) : (
-            <MenuLink
-              label="Documentation"
-              icon={FiBookOpen}
-              to="/docs"
-              onNavigate={() => setOpen(false)}
-              className="md:hidden"
-            />
-          )}
+          <MenuExternalLink
+            label="Documentation"
+            icon={FiBookOpen}
+            href={documentationHref({ docs_url })}
+            className="md:hidden"
+          />
           {feedback_enabled && onOpenFeedback ? (
             <MenuItem
               label="Feedback"

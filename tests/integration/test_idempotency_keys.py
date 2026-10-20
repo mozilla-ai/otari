@@ -42,6 +42,7 @@ from gateway.core.config import (
     REQUEST_ID_HEADER,
     RESPONSE_DURATION_HEADER,
     ROUTER_TASK_HEADER,
+    TAGS_HEADER,
     GatewayConfig,
 )
 from gateway.core.unit_of_work import UnitOfWork
@@ -257,6 +258,25 @@ def test_reusing_a_key_with_different_routing_headers_is_refused(
 
     assert refused.status_code == 422, refused.text
     assert provider.await_count == 1
+
+
+def test_reusing_a_key_with_different_tags_headers_is_refused(
+    client: TestClient, master_key_header: dict[str, str], user: None
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+    headers = _keyed(master_key_header, "reused-tags")
+
+    assert _post_chat(client, headers, provider).status_code == 200
+    refused = _post_chat(client, {**headers, TAGS_HEADER: "run=1"}, provider)
+    assert refused.status_code == 422, refused.text
+    replayed = _post_chat(client, headers, provider)
+    assert replayed.headers[IDEMPOTENT_REPLAYED_HEADER] == "true"
+
+    tagged = _keyed(master_key_header, "reused-tags-value")
+    assert _post_chat(client, {**tagged, TAGS_HEADER: "run=1"}, provider).status_code == 200
+    refused = _post_chat(client, {**tagged, TAGS_HEADER: "run=2"}, provider)
+    assert refused.status_code == 422, refused.text
+    assert provider.await_count == 2
 
 
 def test_reusing_a_key_with_another_value_of_a_repeated_header_is_refused(

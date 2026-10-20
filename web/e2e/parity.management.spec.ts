@@ -7,6 +7,7 @@ import {
   gotoRoute,
   login,
   nav,
+  openAccountMenu,
   openNested,
   openOrganization,
   pageHeading,
@@ -72,82 +73,86 @@ async function fillModelBox(
   await dismissComboBoxInDialog(box)
 }
 
-test.describe("standalone provider setup", () => {
+test.describe("hosted provider setup", () => {
   test("adds a provider, reports what testing it found, edits and removes it", async ({
     page,
   }) => {
     await login(page)
-    await openOrganization(page)
-    await openPage(page, "Deployment providers", "Deployment providers")
+    // The deployment's own rail, entered from the account menu as an operator
+    // reaches it.
+    const menu = await openAccountMenu(page)
+    await menu.getByRole("link", { name: "Deployment" }).click()
+    await openPage(page, "Hosted providers", "Hosted providers")
 
-    await page.getByRole("button", { name: "Add provider" }).click()
-    // Scoped: the heading's trigger and the dialog's submit both say "Add
-    // provider", so an unscoped press is ambiguous.
-    const dialog = page.getByRole("dialog", { name: "New provider" })
-    await dialog.getByRole("button", { name: "Custom endpoint" }).click()
-    await dialog.getByLabel("Name").fill(PROVIDER)
-    await dialog.getByLabel("API base").fill(UNREACHABLE)
+    await page.getByRole("button", { name: "Add provider" }).first().click()
+    const dialog = page.getByRole("dialog", { name: "Add hosted provider" })
+    await dialog.getByRole("combobox", { name: "Provider" }).fill("OpenAI")
+    await page.getByRole("option", { name: "OpenAI", exact: true }).click()
+    await dialog.getByRole("textbox", { name: "Name" }).fill(PROVIDER)
+    await dialog
+      .getByRole("textbox", { name: "API base URL" })
+      .fill(UNREACHABLE)
+    await dialog.getByText("Serve models not on its list").click()
     await dialog.getByRole("button", { name: "Add provider" }).click()
+    await expect(dialog).toBeHidden({ timeout: 30_000 })
 
-    const provider = row(page, "Providers", PROVIDER)
+    const provider = hostedRow(page)
     await expect(provider).toBeVisible()
-    // A stored provider is one the dashboard owns, as against one read out of
-    // config.yml, which is what decides whether it can be edited here at all.
-    // Uppercase in the source rather than through a `text-transform`, so this is
-    // the text content and the match is case-sensitive.
-    await expect(provider).toContainText("STORED")
 
     // Testing has to come back with a reported outcome, not just stop spinning:
-    // an assertion that it merely does not say "Connected." would also pass if the
-    // check never ran at all. Nothing is listening, so the outcome is a failure,
-    // and the alternation covers the shapes TestOutcome can render (the sanitized
-    // provider error, its own fallback, and the no-model-listing branch).
-    await provider.getByRole("button", { name: "Test" }).click()
+    // an assertion that it merely does not say "Connected." would also pass if
+    // the check never ran at all. Nothing is listening, so the outcome is a
+    // failure, in whichever shape the row reports one.
+    await provider.getByRole("button", { name: `Test ${PROVIDER}` }).click()
     await expect(
       provider.getByText(
-        /Connection error\.|Connection failed\.|Could not list models/,
+        /Connection error\.|Connection failed\.|Could not list models|refused|connect/i,
       ),
     ).toBeVisible({ timeout: 30_000 })
     await expect(provider).not.toContainText("Connected.")
 
-    await provider.getByRole("button", { name: "Edit" }).click()
-    const editProvider = page.getByRole("dialog", { name: "Edit provider" })
-    await editProvider.getByLabel("API base").fill("http://127.0.0.1:9/v2")
+    await provider.getByRole("button", { name: `Edit ${PROVIDER}` }).click()
+    const editProvider = page.getByRole("dialog", {
+      name: "Edit hosted provider",
+    })
+    await editProvider
+      .getByRole("textbox", { name: "API base URL" })
+      .fill("http://127.0.0.1:9/v2")
     await editProvider.getByRole("button", { name: "Save" }).click()
-    // Wait on the frame, not on the button that was just pressed: the submit
-    // keeps its label through the request, so asserting it is hidden passes the
-    // instant it is pressed and the reload below then aborts the PATCH and loses
-    // the edit. The dialog closes only in the mutation's onSuccess.
-    await expect(editProvider).toBeHidden()
+    // Wait on the frame, not on the button that was just pressed: the dialog
+    // closes only in the mutation's onSuccess, and reloading earlier would
+    // abort the PATCH.
+    await expect(editProvider).toBeHidden({ timeout: 30_000 })
 
-    // Reopening is what proves the edit was persisted rather than only echoed
-    // back into a form that never closed. Reload first: the form seeds its fields
-    // from the provider on mount only, so reopening it while the invalidated
-    // provider query is still refetching would seed the stale value and then never
-    // correct itself, which no amount of retrying the assertion can recover.
+    // Reopening after a reload is what proves the edit was persisted rather
+    // than only echoed back into a form that never closed.
     await page.reload()
-    await row(page, "Providers", PROVIDER)
-      .getByRole("button", { name: "Edit" })
+    await hostedRow(page)
+      .getByRole("button", { name: `Edit ${PROVIDER}` })
       .click()
-    await expect(editProvider.getByLabel("API base")).toHaveValue(
-      "http://127.0.0.1:9/v2",
-    )
+    await expect(
+      editProvider.getByRole("textbox", { name: "API base URL" }),
+    ).toHaveValue("http://127.0.0.1:9/v2")
     await editProvider.getByRole("button", { name: "Cancel" }).click()
     await expect(editProvider).toBeHidden()
 
     // The confirmation is a modal, so it names the provider rather than relying
     // on the row behind the backdrop to say which one this is about.
-    await row(page, "Providers", PROVIDER)
-      .getByRole("button", { name: "Delete" })
+    await hostedRow(page)
+      .getByRole("button", { name: `Remove ${PROVIDER}` })
       .click()
     const confirmProvider = page.getByRole("alertdialog")
     await expect(confirmProvider).toContainText(PROVIDER)
     await confirmProvider
-      .getByRole("button", { name: "Delete provider" })
+      .getByRole("button", { name: "Remove provider" })
       .click()
-    await expect(row(page, "Providers", PROVIDER)).toHaveCount(0)
+    await expect(hostedRow(page)).toHaveCount(0)
   })
 })
+
+function hostedRow(page: Page): Locator {
+  return row(page, "Hosted providers", new RegExp(`^${PROVIDER}`))
+}
 
 test.describe("api keys", () => {
   test("issues a key, and will not delete one until it is disabled", async ({

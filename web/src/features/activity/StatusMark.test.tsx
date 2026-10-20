@@ -23,9 +23,11 @@ describe("StatusMark", () => {
     expect(screen.getByText("Absorbed")).not.toHaveClass("text-danger")
   })
 
-  it("renders an unknown status as its own slug", () => {
-    render(<StatusMark status="quarantined" />)
-    expect(screen.getByText("quarantined")).toBeInTheDocument()
+  it("renders an unknown status as its own slug, not as a success", () => {
+    render(<StatusMark status="cancelled_by_client" />)
+    const word = screen.getByText("cancelled_by_client")
+    expect(word).toHaveClass("text-subtle", "truncate")
+    expect(word.parentElement).toHaveAttribute("title", "cancelled_by_client")
   })
 
   it("shows a skipped candidate as neither a failure nor a success", () => {

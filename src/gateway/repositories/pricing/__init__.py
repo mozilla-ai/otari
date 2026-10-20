@@ -5,8 +5,9 @@ A package rather than a module beside `base_repository.py`, which is what
 belongs to its domain's package.
 """
 
+from gateway.repositories.pricing.model_pricing_repository import ModelPricingRepository
 from gateway.repositories.pricing.organization_model_pricing_repository import (
     OrganizationModelPricingRepository,
 )
 
-__all__ = ["OrganizationModelPricingRepository"]
+__all__ = ["ModelPricingRepository", "OrganizationModelPricingRepository"]

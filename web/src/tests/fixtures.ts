@@ -148,14 +148,16 @@ export function pricingResponse(
 export const STANDALONE_SURFACES = [
   "admin",
   "budgets",
+  "health_checks",
+  "hosted_providers",
   "keys",
   "models",
   "organization_guardrails",
   "organization_providers",
+  "organization_usage",
   "organizations",
   "playground",
   "pricing",
-  "providers",
   "routing",
   "settings",
   "tools",
@@ -165,22 +167,19 @@ export const STANDALONE_SURFACES = [
 ]
 
 // The same list for a hosted (multi-tenant) deployment, kept in step with
-// HOSTED_SURFACES beside it: the process-global provider page drops, because a
-// credential keyed on an instance name alone is served to every tenant; the
-// Playground drops because a control plane serves no inference (otari#822); and
-// the organization-wide Usage page appears, being a destination only where "my
-// organization" is narrower than "everything" (otari-ai#1963).
+// HOSTED_SURFACES beside it: the Playground drops because a control plane
+// serves no inference (otari#822), and health checks drop because a control
+// plane sends no inference of its own to check.
 //
-// `organization_providers` is not part of that difference: it is on the
-// standalone list above too, because the page behind it is where an
-// organization's models are offered, priced and switched, which is a tenant's
-// question whether or not the deployment has more than one tenant.
-const HOSTED_DROPS = new Set(["providers", "playground"])
+// `organization_providers` and `organization_usage` are not part of that
+// difference: both are on the standalone list above too, because what each page
+// answers is a tenant's question whether or not the deployment has more than
+// one tenant.
+const HOSTED_DROPS = new Set(["playground", "health_checks"])
 
-export const HOSTED_SURFACES = [
-  ...STANDALONE_SURFACES.filter((surface) => !HOSTED_DROPS.has(surface)),
-  "organization_usage",
-]
+export const HOSTED_SURFACES = STANDALONE_SURFACES.filter(
+  (surface) => !HOSTED_DROPS.has(surface),
+)
 
 /** The deployment bootstrap, standalone by default. See useDeployment. */
 export function bootstrap(
@@ -198,8 +197,8 @@ export function bootstrap(
     // served this page is the address that serves the API. The hosted-mode
     // snippet tests set it.
     data_plane_url: null,
-    // Null, because a fixture describes a deployment whose documentation is the
-    // bundled guide; the tests about an operator-configured docs site set it.
+    // Null, so Documentation links open docs.otari.ai; the tests about an
+    // operator-configured docs site set it.
     docs_url: null,
     // Unset, like docs_url: this fixture's deployment publishes none. The
     // account-menu tests set them.

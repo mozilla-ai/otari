@@ -32,6 +32,7 @@ from gateway.api.deps import get_config, get_db_if_needed, get_enabled_features
 from gateway.api.routes import (
     admin,
     budgets,
+    hosted_providers,
     keys,
     models,
     org_provider_keys,
@@ -40,7 +41,6 @@ from gateway.api.routes import (
     organizations,
     playground,
     pricing,
-    providers,
     routing,
     settings,
     tools,
@@ -81,6 +81,7 @@ SignInMethod = Literal["master_key", "password", "passkey"]
 _DECLARED_SURFACES: tuple[Surface, ...] = (
     admin.SURFACE,
     budgets.SURFACE,
+    hosted_providers.SURFACE,
     keys.SURFACE,
     models.SURFACE,
     org_provider_keys.SURFACE,
@@ -89,7 +90,6 @@ _DECLARED_SURFACES: tuple[Surface, ...] = (
     organizations.SURFACE,
     playground.SURFACE,
     pricing.SURFACE,
-    providers.SURFACE,
     routing.SURFACE,
     settings.SURFACE,
     tools.SURFACE,
@@ -183,10 +183,9 @@ class DeploymentBootstrap(BaseModel):
     )
     docs_url: str | None = Field(
         description=(
-            "Where this deployment's documentation lives, when it is not the operator guide "
-            "bundled with the gateway. Set, the dashboard's Documentation links open it in a "
-            "new tab; null, they go to the bundled guide at /#/docs, which stays served either "
-            "way. A link target an operator configured, validated at startup as an absolute "
+            "Where this deployment's documentation lives, when it is not docs.otari.ai. Set, "
+            "the dashboard's Documentation links open it in a new tab; null, they open "
+            "https://docs.otari.ai/. A link target an operator configured, validated at startup as an absolute "
             "http(s) URL carrying no credential, since this response is unauthenticated."
         )
     )

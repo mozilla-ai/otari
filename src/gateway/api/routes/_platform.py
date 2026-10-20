@@ -22,6 +22,8 @@ from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field, ValidationError
 
+from gateway.api.routes._attempt_metrics import record_abandoned_attempt
+from gateway.api.routes._helpers import with_retry_hint
 from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
 from gateway.core.error_codes import (
     ALL_CANDIDATES_REJECTED,
@@ -38,42 +40,25 @@ from gateway.core.usage import (
 )
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
 from gateway.log_config import logger
-from gateway.metrics import REGISTRY, Counter
+from gateway.schemas.inference import PRICING_SOURCE_PATTERN, SETTLED_COST_PATTERN, SettledCost
 from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
 from gateway.services.control_plane import ResolveEndpoint, resolve, transport
 from gateway.services.inference import (
     is_empty_completion,
     is_provider_billing_error,
-    is_retry_futile,
-    is_upstream_request_fault,
+    is_provider_credential_rejection,
     upstream_exception_shape,
 )
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
-from gateway.services.provider_kwargs import missing_credential, no_candidate_configured_detail, split_selector
+from gateway.services.provider_kwargs import (
+    missing_credential,
+    no_candidate_configured_detail,
+    split_selector,
+)
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 
 T = TypeVar("T")
-
-ABANDONED_ATTEMPTS = Counter(
-    "gateway_abandoned_attempts",
-    "Total upstream attempts abandoned before their first chunk (provider fallback / timeout waste)",
-    ["provider", "model", "reason", "position"],
-    registry=REGISTRY,
-)
-
-
-def record_abandoned_attempt(provider: str, model: str, reason: str, position: int) -> None:
-    """Record an upstream attempt abandoned before it produced its first chunk.
-
-    ``reason`` is one of ``timeout`` (the first-chunk wait elapsed),
-    ``build_error`` (opening the upstream stream failed), or ``upstream_error``
-    (the upstream raised before yielding a chunk). ``position`` is the attempt's
-    index in the resolved routing plan; label cardinality stays bounded by the
-    plan length.
-    """
-    ABANDONED_ATTEMPTS.labels(provider=provider, model=model, reason=reason, position=str(position)).inc()
-
 
 # Status codes returned by the platform's usage-report endpoint that the
 # gateway should NOT retry. Auth, payment-required, not-found, conflict, gone,
@@ -126,28 +111,15 @@ class ResolvedAttempt(BaseModel):
     ``default_attempt_kwargs``, which merges these in non-overridably."""
 
 
-# What the gateway attaches from a peer's settlement, checked at this edge: a
-# negative amount or a source name of any shape reaches a client otherwise.
-_SETTLED_COST_PATTERN = r"^\d+\.\d{6}$"
-_PRICING_SOURCE_PATTERN = r"^[a-z_]{1,32}$"
-
-
-class SettledCost(BaseModel):
-    """An attachable platform settlement: a priced cost and the basis for it."""
-
-    cost_usd: str = Field(pattern=_SETTLED_COST_PATTERN)
-    pricing_source: str = Field(pattern=_PRICING_SOURCE_PATTERN)
-
-
 class _UsagePricing(BaseModel):
-    source: str | None = Field(pattern=_PRICING_SOURCE_PATTERN)
+    source: str | None = Field(pattern=PRICING_SOURCE_PATTERN)
 
 
 class _CompletedUsageSettlement(BaseModel):
     correlation_id: str
     status: Literal["completed"]
     outcome: Literal["success"]
-    cost_usd: str = Field(pattern=_SETTLED_COST_PATTERN)
+    cost_usd: str = Field(pattern=SETTLED_COST_PATTERN)
     currency: Literal["USD"]
     usage_status: Literal["reported", "unavailable"]
     pricing: _UsagePricing
@@ -735,38 +707,6 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
             )
         ],
     )
-
-
-def is_provider_credential_rejection(exc: BaseException) -> bool:
-    """Whether the provider refused the credential the gateway sent.
-
-    An upstream 401, or a 403 that is not the provider refusing the request itself
-    (see :func:`is_upstream_request_fault`).
-    """
-    if missing_credential(exc) is not None:
-        return False
-    kind, status_code = upstream_exception_shape(exc)
-    if kind == "timeout":
-        return False
-    if status_code == status.HTTP_401_UNAUTHORIZED:
-        return True
-    return status_code == status.HTTP_403_FORBIDDEN and not is_upstream_request_fault(exc)
-
-
-# The OpenAI and Anthropic SDKs read this header before their own retry rule
-# (``_should_retry`` in each SDK's ``_base_client.py``), so ``false`` stops them
-# retrying a 5xx they would otherwise retry. The name is theirs, not Otari's.
-SHOULD_RETRY_HEADER = "x-should-retry"
-
-
-def with_retry_hint(exc: BaseException, status_code: int, headers: dict[str, str] | None) -> dict[str, str] | None:
-    """``headers`` for a provider failure answered with ``status_code``, telling the client not to retry a futile 5xx.
-
-    Only a 5xx carries it: an SDK does not retry the 4xx answers anyway.
-    """
-    if status_code < status.HTTP_500_INTERNAL_SERVER_ERROR or not is_retry_futile(exc):
-        return headers
-    return {**(headers or {}), SHOULD_RETRY_HEADER: "false"}
 
 
 def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:

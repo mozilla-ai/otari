@@ -63,7 +63,7 @@ from gateway.models.tenancy import (
     WorkspaceMember,
     WorkspacePublic,
 )
-from gateway.repositories.api_keys import ApiKeyRepository
+from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     InvitationRepository,
@@ -628,7 +628,7 @@ def _budget_service(db: AsyncSession, organizations: OrganizationService | None 
         uow,
         BudgetRepositories.on(uow),
         organizations,
-        ApiKeyService(ApiKeyRepository(uow)),
+        ApiKeyService(uow, ApiKeyRepositories.on(uow)),
         WorkspaceAccess(db, organizations),
     )
 

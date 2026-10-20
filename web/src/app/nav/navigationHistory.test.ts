@@ -48,9 +48,9 @@ describe("rail location memory", () => {
 
   it("ignores a path the registry does not declare", () => {
     rememberLocation("/usage", showsEverything)
-    rememberLocation("/docs", showsEverything)
+    rememberLocation("/account", showsEverything)
 
-    // The guide and the 404 splat are not places to return to, so the last real
+    // The account page and the 404 splat are not places to return to, so the last real
     // destination stands rather than being replaced by one.
     expect(lastLocation("workspace", showsEverything)).toEqual({ to: "/usage" })
   })

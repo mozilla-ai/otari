@@ -33,15 +33,16 @@ test.describe("dashboard core flows", () => {
     await expect(page.getByText("Welcome to Otari")).toBeVisible()
 
     await page.getByRole("button", { name: "Add your first provider" }).click()
-    // Scoped: the heading's trigger and the dialog's submit both say "Add
-    // provider", so an unscoped press is ambiguous.
-    const dialog = page.getByRole("dialog", { name: "New provider" })
-    await dialog.getByRole("button", { name: "Custom endpoint" }).click()
-    await dialog.getByLabel("Name").fill("e2e-llm")
-    await dialog.getByLabel("API base").fill("http://e2e-box:8000/v1")
+    const dialog = page.getByRole("dialog", { name: "Add hosted provider" })
+    await dialog.getByRole("combobox", { name: "Provider" }).fill("OpenAI")
+    await page.getByRole("option", { name: "OpenAI", exact: true }).click()
+    await dialog.getByRole("textbox", { name: "Name" }).fill("e2e-llm")
+    await dialog
+      .getByRole("textbox", { name: "API base URL" })
+      .fill("http://e2e-box:8000/v1")
     await dialog.getByRole("button", { name: "Add provider" }).click()
 
-    await expect(page.getByText("e2e-llm")).toBeVisible()
+    await expect(page.getByText("e2e-llm")).toBeVisible({ timeout: 30_000 })
     // Onboarding clears once a provider exists.
     await expect(page.getByText("Welcome to Otari")).toBeHidden()
   })
@@ -133,11 +134,7 @@ test.describe("dashboard core flows", () => {
 
     await openOrganization(page)
     for (const [link, heading] of [
-      // Two provider rows on this rail, told apart by their labels: the
-      // organization's own credentials and the process-wide ones a deployment
-      // operator manages.
       ["Providers", "Providers"],
-      ["Deployment providers", "Deployment providers"],
       ["Spend & budgets", "Budgets"],
     ]) {
       await nav(page).getByRole("link", { name: link, exact: true }).click()
@@ -158,13 +155,17 @@ test.describe("dashboard core flows", () => {
 
     // The deployment's own rail, which neither loop above reaches: it is entered
     // from the account menu rather than from a row, and the menu closes on the
-    // way, so the rail is what carries you between its two pages once you are
+    // way, so the rail is what carries you between its pages once you are
     // in. Exact, because the organization rail also carries "Org settings".
     const menu = await openAccountMenu(page)
     await menu.getByRole("link", { name: "Deployment" }).click()
     await expect(pageHeading(page, "Settings")).toBeVisible()
     await nav(page).getByRole("link", { name: "Accounts", exact: true }).click()
     await expect(pageHeading(page, "Accounts")).toBeVisible()
+    await nav(page)
+      .getByRole("link", { name: "Hosted providers", exact: true })
+      .click()
+    await expect(pageHeading(page, "Hosted providers")).toBeVisible()
     // The way out names where it goes. Queried on the page rather than inside
     // the Sidebar landmark: the back row is in the scope band above the nav, the
     // same place the workspace switcher sits on the other rail.

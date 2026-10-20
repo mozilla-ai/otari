@@ -1,5 +1,16 @@
 """The pricing domain: which meter a rate prices, what an attempt costs at it, and the models.dev default prices."""
 
+from gateway.services.pricing._deployment_pricing_service import DeploymentPricingService
+from gateway.services.pricing._tool_pricing import (
+    PROVIDER_TOOL_LIST_PRICES,
+    ToolCharges,
+    ToolRate,
+    ToolRateLookup,
+    UnpricedToolLabel,
+    charge_tool_calls,
+    paid_by_the_deployment,
+    tool_rate_lookup,
+)
 from gateway.services.pricing._usage_pricing import (
     UsageCharge,
     billed_search_units,
@@ -40,6 +51,7 @@ from gateway.services.pricing.models_dev_index import (
 
 __all__ = [
     "BUNDLED_SNAPSHOT_NAME",
+    "DeploymentPricingService",
     "MAX_RATE_PER_MILLION",
     "MAX_RESIDENT_GENERATIONS",
     "ModelsDevPrice",
@@ -47,6 +59,11 @@ __all__ = [
     "PriceGeneration",
     "PriceTier",
     "PriceTimeline",
+    "PROVIDER_TOOL_LIST_PRICES",
+    "ToolCharges",
+    "ToolRate",
+    "ToolRateLookup",
+    "UnpricedToolLabel",
     "UsageCharge",
     "active_generations",
     "active_timeline",
@@ -54,9 +71,11 @@ __all__ = [
     "billed_search_units",
     "bundled_generation",
     "can_price",
+    "charge_tool_calls",
     "current_index",
     "invalid_rate_count",
     "load_bundled_index",
+    "paid_by_the_deployment",
     "parse_rate",
     "price_usage",
     "request_rate",
@@ -64,6 +83,7 @@ __all__ = [
     "resolve_as_of",
     "select_generation",
     "set_accepted_generations",
+    "tool_rate_lookup",
     "trim_catalog",
     "validated_units",
 ]

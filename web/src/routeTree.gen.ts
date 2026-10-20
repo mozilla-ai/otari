@@ -15,14 +15,13 @@ import { Route as AccountRouteImport } from './routes/account'
 import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as AliasesRouteImport } from './routes/aliases'
 import { Route as BudgetsRouteImport } from './routes/budgets'
-import { Route as DocsRouteImport } from './routes/docs'
+import { Route as HealthChecksRouteImport } from './routes/health-checks'
 import { Route as InvitationsRouteImport } from './routes/invitations'
 import { Route as KeysRouteImport } from './routes/keys'
 import { Route as MembersRouteImport } from './routes/members'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as OrganizationRouteImport } from './routes/organization'
 import { Route as PlaygroundRouteImport } from './routes/playground'
-import { Route as ProvidersRouteImport } from './routes/providers'
 import { Route as RoutingRouteImport } from './routes/routing'
 import { Route as SessionsRouteImport } from './routes/sessions'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -30,6 +29,7 @@ import { Route as ToolsRouteImport } from './routes/tools'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
+import { Route as AdminHostedProvidersRouteImport } from './routes/admin.hosted-providers'
 import { Route as ModelsIndexRouteImport } from './routes/models.index'
 import { Route as ModelsSplatRouteImport } from './routes/models.$'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
@@ -77,9 +77,9 @@ const BudgetsRoute = BudgetsRouteImport.update({
   path: '/budgets',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DocsRoute = DocsRouteImport.update({
-  id: '/docs',
-  path: '/docs',
+const HealthChecksRoute = HealthChecksRouteImport.update({
+  id: '/health-checks',
+  path: '/health-checks',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InvitationsRoute = InvitationsRouteImport.update({
@@ -110,11 +110,6 @@ const OrganizationRoute = OrganizationRouteImport.update({
 const PlaygroundRoute = PlaygroundRouteImport.update({
   id: '/playground',
   path: '/playground',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProvidersRoute = ProvidersRouteImport.update({
-  id: '/providers',
-  path: '/providers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RoutingRoute = RoutingRouteImport.update({
@@ -150,6 +145,11 @@ const WorkspacesRoute = WorkspacesRouteImport.update({
 const AdminAccountsRoute = AdminAccountsRouteImport.update({
   id: '/admin/accounts',
   path: '/admin/accounts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminHostedProvidersRoute = AdminHostedProvidersRouteImport.update({
+  id: '/admin/hosted-providers',
+  path: '/admin/hosted-providers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ModelsIndexRoute = ModelsIndexRouteImport.update({
@@ -241,14 +241,13 @@ export interface FileRoutesByFullPath {
   '/activity': typeof ActivityRoute
   '/aliases': typeof AliasesRoute
   '/budgets': typeof BudgetsRoute
-  '/docs': typeof DocsRoute
+  '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
   '/models': typeof ModelsRouteWithChildren
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
-  '/providers': typeof ProvidersRoute
   '/routing': typeof RoutingRouteWithChildren
   '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
@@ -256,6 +255,7 @@ export interface FileRoutesByFullPath {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -280,17 +280,17 @@ export interface FileRoutesByTo {
   '/activity': typeof ActivityRoute
   '/aliases': typeof AliasesRoute
   '/budgets': typeof BudgetsRoute
-  '/docs': typeof DocsRoute
+  '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
   '/playground': typeof PlaygroundRoute
-  '/providers': typeof ProvidersRoute
   '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -316,14 +316,13 @@ export interface FileRoutesById {
   '/activity': typeof ActivityRoute
   '/aliases': typeof AliasesRoute
   '/budgets': typeof BudgetsRoute
-  '/docs': typeof DocsRoute
+  '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
   '/models': typeof ModelsRouteWithChildren
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
-  '/providers': typeof ProvidersRoute
   '/routing': typeof RoutingRouteWithChildren
   '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
@@ -331,6 +330,7 @@ export interface FileRoutesById {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -357,14 +357,13 @@ export interface FileRouteTypes {
     | '/activity'
     | '/aliases'
     | '/budgets'
-    | '/docs'
+    | '/health-checks'
     | '/invitations'
     | '/keys'
     | '/members'
     | '/models'
     | '/organization'
     | '/playground'
-    | '/providers'
     | '/routing'
     | '/sessions'
     | '/settings'
@@ -372,6 +371,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/admin/hosted-providers'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -396,17 +396,17 @@ export interface FileRouteTypes {
     | '/activity'
     | '/aliases'
     | '/budgets'
-    | '/docs'
+    | '/health-checks'
     | '/invitations'
     | '/keys'
     | '/members'
     | '/playground'
-    | '/providers'
     | '/sessions'
     | '/settings'
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/admin/hosted-providers'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -431,14 +431,13 @@ export interface FileRouteTypes {
     | '/activity'
     | '/aliases'
     | '/budgets'
-    | '/docs'
+    | '/health-checks'
     | '/invitations'
     | '/keys'
     | '/members'
     | '/models'
     | '/organization'
     | '/playground'
-    | '/providers'
     | '/routing'
     | '/sessions'
     | '/settings'
@@ -446,6 +445,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/admin/hosted-providers'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -471,14 +471,13 @@ export interface RootRouteChildren {
   ActivityRoute: typeof ActivityRoute
   AliasesRoute: typeof AliasesRoute
   BudgetsRoute: typeof BudgetsRoute
-  DocsRoute: typeof DocsRoute
+  HealthChecksRoute: typeof HealthChecksRoute
   InvitationsRoute: typeof InvitationsRoute
   KeysRoute: typeof KeysRoute
   MembersRoute: typeof MembersRoute
   ModelsRoute: typeof ModelsRouteWithChildren
   OrganizationRoute: typeof OrganizationRouteWithChildren
   PlaygroundRoute: typeof PlaygroundRoute
-  ProvidersRoute: typeof ProvidersRoute
   RoutingRoute: typeof RoutingRouteWithChildren
   SessionsRoute: typeof SessionsRoute
   SettingsRoute: typeof SettingsRoute
@@ -486,6 +485,7 @@ export interface RootRouteChildren {
   UsageRoute: typeof UsageRoute
   WorkspacesRoute: typeof WorkspacesRoute
   AdminAccountsRoute: typeof AdminAccountsRoute
+  AdminHostedProvidersRoute: typeof AdminHostedProvidersRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -532,11 +532,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BudgetsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/docs': {
-      id: '/docs'
-      path: '/docs'
-      fullPath: '/docs'
-      preLoaderRoute: typeof DocsRouteImport
+    '/health-checks': {
+      id: '/health-checks'
+      path: '/health-checks'
+      fullPath: '/health-checks'
+      preLoaderRoute: typeof HealthChecksRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/invitations': {
@@ -579,13 +579,6 @@ declare module '@tanstack/react-router' {
       path: '/playground'
       fullPath: '/playground'
       preLoaderRoute: typeof PlaygroundRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/providers': {
-      id: '/providers'
-      path: '/providers'
-      fullPath: '/providers'
-      preLoaderRoute: typeof ProvidersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/routing': {
@@ -635,6 +628,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/accounts'
       fullPath: '/admin/accounts'
       preLoaderRoute: typeof AdminAccountsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/hosted-providers': {
+      id: '/admin/hosted-providers'
+      path: '/admin/hosted-providers'
+      fullPath: '/admin/hosted-providers'
+      preLoaderRoute: typeof AdminHostedProvidersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/models/': {
@@ -827,14 +827,13 @@ const rootRouteChildren: RootRouteChildren = {
   ActivityRoute: ActivityRoute,
   AliasesRoute: AliasesRoute,
   BudgetsRoute: BudgetsRoute,
-  DocsRoute: DocsRoute,
+  HealthChecksRoute: HealthChecksRoute,
   InvitationsRoute: InvitationsRoute,
   KeysRoute: KeysRoute,
   MembersRoute: MembersRoute,
   ModelsRoute: ModelsRouteWithChildren,
   OrganizationRoute: OrganizationRouteWithChildren,
   PlaygroundRoute: PlaygroundRoute,
-  ProvidersRoute: ProvidersRoute,
   RoutingRoute: RoutingRouteWithChildren,
   SessionsRoute: SessionsRoute,
   SettingsRoute: SettingsRoute,
@@ -842,6 +841,7 @@ const rootRouteChildren: RootRouteChildren = {
   UsageRoute: UsageRoute,
   WorkspacesRoute: WorkspacesRoute,
   AdminAccountsRoute: AdminAccountsRoute,
+  AdminHostedProvidersRoute: AdminHostedProvidersRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
