@@ -20,8 +20,12 @@ async def apply_declared_key(
     end_user_budget_ids: list[str] | None,
     workspace_id: uuid.UUID,
     fingerprint: Callable[[str], str],
-) -> str:
+) -> tuple[str, bool]:
     """Create the key ``config_name`` or write the declared values over it, and return its id.
+
+    Returns whether anything was written too. A key config.yml already wrote this
+    same entry over (its ``declared_digest``) is left as it is, so a change made
+    through the API since, such as deactivating it, survives the start.
 
     The key is found by its config name, or else adopted by its secret, which is
     how a key minted through the API comes under config.yml with its id, its end
@@ -32,7 +36,10 @@ async def apply_declared_key(
     secret = spec.secret.get_secret_value()
     key_hash = hash_key(secret)
 
+    digest = spec.declaration_digest()
     key = await keys.get_by_config_name(config_name)
+    if key is not None and key.declared_digest == digest:
+        return key.id, False
     if key is None:
         holder = await keys.get_by_hash(key_hash)
         if holder is not None and holder.config_name is not None and holder.config_name in declared_names:
@@ -60,8 +67,10 @@ async def apply_declared_key(
         "is_service_key": spec.is_service_key,
         "end_user_budget_id": spec.end_user_budget_id,
         "end_user_budget_ids": end_user_budget_ids,
+        "max_end_users": spec.max_end_users,
         "exclude_from_budget": spec.exclude_from_budget,
         "reject_user_mismatch": spec.reject_user_mismatch,
+        "declared_digest": digest,
     }
     if key.key_hash != key_hash:
         holder = await keys.get_by_hash(key_hash)
@@ -74,4 +83,4 @@ async def apply_declared_key(
             "last_used_at": None,
         }
     key = await keys.update(key, changes)
-    return key.id
+    return key.id, True

@@ -102,6 +102,7 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
                 errors=sum(1 for span in turn.children + turn.steps if span.outcome == "error" and not span.recovered),
                 input_tokens=sum(span.input_tokens or 0 for span in llm),
                 output_tokens=sum(span.output_tokens or 0 for span in llm),
+                cache_read_tokens=sum(span.cache_read_tokens or 0 for span in llm),
                 cost=sum((span.cost_snapshot or Decimal(0) for span in llm), Decimal(0)),
                 continued=turn.continued,
             )

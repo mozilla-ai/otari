@@ -1,6 +1,7 @@
 """Per-request accounting for tools the gateway runs itself.
 
-A gateway-run tool call (``otari_web_search`` → :class:`~gateway.services.web_search_backend.WebSearchBackend`,
+A gateway-run tool call (``otari_web_search`` → the tools domain's ``WebSearchBackend``, or the older
+:class:`~gateway.services.web_retrieval_backend.WebRetrievalBackend`,
 ``otari_code_execution`` → :class:`~gateway.services.sandbox_backend.SandboxBackend`,
 or any MCP tool) costs the operator real money at a search provider, a sandbox,
 or an MCP server, and until now none of it was recorded: the request's usage row
@@ -19,10 +20,11 @@ the stream is exhausted, and ``streaming_generator`` only awaits ``on_complete``
 afterwards. A tally stashed on the backend would be read after teardown.
 
 Billable vs failed is decided on the ``[tool error]`` sentinel rather than on an
-exception, because the backends disagree about which they use: ``MCPClientPool``
-and ``SandboxBackend`` return the sentinel as a normal value, ``WebSearchBackend``
-returns it for an empty query but raises ``WebSearchNotReachableError`` when the
-backend is unreachable. A failed call is counted and never billed.
+exception, because the backends disagree about which they use: ``MCPClientPool``,
+``SandboxBackend`` and the web search and fetch backends on the libraries return the
+sentinel as a normal value, while the older ``WebRetrievalBackend`` returns it for an
+empty query but raises ``WebSearchNotReachableError`` when its search backend is
+unreachable. A failed call is counted and never billed.
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ from decimal import Decimal
 
 from gateway.core.metered_pricing import to_decimal
 from gateway.models.money import MAX_USD_COST
-from gateway.types.tool_charges import PROVIDER_WEB_SEARCH_TOOL, LabelCalls, provider_web_search_label
+from gateway.types.tool_charges import PROVIDER_WEB_SEARCH_TOOL, LabelCalls, RateKey, provider_web_search_label
 
 # Every tool backend marks a recoverable failure by prefixing the string it hands
 # back to the model. The tool loop's own error path uses the same prefix, so this
@@ -87,7 +89,7 @@ class ToolUsageTally:
 
     def __init__(self) -> None:
         self._counts: dict[str, dict[str, int]] = {}
-        self._labels: dict[tuple[str, str | None, tuple[str, ...] | None, bool | None], _LabelTotals] = {}
+        self._labels: dict[tuple[str, str | None, tuple[RateKey, ...] | None, bool | None], _LabelTotals] = {}
         self._overflowed = False
 
     def record_result(
@@ -96,7 +98,7 @@ class ToolUsageTally:
         text: str,
         *,
         label: str | None = None,
-        rate_keys: tuple[str, ...] | None = None,
+        rate_keys: tuple[RateKey, ...] | None = None,
         cost: Decimal | None = None,
         enrichment_cost: Decimal | None = None,
     ) -> None:
@@ -167,10 +169,6 @@ class ToolUsageTally:
 
     def is_empty(self) -> bool:
         return not self._counts
-
-    def billable_calls(self) -> dict[str, int]:
-        """Successful calls per tool."""
-        return {tool: counts["billed"] for tool, counts in self._counts.items() if counts["billed"]}
 
     def label_calls(self) -> list[LabelCalls]:
         """Successful calls per tool and label, the units settlement prices."""

@@ -3,13 +3,11 @@ import { Fragment } from "react"
 import { FiAlertTriangle, FiArrowRight } from "react-icons/fi"
 
 import type { AutomaticFallback, FallbackOffering } from "@/client"
-import { Button } from "@/design-system/actions/Button"
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { Popover } from "@/design-system/overlays/Popover"
 import { docsSourceHref } from "@/shared/helpers/docs"
 import { formatNumber } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
@@ -20,63 +18,6 @@ function Warning({ children }: { children: string }) {
       <FiAlertTriangle aria-hidden className="size-3 shrink-0" />
       {children}
     </span>
-  )
-}
-
-const TOOL_NAMES: Record<string, string> = {
-  web_search: "search",
-  web_fetch: "fetch",
-  code_execution: "code",
-}
-
-/**
- * Every tool and who runs it. The caption names the provider's own where it has
- * any, so a mixed provider (OpenAI runs its search and code, Otari its fetch)
- * keeps the short label and the detail opens from it.
- */
-function toolsDetail(offering: FallbackOffering): string {
-  const names = (tools: string[]) =>
-    tools.map((tool) => TOOL_NAMES[tool] ?? tool).join(", ")
-  return [
-    offering.own_tools.length > 0 ? `Own: ${names(offering.own_tools)}` : "",
-    offering.otari_tools.length > 0
-      ? `Otari's: ${names(offering.otari_tools)}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join(" · ")
-}
-
-/**
- * The caption, and for a provider whose tools are split between it and Otari a
- * press that opens who runs which: a hover alone would leave it unsaid on a
- * phone and to a keyboard.
- */
-function ToolsCaption({
-  offering,
-  caption,
-}: {
-  offering: FallbackOffering
-  caption: string
-}) {
-  const isMixed =
-    offering.own_tools.length > 0 && offering.otari_tools.length > 0
-  if (!isMixed)
-    return <span className="text-caption text-subtle">{caption}</span>
-  return (
-    <Popover
-      label={`Tools on ${providerName(offering.provider)}`}
-      trigger={
-        <Button
-          size="sm"
-          className="h-auto min-h-11 justify-start px-0 text-caption text-subtle underline decoration-dotted underline-offset-2 md:min-h-0"
-        >
-          {caption}
-        </Button>
-      }
-    >
-      <p className="text-sm">{toolsDetail(offering)}</p>
-    </Popover>
   )
 }
 
@@ -128,7 +69,7 @@ function Chain({ offerings }: { offerings: FallbackOffering[] }) {
                 {providerName(offering.provider)}
               </span>
               {caption ? (
-                <ToolsCaption offering={offering} caption={caption} />
+                <span className="text-caption text-subtle">{caption}</span>
               ) : null}
             </span>
           </Fragment>
@@ -142,12 +83,13 @@ function Chain({ offerings }: { offerings: FallbackOffering[] }) {
  * The order cell: the chain, or the one provider a model's traffic reaches and
  * a warning that it has no backup. Traffic that names one provider has none
  * even where the catalog offers more, marked "pinned" because the caller can
- * fix it by sending the catalog ID.
+ * fix it by sending the catalog ID. A model counts as pinned once most of its
+ * requests are, so a handful sent by catalog ID does not make it read covered.
  */
 function OrderCell({ row }: { row: AutomaticFallback }) {
   const { offerings } = row
   const hasBackup = byProvider(offerings).length > 1
-  const isPinned = hasBackup && row.requests > 0 && row.pinned >= row.requests
+  const isPinned = hasBackup && row.pinned * 2 > row.requests
   if (hasBackup && !isPinned) {
     return <Chain offerings={offerings} />
   }

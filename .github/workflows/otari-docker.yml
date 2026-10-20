@@ -11,10 +11,8 @@ on:
       - 'any-fetch/**'
       - 'alembic/**'
       # The image builds the dashboard bundle in its web stage rather than
-      # shipping a committed one, so these are image inputs too. docs/dashboard.md
-      # is bundled into the app (web/src/features/docs/DocsPage.tsx).
+      # shipping a committed one, so these are image inputs too.
       - 'web/**'
-      - 'docs/dashboard.md'
       - 'Dockerfile'
       - '.dockerignore'
       - 'docker-compose*.yml'

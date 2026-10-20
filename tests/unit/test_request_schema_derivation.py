@@ -29,7 +29,7 @@ from any_llm.types.completion import CompletionParams
 from any_llm.types.image import ImageGenerationParams
 from any_llm.types.messages import MessagesParams
 from any_llm.types.responses import ResponsesParams
-from pydantic import BaseModel, Field, ValidationError, create_model
+from pydantic import BaseModel, Field, ValidationError
 
 from gateway.api.routes._schema_derive import (
     PARAM_FIELD_RENAMES,
@@ -210,14 +210,14 @@ def test_no_derived_schema_exposes_a_sensitive_param() -> None:
 
 def test_sensitive_params_are_dropped_when_deriving() -> None:
     """If a future any-llm ``*Params`` grows a sensitive field, it is not derived onto the schema."""
-    params = create_model(
-        "ParamsWithSecret",
-        model_id=(str, ...),
-        api_key=(str | None, None),
-        base_url=(str | None, None),
-        temperature=(float | None, None),
-    )
-    derived = derive_request_base(params, base_name="DerivedWithSecret")
+
+    class ParamsWithSecret(BaseModel):
+        model_id: str
+        api_key: str | None = None
+        base_url: str | None = None
+        temperature: float | None = None
+
+    derived = derive_request_base(ParamsWithSecret, base_name="DerivedWithSecret")
     fields = set(derived.model_fields)
     assert "api_key" not in fields and "base_url" not in fields
     assert {"model", "temperature"} <= fields
@@ -241,12 +241,12 @@ def test_sensitive_params_are_stripped_before_forwarding() -> None:
 
 def test_default_factory_is_preserved_when_deriving() -> None:
     """A ``default_factory`` field stays optional with its factory, not forced required."""
-    params = create_model(
-        "ParamsWithFactory",
-        model_id=(str, ...),
-        tags=(list[str], Field(default_factory=list)),
-    )
-    derived = derive_request_base(params, base_name="DerivedWithFactory")
+
+    class ParamsWithFactory(BaseModel):
+        model_id: str
+        tags: list[str] = Field(default_factory=list)
+
+    derived = derive_request_base(ParamsWithFactory, base_name="DerivedWithFactory")
     instance = derived(model="m")
     assert instance.tags == []
     assert not derived.model_fields["tags"].is_required()

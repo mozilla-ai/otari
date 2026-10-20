@@ -135,10 +135,10 @@ may also define:
 The plaintext key is returned only when it is created or rotated. Store it then.
 Rotation preserves the key record and invalidates the previous secret.
 A key can also be declared in config.yml with a secret you choose, in which
-case config.yml owns it and writes it back at every start; see
+case config.yml owns it and writes it back whenever its entry changes; see
 [Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
-Rotating a declared key through the API lasts only until the next start, which
-restores the secret config.yml declares.
+Rotating a declared key through the API lasts until config.yml changes the
+key's entry or its secret, which restores the secret config.yml declares.
 
 A budget-exempt key is also exempt from `require_pricing`. Reserve such keys for
 usage import or other intentional observability-only traffic.
@@ -230,12 +230,37 @@ A request that names nobody, or the key's own user, bills the key's user as it
 would on any other key. Blocking the key's user stops its end users too.
 
 Each distinct `user` value creates an end user, whether or not the request is
-then admitted, and nothing else caps how many a key can create. Set a rate
-limit on a deployment that issues service keys, and send a stable id per end
-user rather than a per-session or per-request value. An id is at most 256
+then admitted. Unless the key sets `max_end_users` (see
+[Capping a key's end users](#capping-a-keys-end-users)), nothing caps how many
+it can create. Set a rate limit on a deployment that issues service keys, and
+send a stable id per end user rather than a per-session or per-request value. An id is at most 256
 characters and may otherwise be any string, `/` included, such as a base64 key
 id. The routes below name every end user with the `external_id` query
 parameter, which carries any id intact.
+
+### Capping a key's end users
+
+`max_end_users` on a service key (in `POST` or `PATCH /api/v1/keys`, or in
+config.yml) caps how many live end users it may have. A request that would
+create one more, or revive one that was deleted, is refused with 403 and the
+code `end_user_limit_reached`, and nothing is created; the end users the key
+already has keep working. Deleting end users makes room again. `null`, the
+default, is no cap, and `0` admits no new end user at all.
+
+The cap counts the end users of the key's user that are on a budget the key may
+assign (its `end_user_budget_ids`, or its default alone), or every end user of
+that user when the key assigns none. A key with a list and no default also
+counts the end users on no budget, which is where a request naming none starts
+one. So two service keys of one user, each with budgets of its own, such as one
+for signed-in users and one for guests, keep separate caps. For a key with
+budgets of its own, an end user moved to a budget outside its list stops
+counting toward it, and moving one onto the list from outside takes a place, so
+that move is refused with `end_user_limit_reached` when the key is full. A key
+that assigns no budget counts every end user wherever it is moved.
+
+Replicas admitting end users at once cannot exceed the cap: each new or revived
+end user is counted and created while the key's user is locked. Requests from
+live end users never take that lock.
 
 ### Several budgets on one key
 
@@ -305,8 +330,9 @@ api_keys:
 `ceiling` is the key's own ceiling, the scoped budget on the API key that pools
 every end user. The service reads the same `MLPA_SERVICE_KEY` and presents it as
 its API key, so nothing has to hand a freshly minted secret from one to the
-other, and a restart or a second replica does not change it. Every start writes
-the declared settings back over changes made through the API; see
+other, and a restart or a second replica does not change it. A start writes
+the declared settings back over changes made through the API only when the
+key's entry in config.yml changed; see
 [What config.yml owns](configuration.md#what-configyml-owns).
 
 ### Managing end users

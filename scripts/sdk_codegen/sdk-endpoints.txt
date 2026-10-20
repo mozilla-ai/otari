@@ -137,6 +137,7 @@ POST /api/v1/hosted-providers/test                  # dashboard-only
 POST /api/v1/hosted-providers/reencrypt             # dashboard-only
 GET /api/v1/hosted-providers/migration              # dashboard-only
 POST /api/v1/hosted-providers/migration             # dashboard-only
+DELETE /api/v1/hosted-providers/migration/{instance} # dashboard-only
 PATCH /api/v1/hosted-providers/{provider}           # dashboard-only
 DELETE /api/v1/hosted-providers/{provider}          # dashboard-only
 GET /api/v1/hosted-providers/{provider}/models      # dashboard-only
@@ -146,12 +147,6 @@ GET /api/v1/hosted-providers/{provider}/available-models                 # dashb
 PATCH /api/v1/hosted-providers/{provider}/models/{model_id}              # dashboard-only
 DELETE /api/v1/hosted-providers/{provider}/models/{model_id}             # dashboard-only
 # Provider credentials (runtime provider management)
-GET /api/v1/provider-credentials                    # not yet wrapped
-POST /api/v1/provider-credentials                   # not yet wrapped
-POST /api/v1/provider-credentials/test              # not yet wrapped
-PATCH /api/v1/provider-credentials/{instance}       # not yet wrapped
-DELETE /api/v1/provider-credentials/{instance}      # not yet wrapped
-POST /api/v1/provider-credentials/{instance}/test   # not yet wrapped
 # Providers catalog
 GET /api/v1/providers                               # not yet wrapped
 GET /api/v1/providers/catalog                       # not yet wrapped
@@ -165,6 +160,11 @@ GET /api/v1/settings                                # not yet wrapped
 PATCH /api/v1/settings                              # not yet wrapped
 GET /api/v1/settings/mail                           # not yet wrapped
 POST /api/v1/settings/mail/test                     # not yet wrapped
+GET /api/v1/health-checks                           # operator dashboard only
+POST /api/v1/health-checks/disable-failing          # operator dashboard only
+POST /api/v1/health-checks/run                      # operator dashboard only
+GET /api/v1/health-checks/settings                  # operator dashboard only
+PATCH /api/v1/health-checks/settings                # operator dashboard only
 GET /api/v1/settings/maintenance-mode               # not yet wrapped
 PATCH /api/v1/settings/maintenance-mode             # not yet wrapped
 # Model discovery / metadata
@@ -298,7 +298,6 @@ POST /api/v1/catalog/selectors/refresh              # not yet wrapped
 # Providers
 GET /api/v1/providers/catalog/{provider_id}         # not yet wrapped
 GET /api/v1/providers/health                        # not yet wrapped
-POST /api/v1/provider-credentials/reencrypt         # not yet wrapped
 # Built-in tool settings and search
 GET /api/v1/tools                                   # not yet wrapped
 GET /api/v1/tool-settings                           # not yet wrapped
@@ -508,8 +507,10 @@ DELETE /api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}             # 
 # by id in `mcp_server_ids` on a completion request, which is already covered.
 GET /api/v1/workspaces/{workspace_id}/mcp-servers                             # operator surface
 POST /api/v1/workspaces/{workspace_id}/mcp-servers                            # operator surface
+POST /api/v1/workspaces/{workspace_id}/mcp-servers/check                      # operator surface
 PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}               # operator surface
 DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}              # operator surface
+POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check          # operator surface
 # Web-search backend (otari#882): the SearXNG-shaped endpoint one gateway calls
 # on another, authenticated by a shared deployment token rather than an API key.
 # Its caller is a data-plane gateway, not an application, and no SDK holds that

@@ -22,6 +22,7 @@ function override(
   return {
     id: "override-1",
     organization_id: "org-1",
+    kind: "model",
     model_key: "openai:gpt-4o",
     input_price_per_million: 2.5,
     output_price_per_million: 5,

@@ -56,7 +56,7 @@ from gateway.core.config import (
     GatewayConfig,
     provider_credential_env_names,
 )
-from gateway.core.error_codes import MANAGED_CREDENTIAL_UNSUPPORTED, PROVIDER_NOT_CONFIGURED
+from gateway.core.error_codes import PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import FORBIDDEN_ENDPOINT_DEFAULTS
 from gateway.log_config import logger
 from gateway.services.alias_service import resolve_effective_alias
@@ -377,14 +377,33 @@ def _mapping_declares_a_credential(mapping: Mapping[str, Any]) -> bool:
     return False
 
 
+def configured_instances(config: GatewayConfig) -> frozenset[str]:
+    """The ``providers:`` instances the configuration declares, a dropped uncredentialed one included."""
+    baseline = config._provider_baseline
+    return frozenset(config.providers if baseline is None else baseline)
+
+
+def settle_configured_providers(config: GatewayConfig) -> None:
+    """Rebuild ``providers:`` from what the configuration declares, then drop the entries that declare no credential.
+
+    The baseline is captured on the first start and kept, so a later start on
+    the same config begins from the declaration again, and a dropped entry's
+    name stays reserved (see :func:`configured_instances`).
+    """
+    if config._provider_baseline is None:
+        config._provider_baseline = {name: dict(entry) for name, entry in config.providers.items()}
+    config.providers = {name: dict(entry) for name, entry in config._provider_baseline.items()}
+    prune_uncredentialed_providers(config)
+
+
 def prune_uncredentialed_providers(config: GatewayConfig) -> dict[str, tuple[str, ...]]:
     """Drop every ``providers:`` entry that declares no credential, and say so once.
 
     A hollow entry is worse than no entry: an ``instance:model`` selector that
     matches it never consults an organization's own key for the same provider,
     and a bare ``provider:model`` selector is gated and priced as if the
-    deployment served it, so the credential an operator stored on the dashboard
-    goes unused while every request fails upstream. Returns what was dropped,
+    deployment served it, so a hosted provider of the same name goes unused
+    while every request fails upstream. Returns what was dropped,
     keyed by instance, with the variables that would have filled each.
     """
     pruned = {
@@ -399,7 +418,7 @@ def prune_uncredentialed_providers(config: GatewayConfig) -> dict[str, tuple[str
         _uncredentialed_warned.add(instance)
         logger.warning(
             "providers.%s declares no credential, so the entry is ignored. Name the key it reads "
-            "(api_key: ${%s}), or store one for the provider through the dashboard.",
+            "(api_key: ${%s}), or add the provider on the Hosted providers page.",
             instance,
             # codeql[py/clear-text-logging-sensitive-data]
             env_names[0],
@@ -992,10 +1011,6 @@ class MissingCredential:
 
     @classmethod
     def from_error(cls, exc: MissingApiKeyError) -> "MissingCredential":
-        if isinstance(exc, ManagedCredentialUnsupportedError):
-            return ManagedCredentialUnsupported(
-                provider=exc.provider_name or "unknown", env_var=None, selectors=(exc.selector,), surface=exc.surface
-            )
         return cls(provider=exc.provider_name or "unknown", env_var=exc.env_var_name or None)
 
     def behind_alias(self, alias: str | None) -> "MissingCredential":
@@ -1007,7 +1022,7 @@ class MissingCredential:
         if self.alias is not None:
             return (
                 f"No credential is configured for the provider behind model '{self.alias}'. "
-                "Declare it under providers: in config.yml, store it on the Providers page, "
+                "Declare it under providers: in config.yml, add it on the Hosted providers page, "
                 "or add an organization provider key."
             )
         # The variable is offered as what a declaration reads its key from: set
@@ -1016,70 +1031,9 @@ class MissingCredential:
         declare = f" (api_key: ${{{variable}}})" if variable else ""
         return (
             f"No credential is configured for provider '{self.provider}'. "
-            f"Declare it under providers: in config.yml{declare}, store it on the Providers page, "
+            f"Declare it under providers: in config.yml{declare}, add it on the Hosted providers page, "
             "or add an organization provider key."
         )
-
-
-# What a managed-credential refusal names as the place the caller reached them through.
-MANAGED_SURFACE_ROUTING_POLICY = "a routing policy with fallbacks"
-MANAGED_SURFACE_BATCHES = "batches"
-
-
-def managed_credential_unsupported_detail(selectors: Sequence[str], surface: str) -> str:
-    """Why a model offered only on the deployment's managed credentials was refused on ``surface``."""
-    names = ", ".join(f"'{selector}'" for selector in sorted(set(selectors)))
-    verb = "is" if len(set(selectors)) == 1 else "are"
-    return (
-        f"{names} {verb} offered on this deployment's managed credentials only through Chat Completions, "
-        f"Messages and Responses with a single model, not through {surface}. "
-        "Use one of those, or add your own provider key."
-    )
-
-
-class ManagedCredentialUnsupportedError(MissingApiKeyError):
-    """Nothing declared serves a candidate the deployment offers only on its managed credentials.
-
-    A ``MissingApiKeyError``, so every path that skips or refuses a candidate
-    missing a key treats this one alike, while :func:`missing_credential` reads
-    it as :class:`ManagedCredentialUnsupported`. ``selector`` is the name the
-    caller wrote (an alias or a policy), never the target behind it.
-    """
-
-    def __init__(self, provider_name: str, *, selector: str, surface: str) -> None:
-        self.env_var_name = ""
-        self.selector = selector
-        self.surface = surface
-        AnyLLMError.__init__(
-            self, managed_credential_unsupported_detail([selector], surface), provider_name=provider_name
-        )
-
-
-@dataclass(frozen=True)
-class ManagedCredentialUnsupported(MissingCredential):
-    """A missing credential the deployment would have supplied, on a path its managed credentials do not serve."""
-
-    selectors: tuple[str, ...] = ()
-    surface: str = ""
-    code: ClassVar[str] = MANAGED_CREDENTIAL_UNSUPPORTED
-
-    @property
-    def detail(self) -> str:
-        return managed_credential_unsupported_detail(self.selectors, self.surface)
-
-
-def shared_managed_refusal(missing: Sequence[MissingCredential]) -> ManagedCredentialUnsupported | None:
-    """The refusal for candidates that all lacked a credential, when any was offered only on managed credentials.
-
-    Named ahead of the others, because declaring a provider the deployment serves
-    on its own credentials is not the remedy for those. Each name the caller
-    wrote is named once, however many of its candidates were managed.
-    """
-    managed = [entry for entry in missing if isinstance(entry, ManagedCredentialUnsupported)]
-    if not managed:
-        return None
-    selectors = tuple(sorted({selector for entry in managed for selector in entry.selectors}))
-    return replace(managed[0], selectors=selectors)
 
 
 def missing_credential(exc: BaseException) -> MissingCredential | None:

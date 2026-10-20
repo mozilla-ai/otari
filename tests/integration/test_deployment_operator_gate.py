@@ -52,21 +52,24 @@ _DEPLOYMENT_WIDE_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/routing/policies"),
     ("GET", f"{API_ROOT}/routing/status"),
     ("GET", f"{API_ROOT}/models/discoverable"),
-    ("GET", f"{API_ROOT}/provider-credentials"),
     ("GET", f"{API_ROOT}/search-tools"),
     ("GET", f"{API_ROOT}/settings"),
     ("GET", f"{API_ROOT}/settings/mail"),
     ("GET", f"{API_ROOT}/settings/maintenance-mode"),
+    ("GET", f"{API_ROOT}/health-checks"),
+    # A run spends the deployment's provider credit.
+    ("POST", f"{API_ROOT}/health-checks/run"),
     ("POST", f"{API_ROOT}/pricing"),
 ]
 
 # The subset whose reach is worse than reading somebody else's rows: two that
-# take the deployment away from its operator, and the three that make the
-# gateway issue an outbound request to an address the caller supplies.
+# take the deployment away from its operator, and two that make the gateway
+# issue an outbound request to an address the caller supplies. The hosted
+# provider routes, which answer a non-operator 404, are swept in
+# ``test_hosted_providers_authz.py``.
 _ESCALATION_PROBES: list[tuple[str, str]] = [
     ("POST", f"{API_ROOT}/settings/master-key/rotate"),
     ("PATCH", f"{API_ROOT}/settings/maintenance-mode"),
-    ("POST", f"{API_ROOT}/provider-credentials/test"),
     ("POST", f"{API_ROOT}/tool-settings/web_search/test"),
     ("POST", f"{API_ROOT}/settings/mail/test"),
 ]

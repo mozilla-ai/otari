@@ -21,6 +21,7 @@ from gateway.types.tool_charges import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     ORGANIZATION_KEY_LABEL_PREFIX,
     LabelCalls,
+    RateKey,
     gateway_tool_pricing_key,
 )
 
@@ -36,7 +37,7 @@ PROVIDER_TOOL_LIST_PRICES: Mapping[str, Decimal] = {
 class ToolRate(NamedTuple):
     """The rate a call with no reported cost is priced at, and where it was found."""
 
-    rate_key: str
+    rate_key: RateKey
     #: USD per call.
     unit_rate: Decimal
     source: PriceSource
@@ -45,7 +46,7 @@ class ToolRate(NamedTuple):
 class ToolRateLookup(NamedTuple):
     """What a label's calls with no reported cost are priced under."""
 
-    rate_keys: tuple[str, ...]
+    rate_keys: tuple[RateKey, ...]
     #: True for a call the deployment pays for, which only the operator's override prices.
     operator_set_only: bool
 
@@ -56,7 +57,7 @@ class UnpricedToolLabel(NamedTuple):
     tool: str
     label: str
     #: The row an operator would add: the label's first rate key.
-    rate_key: str
+    rate_key: RateKey
     #: The calls that went unpriced: those that reported no cost.
     calls: int
 
@@ -124,7 +125,7 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
     # Keyed by tool and label, so two records of one label with different rate
     # keys still settle as one line.
     by_label: dict[tuple[str, str], tuple[int, Decimal]] = {}
-    unpriced: dict[tuple[str, str, str], UnpricedToolLabel] = {}
+    unpriced: dict[tuple[str, str, RateKey], UnpricedToolLabel] = {}
     for entry in calls:
         if entry.calls <= 0:
             continue

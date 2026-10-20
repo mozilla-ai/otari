@@ -37,9 +37,8 @@ class OrgProviderKeyUnknownProviderError(TenancyValidationError):
     ``org_provider_key_service.refresh_org_provider_cache``). Left unguarded,
     a typo, unexpected casing, or an unaliased value (``"OpenAI"``,
     ``"azure-openai"``, trailing whitespace) is accepted with a 201 and then
-    never resolves at dispatch, with no error at either point. Mirrors
-    ``/v1/provider-credentials``'s ``_validate_instance`` provider_type guard,
-    including ``PROVIDER_TYPE_ALIASES`` so an aliased name still resolves.
+    never resolves at dispatch, with no error at either point. Accepts
+    ``PROVIDER_TYPE_ALIASES`` too, so an aliased name still resolves.
     """
 
     def __init__(self, provider: str) -> None:
@@ -310,6 +309,11 @@ class HostedProviderKeyRequiredError(TenancyValidationError):
 class HostedProviderNotFoundError(TenancyNotFoundError):
     def __init__(self, provider: str) -> None:
         super().__init__(f"Hosted provider '{provider}' not found")
+
+
+class DeploymentProviderNotFoundError(TenancyNotFoundError):
+    def __init__(self, instance: str) -> None:
+        super().__init__(f"Deployment provider '{instance}' not found")
 
 
 class HostedProviderReadOnlyError(TenancyConflictError):

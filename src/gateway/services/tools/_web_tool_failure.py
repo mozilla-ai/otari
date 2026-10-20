@@ -22,6 +22,11 @@ from gateway.core.error_codes import (
 
 # The tag of a call refused because the request used up its calls, which reaches no provider.
 CALL_LIMIT_TAG = "call_limit"
+# A provider call that failed before it was sent: an instance's key that cannot be read, an
+# option its provider does not take, or any other exception, which is logged by its class alone.
+MISSING_CREDENTIAL_TAG = "missing_credential"
+UNSUPPORTED_OPTION_TAG = "unsupported_option"
+INTERNAL_ERROR_TAG = "internal_error"
 
 # A retry may help a timeout, a rate limit or a fault on the provider's side.
 _RETRYABLE_TAGS = frozenset({"timeout"})
@@ -67,3 +72,9 @@ class WebToolFailure:
         if self.status is not None:
             headers[ERROR_STATUS_HEADER] = str(self.status)
         return headers
+
+
+def failed_text(provider: str | None, action: str, tag: str, status: int | None) -> str:
+    """How a failed provider call reads: ``<provider> <action> failed (<tag>)``, plus ``, HTTP <status>`` if any."""
+    detail = tag if status is None else f"{tag}, HTTP {status}"
+    return f"{provider} {action} failed ({detail})"

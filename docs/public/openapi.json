@@ -2260,7 +2260,7 @@
                 "type": "null"
               }
             ],
-            "description": "'config' while config.yml declares this budget, in which case every start writes the declared values back over any change made through the API; null otherwise",
+            "description": "'config' while config.yml declares this budget, in which case a start writes the declared values back over any change made through the API when the budget's entry in config.yml changed, and once on the first start after upgrading to a version that tracks this; null otherwise",
             "title": "Origin"
           },
           "request_limit": {
@@ -4060,6 +4060,27 @@
         "title": "ChatCompletionRequest",
         "type": "object"
       },
+      "CheckFailure": {
+        "description": "Why a stored server failed its connection check.\n\nStored on the server's row and shown to whoever manages it, so each value\nnames a cause an operator can act on, and none carries anything the remote\nserver said. The first two are decided before any connection is opened.",
+        "enum": [
+          "unsafe_url",
+          "credentials_unavailable",
+          "unreachable",
+          "tls_failed",
+          "timeout",
+          "redirected",
+          "unauthorized",
+          "forbidden",
+          "not_found",
+          "server_error",
+          "http_error",
+          "not_mcp",
+          "limits_exceeded",
+          "connection_failed"
+        ],
+        "title": "CheckFailure",
+        "type": "string"
+      },
       "CheckVerdictRequest": {
         "additionalProperties": false,
         "description": "One verifier gate's verdict, as the caller's own verifier run produced it.\n\nMirrors ``JudgeVerdictRequest`` field-for-field: ``gate_id`` echoes back\nthe gate the policy itself named (same bound, same reason), ``outcome``\nis the caller's own report of the verifier's exit code (0/1/anything\nelse, mapped by the caller to pass/fail/error), and ``detail`` is the\nverifier's captured stdout, capped the same way ``reasoning`` is.",
@@ -4748,6 +4769,19 @@
             "description": "Optional name for the key",
             "title": "Key Name"
           },
+          "max_end_users": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most live end users this key may have on the budgets it assigns (all of its owner's end users when it assigns none). A request that would create one more is refused with 403 and end_user_limit_reached; deleting end users frees room. Null is no cap.",
+            "title": "Max End Users"
+          },
           "metadata": {
             "additionalProperties": true,
             "description": "Optional metadata",
@@ -4909,6 +4943,17 @@
             ],
             "title": "Key Suffix"
           },
+          "max_end_users": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max End Users"
+          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
@@ -4954,6 +4999,7 @@
           "is_service_key",
           "end_user_budget_id",
           "end_user_budget_ids",
+          "max_end_users",
           "metadata"
         ],
         "title": "CreateKeyResponse",
@@ -5265,69 +5311,6 @@
         "title": "CreateSessionRequest",
         "type": "object"
       },
-      "CreateStoredProviderRequest": {
-        "description": "Create a stored provider. ``api_key`` is write-only and requires OTARI_SECRET_KEY.",
-        "properties": {
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base"
-          },
-          "api_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Provider API key. Stored encrypted; never returned.",
-            "title": "Api Key"
-          },
-          "client_args": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Args"
-          },
-          "instance": {
-            "description": "Routing key, e.g. 'openai' or a named instance like 'home_lab'.",
-            "minLength": 1,
-            "title": "Instance",
-            "type": "string"
-          },
-          "provider_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "any-llm implementation when the instance name is not itself one.",
-            "title": "Provider Type"
-          }
-        },
-        "required": [
-          "instance"
-        ],
-        "title": "CreateStoredProviderRequest",
-        "type": "object"
-      },
       "CreateUserRequest": {
         "description": "Request model for creating a new user.",
         "properties": {
@@ -5531,7 +5514,7 @@
         "type": "object"
       },
       "CurrentPricingPage": {
-        "description": "One page of current model prices, with the total number of priced models.",
+        "description": "One page of current prices, with the total number of priced keys of any kind.",
         "properties": {
           "count": {
             "title": "Count",
@@ -5851,7 +5834,7 @@
                 "type": "null"
               }
             ],
-            "description": "Where this deployment's documentation lives, when it is not the operator guide bundled with the gateway. Set, the dashboard's Documentation links open it in a new tab; null, they go to the bundled guide at /#/docs, which stays served either way. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.",
+            "description": "Where this deployment's documentation lives, when it is not docs.otari.ai. Set, the dashboard's Documentation links open it in a new tab; null, they open https://docs.otari.ai/. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.",
             "title": "Docs Url"
           },
           "feedback_enabled": {
@@ -6001,7 +5984,7 @@
         "type": "object"
       },
       "DeploymentProviderMigrationPublic": {
-        "description": "The deployment providers stored through the dashboard, and how each moves onto a hosted provider.",
+        "description": "The deployment providers the retired dashboard page stored, and how each moves onto a hosted provider.",
         "properties": {
           "rows": {
             "items": {
@@ -6073,7 +6056,7 @@
         "type": "object"
       },
       "DeploymentProviderMigrationRowPublic": {
-        "description": "What moving one deployment provider onto a hosted provider does, or did.\n\n``instance`` is the deployment provider's name, which the hosted provider\nkeeps, so ``instance:model`` selectors keep working. ``outcome`` is\n``migrate`` in a preview and ``migrated`` once applied; ``conflict``,\n``unreadable``, ``invalid`` and ``failed`` leave the row where it is, with\n``detail`` saying why. ``source_removed`` says whether the deployment\nprovider was removed: it is kept while the hosted provider offers no model,\nso nothing it serves stops being served. ``notes`` are what an operator\nshould check afterwards.",
+        "description": "What moving one deployment provider onto a hosted provider does, or did.\n\n``instance`` is the deployment provider's name, which the hosted provider\nkeeps, so ``instance:model`` selectors keep working. ``outcome`` is\n``migrate`` in a preview and ``migrated`` once applied; ``conflict``,\n``unreadable``, ``invalid`` and ``failed`` leave the row where it is, with\n``detail`` saying why. ``source_removed`` says whether the deployment\nprovider was removed: it is kept while the hosted provider offers no model,\nand when it changed while the move ran. ``notes`` are what an operator\nshould check afterwards.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -7960,6 +7943,387 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HealthCheckDisabled": {
+        "description": "What switching off the failing models did.",
+        "properties": {
+          "disabled": {
+            "description": "How many models were switched off on their hosted provider.",
+            "title": "Disabled",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "disabled"
+        ],
+        "title": "HealthCheckDisabled",
+        "type": "object"
+      },
+      "HealthCheckResultPublic": {
+        "description": "What one offering answered in the latest finished run.",
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "failed_runs": {
+            "default": 0,
+            "description": "How many runs in a row it has failed.",
+            "title": "Failed Runs",
+            "type": "integer"
+          },
+          "failing_since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a failing model's unbroken run of failures began, as far back as results are kept (48 hours). Null when it answered.",
+            "title": "Failing Since"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "selector": {
+            "title": "Selector",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pass",
+              "fail",
+              "skip"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Code"
+          }
+        },
+        "required": [
+          "selector",
+          "provider",
+          "status",
+          "status_code",
+          "error",
+          "latency_ms",
+          "checked_at"
+        ],
+        "title": "HealthCheckResultPublic",
+        "type": "object"
+      },
+      "HealthCheckRunPublic": {
+        "description": "One pass over every offering.",
+        "properties": {
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "included_reasoning": {
+            "title": "Included Reasoning",
+            "type": "boolean"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "started_at",
+          "finished_at",
+          "included_reasoning",
+          "total",
+          "passed",
+          "failed"
+        ],
+        "title": "HealthCheckRunPublic",
+        "type": "object"
+      },
+      "HealthCheckSettingsPublic": {
+        "description": "Whether the checks run, how often, and what they send.",
+        "properties": {
+          "alert_emails": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Alert Emails",
+            "type": "array"
+          },
+          "interval_minutes": {
+            "title": "Interval Minutes",
+            "type": "integer"
+          },
+          "max_tokens": {
+            "title": "Max Tokens",
+            "type": "integer"
+          },
+          "next_run_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Run At"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "reasoning_every_runs": {
+            "title": "Reasoning Every Runs",
+            "type": "integer"
+          },
+          "reasoning_max_tokens": {
+            "title": "Reasoning Max Tokens",
+            "type": "integer"
+          },
+          "run_requested": {
+            "title": "Run Requested",
+            "type": "boolean"
+          },
+          "schedule_enabled": {
+            "title": "Schedule Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schedule_enabled",
+          "interval_minutes",
+          "prompt",
+          "max_tokens",
+          "reasoning_max_tokens",
+          "reasoning_every_runs",
+          "next_run_at",
+          "run_requested",
+          "alert_emails"
+        ],
+        "title": "HealthCheckSettingsPublic",
+        "type": "object"
+      },
+      "HealthCheckSettingsUpdate": {
+        "additionalProperties": false,
+        "description": "Settings to change. An omitted field keeps its value.",
+        "example": {
+          "interval_minutes": 60,
+          "schedule_enabled": true
+        },
+        "properties": {
+          "alert_emails": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who is emailed when a model stops answering and when it answers again. An empty list emails nobody.",
+            "items": {
+              "format": "email",
+              "type": "string"
+            },
+            "title": "Alert Emails"
+          },
+          "interval_minutes": {
+            "anyOf": [
+              {
+                "maximum": 1440.0,
+                "minimum": 15.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Minutes between scheduled runs.",
+            "title": "Interval Minutes"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "maximum": 4096.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Output cap for a model that does not reason.",
+            "title": "Max Tokens"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The user message every model is sent. A check passes on any answer, whatever it says.",
+            "title": "Prompt"
+          },
+          "reasoning_every_runs": {
+            "anyOf": [
+              {
+                "maximum": 48.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Include reasoning models every Nth run; 0 leaves them out.",
+            "title": "Reasoning Every Runs"
+          },
+          "reasoning_max_tokens": {
+            "anyOf": [
+              {
+                "maximum": 8192.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Output cap for a reasoning model.",
+            "title": "Reasoning Max Tokens"
+          },
+          "schedule_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Run the checks on a schedule.",
+            "title": "Schedule Enabled"
+          }
+        },
+        "title": "HealthCheckSettingsUpdate",
+        "type": "object"
+      },
+      "HealthCheckStatus": {
+        "description": "The Health page: settings, the run in progress, and the latest finished run by provider.",
+        "properties": {
+          "last_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HealthCheckRunPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderHealthSummary"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/HealthCheckResultPublic"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HealthCheckRunPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settings": {
+            "$ref": "#/components/schemas/HealthCheckSettingsPublic"
+          }
+        },
+        "required": [
+          "settings",
+          "running",
+          "last_run",
+          "providers",
+          "results"
+        ],
+        "title": "HealthCheckStatus",
+        "type": "object"
+      },
       "HostedAvailableModelsPublic": {
         "description": "What the provider says it serves on the stored credential.\n\nFailure is a field rather than a status: an unreachable upstream, or a\nprovider with no model listing, is an answer about the provider rather than\nabout this request, and the form still has to render a plain text box when\nthe list cannot be fetched.",
         "properties": {
@@ -8496,7 +8860,7 @@
         "type": "object"
       },
       "HostedProviderCreateRequest": {
-        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``provider`` is the any-llm implementation. ``name`` is what requests\naddress it by (``name:model``), defaulting to ``provider``; a name of its\nown lets two endpoints of one implementation coexist. ``api_key`` may be\nleft out for a backend that needs none, or for an endpoint of its own\n(``api_base``), which is called with a placeholder key.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.",
+        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``provider`` is the any-llm implementation. ``name`` is what requests\naddress it by (``name:model``), defaulting to ``provider``; a name of its\nown lets two endpoints of one implementation coexist. ``api_key`` may be\nleft out for a backend that needs none, or for an endpoint of its own\n(``api_base``), which is called with a placeholder key.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.\n``serves_unlisted_models`` serves a model the roster does not list, as a\n``config.yml`` instance does, and switches on every model it offers\nwhether or not something prices it.",
         "example": {
           "api_key": "<your OpenAI API key>",
           "provider": "openai"
@@ -8574,6 +8938,11 @@
               }
             ],
             "title": "Restricted To Organization Id"
+          },
+          "serves_unlisted_models": {
+            "default": false,
+            "title": "Serves Unlisted Models",
+            "type": "boolean"
           }
         },
         "required": [
@@ -8583,7 +8952,7 @@
         "type": "object"
       },
       "HostedProviderPublic": {
-        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.",
+        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.\n``serves_unlisted_models`` is true for one that serves a model its roster\ndoes not list.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -8676,6 +9045,11 @@
               }
             ],
             "title": "Restricted To Organization Id"
+          },
+          "serves_unlisted_models": {
+            "default": false,
+            "title": "Serves Unlisted Models",
+            "type": "boolean"
           },
           "shadows_config": {
             "default": false,
@@ -8882,6 +9256,17 @@
               }
             ],
             "title": "Restricted To Organization Id"
+          },
+          "serves_unlisted_models": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serves Unlisted Models"
           }
         },
         "title": "HostedProviderUpdateRequest",
@@ -9545,6 +9930,17 @@
               }
             ],
             "title": "Last Used At"
+          },
+          "max_end_users": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max End Users"
           },
           "metadata": {
             "additionalProperties": true,
@@ -13357,7 +13753,7 @@
         "type": "object"
       },
       "OrganizationModelPricingCreate": {
-        "description": "Create one rate override for a model, for a period.",
+        "description": "Create one rate override for a model, or a search or fetch instance, for a period.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -13417,11 +13813,27 @@
             "title": "Input Price Per Million",
             "type": "number"
           },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "model",
+                  "search",
+                  "fetch"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+            "title": "Kind"
+          },
           "model_key": {
-            "description": "Model identifier in 'provider:model' form, matching the key the deployment price list uses. A provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the instance a request resolves to.",
+            "description": "For a model, 'provider:model', matching the key the deployment price list uses; a provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the instance a request resolves to. For a search or fetch kind, the instance's name.",
             "maxLength": 255,
             "minLength": 1,
-            "pattern": "^[^\\s:/]+[:/][^\\s]+$",
             "title": "Model Key",
             "type": "string"
           },
@@ -13522,6 +13934,11 @@
             "title": "Input Price Per Million",
             "type": "number"
           },
+          "kind": {
+            "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+            "title": "Kind",
+            "type": "string"
+          },
           "model_key": {
             "title": "Model Key",
             "type": "string"
@@ -13555,6 +13972,7 @@
         "required": [
           "id",
           "organization_id",
+          "kind",
           "model_key",
           "input_price_per_million",
           "output_price_per_million",
@@ -15350,6 +15768,11 @@
             "title": "Input Price Per Million",
             "type": "number"
           },
+          "kind": {
+            "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+            "title": "Kind",
+            "type": "string"
+          },
           "model_key": {
             "title": "Model Key",
             "type": "string"
@@ -15388,6 +15811,7 @@
           }
         },
         "required": [
+          "kind",
           "model_key",
           "effective_at",
           "input_price_per_million",
@@ -15892,6 +16316,92 @@
         "title": "ProviderHealthSchema",
         "type": "object"
       },
+      "ProviderHealthSummary": {
+        "description": "One provider's offerings in the latest finished run.\n\n``down`` when none answered, ``degraded`` when some did not, ``ok`` when all did.",
+        "properties": {
+          "answered": {
+            "title": "Answered",
+            "type": "integer"
+          },
+          "history": {
+            "description": "Every finished run in the last 24 hours, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/ProviderHistoryPoint"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded",
+              "down"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "top_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The most common failure, with the model id taken out.",
+            "title": "Top Error"
+          },
+          "top_error_count": {
+            "title": "Top Error Count",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider",
+          "status",
+          "answered",
+          "total",
+          "top_error",
+          "top_error_count",
+          "history"
+        ],
+        "title": "ProviderHealthSummary",
+        "type": "object"
+      },
+      "ProviderHistoryPoint": {
+        "description": "How one provider did in one run.",
+        "properties": {
+          "answered": {
+            "title": "Answered",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "started_at",
+          "answered",
+          "total"
+        ],
+        "title": "ProviderHistoryPoint",
+        "type": "object"
+      },
       "ProviderInfoSchema": {
         "description": "Static, network-free metadata for one configured provider instance.",
         "properties": {
@@ -15955,12 +16465,9 @@
             "type": "string"
           },
           "source": {
+            "const": "config",
             "default": "config",
-            "description": "Where the instance is defined: 'config' for config.yml (or OTARI_CONFIG_YAML), 'dashboard' for one stored through the deployment providers page.",
-            "enum": [
-              "config",
-              "dashboard"
-            ],
+            "description": "Where the instance is defined: 'config' for config.yml (or OTARI_CONFIG_YAML).",
             "title": "Source",
             "type": "string"
           }
@@ -16443,33 +16950,6 @@
           "warm"
         ],
         "title": "RecordedPool",
-        "type": "object"
-      },
-      "ReencryptProviderCredentialsResponse": {
-        "description": "Result of re-encrypting stored provider keys with the primary secret key.",
-        "properties": {
-          "reencrypted": {
-            "description": "Number of stored provider keys re-encrypted.",
-            "title": "Reencrypted",
-            "type": "integer"
-          },
-          "skipped": {
-            "default": 0,
-            "description": "Number of rows whose stored key changed between the read and the write, so the re-encryption was not applied. They already hold whoever wrote them last.",
-            "title": "Skipped",
-            "type": "integer"
-          },
-          "unreadable": {
-            "description": "Number of encrypted keys left untouched because they could not be decrypted.",
-            "title": "Unreadable",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "reencrypted",
-          "unreadable"
-        ],
-        "title": "ReencryptProviderCredentialsResponse",
         "type": "object"
       },
       "ReencryptSearchToolsResponse": {
@@ -18714,8 +19194,25 @@
             "title": "Input Price Per Million",
             "type": "number"
           },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "model",
+                  "search",
+                  "fetch"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+            "title": "Kind"
+          },
           "model_key": {
-            "description": "Model identifier in format 'provider:model'",
+            "description": "Model identifier in format 'provider:model', or a search or fetch instance's name for those kinds",
             "title": "Model Key",
             "type": "string"
           },
@@ -18846,6 +19343,30 @@
             "title": "Attributes",
             "type": "object"
           },
+          "cache_read_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Input tokens read from the prompt cache.",
+            "title": "Cache Read Tokens"
+          },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Input tokens written to the prompt cache.",
+            "title": "Cache Write Tokens"
+          },
           "cost": {
             "anyOf": [
               {
@@ -18900,6 +19421,7 @@
                 "type": "null"
               }
             ],
+            "description": "The whole prompt, cached tokens included.",
             "title": "Input Tokens"
           },
           "kind": {
@@ -19010,6 +19532,18 @@
             ],
             "title": "Provider"
           },
+          "reasoning_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Output tokens spent reasoning.",
+            "title": "Reasoning Tokens"
+          },
           "recovered": {
             "title": "Recovered",
             "type": "boolean"
@@ -19094,6 +19628,9 @@
           "provider",
           "input_tokens",
           "output_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens",
+          "reasoning_tokens",
           "cost",
           "tool_name",
           "tool_type",
@@ -19104,85 +19641,6 @@
           "attributes"
         ],
         "title": "SpanPublic",
-        "type": "object"
-      },
-      "StoredProviderResponse": {
-        "description": "A runtime-stored provider. The API key is never returned, only ``last4``.",
-        "properties": {
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base"
-          },
-          "client_args": {
-            "additionalProperties": true,
-            "title": "Client Args",
-            "type": "object"
-          },
-          "created_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
-          },
-          "decryptable": {
-            "default": true,
-            "title": "Decryptable",
-            "type": "boolean"
-          },
-          "instance": {
-            "title": "Instance",
-            "type": "string"
-          },
-          "last4": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last4"
-          },
-          "provider_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider Type"
-          },
-          "updated_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Updated At"
-          }
-        },
-        "required": [
-          "instance"
-        ],
-        "title": "StoredProviderResponse",
         "type": "object"
       },
       "StoredSearchToolSchema": {
@@ -19366,106 +19824,6 @@
           "warm"
         ],
         "title": "TaskPool",
-        "type": "object"
-      },
-      "TestProviderRequest": {
-        "description": "Credentials to test before saving (from the add-provider form).",
-        "properties": {
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base"
-          },
-          "api_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Key"
-          },
-          "client_args": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Args"
-          },
-          "instance": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Provider/instance name; the impl when no provider_type.",
-            "title": "Instance"
-          },
-          "provider_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider Type"
-          }
-        },
-        "title": "TestProviderRequest",
-        "type": "object"
-      },
-      "TestProviderResponse": {
-        "description": "Result of a live provider connection test.",
-        "properties": {
-          "discovery_unsupported": {
-            "default": false,
-            "description": "True when the test failed only because this backend serves no model-listing endpoint, so the credentials could not be verified this way but may still work for requests.",
-            "title": "Discovery Unsupported",
-            "type": "boolean"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "model_count": {
-            "title": "Model Count",
-            "type": "integer"
-          },
-          "ok": {
-            "title": "Ok",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "ok",
-          "model_count"
-        ],
-        "title": "TestProviderResponse",
         "type": "object"
       },
       "TestServiceRequest": {
@@ -19840,10 +20198,12 @@
             "type": "string"
           },
           "failed": {
+            "description": "Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.",
             "title": "Failed",
             "type": "integer"
           },
           "succeeded": {
+            "description": "Sessions that started in the bucket and did not fail.",
             "title": "Succeeded",
             "type": "integer"
           }
@@ -19978,7 +20338,7 @@
             "type": "number"
           },
           "error_count": {
-            "description": "Spans that ended in an error no fallback recovered.",
+            "description": "Spans that ended in an error no fallback recovered, including tools' errors, which do not fail the session.",
             "title": "Error Count",
             "type": "integer"
           },
@@ -20087,6 +20447,10 @@
       "TurnPublic": {
         "description": "One user prompt and the steps it caused.",
         "properties": {
+          "cache_read_tokens": {
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
           "continued": {
             "description": "True for steps a session started with before any prompt was seen.",
             "title": "Continued",
@@ -20174,6 +20538,7 @@
           "errors",
           "input_tokens",
           "output_tokens",
+          "cache_read_tokens",
           "cost"
         ],
         "title": "TurnPublic",
@@ -20444,6 +20809,18 @@
               }
             ],
             "title": "Key Name"
+          },
+          "max_end_users": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max End Users"
           },
           "metadata": {
             "anyOf": [
@@ -20952,71 +21329,6 @@
           }
         },
         "title": "UpdateSettingsRequest",
-        "type": "object"
-      },
-      "UpdateStoredProviderRequest": {
-        "description": "Update a stored provider. Omitted fields are unchanged; ``api_key`` rotates in place.",
-        "properties": {
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base"
-          },
-          "api_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "New API key. Omit to keep the existing one. Never returned.",
-            "title": "Api Key"
-          },
-          "client_args": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Args"
-          },
-          "expected_updated_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.",
-            "title": "Expected Updated At"
-          },
-          "provider_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider Type"
-          }
-        },
-        "title": "UpdateStoredProviderRequest",
         "type": "object"
       },
       "UpdateToolSettingsRequest": {
@@ -23522,6 +23834,66 @@
         "title": "WorkspaceCreate",
         "type": "object"
       },
+      "WorkspaceMcpServerCheckRequest": {
+        "description": "Connection details to check without storing them, for a form to test before it saves.\n\n``server_id`` names a stored server whose token stands in when\n``authorization_token`` is omitted, so an edit form can test a new URL with\na token it was never shown. ``\"\"`` checks with no token at all.",
+        "properties": {
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The allow-list to report the catalog against",
+            "title": "Allowed Tools"
+          },
+          "authorization_token": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bearer token; omit to use the stored server's, if any",
+            "title": "Authorization Token"
+          },
+          "server_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A stored server whose token to use",
+            "title": "Server Id"
+          },
+          "url": {
+            "description": "Streamable HTTP MCP endpoint",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "WorkspaceMcpServerCheckRequest",
+        "type": "object"
+      },
       "WorkspaceMcpServerCreate": {
         "description": "Request body for registering a server.\n\n``authorization_token`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`providers.ProviderCredential` and `OrgProviderKey` already use.",
         "properties": {
@@ -23596,6 +23968,80 @@
         "title": "WorkspaceMcpServerCreate",
         "type": "object"
       },
+      "WorkspaceMcpServerHealth": {
+        "description": "The last connection check: whether the gateway reached the server, and what it found.\n\nDescribes the server as the gateway saw it at ``checked_at``, not now: a\nserver that answered then can be down since, and the request path checks\nnothing in advance on the strength of this.",
+        "properties": {
+          "checked_at": {
+            "title": "Checked At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CheckFailure"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the check failed; null when healthy"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The HTTP status the server refused with, if any",
+            "title": "Http Status"
+          },
+          "missing_allowed_tools": {
+            "description": "Allow-listed names the server did not offer",
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Allowed Tools",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "healthy",
+              "failing"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tool_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Live tools the allow-list admits; null when the check failed",
+            "title": "Tool Count"
+          },
+          "tools": {
+            "description": "Every tool name the server offers, allowed or not, up to 200; empty on a failure",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status",
+          "checked_at"
+        ],
+        "title": "WorkspaceMcpServerHealth",
+        "type": "object"
+      },
       "WorkspaceMcpServerPublic": {
         "description": "The API-facing shape. Never carries the token, only whether one is set.\n\nNo ``last4``-style prefix either, unlike `OrgProviderKeyPublic`: a provider\nkey's last four digits let an operator match a stored key against the one\nin their provider's console, and there is no equivalent workflow for an MCP\nbearer token.",
         "properties": {
@@ -23624,6 +24070,17 @@
           "has_token": {
             "title": "Has Token",
             "type": "boolean"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceMcpServerHealth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last connection check; null until one has run"
           },
           "id": {
             "format": "uuid",
@@ -23668,6 +24125,7 @@
           "allowed_tools",
           "enabled",
           "has_token",
+          "health",
           "created_at",
           "updated_at"
         ],
@@ -29134,6 +29592,174 @@
         ]
       }
     },
+    "/api/v1/health-checks": {
+      "get": {
+        "description": "The settings, the run in progress, and the latest finished run by provider and by offering.",
+        "operationId": "health-checks-get_health_check_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Health Check Status",
+        "tags": [
+          "health-checks"
+        ]
+      }
+    },
+    "/api/v1/health-checks/disable-failing": {
+      "post": {
+        "description": "Stop serving every model the latest run found failing, on its hosted provider.\n\nEach stays listed on the Hosted providers page, priced, to be switched back on there.",
+        "operationId": "health-checks-disable_failing_models",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckDisabled"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Disable Failing Models",
+        "tags": [
+          "health-checks"
+        ]
+      }
+    },
+    "/api/v1/health-checks/run": {
+      "post": {
+        "description": "Start a run within a minute, whether or not the schedule is on.",
+        "operationId": "health-checks-run_health_checks",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckSettingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Run Health Checks",
+        "tags": [
+          "health-checks"
+        ]
+      }
+    },
+    "/api/v1/health-checks/settings": {
+      "get": {
+        "description": "Whether the checks run on a schedule, how often, and what they send.",
+        "operationId": "health-checks-get_health_check_settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckSettingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Health Check Settings",
+        "tags": [
+          "health-checks"
+        ]
+      },
+      "patch": {
+        "description": "Change the settings. Turning the schedule on starts a run within a minute.",
+        "operationId": "health-checks-update_health_check_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HealthCheckSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckSettingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Health Check Settings",
+        "tags": [
+          "health-checks"
+        ]
+      }
+    },
     "/api/v1/health/liveness": {
       "get": {
         "description": "Liveness probe endpoint.\n\nSimple check to verify the process is alive and responding.\nUsed by Kubernetes/container orchestrators for liveness probes.\n\nReturns:\n    Plain text \"I'm alive!\" message",
@@ -29346,7 +29972,7 @@
     },
     "/api/v1/hosted-providers/migration": {
       "get": {
-        "description": "What moving the deployment providers stored through the dashboard onto hosted providers would do.\n\nWrites nothing and dials nothing.",
+        "description": "What moving the deployment providers the retired dashboard page stored onto hosted providers would do.\n\nThe gateway moves them at startup, so this lists the ones it could not\nmove, each with the reason. Writes nothing and dials nothing.",
         "operationId": "hosted-providers-preview_deployment_provider_migration",
         "responses": {
           "200": {
@@ -29374,7 +30000,7 @@
         ]
       },
       "post": {
-        "description": "Move the deployment providers stored through the dashboard onto hosted providers of the same name.\n\nEach is created as a hosted provider, offering what it lists as a create\ndoes, and the deployment provider is removed once the hosted one offers a\nmodel. One that cannot move is reported and left in place. ``rows``\nlimits the move to the rows of the preview the caller reviewed, at the\nversions it was shown them.",
+        "description": "Move the deployment providers the retired dashboard page stored onto hosted providers of the same name.\n\nEach is created as a hosted provider that serves models not on its roster,\noffering what it lists as a create does, and the deployment provider is\nremoved. One that cannot move is reported and left in place. ``rows``\nlimits the move to the rows of the preview the caller reviewed, at the\nversions it was shown them.",
         "operationId": "hosted-providers-apply_deployment_provider_migration",
         "requestBody": {
           "content": {
@@ -29422,9 +30048,53 @@
         ]
       }
     },
+    "/api/v1/hosted-providers/migration/{instance}": {
+      "delete": {
+        "description": "Remove a deployment provider the move could not take, which serves nothing.",
+        "operationId": "hosted-providers-discard_deployment_provider",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "title": "Instance",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Discard Deployment Provider",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
     "/api/v1/hosted-providers/reencrypt": {
       "post": {
-        "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nRun after rotating the key, alongside ``POST /api/v1/provider-credentials/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
+        "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nRun after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
         "operationId": "hosted-providers-reencrypt_hosted_providers",
         "responses": {
           "200": {
@@ -34443,6 +35113,29 @@
             }
           },
           {
+            "description": "Return only overrides of this kind.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "model",
+                    "search",
+                    "fetch"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return only overrides of this kind.",
+              "title": "Kind"
+            }
+          },
+          {
             "description": "Number of records to skip",
             "in": "query",
             "name": "skip",
@@ -36014,7 +36707,7 @@
     },
     "/api/v1/organizations/me/traces": {
       "get": {
-        "description": "List agent sessions, most recently active first.",
+        "description": "List agent sessions, most recently active first unless ``sort`` says otherwise.",
         "operationId": "organization-traces-list_traces",
         "parameters": [
           {
@@ -36038,6 +36731,41 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "What to order by. Latency runs from a session's start to its last activity.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "last_activity",
+              "description": "What to order by. Latency runs from a session's start to its last activity.",
+              "enum": [
+                "last_activity",
+                "latency",
+                "tokens",
+                "cost",
+                "errors"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The direction of `sort`.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "description": "The direction of `sort`.",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Order",
+              "type": "string"
             }
           },
           {
@@ -36210,21 +36938,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -36440,21 +37168,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -36548,7 +37276,7 @@
     },
     "/api/v1/organizations/me/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
+        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
         "operationId": "organization-traces-trace_series",
         "parameters": [
           {
@@ -36735,21 +37463,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -39832,7 +40560,7 @@
     },
     "/api/v1/pricing": {
       "get": {
-        "description": "List all model pricing.\n\nA hosted provider restricted to another organization than the caller's is\nleft out, as it is from the catalog.",
+        "description": "List every stored price version, of every kind.\n\nA row's ``kind`` says whether it prices a model or a search or fetch\ninstance. A hosted provider restricted to another organization than the\ncaller's is left out, as it is from the catalog.",
         "operationId": "pricing-list_pricing",
         "parameters": [
           {
@@ -39949,7 +40677,7 @@
     },
     "/api/v1/pricing/current": {
       "get": {
-        "description": "List the rate each priced model is metered at, one row per model key.\n\nListing prices answers the stored history, one row per ``effective_at``, so a\npage of that is a page of revisions rather than a page of models. This\nanswers one row per key: the newest rate that has taken effect, or the\nearliest scheduled rate for a key that has none yet. ``count`` is the number\nof priced models, so a caller can page without reading the collection to\nlearn how long it is. A hosted provider restricted to another organization\nthan the caller's is left out of both.",
+        "description": "List the rate each priced key is metered at, one row per kind and key.\n\nListing prices answers the stored history, one row per ``effective_at``, so a\npage of that is a page of revisions rather than a page of keys. This\nanswers one row per key: the newest rate that has taken effect, or the\nearliest scheduled rate for a key that has none yet. Every kind is returned,\na row's ``kind`` telling a model's price from a search or fetch instance's,\nand ``count`` is the number of priced keys of any kind, so a caller can page\nwithout reading the collection to learn how long it is. A hosted provider\nrestricted to another organization than the caller's is left out of both.",
         "operationId": "pricing-list_current_pricing",
         "parameters": [
           {
@@ -40303,7 +41031,7 @@
     },
     "/api/v1/pricing/{model_key}": {
       "delete": {
-        "description": "Delete pricing entries for a model.",
+        "description": "Delete pricing entries for a model, or for a search or fetch instance.",
         "operationId": "pricing-delete_pricing",
         "parameters": [
           {
@@ -40332,6 +41060,23 @@
               ],
               "description": "ISO datetime identifying a specific pricing row to delete",
               "title": "Effective At"
+            }
+          },
+          {
+            "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "model",
+              "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+              "enum": [
+                "model",
+                "search",
+                "fetch"
+              ],
+              "title": "Kind",
+              "type": "string"
             }
           }
         ],
@@ -40364,7 +41109,7 @@
         ]
       },
       "get": {
-        "description": "Get pricing for a specific model as of a timestamp.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
+        "description": "Get pricing for a specific model, or a search or fetch instance, as of a timestamp.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
         "operationId": "pricing-get_pricing",
         "parameters": [
           {
@@ -40393,6 +41138,23 @@
               ],
               "description": "ISO datetime for effective lookup",
               "title": "as_of"
+            }
+          },
+          {
+            "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "model",
+              "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+              "enum": [
+                "model",
+                "search",
+                "fetch"
+              ],
+              "title": "Kind",
+              "type": "string"
             }
           }
         ],
@@ -40437,7 +41199,7 @@
     },
     "/api/v1/pricing/{model_key}/history": {
       "get": {
-        "description": "Return the full pricing history for a model.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
+        "description": "Return the full pricing history for a model, or for a search or fetch instance.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
         "operationId": "pricing-get_pricing_history",
         "parameters": [
           {
@@ -40446,6 +41208,23 @@
             "required": true,
             "schema": {
               "title": "Model Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "model",
+              "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+              "enum": [
+                "model",
+                "search",
+                "fetch"
+              ],
+              "title": "Kind",
               "type": "string"
             }
           }
@@ -40490,322 +41269,6 @@
         "summary": "Get Pricing History",
         "tags": [
           "pricing"
-        ]
-      }
-    },
-    "/api/v1/provider-credentials": {
-      "get": {
-        "description": "List runtime-stored providers. Keys are never returned, only ``last4``.",
-        "operationId": "providers-list_stored_providers",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/StoredProviderResponse"
-                  },
-                  "title": "Response Providers-List Stored Providers",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "List Stored Providers",
-        "tags": [
-          "providers"
-        ]
-      },
-      "post": {
-        "description": "Add a provider at runtime. Storing a key requires OTARI_SECRET_KEY.",
-        "operationId": "providers-create_stored_provider",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateStoredProviderRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StoredProviderResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Create Stored Provider",
-        "tags": [
-          "providers"
-        ]
-      }
-    },
-    "/api/v1/provider-credentials/reencrypt": {
-      "post": {
-        "description": "Re-encrypt stored provider keys with the primary OTARI_SECRET_KEY.\n\nOperators rotate ``OTARI_SECRET_KEY`` by setting it to ``new,old`` first,\nrestarting, running this endpoint, then removing the old key and restarting\nagain. Rows that cannot be decrypted are left untouched and must be recovered\nby replacing the affected provider keys.",
-        "operationId": "providers-reencrypt_stored_provider_keys",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReencryptProviderCredentialsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Reencrypt Stored Provider Keys",
-        "tags": [
-          "providers"
-        ]
-      }
-    },
-    "/api/v1/provider-credentials/test": {
-      "post": {
-        "description": "Test provider credentials without storing them (for the add/edit form).\n\nResolves the implementation from ``provider_type`` (honoring the\n``*-compatible`` aliases) or the ``instance`` name, then lists the provider's\nmodels with the supplied credentials. Nothing is persisted and the key is\nnever echoed.",
-        "operationId": "providers-test_provider_connection",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TestProviderRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TestProviderResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Test Provider Connection",
-        "tags": [
-          "providers"
-        ]
-      }
-    },
-    "/api/v1/provider-credentials/{instance}": {
-      "delete": {
-        "description": "Delete a stored provider. A config.yml provider cannot be deleted here.",
-        "operationId": "providers-delete_stored_provider",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance",
-            "required": true,
-            "schema": {
-              "title": "Instance",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Delete Stored Provider",
-        "tags": [
-          "providers"
-        ]
-      },
-      "patch": {
-        "description": "Update a stored provider. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it. The row is locked ``FOR UPDATE``\nso the ``expected_updated_at`` check and the write it guards are atomic.",
-        "operationId": "providers-update_stored_provider",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance",
-            "required": true,
-            "schema": {
-              "title": "Instance",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateStoredProviderRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StoredProviderResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Update Stored Provider",
-        "tags": [
-          "providers"
-        ]
-      }
-    },
-    "/api/v1/provider-credentials/{instance}/test": {
-      "post": {
-        "description": "Verify a stored provider's key by listing its models, without exposing the key.",
-        "operationId": "providers-test_stored_provider",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance",
-            "required": true,
-            "schema": {
-              "title": "Instance",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TestProviderResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Test Stored Provider",
-        "tags": [
-          "providers"
         ]
       }
     },
@@ -42547,7 +43010,7 @@
     },
     "/api/v1/search-tools/reencrypt": {
       "post": {
-        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/provider-credentials/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
+        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
         "operationId": "search-tools-reencrypt_stored_search_tool_keys",
         "responses": {
           "200": {
@@ -43399,7 +43862,7 @@
     },
     "/api/v1/traces": {
       "get": {
-        "description": "List agent sessions, most recently active first.",
+        "description": "List agent sessions, most recently active first unless ``sort`` says otherwise.",
         "operationId": "traces-list_traces",
         "parameters": [
           {
@@ -43423,6 +43886,41 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "What to order by. Latency runs from a session's start to its last activity.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "last_activity",
+              "description": "What to order by. Latency runs from a session's start to its last activity.",
+              "enum": [
+                "last_activity",
+                "latency",
+                "tokens",
+                "cost",
+                "errors"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The direction of `sort`.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "description": "The direction of `sort`.",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Order",
+              "type": "string"
             }
           },
           {
@@ -43595,21 +44093,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -43825,21 +44323,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -43933,7 +44431,7 @@
     },
     "/api/v1/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
+        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
         "operationId": "traces-trace_series",
         "parameters": [
           {
@@ -44120,21 +44618,21 @@
             }
           },
           {
-            "description": "A trace id, or the start of one.",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 64,
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "A trace id, or the start of one.",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -47309,7 +47807,7 @@
         ]
       },
       "post": {
-        "description": "Register an MCP server for a workspace. Organization owners/admins or this workspace's owners/admins.\n\nThe authorization token is encrypted at rest and never returned. The URL\nis checked for SSRF safety here as well as on the request path, and must\nuse https when a token is set. A name already used in this workspace is\nrefused with a 409.",
+        "description": "Register an MCP server for a workspace. Organization owners/admins or this workspace's owners/admins.\n\nThe authorization token is encrypted at rest and never returned. The URL\nis checked for SSRF safety here as well as on the request path, and must\nuse https when a token is set. A name already used in this workspace is\nrefused with a 409.\n\nOnce stored, the server is connected to and its tools listed, and the\noutcome is returned as `health`. A server that fails this check is still\nstored, and `health.error` says why.",
         "operationId": "mcp-servers-create_workspace_mcp_server",
         "parameters": [
           {
@@ -47364,6 +47862,74 @@
           }
         ],
         "summary": "Create Workspace Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/check": {
+      "post": {
+        "description": "Check connection details without storing them. Organization owners/admins or this workspace's owners/admins.\n\nWhat a form's Test button calls before it saves. Answers with what a stored\nserver's `health` would say, and records nothing. Pass `server_id` and omit\n`authorization_token` to test with that server's stored token. The URL is\nchecked for SSRF safety first, with the same 400 a create gets.",
+        "operationId": "mcp-servers-check_workspace_mcp_server_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMcpServerCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerHealth"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "The URL failed the SSRF or TLS check; nothing was sent to it."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "description": "Every check slot on this gateway was busy. Try again shortly."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Check Workspace Mcp Server Connection",
         "tags": [
           "mcp-servers"
         ]
@@ -47431,7 +47997,7 @@
         ]
       },
       "patch": {
-        "description": "Update a server. Organization owners/admins or this workspace's owners/admins.\n\nOnly the fields sent are applied. Omit `authorization_token` to leave the\nstored token alone, send an empty string to clear it, or send a value to\nrotate it.",
+        "description": "Update a server. Organization owners/admins or this workspace's owners/admins.\n\nOnly the fields sent are applied. Omit `authorization_token` to leave the\nstored token alone, send an empty string to clear it, or send a value to\nrotate it. A change to the URL, the token or the allow-list checks the\nserver again, as creating it does.",
         "operationId": "mcp-servers-update_workspace_mcp_server",
         "parameters": [
           {
@@ -47496,6 +48062,71 @@
           }
         ],
         "summary": "Update Workspace Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check": {
+      "post": {
+        "description": "Check a server's connection now. Organization owners/admins or this workspace's owners/admins.\n\nOpens one session, lists the server's tools, and stores the outcome as\n`health`. A server that fails is still a 200, with `health.status` set to\n`failing`. A 429 means every check slot on this gateway was busy and\nnothing was recorded.",
+        "operationId": "mcp-servers-check_workspace_mcp_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "description": "Every check slot on this gateway was busy; nothing was recorded. Try again shortly."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Check Workspace Mcp Server",
         "tags": [
           "mcp-servers"
         ]

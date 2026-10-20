@@ -13,6 +13,7 @@ import {
   FiSidebar,
   FiX,
 } from "react-icons/fi"
+import { AutoUpdate } from "@/app/AutoUpdate"
 import { ConnectionStatus } from "@/app/ConnectionStatus"
 import { AccountMenu } from "@/app/nav/AccountMenu"
 import { Breadcrumbs } from "@/app/nav/Breadcrumbs"
@@ -51,7 +52,6 @@ import { EntitlementResolver } from "@/app/overlayEntitlementResolver"
 import { PostSignInGate } from "@/app/overlayPostSignInGate"
 import { PendingPage } from "@/app/PendingPage"
 import { TelemetryIdentity } from "@/app/TelemetryIdentity"
-import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { Chip } from "@/design-system/indicators/Chip"
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
@@ -813,7 +813,7 @@ function AppShellChrome() {
           the actor a session belongs to, and this shell is what a session gets
           you; the pages in front of one have no actor to name. */}
       <TelemetryIdentity />
-      <UpdatePrompt />
+      <AutoUpdate />
       <ConnectionStatus />
       <PricingWarning />
       <UnpricedUsageWarning />
@@ -822,8 +822,8 @@ function AppShellChrome() {
           and the pricing alarm above it is a band in flow, so a
           viewport-relative offset would leave the drawer covering the header by
           however tall that band is, taking the only control that closes it with
-          it. The update prompt and the connection status are out of flow and
-          carry their own fill, so they do not enter into this. */}
+          it. The connection status is out of flow and carries its own fill, so
+          it does not enter into this. */}
       <div
         className="relative flex min-h-0 flex-1"
         // What the rail costs the content beside it, for a `position: fixed`
@@ -1032,7 +1032,7 @@ function AppShellChrome() {
               })}
             </nav>
             {/* The account block, set off by a rule as in the navigation prototype:
-              the way onto the organization rail, the bundled guide, and the
+              the way onto the organization rail, the documentation, and the
               account control whose menu carries appearance and sign-out. */}
             {/* `-mx-3 px-3` so the rule runs the rail's full width and meets its
               right border, while the rows inside keep the rail's padding. A
@@ -1214,7 +1214,11 @@ function AppShellChrome() {
             // without adding the region itself to the natural tab order.
             tabIndex={-1}
             inert={backgroundInert}
-            className="flex-1 overflow-y-auto focus:outline-none"
+            // The page never scrolls sideways; content meant to (a wide table)
+            // carries its own scroller. This is the backstop, not the fix: the
+            // 390px e2e check measures overflow under it. Not `overflow-x-clip`,
+            // which computes to `hidden` beside `overflow-y: auto` anyway.
+            className="flex-1 overflow-x-hidden overflow-y-auto focus:outline-none"
           >
             <div className="mx-auto flex max-w-[112.5rem] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
               {answerIsStillComing ? (

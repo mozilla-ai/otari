@@ -7,7 +7,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.services.secret_box import generate_secret_key
 
 from .conftest import build_test_client
 
@@ -84,25 +83,14 @@ def test_providers_carries_metadata_and_capabilities(
     }
 
 
-def test_providers_says_where_each_instance_is_defined(
+def test_providers_says_each_instance_is_defined_in_the_configuration(
     providers_client: TestClient,
     master_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A config.yml instance reads ``config``; one stored through the deployment providers page ``dashboard``."""
-    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
-    stored = providers_client.post(
-        f"{API_ROOT}/provider-credentials",
-        json={"instance": "groq", "api_key": "sk-groq-fake"},
-        headers=master_header,
-    )
-    assert stored.status_code == 201, stored.text
-
     resp = providers_client.get(f"{API_ROOT}/providers", headers=master_header)
 
     assert {p["instance"]: p["source"] for p in resp.json()["providers"]} == {
         "anthropic": "config",
-        "groq": "dashboard",
         "openai": "config",
     }
 

@@ -62,9 +62,17 @@ class HostedOffers:
         return await self.pricing.defaults_for(provider, models, implementation=implementation)
 
     async def offer(
-        self, provider: str, names: Sequence[str], defaults: Mapping[str, ModelPricing]
+        self,
+        provider: str,
+        names: Sequence[str],
+        defaults: Mapping[str, ModelPricing],
+        *,
+        serves_unlisted: bool = False,
     ) -> Sequence[HostedProviderModel]:
         """Record models as offered, each switched on exactly when something prices it.
+
+        A provider that ``serves_unlisted`` models serves them unpriced, so each
+        is switched on.
 
         Raises:
             HostedModelAlreadyOfferedError: one of ``names`` is already offered here.
@@ -78,13 +86,15 @@ class HostedOffers:
             keys[name]: default for name, default in defaults.items() if name in keys and keys[name] not in stored
         }
         await self.pricing.store_defaults(seeded, now)
-        enabled = {name: keys[name] in stored or keys[name] in seeded for name in names}
+        enabled = {name: serves_unlisted or keys[name] in stored or keys[name] in seeded for name in names}
         try:
             return await self.models.create_many(provider, names, enabled=enabled)
         except HostedModelConflict as conflict:
             raise HostedModelAlreadyOfferedError(provider, conflict.model) from conflict
 
-    async def reseed(self, provider: str, defaults: Mapping[str, ModelPricing]) -> list[str]:
+    async def reseed(
+        self, provider: str, defaults: Mapping[str, ModelPricing], *, serves_unlisted: bool = False
+    ) -> list[str]:
         """Move every seeded rate to today's default, and price what nothing prices any more.
 
         A version somebody chose is left alone. A model whose rates are gone,
@@ -92,8 +102,9 @@ class HostedOffers:
         dataset prices it and switched off where it does not, so the offer rule
         holds after the fact as well as at the offer. The switch is only ever
         turned off here: a row does not record why it is off, and a model the
-        operator refused must not come back because a rate appeared. Returns
-        the models whose rate moved.
+        operator refused must not come back because a rate appeared. A
+        provider that ``serves_unlisted`` models serves them unpriced, so none
+        is switched off. Returns the models whose rate moved.
         """
         rows = await self.models.list_all_for_provider(provider)
         if not rows:
@@ -108,7 +119,8 @@ class HostedOffers:
             default = defaults.get(row.model)
             if version is None:
                 if default is None:
-                    row.enabled = False
+                    if not serves_unlisted:
+                        row.enabled = False
                     continue
                 moved[keys[row.model]] = default
                 repriced.append(row.model)

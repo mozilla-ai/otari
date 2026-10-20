@@ -241,9 +241,9 @@ async def _run_owned_calls(
         try:
             text = await owner.call_tool(name, args)
         except MaxToolIterationsExceeded:
-            # The request's shared search and fetch limit refused the call inside the
+            # The old backend's shared search and fetch limit refused the call inside the
             # backend, after its started entry went out, so the entry ends before the
-            # request fails.
+            # request fails. On the libraries, a call past the limit returns a tool error.
             if rendering is not None:
                 yield True, rendering.refused(call)
             raise

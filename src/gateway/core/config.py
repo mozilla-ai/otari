@@ -5,7 +5,7 @@ import os
 import re
 import types
 import typing
-from collections.abc import Container
+from collections.abc import Callable, Container
 from pathlib import Path
 from typing import Annotated, Any, Literal, NamedTuple
 from urllib.parse import urlsplit
@@ -23,6 +23,7 @@ from gateway.core.env import otari_env
 from gateway.core.settings.api_keys import ApiKeySettings
 from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
+from gateway.core.settings.health_checks import HealthCheckFeatureSettings
 from gateway.core.settings.inference import InferenceSettings
 from gateway.core.settings.organizations import OrganizationSettings
 from gateway.core.settings.pricing import PricingSettings
@@ -567,6 +568,7 @@ class GatewayConfig(
     PricingSettings,
     ProviderSettings,
     FeedbackSettings,
+    HealthCheckFeatureSettings,
     OrganizationSettings,
     ToolSettings,
     TraceSettings,
@@ -780,11 +782,9 @@ class GatewayConfig(
         default=None,
         description=(
             "Where this deployment's documentation lives, as an absolute http(s) URL "
-            "(e.g. 'https://docs.otari.ai/en/'). Unset, the dashboard's Documentation links "
-            "point at the operator guide bundled with the gateway at /#/docs, which is the "
-            "right default for a self-hosted deployment. Set it to retarget those links at "
-            "a product documentation site instead; the bundled guide stays reachable at "
-            "/#/docs either way."
+            "(e.g. 'https://docs.example.com/'). Unset, the dashboard's Documentation links "
+            "open https://docs.otari.ai/. Set it to retarget those links at a documentation "
+            "site of the deployment's own."
         ),
     )
     terms_url: Annotated[str | None, Shown(SettingsGroup.GENERAL)] = Field(
@@ -1524,8 +1524,8 @@ class GatewayConfig(
             "On by default (the opposite of the other SSRF gates) because operator-supplied api_base "
             "values are master-key gated and the home-lab / self-hosted use case depends on private "
             "endpoints. Set to false to make provider connection tests, model discovery, and the "
-            f"credential write path (POST {API_ROOT}/provider-credentials and PATCH "
-            f"{API_ROOT}/provider-credentials/{{instance}}) refuse an internal api_base. "
+            f"credential write path (POST {API_ROOT}/hosted-providers and PATCH "
+            f"{API_ROOT}/hosted-providers/{{provider}}) refuse an internal api_base. "
             "Chat dispatch (which dials the endpoint on every request) is not gated, so this is not a "
             "general egress control. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
         ),
@@ -1550,12 +1550,11 @@ class GatewayConfig(
     _platform_token: str | None = PrivateAttr(default=None)
     _platform_token_resolved: bool = PrivateAttr(default=False)
 
-    # The config-file providers as loaded, before any dashboard-stored providers
-    # are overlaid onto ``providers`` at runtime. Captured once by
-    # ``provider_store_service`` so every refresh rebuilds the merged view from a
-    # stable base (and a deleted stored row restores the config entry). Kept on
-    # the config, not a module global, so it is per-config and cannot leak
-    # between processes or tests.
+    # The config-file providers as loaded, before the ones that declare no
+    # credential are dropped. Captured once by ``settle_configured_providers``
+    # (``services/provider_kwargs``), so a dropped entry's name stays reserved.
+    # Kept on the config, not a module global, so it is per-config and cannot
+    # leak between processes or tests.
     _provider_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
 
     # The same idea for ``rate_limits``: the config-file rules, before the
@@ -1874,7 +1873,14 @@ class GatewayConfig(
         target = self.aliases.get(name)
         return target if isinstance(target, str) and target else None
 
-    def validate_alias(self, name: str, target: str, *, alias_names: Container[str] | None = None) -> None:
+    def validate_alias(
+        self,
+        name: str,
+        target: str,
+        *,
+        alias_names: Container[str] | None = None,
+        hosted_implementation: Callable[[str], str | None] | None = None,
+    ) -> None:
         """Validate a single alias, raising ``ValueError`` with the reason.
 
         An alias must name a non-empty target selector with a usable
@@ -1890,6 +1896,8 @@ class GatewayConfig(
         chaining check, defaulting to the configured ones. Callers that also
         store aliases elsewhere (the runtime ``model_aliases`` table) pass the
         union, so chaining is rejected no matter which side each alias came from.
+        ``hosted_implementation`` names the implementation behind a hosted
+        provider's name, so a target may name one.
         """
         known_aliases: Container[str] = self.aliases if alias_names is None else alias_names
 
@@ -1915,6 +1923,10 @@ class GatewayConfig(
             msg = f"aliases.{name} target '{target}' points at another alias; alias chaining is not supported."
             raise ValueError(msg)
         if prefix in self.providers:
+            return
+        # A hosted provider's own name, which the caller passes in where the
+        # deployment's database is read: configuration is validated before it is.
+        if hosted_implementation is not None and hosted_implementation(prefix) is not None:
             return
         # No PROVIDER_TYPE_ALIASES mapping here: that normalizes an instance's
         # declared provider_type, not a selector prefix. Request-time routing

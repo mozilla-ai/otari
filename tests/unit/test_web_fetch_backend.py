@@ -80,7 +80,7 @@ from gateway.services.web_retrieval_policy import (
     canonicalize_domain_rules,
     canonicalize_web_url,
 )
-from gateway.types.tool_charges import LabelCalls
+from gateway.types.tool_charges import InstanceRateKey, LabelCalls
 
 _URL = "https://example.com/start"
 _FAKE = "fake-fetch"
@@ -291,7 +291,6 @@ async def test_a_fetched_page_is_billed_and_a_failed_one_is_not(fetcher: AsyncMo
         await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
 
     assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": 1, "errors": 1}}
-    assert tally.billable_calls() == {WEB_FETCH_TOOL_NAME: 1}
 
 
 @pytest.mark.asyncio
@@ -305,7 +304,7 @@ async def test_a_fetch_is_recorded_under_its_instances_label_rate_keys_and_repor
         LabelCalls(
             tool=WEB_FETCH_TOOL_NAME,
             label=f"fake:{_FAKE}",
-            rate_keys=(f"fake:{_FAKE}", "otari:web_fetch"),
+            rate_keys=(InstanceRateKey("fetch", _FAKE, f"fake:{_FAKE}"), "otari:web_fetch"),
             calls=2,
             unreported_calls=0,
             reported_cost=Decimal("0.004"),
@@ -324,7 +323,7 @@ async def test_a_built_in_fetch_is_recorded_under_builtin_fetch_for_its_rate(fet
         LabelCalls(
             tool=WEB_FETCH_TOOL_NAME,
             label="builtin:builtin_fetch",
-            rate_keys=("builtin:builtin_fetch", "otari:web_fetch"),
+            rate_keys=(InstanceRateKey("fetch", "builtin_fetch", "builtin:builtin_fetch"), "otari:web_fetch"),
             calls=1,
             unreported_calls=1,
             reported_cost=Decimal(0),
@@ -938,7 +937,7 @@ async def test_the_old_counter_refuses_the_eleventh_call_before_dispatch() -> No
             await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
 
     assert counter.count == MAX_WEB_RETRIEVAL_CALLS
-    assert tally.billable_calls() == {WEB_FETCH_TOOL_NAME: MAX_WEB_RETRIEVAL_CALLS}
+    assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": MAX_WEB_RETRIEVAL_CALLS, "errors": 0}}
 
 
 @pytest.mark.asyncio
@@ -966,7 +965,7 @@ async def test_the_old_counter_survives_the_backend_being_rebuilt_between_routin
         with pytest.raises(WebRetrievalLimitExceededError):
             await second.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
 
-    assert tally.billable_calls() == {WEB_FETCH_TOOL_NAME: MAX_WEB_RETRIEVAL_CALLS}
+    assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": MAX_WEB_RETRIEVAL_CALLS, "errors": 0}}
 
 
 # ---------------------------------------------------------------------------

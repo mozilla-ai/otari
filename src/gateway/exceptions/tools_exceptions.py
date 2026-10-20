@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from fastapi import status
 
+from gateway.core.error_codes import PRICING_REQUIRED
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -53,6 +54,20 @@ class WorkspaceMcpServerLimitReachedError(TenancyValidationError):
 
     def __init__(self, workspace_id: object, limit: int):
         super().__init__(f"Workspace {workspace_id} already has the maximum of {limit} MCP servers")
+
+
+class WorkspaceMcpServerCheckBusyError(TenancyError):
+    """No connection check could start, because every check slot on this process was taken.
+
+    A 429 rather than a 503: it clears on its own within seconds, and a 5xx
+    renders as a generic internal error, hiding the one thing the caller needs
+    to know, which is to try again shortly.
+    """
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+
+    def __init__(self) -> None:
+        super().__init__("Too many MCP server checks are running on this gateway; try again shortly")
 
 
 class ContainerOnManagedCredentialError(TenancyValidationError):
@@ -399,6 +414,17 @@ class DirectSearchFailedError(TenancyError):
         super().__init__(message)
         self.headers = headers
         self.upstream_status = upstream_status
+
+
+class DirectSearchPricingRequiredError(TenancyError):
+    """A direct search refused because ``require_pricing`` is on and no pricing row prices it.
+
+    ``message`` names the row to add; the route returns it to the caller and
+    writes it on the usage row.
+    """
+
+    status_code = status.HTTP_402_PAYMENT_REQUIRED
+    error_code: str = PRICING_REQUIRED
 
 
 class WebSearchOptionRefusedError(TenancyValidationError):

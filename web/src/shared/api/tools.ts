@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
+  CheckWorkspaceMcpServerRequest,
   CreateOrganizationGuardrailRequest,
   CreateSearchToolRequest,
   CreateWorkspaceMcpServerRequest,
@@ -21,6 +22,7 @@ import type {
   UpdateWorkspaceWebSearchConfigRequest,
   WorkspaceCodeExecutionPolicy,
   WorkspaceMcpServer,
+  WorkspaceMcpServerHealth,
   WorkspaceMcpServers,
   WorkspaceWebSearchConfig,
 } from "@/client"
@@ -449,6 +451,49 @@ export function useUpdateWorkspaceMcpServer() {
         queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
       })
     },
+  })
+}
+
+// Connects to a stored server now and records the outcome as its `health`. A
+// server that fails answers 200 like one that passes; only a busy gateway (429)
+// is an error here.
+export function useCheckWorkspaceMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+    }: {
+      workspaceId: string
+      serverId: string
+    }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}/check`,
+        { method: "POST" },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+      })
+    },
+  })
+}
+
+// Checks connection details without storing anything: the dialog's Test
+// button. Nothing to invalidate, since nothing was written.
+export function useTestWorkspaceMcpServerConnection() {
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      body,
+    }: {
+      workspaceId: string
+      body: CheckWorkspaceMcpServerRequest
+    }) =>
+      apiFetch<WorkspaceMcpServerHealth>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/check`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
   })
 }
 

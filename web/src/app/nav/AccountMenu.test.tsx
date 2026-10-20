@@ -173,13 +173,13 @@ describe("AccountMenu", () => {
     expect(link).toHaveAttribute("href", "/account")
   })
 
-  it("keeps the bundled guide reachable on a phone when no docs site is configured", async () => {
+  it("points the phone's Documentation row at docs.otari.ai when no docs site is configured", async () => {
     mockCaller(OPERATOR)
     await openMenu()
 
     const link = await screen.findByRole("link", { name: "Documentation" })
-    expect(link).toHaveAttribute("href", "/docs")
-    expect(link).not.toHaveAttribute("target")
+    expect(link).toHaveAttribute("href", "https://docs.otari.ai/")
+    expect(link).toHaveAttribute("target", "_blank")
   })
 
   it("names no legal page a deployment has not published", async () => {
@@ -233,10 +233,10 @@ describe("AccountMenu", () => {
 
   it("retargets the phone's Documentation row at the deployment's own docs site", async () => {
     mockCaller(OPERATOR)
-    await openMenu({ docs_url: "https://docs.otari.ai/en/" })
+    await openMenu({ docs_url: "https://docs.example.com/" })
 
     const link = await screen.findByRole("link", { name: "Documentation" })
-    expect(link).toHaveAttribute("href", "https://docs.otari.ai/en/")
+    expect(link).toHaveAttribute("href", "https://docs.example.com/")
     expect(link).toHaveAttribute("target", "_blank")
     // Still the row the top bar hands off to below `md`, not a second entry
     // point: retargeting it must not make it visible where the cluster already

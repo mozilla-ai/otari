@@ -1,6 +1,7 @@
-"""Web fetch on any-fetch: the fetch backend, and otari's fetcher as the library's ``builtin`` provider."""
+"""Web fetch on any-fetch: the fetch backend, one page fetched on an instance, and otari's fetcher as ``builtin``."""
 
-from gateway.services.tools._web_fetch._backend import WebFetchBackend, build_web_fetch_backend
+from gateway.services.tools._web_fetch._backend import WebFetchBackend
 from gateway.services.tools._web_fetch._builtin import register_builtin_fetcher, retrieval_client
+from gateway.services.tools._web_fetch._fetch_page import FetchFailure, fetch_page
 
-__all__ = ["WebFetchBackend", "build_web_fetch_backend", "register_builtin_fetcher", "retrieval_client"]
+__all__ = ["FetchFailure", "WebFetchBackend", "fetch_page", "register_builtin_fetcher", "retrieval_client"]

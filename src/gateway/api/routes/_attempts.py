@@ -143,6 +143,7 @@ async def walk_attempts(
     policy_name: str | None = None,
     classify_error: Callable[[BaseException], tuple[bool, str]] = classify_local_attempt_error,
     build_kwargs: Callable[[Attempt, dict[str, Any]], dict[str, Any]] | None = None,
+    credential_attempt: Callable[[Attempt], Awaitable[Attempt]] | None = None,
     prepare_kwargs: PrepareKwargs | None = None,
     admit_attempt: AdmitAttempt | None = None,
     on_absorbed: Callable[[Attempt, BaseException, int], Awaitable[None]] | None = None,
@@ -177,6 +178,10 @@ async def walk_attempts(
     shape pass their own (the responses format splits ``provider`` from ``model``
     and rebuilds its Codex extra-body per provider), so the transformation happens
     for the candidate being tried rather than for the one that failed.
+
+    ``credential_attempt`` runs first, and returns the candidate as it will be
+    sent: itself, or itself served on a credential the deployment owns, which
+    may name another instance. It may raise :class:`CandidateCannotServe`.
 
     ``prepare_kwargs`` then turns those kwargs into what the candidate is sent,
     for work that depends on the account a candidate's credential reaches.
@@ -223,7 +228,9 @@ async def walk_attempts(
     unrecorded_skips: list[tuple[Attempt, HTTPException]] = []
     last_failed: Attempt | None = None
 
-    for attempt in attempts:
+    for planned in attempts:
+        # Rebound to the candidate as it is sent once ``credential_attempt`` has run.
+        attempt = planned
         locked_in = False
         drop_admission: DropAdmission | None = None
         sent = False
@@ -240,6 +247,8 @@ async def walk_attempts(
             )
 
         try:
+            if credential_attempt is not None:
+                attempt = await credential_attempt(attempt)
             call_kwargs = make_kwargs(attempt, base_request_fields)
             if admit_attempt is not None:
                 drop_admission = await admit_attempt(attempt)

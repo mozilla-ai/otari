@@ -13,7 +13,7 @@ from sqlalchemy import CursorResult, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.providers import HostedProvider, HostedProviderModel, ProviderCredential
+from gateway.models.providers import ConfiguredProviderImport, HostedProvider, HostedProviderModel, ProviderCredential
 from gateway.repositories.base_repository import BaseRepository
 
 # An operator adds hosted providers by hand, so a full listing stays small
@@ -131,13 +131,12 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
         await self.db.delete(row)
         await self.db.flush()
 
-    # The deployment providers stored through the dashboard (``provider_credentials``)
+    # The deployment providers the retired dashboard page stored (``provider_credentials``)
     # are what moves onto hosted providers, so the move reads and removes them
-    # here. The table goes once the move has run everywhere; until then the
-    # runtime overlay still reads it through ``services/provider_store_service.py``.
+    # here. The table goes once the move has run everywhere.
 
     async def list_deployment_providers(self) -> Sequence[ProviderCredential]:
-        """Every deployment provider stored through the dashboard, by instance name, bounded."""
+        """Every deployment provider the retired dashboard page stored, by instance name, bounded."""
         result = await self.db.execute(
             select(ProviderCredential).order_by(ProviderCredential.instance).limit(_ALL_PROVIDERS)
         )
@@ -150,6 +149,14 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
     async def delete_deployment_provider(self, row: ProviderCredential) -> None:
         """Remove one stored deployment provider, flushed so the caller's block sees it gone."""
         await self.db.delete(row)
+        await self.db.flush()
+
+    async def imported_configured_names(self) -> set[str]:
+        result = await self.db.execute(select(ConfiguredProviderImport.name))
+        return set(result.scalars().all())
+
+    async def record_configured_import(self, name: str) -> None:
+        self.db.add(ConfiguredProviderImport(name=name))
         await self.db.flush()
 
 
@@ -246,6 +253,25 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
         for provider, model in result.all():
             served.setdefault(provider, set()).add(model)
         return served
+
+    async def switch_off(self, provider: str, models: Collection[str]) -> int:
+        """Stop serving these models under ``provider``. Returns how many were still switched on."""
+        if not models:
+            return 0
+        result = cast(
+            CursorResult[Any],
+            await self.db.execute(
+                update(HostedProviderModel)
+                .where(
+                    HostedProviderModel.provider == provider,
+                    HostedProviderModel.model.in_(set(models)),
+                    HostedProviderModel.enabled.is_(True),
+                )
+                .values(enabled=False)
+                .execution_options(synchronize_session=False)
+            ),
+        )
+        return int(result.rowcount or 0)
 
     async def create_many(
         self, provider: str, names: Sequence[str], *, enabled: Mapping[str, bool]

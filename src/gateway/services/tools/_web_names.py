@@ -21,6 +21,12 @@ WEB_FETCH_NATIVE_TYPE_PREFIX = "web_fetch_"
 # Anthropic's own web-fetch tool type (``web_fetch_20250910``), the only one native anywhere.
 ANTHROPIC_WEB_FETCH_TYPE = re.compile(r"web_fetch_\d{8}")
 WEB_RETRIEVAL_RESULT_MAX_BYTES = 50 * 1024
+# What the model is told about web search when no declaration, setting or environment names a hint.
+WEB_SEARCH_PURPOSE_HINT = (
+    "Prefer `web_search` for current information, news, recent events, "
+    "documentation lookups, or any question whose answer changes over time. "
+    "Returns ranked results with extracted page content where available."
+)
 
 
 def web_search_tool_definition() -> dict[str, Any]:
