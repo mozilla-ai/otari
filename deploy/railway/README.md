@@ -183,6 +183,11 @@ and cannot be fully round-tripped from a file in this repo. This directory is th
 human source of truth plus a reviewable snapshot; the live template lives on the
 mozilla-ai Railway account and the button above points at its deploy link.
 
+Railway's public API writes the template's README but not its services or
+variables, so a change to those is made in the template editor and mirrored here
+by a PR. Each release opens that PR for the image tag; anything else starts in
+the editor.
+
 When changing the template:
 
 1. Edit the template on the mozilla-ai Railway account, then deploy it once to a
@@ -193,11 +198,25 @@ When changing the template:
    descriptions, defaults, target port, public domain).
    The README on Railway is [`listing.md`](listing.md), not this file: Railway
    requires its own fixed sections and absolute links, and it drops anything in
-   angle brackets as HTML. Edit `listing.md`, then paste it into the template
-   editor's README field.
-3. To move a new deploy to a newer release, change the image tag on the live
-   template and in `template.json`. This does not touch existing deploys: each
-   keeps the tag it was deployed with until its operator upgrades.
+   angle brackets as HTML. Edit `listing.md`; when the change reaches `main`, the
+   **Otari Railway Listing** workflow (`otari-railway-listing.yml`) publishes it
+   as the live README, keeping the listing's description, category and icon.
+3. To move new deploys to a newer release, change the image tag on the live
+   template and in `template.json`. A published release (not a pre-release) does
+   the repo half: the **Otari Railway Template Bump** workflow
+   (`otari-railway-template-bump.yml`) opens a `chore(railway)` PR that moves the
+   tag in `template.json`, `listing.md` and the services table above, and the
+   example versions under [Upgrade](#upgrade). Its body lists the editor step
+   (otari service, **Source image**), which nothing can automate, and the PR's
+   `railway-template` check fails until it is done. Review the release notes on
+   that PR too: a release that newly requires a variable needs it added in the
+   editor and in `template.json` on the same branch. Every release uses one
+   branch, `chore/railway-template-bump`, so a release that lands while the PR
+   is open updates it in place, and one not above the PR's pin leaves it alone.
+   Once the branch holds a commit besides the bump, the next release's run
+   fails rather than drop it: merge the PR, then dispatch the workflow with the
+   newer tag. A new tag does not touch existing deploys: each keeps the tag it
+   was deployed with until its operator upgrades.
 4. The deploy link is `https://railway.com/deploy/<code>`, where the code is
    set in the template editor (it is `otari`). If it changes, update every
    **Deploy on Railway** button (`grep -rn railway.com/deploy`) and the
@@ -205,11 +224,12 @@ When changing the template:
 5. Run `make railway-template-check`. It reads the live template from
    Railway's public API (no token) and lists every difference from
    `template.json` and `listing.md`: images, bucket names, healthcheck path,
-   domain port, and each variable's default, optional flag and description. Fix either side
-   until it passes. CI runs the same check on every PR that touches this
-   directory and once a week, so an edit made in the Railway editor without a
-   PR still shows up. After a release that changes required config, do steps
-   1 to 5 again.
+   domain port, each variable's default, optional flag and description, and
+   the README. Fix either side until it passes. CI runs the same check on
+   every PR that touches this directory and once a week, so an edit made in
+   the Railway editor without a PR still shows up. On a PR that edits
+   `listing.md`, the README part of the diff stays until the merge publishes
+   it; the rest has to pass before merging.
 
 Listing the template in Railway's public marketplace is optional: the deploy
 link works without it. Publishing only adds marketplace discoverability and

@@ -2,6 +2,7 @@
 
 import copy
 import importlib.util
+import io
 import json
 import sys
 from pathlib import Path
@@ -263,3 +264,97 @@ def test_main_exits_two_when_the_fetch_fails(
 
     assert check.main([]) == 2
     assert "Template not found" in capsys.readouterr().err
+
+
+def test_publish_readme_keeps_the_rest_of_the_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, Any], str | None]] = []
+    listing = {
+        "id": "template-id",
+        "description": "Gateway",
+        "category": "AI/ML",
+        "image": "https://example.com/logo.svg",
+        "demoProjectId": None,
+        "workspaceId": "workspace-id",
+    }
+
+    def graphql(query: str, variables: dict[str, Any], token: str | None = None) -> dict[str, Any]:
+        calls.append((query, variables, token))
+        return {"template": listing} if query == check.LISTING_QUERY else {"templatePublish": {"id": "template-id"}}
+
+    monkeypatch.setattr(check, "_graphql", graphql)
+
+    check.publish_readme("otari", "# New README\n", "token")
+
+    assert calls[0] == (check.LISTING_QUERY, {"code": "otari"}, "token")
+    assert calls[1] == (
+        check.PUBLISH_MUTATION,
+        {
+            "id": "template-id",
+            "input": {
+                "description": "Gateway",
+                "category": "AI/ML",
+                "image": "https://example.com/logo.svg",
+                "workspaceId": "workspace-id",
+                "readme": "# New README\n",
+            },
+        },
+        "token",
+    )
+
+
+def test_main_publishes_the_listing_then_checks_the_readme_alone(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    events: list[str] = []
+    live = _live_from(_snapshot())
+    _live_service(live, "otari")["source"]["image"] = "mzdotai/otari:latest"
+    listing = tmp_path / "listing.md"
+    listing.write_text("new\n")
+    monkeypatch.setenv("RAILWAY_API_TOKEN", "token")
+    monkeypatch.setattr(check, "publish_readme", lambda code, readme, token: events.append(f"publish {readme!r}"))
+
+    def fetch(code: str) -> dict[str, Any]:
+        events.append("fetch")
+        return {"readme": "new\n", "serializedConfig": live}
+
+    monkeypatch.setattr(check, "fetch_template", fetch)
+
+    assert check.main(["--listing", str(listing), "--publish-readme"]) == 0
+    assert events == ["publish 'new\\n'", "fetch"]
+    # The image drift is otari-railway-template.yml's to report, not the publish's.
+    assert "mzdotai/otari:latest" not in capsys.readouterr().out
+
+
+def test_main_fails_when_the_published_readme_did_not_take(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    listing = tmp_path / "listing.md"
+    listing.write_text("new\n")
+    monkeypatch.setenv("RAILWAY_API_TOKEN", "token")
+    monkeypatch.setattr(check, "publish_readme", lambda code, readme, token: None)
+    monkeypatch.setattr(
+        check, "fetch_template", lambda code: {"readme": "old\n", "serializedConfig": _live_from(_snapshot())}
+    )
+
+    assert check.main(["--listing", str(listing), "--publish-readme"]) == 1
+    out = capsys.readouterr().out
+    assert "still differs" in out
+    assert "+old" in out
+
+
+def test_main_refuses_to_publish_without_a_token(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("RAILWAY_API_TOKEN", raising=False)
+    monkeypatch.setattr(check, "publish_readme", lambda *args: pytest.fail("published without a token"))
+
+    assert check.main(["--publish-readme"]) == 2
+    assert "RAILWAY_API_TOKEN" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("payload", [b"null", b"[]", b'"error"'])
+def test_a_body_that_is_not_an_object_is_a_fetch_error(monkeypatch: pytest.MonkeyPatch, payload: bytes) -> None:
+    monkeypatch.setattr(check.urllib.request, "urlopen", lambda request, timeout: io.BytesIO(payload))
+
+    with pytest.raises(check.FetchError, match="not a JSON object"):
+        check.fetch_template("otari")

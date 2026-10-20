@@ -6,7 +6,13 @@ and the API has no mutation that writes its services or variables, so the repo
 snapshot can only be kept honest by reading the live template back. Railway's
 public GraphQL API answers ``template(code: ...)`` with no token: its
 ``serializedConfig`` holds every service's image, deploy settings, domains and
-variables, and ``readme`` holds the README pasted from listing.md.
+variables, and ``readme`` holds the README published from listing.md.
+
+The README is the one part the API writes. ``--publish-readme`` sends
+listing.md through ``templatePublish`` instead of checking, with the token in
+``RAILWAY_API_TOKEN``, and passes the listing's other fields back unchanged,
+since the mutation replaces them all. It then reads the README back and
+compares that alone: the rest is drift only the template editor can fix.
 
 Compared per service (matched by name): the image (``docker.io/`` ignored),
 start command, healthcheck path, the public domain's port, and each variable's
@@ -16,10 +22,11 @@ whitespace. Buckets are compared by name, which is all the serialized config
 carries about one. The README ignores trailing whitespace.
 
 Standard library only, like oss_edition_smoke.py, so CI runs it with no
-environment. Exits 0 when the two agree, 1 on drift, 2 when the fetch fails.
+environment. Exits 0 when the two agree, 1 on drift, 2 when a call to Railway fails.
 
 Usage:
     python scripts/check_railway_template.py
+    RAILWAY_API_TOKEN=... python scripts/check_railway_template.py --publish-readme
 """
 
 from __future__ import annotations
@@ -27,6 +34,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -38,18 +46,23 @@ TEMPLATE_PATH = REPO_ROOT / "deploy" / "railway" / "template.json"
 LISTING_PATH = REPO_ROOT / "deploy" / "railway" / "listing.md"
 GRAPHQL_URL = "https://backboard.railway.com/graphql/v2"
 QUERY = "query($code: String!) { template(code: $code) { readme serializedConfig } }"
+LISTING_FIELDS = ("description", "category", "image", "demoProjectId", "workspaceId")
+LISTING_QUERY = f"query($code: String!) {{ template(code: $code) {{ id {' '.join(LISTING_FIELDS)} }} }}"
+PUBLISH_MUTATION = (
+    "mutation($id: String!, $input: TemplatePublishInput!) { templatePublish(id: $id, input: $input) { id } }"
+)
 
 
 class FetchError(Exception):
-    """The live template could not be read."""
+    """A call to Railway's API failed."""
 
 
-def fetch_template(code: str) -> dict[str, Any]:
-    """Return the live template's ``readme`` and ``serializedConfig``."""
+def _graphql(query: str, variables: dict[str, Any], token: str | None = None) -> dict[str, Any]:
+    headers = {"Content-Type": "application/json", "User-Agent": "otari-railway-template-check"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(
-        GRAPHQL_URL,
-        data=json.dumps({"query": QUERY, "variables": {"code": code}}).encode(),
-        headers={"Content-Type": "application/json", "User-Agent": "otari-railway-template-check"},
+        GRAPHQL_URL, data=json.dumps({"query": query, "variables": variables}).encode(), headers=headers
     )
     body: dict[str, Any]
     try:
@@ -64,12 +77,31 @@ def fetch_template(code: str) -> dict[str, Any]:
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
         raise FetchError(f"could not reach Railway: {exc}") from exc
 
+    if not isinstance(body, dict):
+        raise FetchError("Railway answered with a body that is not a JSON object")
     if body.get("errors"):
         raise FetchError("; ".join(error.get("message", str(error)) for error in body["errors"]))
-    template: dict[str, Any] | None = (body.get("data") or {}).get("template")
+    data: dict[str, Any] = body.get("data") or {}
+    return data
+
+
+def _template(code: str, query: str, token: str | None = None) -> dict[str, Any]:
+    template: dict[str, Any] | None = _graphql(query, {"code": code}, token).get("template")
     if not template:
         raise FetchError(f"Railway returned no template for code {code!r}")
     return template
+
+
+def fetch_template(code: str) -> dict[str, Any]:
+    """Return the live template's ``readme`` and ``serializedConfig``."""
+    return _template(code, QUERY)
+
+
+def publish_readme(code: str, readme: str, token: str) -> None:
+    """Replace the live template's README, keeping the rest of its listing as it is."""
+    listing = _template(code, LISTING_QUERY, token)
+    fields = {key: listing[key] for key in LISTING_FIELDS if listing.get(key) is not None}
+    _graphql(PUBLISH_MUTATION, {"id": listing["id"], "input": {**fields, "readme": readme}}, token)
 
 
 def _one_side_only(label: str, expected: set[str], live: set[str]) -> list[str]:
@@ -163,17 +195,34 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--template", type=Path, default=TEMPLATE_PATH, help="the template.json snapshot")
     parser.add_argument("--listing", type=Path, default=LISTING_PATH, help="the template's Railway README")
+    parser.add_argument(
+        "--publish-readme", action="store_true", help="publish listing.md as the live README (RAILWAY_API_TOKEN)"
+    )
     args = parser.parse_args(argv)
 
-    snapshot = json.loads(args.template.read_text())
+    snapshot = json.loads(args.template.read_text(encoding="utf-8"))
+    listing = args.listing.read_text(encoding="utf-8")
     try:
+        if args.publish_readme:
+            token = os.environ.get("RAILWAY_API_TOKEN")
+            if not token:
+                raise FetchError("--publish-readme needs a Railway API token in RAILWAY_API_TOKEN")
+            publish_readme(snapshot["code"], listing, token)
         live = fetch_template(snapshot["code"])
     except FetchError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    readme_diff = diff_readme(listing, live.get("readme") or "")
+    if args.publish_readme:
+        if readme_diff:
+            print(f"The live README still differs from {args.listing.name} after publishing:")
+            print("\n".join(readme_diff))
+            return 1
+        print(f"Published {args.listing.name} as the README of the live Railway template {snapshot['code']!r}.")
+        return 0
+
     problems = diff_config(snapshot, live.get("serializedConfig") or {})
-    readme_diff = diff_readme(args.listing.read_text(), live.get("readme") or "")
 
     if not problems and not readme_diff:
         print(f"The live Railway template {snapshot['code']!r} matches template.json and listing.md.")

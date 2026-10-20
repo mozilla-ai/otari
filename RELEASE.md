@@ -42,7 +42,7 @@ so the event can arrive before or after the image is pushed.
 For a local preview of what the next release notes will look like, run
 `make changelog` (set `GITHUB_TOKEN` to resolve PR and author links).
 
-Five workflows react to the published Release:
+Six workflows react to the published Release:
 
 - **`otari-docker.yml`** builds and pushes the multi-arch image to Docker Hub,
   tagged `{{version}}` (e.g. `0.4.0`), `{{major}}.{{minor}}` (e.g. `0.4`), and the
@@ -76,16 +76,19 @@ Five workflows react to the published Release:
   GitBook organization as `otari-openapi-spec`, by the URL
   `https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json`,
   so a renamed spec or a moved file breaks them.
+- **`otari-railway-template-bump.yml`** opens a `chore(railway)` PR that moves
+  the Railway template snapshot (`deploy/railway/`) to the new image tag
+  (`scripts/bump_railway_template.py`). A pre-release, or a release not above
+  the pinned version, opens nothing.
 
-One step stays manual. The Railway template (`deploy/railway/`) is a
-platform object that no workflow writes. After a release that changes the
-config a deploy needs (a new required variable, a new healthcheck path), or
-that should move new deploys to the new image tag, edit the live template on
-the mozilla-ai Railway account and update `deploy/railway/template.json` in a
-PR. When `deploy/railway/listing.md` changed, paste it into the template's
-README field. Then run `make railway-template-check`; it exits non-zero while
-the two disagree. The **Otari Railway Template** workflow
-(`otari-railway-template.yml`) runs the same check on such a PR and weekly. See
+One step stays manual. Railway's public API writes a template's README but not
+its services or variables, so the live template's image tag, and any variable a
+release newly requires, are changed by hand in the template editor on the
+mozilla-ai Railway account. The bump PR's body lists that step, and its
+**Otari Railway Template** check (`otari-railway-template.yml`, which also runs
+weekly) fails until the live template agrees with `template.json`. When the PR
+merges, `otari-railway-listing.yml` publishes `deploy/railway/listing.md` as the
+live README. See
 [Maintaining the template](deploy/railway/README.md#maintaining-the-template).
 
 ### Continuous (non-release) builds
@@ -163,10 +166,16 @@ release PR body. It does not stop the release.
   dispatch needs. `otari-docker.yml` identifies the App with the secret
   `PLATFORM_DISPATCH_APP_ID`. `otari-tag-release.yml` identifies it with
   `PLATFORM_DISPATCH_APP_CLIENT_ID` (a repository variable, not a secret).
+- `RAILWAY_API_TOKEN`, used by `otari-railway-listing.yml` to publish
+  `deploy/railway/listing.md` as the Railway template's README. It is a Railway
+  account or workspace token with access to the mozilla-ai workspace that owns
+  the template. Without it the workflow skips the publish with a warning, and
+  the README is pasted into the template editor by hand.
 - `RELEASE_APP_CLIENT_ID` (a repository variable, not a secret) and
-  `RELEASE_APP_PRIVATE_KEY`, used by `otari-release.yml` and
-  `otari-tag-release.yml`. They identify the `otari-bot` GitHub App, org-owned
-  and installed on this repo alone, holding exactly `contents: write` +
+  `RELEASE_APP_PRIVATE_KEY`, used by `otari-release.yml`,
+  `otari-tag-release.yml` and `otari-railway-template-bump.yml`. They identify
+  the `otari-bot` GitHub App, org-owned and installed on this repo alone,
+  holding exactly `contents: write` +
   `pull requests: write`. Each run mints its own installation token with
   `actions/create-github-app-token`, narrowed further to the permissions that
   job uses and revoked when the job ends, so the release PR is authored by
