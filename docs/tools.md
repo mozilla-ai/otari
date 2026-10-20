@@ -38,11 +38,10 @@ Function tools remain the caller's responsibility.
 In [hybrid mode](modes.md) each attempt the platform plans is decided the same
 way, except that none is skipped, because the control plane expects a report for
 every attempt it planned: a request one of whose attempts Otari's tool could
-not serve (the workspace has the tool off, say) is decided as a whole, as it was
-before: search and fetch run on Otari for every attempt if any attempt needs
+not serve (the workspace has the tool off, say) is decided as a whole: search and fetch run on Otari for every attempt if any attempt needs
 it, and code execution follows the first attempt, so a first model that runs
-the code itself keeps it. A refusal then refuses the request. A route with one attempt is dispatched as it
-always was, and the control plane's code-execution and Web Access policies are
+the code itself keeps it. A refusal then refuses the request. A route with one attempt is dispatched as
+that attempt alone decides, and the control plane's code-execution and Web Access policies are
 each asked once per request.
 
 ### Web-search interception
@@ -233,50 +232,14 @@ label of what served it in Otari (see
 `<provider>:web_search`.
 
 Direct `POST /api/v1/search` prices a search on a tool under that tool's own key,
-`<provider>:<search-tool-name>`, because it calls a configured search provider
-without a model tool loop. The deployment pays for that search, so only its own
-price, or an override the deployment operator set, prices it. A search a
-workspace's [organization search key](#organization-search-keys) served is
-priced under `otari:web_search` instead, since the deployment cannot price the
-organization's own provider account, and the organization's own override
-applies to it. A provider's reported cost, when it reports one, comes first.
-
-With `require_pricing: true`, the default, a direct search whose row is missing
-is refused with a `402` and the code `pricing_required`, its detail naming the
-row to add, as an unpriced model is. That holds for a provider that reports its
-charge too, such as Exa, and a zero rate is a valid row. A key exempt from
-budgets is not refused.
-
-**Upgrading from 0.29.** Direct searches were exempt from `require_pricing`, so
-where it is on, a search on a tool with no row of its own now answers `402`. Add
-a row for each search tool, and `otari:web_search` if workspaces search on an
-organization search key. With the master key:
-
-```bash
-curl http://localhost:8000/api/v1/pricing \
-  -H "Authorization: Bearer $OTARI_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model_key": "exa:exa-search", "input_price_per_million": 5000, "output_price_per_million": 0}'
-```
-
-or in `config.yml`:
-
-```yaml
-pricing:
-  exa:exa-search:
-    input_price_per_million: 5000   # $0.005 per search
-    output_price_per_million: 0
-```
-
-Set the rate at about what one search costs: it is what a search holds against
-the caller's budget before it runs, and it is billed when the provider reports
-no charge of its own. A provider's reported charge still comes first. A zero
-rate is valid too and bills as before, but holds nothing. The dashboard cannot
-price a tool's own row yet, so use the API or the configuration file;
-`otari:web_search` can also be set on the dashboard's Tools & Guardrails screen.
-`require_pricing: false` serves unpriced searches again, and unpriced models with
-them. And whether `require_pricing` is on or not, an organization's own pricing
-override no longer prices a search on one of the deployment's tools.
+`<provider>:<search-tool-name>`, or under `otari:web_search` when a workspace's
+[organization search key](#organization-search-keys) served it. How that rate
+is reserved and settled, and how `require_pricing` refuses a missing one with a
+`402 pricing_required`, is in
+[Per-request pricing](configuration.md#per-request-pricing-audio-moderations-rerank-and-completion-models).
+The deployment pays for a search on one of its tools, so only its own price, or
+an override the deployment operator set, prices it; a search an organization key
+served takes the organization's own override.
 
 ## What clients receive
 
@@ -375,9 +338,8 @@ run can build on the last one's variables and files. Across requests, nothing is
 held unless you ask: a request sends `container: "auto"` to say it wants a
 sandbox that outlives it, and the response comes back naming the one it got.
 Send that name on the next request and you get the same sandbox, with the
-workspace as the last run left it. A request that asks for nothing is served
-exactly as it was before any of this existed, and holds nothing, because a held
-sandbox costs the deployment for as long as it is held.
+workspace as the last run left it. A request that asks for nothing holds
+nothing, because a held sandbox costs the deployment for as long as it is held.
 
 This is the same contract as Anthropic's `container` and OpenAI's
 `code_interpreter` container:
@@ -420,8 +382,7 @@ one workspace would interleave their code and each collect the other's files.
 
 A response carries a container only when the sandbox really will still be there.
 A `protocol` backend that declines the idle timeout Otari asks for is told to
-destroy the session at the end of the request, as it was before reuse existed,
-and the response names no container rather than one that is already gone.
+destroy the session at the end of the request, and the response names no container rather than one that is already gone.
 
 `container` is only the gateway's where the gateway runs the code. A request
 whose code execution the provider serves (see
@@ -546,11 +507,6 @@ In hybrid mode a workspace the control plane has not enabled still has a
 declaration its provider runs natively served by that provider. A route with a
 fallback that would need the sandbox is decided as a whole, by the first
 attempt (see [Who runs a tool](#who-runs-a-tool)).
-
-**Upgrading from 0.6.** A deployment with `sandbox_url` set that forwarded
-`code_interpreter`, `code_execution_<date>` or `code_execution` to a provider
-with no native tool for the model now runs it on the sandbox and bills it as a
-sandbox tool call. Set `code_execution_executor: provider` to keep forwarding.
 
 ### Per-workspace code policy
 
@@ -719,27 +675,11 @@ On the legacy settings, Otari reaches a licensed search API directly. Set
 `web_search_provider` to `tavily` or `brave` and `web_search_provider_api_key` to
 that provider's key; the key stays in the gateway process and never reaches a
 caller.
-
-For evaluation, the bundled SearXNG backend needs no key:
-
-```bash
-docker compose --profile web-search up
-```
-
-Request it with:
-
-```json
-{
-  "model": "anthropic:claude-sonnet-4-6",
-  "messages": [{"role": "user", "content": "Find the latest Python release."}],
-  "tools": [{"type": "otari_web_search"}]
-}
-```
-
-Public SearXNG engines may rate-limit automated traffic, so prefer a licensed
-provider for production. `web_search_url` points at any other backend exposing
-a SearXNG-compatible `/search?format=json` endpoint, and a configured provider
-wins over it.
+`web_search_url` points at a backend exposing a SearXNG-compatible
+`/search?format=json` endpoint, such as the bundled SearXNG
+([try it](#try-web-search-with-the-bundled-searxng)), and a configured provider
+wins over it. A deployment whose search key must stay off the serving machine
+can [serve search from its control plane](#keep-the-search-key-off-a-hybrid-data-plane).
 
 When content extraction is enabled, Otari retrieves each result through its
 bounded public-web client. It validates and pins the resolved address before
@@ -747,6 +687,19 @@ connecting, validates every redirect, rejects HTTPS-to-HTTP downgrades, follows
 at most five redirects, and applies one five-second network deadline across DNS,
 connection setup, redirects, and body streaming. The decoded response body is
 limited to 5 MiB.
+
+Otari extracts HTML, textual formats (including Markdown, JSON, XML, and
+JavaScript), and text-bearing PDFs. HTML and PDF parsing runs in a supervised
+single-worker process with fixed time, memory, queue, page, and intermediate
+output limits. Unsafe, unreachable, unsupported, empty, timed-out, or
+unextractable results fall back to the search provider's snippet. A provider's
+own `extracted_content` still takes precedence and is not fetched locally.
+
+Each complete `web_search` tool result is limited to 50 KiB of valid UTF-8,
+including any truncation notice. The 1,500-character per-result content limit
+applies before this overall result limit.
+
+#### Result retrieval through a proxy
 
 Result-page retrieval ignores environment proxies by default. To use an
 operator-controlled proxy that blocks unsafe destination addresses, set
@@ -764,47 +717,6 @@ and response limits, so destination DNS must also work on the gateway.
 Requests without an applicable proxy, including `NO_PROXY` matches, remain
 IP-pinned. A failed proxy request never falls back to a direct connection.
 This deployment-only setting cannot be enabled by a tool request or workspace.
-
-Otari extracts HTML, textual formats (including Markdown, JSON, XML, and
-JavaScript), and text-bearing PDFs. HTML and PDF parsing runs in a supervised
-single-worker process with fixed time, memory, queue, page, and intermediate
-output limits. Unsafe, unreachable, unsupported, empty, timed-out, or
-unextractable results fall back to the search provider's snippet. A provider's
-own `extracted_content` still takes precedence and is not fetched locally.
-
-Each complete `web_search` tool result is limited to 50 KiB of valid UTF-8,
-including any truncation notice. The existing 1,500-character per-result content
-limit still applies before this overall result limit.
-
-Where the search key must not sit on the machine serving traffic, a deployment
-can also serve the search itself at `GET /api/v1/web-search/search`. This is the
-hosted shape: the control plane holds the key and runs the query, and its
-**hybrid** data plane calls it by setting `web_search_url` to
-`{control-plane}/api/v1/web-search`. That address has to be under the gateway's
-`PLATFORM_BASE_URL`, because a gateway forwards its platform token only to its
-own control plane, and that token is what the route recognizes.
-
-Set `web_search_backend_token` on the serving process to the token its own
-gateway presents, which is that gateway's `OTARI_AI_TOKEN`. The two are one
-secret, so rotating the platform token stops web search for that data plane
-until both sides are updated. Without it the route is not mounted at all, since
-it spends the deployment's search quota and a control plane is reachable from
-the internet. A gateway someone else self-hosts presents a credential of its own and
-is refused, deliberately: that is the same boundary that keeps a deployment's
-provider keys off a foreign process. Such a gateway configures its own
-`web_search_provider` or `web_search_url` instead, and the per-workspace policy
-below still governs it.
-
-Migrating from the Brave or Tavily adapter container: on the process that holds
-the key, set `web_search_provider` and `web_search_provider_api_key` and unset
-`web_search_url`. A hybrid data plane holds no key, so it keeps a
-`web_search_url` and points it at its control plane's `/api/v1/web-search` instead.
-The adapters, and the `web-search-brave` and `web-search-tavily` compose
-profiles that ran them, were removed. A `web_search_url` still pointing at one
-keeps the deployment looking configured while every search fails, so change both
-together.
-
-A runnable example lives under `demo/web-search/`.
 
 ### Per-workspace web-access policy
 
@@ -857,7 +769,7 @@ Each workspace searches with one key, for model-initiated search and for a
 
 A key the workspace turned off, an archived key, or one this deployment cannot
 decrypt is passed over. A workspace with no usable key uses the deployment's
-search exactly as before. A workspace's owners and admins pin or turn off keys
+search. A workspace's owners and admins pin or turn off keys
 under `/api/v1/workspaces/{workspace_id}/web-search-keys`, which any member of
 the workspace can read to see which key it uses.
 
@@ -866,6 +778,48 @@ deployment must still have web search configured, and the workspace's
 web-access policy still applies. In hybrid mode the control plane chooses the
 key and returns it with the workspace's policy; see
 [Web Access resolution](hybrid-mode-protocol.md#web-access-resolution).
+
+### Try web search with the bundled SearXNG
+
+For evaluation, the bundled SearXNG backend needs no key. Start it:
+
+```bash
+docker compose --profile web-search up
+```
+
+Then declare the tool on a request:
+
+```json
+{
+  "model": "anthropic:claude-sonnet-4-6",
+  "messages": [{"role": "user", "content": "Find the latest Python release."}],
+  "tools": [{"type": "otari_web_search"}]
+}
+```
+
+Public SearXNG engines may rate-limit automated traffic, so prefer a licensed
+provider for production. A runnable example lives under `demo/web-search/`.
+
+### Keep the search key off a hybrid data plane
+
+Where the search key must not sit on the machine serving traffic, a deployment
+can also serve the search itself at `GET /api/v1/web-search/search`. This is the
+hosted shape: the control plane holds the key and runs the query, and its
+**hybrid** data plane calls it by setting `web_search_url` to
+`{control-plane}/api/v1/web-search`. That address has to be under the gateway's
+`PLATFORM_BASE_URL`, because a gateway forwards its platform token only to its
+own control plane, and that token is what the route recognizes.
+
+Set `web_search_backend_token` on the serving process to the token its own
+gateway presents, which is that gateway's `OTARI_AI_TOKEN`. The two are one
+secret, so rotating the platform token stops web search for that data plane
+until both sides are updated. Without it the route is not mounted at all, since
+it spends the deployment's search quota and a control plane is reachable from
+the internet. A gateway someone else self-hosts presents a credential of its own and
+is refused, deliberately: that is the same boundary that keeps a deployment's
+provider keys off a foreign process. Such a gateway configures its own
+`web_search_provider` or `web_search_url` instead, and the
+[per-workspace policy](#per-workspace-web-access-policy) still governs it.
 
 ## Direct search
 
@@ -913,3 +867,57 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
   limit, whatever the plan, and its hits carry a snippet but no page text.
 - **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
   at the tool's rate.
+
+## Upgrading
+
+Each note applies when upgrading from the release it names to a later one.
+
+### From 0.29: direct searches need a price
+
+Direct searches were exempt from `require_pricing`, so
+where it is on, a search on a tool with no row of its own now answers `402`. Add
+a row for each search tool, and `otari:web_search` if workspaces search on an
+organization search key. With the master key:
+
+```bash
+curl http://localhost:8000/api/v1/pricing \
+  -H "Authorization: Bearer $OTARI_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model_key": "exa:exa-search", "input_price_per_million": 5000, "output_price_per_million": 0}'
+```
+
+or in `config.yml`:
+
+```yaml
+pricing:
+  exa:exa-search:
+    input_price_per_million: 5000   # $0.005 per search
+    output_price_per_million: 0
+```
+
+Set the rate at about what one search costs: it is what a search holds against
+the caller's budget before it runs, and it is billed when the provider reports
+no charge of its own. A provider's reported charge still comes first. A zero
+rate is valid too and bills as before, but holds nothing. The dashboard cannot
+price a tool's own row yet, so use the API or the configuration file;
+`otari:web_search` can also be set on the dashboard's Tools & Guardrails screen.
+`require_pricing: false` serves unpriced searches again, and unpriced models with
+them. And whether `require_pricing` is on or not, an organization's own pricing
+override no longer prices a search on one of the deployment's tools.
+
+### From 0.6: provider code-execution declarations can run on the sandbox
+
+A deployment with `sandbox_url` set that forwarded
+`code_interpreter`, `code_execution_<date>` or `code_execution` to a provider
+with no native tool for the model now runs it on the sandbox and bills it as a
+sandbox tool call. Set `code_execution_executor: provider` to keep forwarding.
+
+### From 0.4: the Brave and Tavily adapter containers
+
+The adapters, and the `web-search-brave` and `web-search-tavily` compose
+profiles that ran them, were removed in 0.5. On the process that holds
+the key, set `web_search_provider` and `web_search_provider_api_key` and unset
+`web_search_url`. A hybrid data plane holds no key, so it keeps a
+`web_search_url` and points it at its control plane's `/api/v1/web-search` instead.
+A `web_search_url` still pointing at an adapter keeps the deployment looking configured while every search fails, so change both
+together.

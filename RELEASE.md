@@ -193,10 +193,24 @@ described above. A maintainer reviews and merges each, after which that SDK's ow
 release-please flow opens a release PR, and merging it cuts and publishes that
 SDK's release.
 
-For the full model (the spec-version compatibility scheme, the two-merge
-lifecycle, and the per-SDK registries and secrets) see
-[`docs/sdk-compatibility.md`](docs/sdk-compatibility.md) and each SDK repo's
-`RELEASE.md`.
+The flow, end to end:
+
+1. A spec change regenerates the typed core and opens PRs in the SDK repos
+   (`.github/workflows/otari-sdk-codegen.yml`; see
+   [`scripts/sdk_codegen/README.md`](scripts/sdk_codegen/README.md#automation)).
+2. A maintainer reviews and merges the regeneration PR.
+3. `release-please` opens or updates the SDK's release PR.
+4. Merging the release PR tags the release and publishes the SDK. For Go, the
+   tag itself is the consumable release via `go get`.
+
+`.github/workflows/sdk-regen-staleness.yml` keeps a tracking issue open on this
+repository while a regeneration PR has failing checks or has stayed open past
+its freshness window, which signals an SDK lagging the spec.
+
+For the spec-version compatibility rule and matrix users read, see
+[`docs/sdk-compatibility.md`](docs/sdk-compatibility.md); for the per-SDK
+registries and secrets, each SDK repo's `RELEASE.md`. Update that page's matrix
+when tagged SDK releases land.
 
 ## Integration package releases
 

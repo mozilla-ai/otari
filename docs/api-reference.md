@@ -86,7 +86,7 @@ through `extra_body={"input_type": "search_query"}`.
 a chat completion and translates the answer back, streamed or not, so the client
 sees an ordinary Responses object or event stream. A provider with its own
 Responses API (OpenAI, Azure OpenAI, Gemini, Groq, and others) is called
-natively, as before.
+natively.
 
 The translation covers text, image and file input, `instructions`, function
 tools and `tool_choice`, `max_output_tokens`, `reasoning.effort`, JSON output
@@ -146,16 +146,12 @@ priced.
 
 ### Who runs a built-in tool
 
-A request that declares code execution, web search or Anthropic's web fetch in a
-provider's own words (`code_execution_<date>`, `code_interpreter`,
-`web_search_<date>`, `web_fetch_<date>`) can say who runs it with the
-`Otari-Code-Execution`, `Otari-Web-Search` and `Otari-Web-Fetch` headers. Each
-takes `auto`, `otari` or `provider`, and each attempt of a fallback chain is
-decided on its own. `auto` keeps the provider's own tool on an attempt whose
-model runs it natively and runs Otari's on one that does not. `otari` always
-runs Otari's. `provider` always forwards the provider's own tool and never uses
-Otari's, so on a fallback to a provider that cannot run it, that attempt fails;
-use `auto` for fallback cover. See [Who runs a tool](tools.md#who-runs-a-tool).
+The `Otari-Code-Execution`, `Otari-Web-Search` and `Otari-Web-Fetch` request
+headers say who runs a tool declared in a provider's own words
+(`code_execution_<date>`, `code_interpreter`, `web_search_<date>`,
+`web_fetch_<date>`). Each takes `auto`, `otari` or `provider`, decided for each
+attempt of a fallback chain on its own. [Who runs a tool](tools.md#who-runs-a-tool)
+defines the values and their limits.
 
 ### Web tool calls on Chat Completions
 
@@ -265,9 +261,9 @@ never forwarded to the provider.
 
 What reaches the provider depends on the surface. Chat Completions and Messages
 never forward the caller's `metadata`. On Messages, `metadata.user_id` names the
-billed user, as it always has, and is not a tag; the provider gets an
+billed user and is not a tag; the provider gets an
 [end-user identifier](configuration.md#end-user-identifiers) derived from it in
-its place. Responses forwards `metadata` as before, minus
+its place. Responses forwards `metadata`, minus
 `spend_logs_metadata`, because the Responses API stores it.
 
 The usage endpoints (`GET /api/v1/usage`, `/count`, `/summary`, `/series`, and
@@ -306,18 +302,16 @@ To tag a request with a free-form end-user ID, put it in `metadata`
 
 ### Cost of a failed or interrupted request
 
-A stream that fails mid-response ends in an error event, and one the client
-disconnects from ends with nothing, so neither delivers `usage.cost_usd`. The
-provider may still have charged for the tokens it reported before the stream
-ended (an Anthropic stream reports its input tokens in `message_start`), and a
-standalone gateway records and bills those tokens rather than treating the
-request as free.
+- A stream that fails mid-response ends in an error event, and one the client
+  disconnects from ends with nothing, so neither delivers `usage.cost_usd`.
+- A standalone gateway still records and bills the tokens the provider reported
+  before the stream ended (an Anthropic stream reports its input tokens in
+  `message_start`). The request is not treated as free.
+- A stream the client abandoned before the provider reported any usage, and
+  that ran no gateway tools, has nothing to bill and writes no usage row.
 
-To recover that amount, look the request up by its `Otari-Request-ID`:
-
-```
-GET /api/v1/usage/requests/{request_id}
-```
+`GET /api/v1/usage/requests/{request_id}` returns what a request was billed,
+looked up by its `Otari-Request-ID`:
 
 ```json
 {
@@ -331,76 +325,65 @@ GET /api/v1/usage/requests/{request_id}
 }
 ```
 
-The response sums every usage row the request wrote: a request routed through a
-policy writes one per attempt, all sharing that id as their `request_group_id`,
-so the total covers the attempts it fell over from as well as the one that
-served. `cost_usd` uses the inline format and is `null` when nothing was priced.
-An API key sees only its own requests and the master key sees any. The endpoint
-answers 404 until the request has settled, since usage rows are written in the
-background, and for an id that is unknown or belongs to another key. A stream the
-client abandoned before the provider reported any usage, and that ran no gateway
-tools, has nothing to bill and writes no row, so its id stays 404.
-
-This lookup is standalone only. In hybrid mode the platform owns settlement, and
-a failed stream reports no usage to it; see
-[Hybrid mode protocol](hybrid-mode-protocol.md).
+| Aspect | Behavior |
+|---|---|
+| Totals | The sum of every usage row the request wrote. A request routed through a policy writes one per attempt, all sharing the id as their `request_group_id`, so the total covers the attempts it fell over from as well as the one that served. |
+| `cost_usd` | The [inline cost](#request-id-and-inline-cost) format; `null` when nothing was priced. |
+| Access | An API key sees only its own requests; the master key sees any. |
+| `404` | Until the request has settled (usage rows are written in the background), for an unknown id, for another key's id, and for a request that wrote no row. |
+| Modes | Standalone only. In hybrid mode the platform owns settlement, and a failed stream reports no usage to it; see [Hybrid mode protocol](hybrid-mode-protocol.md). |
 
 ### Retrying safely
 
-A request the provider or the gateway refused (a 429, a 529, any other error) is
-not billed: its budget hold is refunded, so a client can retry it as it is. A
-stream that fails or that the client disconnects from is billed for the tokens
-the provider reported before it ended, and nothing more (see
-[Cost of a failed or interrupted request](#cost-of-a-failed-or-interrupted-request));
-a retry of it is a new request, billed on its own. The case that does bill twice
-is a
-non-streaming request that succeeded while its response was lost on the way
-back, through a dropped connection or a client timeout, because the retry calls
-the provider again.
+What a retry costs depends on how the first attempt ended:
 
-Send an `Idempotency-Key` header on a non-streaming Chat, Messages, or Responses
-request to make that retry safe. The value is any unique string of 1 to 255
-printable ASCII characters; a UUID is the usual choice. A retry with the same key
-and the same body then gets the original response, with its original
-`Otari-Request-ID`, serving headers and `usage.cost_usd`, and an `Otari-Idempotent-Replayed: true`
-header (but no `Otari-Response-Duration-Ms`, which described the original), without calling the provider or billing again. While the original is
-still running, a retry is answered 409 with `Retry-After`, and if the original
-fails the next retry runs in its place.
+| First attempt | Billed | A retry |
+|---|---|---|
+| Refused by the provider or the gateway (a 429, a 529, any other error) | No: its budget hold is refunded | Can be sent as it is. |
+| A stream that failed or that the client disconnected from | The tokens the provider reported before it ended, and nothing more (see [Cost of a failed or interrupted request](#cost-of-a-failed-or-interrupted-request)) | Is a new request, billed on its own. |
+| A non-streaming request that succeeded while its response was lost (a dropped connection, a client timeout) | Yes | Calls the provider again and is billed again, unless both carry the same `Idempotency-Key`. |
 
-- A key belongs to the API key that sent it (or, for the master key, to the
-  billed user), so two callers never see each other's responses.
-- A retry has to be the same request: the same body, and the same
-  `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Web-Fetch`, `Otari-Router`,
-  `Otari-Router-Task`, `Otari-Conversation-Id`, `Otari-Tags` and `anthropic-beta` headers,
-  since those change what the request does. The same key with a different body
-  or different values for those headers is refused with 422, so send a new key
-  for a new request. Key order and whitespace in the JSON body do not count as a
-  difference.
-- A retry that arrives while the original is still running is answered 409
-  with `Retry-After` at once, as the IETF `Idempotency-Key` draft and Stripe's
-  API do. Retry again later with the same key, backing off exponentially.
-- The request holding a key renews its claim while it runs, so a retry does not
-  run it a second time however long it takes. If the worker running it dies, its
-  key frees up within `idempotency_lease_sec` (a minute by default).
-- A response is kept for `idempotency_retention_sec` (a day by default),
-  generated content included, and then deleted. It is stored encrypted with
-  `OTARI_SECRET_KEY`, so a deployment without that key ignores the header, and
-  a response no configured key can decrypt (after the key was rotated away)
-  runs again. Responses larger than 8 MiB are not kept, so a retry of one runs
-  again. Expired responses are still deleted after the header is turned off.
-- Only a successful response is kept. On a retry the request is still
-  authenticated and checked against the key's model access, and a user who has
-  since been blocked is refused rather than given the stored response.
-- Streaming requests ignore the header, and so does hybrid mode, which has no
-  local database to keep the response in.
+#### `Idempotency-Key`
 
-A retry runs again, and is billed again, whenever the original's response was
-not stored or can no longer be read. The cases above are the ones a deployment
-chooses: the response was larger than 8 MiB, its retention passed, the header was
-turned off, or `OTARI_SECRET_KEY` was rotated away. Two more come from failures:
-the gateway stops after the provider answers and before the response is stored,
-or the database stays unreachable for about `idempotency_lease_sec` while the
-original runs, so its claim lapses and a retry takes it over.
+A non-streaming Chat, Messages, or Responses request may carry an
+`Idempotency-Key` header: any unique string of 1 to 255 printable ASCII
+characters, usually a UUID. A retry with the same key and the same request gets
+the original response, with its original `Otari-Request-ID`, serving headers
+and `usage.cost_usd`, plus `Otari-Idempotent-Replayed: true` (and no
+`Otari-Response-Duration-Ms`, which described the original), without calling the
+provider or billing again.
+
+| Aspect | Behavior |
+|---|---|
+| Scope | A key belongs to the API key that sent it (or, for the master key, to the billed user), so two callers never see each other's responses. |
+| Same request | The same body, and the same `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Web-Fetch`, `Otari-Router`, `Otari-Router-Task`, `Otari-Conversation-Id`, `Otari-Tags` and `anthropic-beta` headers, since those change what the request does. Key order and whitespace in the JSON body do not count as a difference. |
+| Different request, same key | `422`. |
+| Original still running | `409` with `Retry-After`, at once, as the IETF `Idempotency-Key` draft and Stripe's API answer. |
+| Original failed | The next retry runs in its place. Only a successful response is kept. |
+| Long-running original | The request holding a key renews its claim while it runs, so a retry never runs it a second time. If the worker running it dies, its key frees up within `idempotency_lease_sec` (a minute by default). |
+| Retention | A response, generated content included, is kept for `idempotency_retention_sec` (a day by default; `0` ignores the header) and then deleted. Expired responses are still deleted after the header is turned off. |
+| Storage | Encrypted with `OTARI_SECRET_KEY`; a deployment without that key ignores the header. Responses larger than 8 MiB are not kept. |
+| Checks on a replay | The request is still authenticated and checked against the key's model access, and a user who has since been blocked is refused rather than given the stored response. |
+| Not applied | Streaming requests, and hybrid mode, which has no local database to keep the response in, ignore the header. |
+
+A keyed retry runs again, and is billed again, whenever the original's response
+was not stored or can no longer be read:
+
+- the response was larger than 8 MiB;
+- its retention passed, or the header was turned off;
+- `OTARI_SECRET_KEY` was rotated away, so no configured key can decrypt it;
+- the gateway stopped after the provider answered and before the response was
+  stored;
+- the database stayed unreachable for about `idempotency_lease_sec` while the
+  original ran, so its claim lapsed and a retry took it over.
+
+#### Procedure: retry a non-streaming request
+
+1. Generate a UUID for the request and send it as `Idempotency-Key`.
+2. On a lost response, resend the identical request with the same key.
+3. On a `409`, wait for `Retry-After` and retry with the same key, backing off
+   exponentially.
+4. For a new or changed request, generate a new key; reusing one is a `422`.
 
 ## Rerank
 
@@ -586,6 +569,78 @@ examples and status live under `/api/v1/routing/preferences` and `/api/v1/routin
 See [Routing policies](routing.md) for configuration and behavior, and OpenAPI for
 the request schemas.
 
+## Routing recommendations
+
+`POST /api/v1/routing/recommend` recommends the model a coding agent's
+subagent should start on, asked by the harness at spawn time. One decision call
+is made and nothing else is dispatched: the harness runs the subagent on the
+answer with its own provider credentials. How the recommendation is reached is
+in [Agent model recommendations](routing.md#agent-model-recommendations).
+
+Any active API key may ask; the decision is billed to the key's own user. A
+master-key request names the billed user in `user`. The call is metered,
+budgeted and recorded in usage like a [decision](#decisions). The route is
+standalone only: hybrid and hosted gateways do not serve it.
+
+```bash
+curl "$OTARI_URL/api/v1/routing/recommend" \
+  -H "Authorization: Bearer $OTARI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "harness": "claude-code",
+    "session_id": "bf05abe2-5ff2-4eb0-8459-ab578d5c9468",
+    "tool_use_id": "toolu_01Ab3dEfGh",
+    "agent_type": "Explore",
+    "description": "Find the budget reservation code",
+    "prompt": "Find where budgets are reserved before dispatch.",
+    "parent_model": "claude-opus-5",
+    "requested_model": null
+  }'
+```
+
+**Request.** Unknown fields are refused with a `422`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `harness` | `claude-code` or `pi`, required | The harness asking. It decides the candidates (below). |
+| `candidates` | object | The models the subagent may be sent to, as Otari model ids (`<provider>:<model>`, up to 256 characters) mapped to what each is for (up to 1,024 characters, or `null` when the name says enough). Two to 255 entries. Required for `pi`, refused for `claude-code`. |
+| `session_id` | string, 1 to 256, required | The harness's own id for the session the spawn happens in. |
+| `tool_use_id` | string, 1 to 256, required | The harness's own id for the tool call that spawns the subagent. |
+| `agent_type` | string, 1 to 128, required | The subagent type: a built-in such as `Explore` or `Plan`, or a custom agent's name. |
+| `description` | string, up to 1,024 | The caller's short description of the task. Default empty. |
+| `prompt` | string, 1 to 65,536, required | The task the subagent is given. Its first 32,000 characters reach the decision model. Never stored or logged. |
+| `parent_model` | string, 1 to 256, required | The model the parent conversation runs on, as the harness names it. |
+| `requested_model` | string, up to 256 | The model the caller asked for, if any. Received as a fact and kept out of the question, so the orchestrator's guess cannot pull the answer toward itself. |
+| `user` | string | The user billed for a master-key request; not sent upstream. |
+
+**Candidates.** A `claude-code` request chooses among the deployment's
+`agent_recommender_candidates`, Claude Code's `haiku`, `sonnet` and `opus`
+aliases by default, because Claude Code sends the subagent's requests to
+Anthropic itself and resolves the alias on its side; it may not send
+`candidates`. A `pi` request must send its own. Either mismatch is a `422`.
+
+**Response.**
+
+```json
+{
+  "model": "haiku",
+  "reason": "jev-1.13.0 chose haiku with 81%",
+  "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `model` | One of the candidates: a model alias or id the harness can start the subagent on. |
+| `reason` | One short sentence the harness may show, or `null`. |
+| `probabilities` | The decision model's probability for each candidate, or `null` when it reports none. |
+
+**Errors.** No decision provider that `agent_recommender_model` resolves to is a
+`400`. The decision model's refusal of the request (400, 422, or 501) is a
+`400`, its rate limit a `429`, its refusal of the gateway's credential (401 or
+403) a `424` with `provider_credential_rejected`, and any other failure, or an
+answer that names no candidate, a `502`.
+
 ## Provider error details
 
 Otari may return a short, sanitized provider diagnostic when the upstream
@@ -608,39 +663,35 @@ body's other fields, or the response headers. When that body has no message, or
 its message is redacted away, the caller gets the fixed detail for the status
 instead (for a 400,
 `The provider rejected the request as invalid (check the model name and parameters)`).
-The provider's `param` and `code` fields are not copied into the response.
+The provider's `param` and `code` fields are not copied into the response. When
+the request named a model alias, a provider message that names the alias's
+target names the alias instead.
 
 The completion routes and the pass-through routes (embeddings, images, audio,
-moderations, rerank) classify a provider failure the same way. A provider that
-rejects the request (its own 400 or 422) answers 400, and an unknown model 404.
-OpenAI answers some request faults with a 403 instead, with the error type
-`invalid_request_error` (logprobs requested from a model that does not return
-them, an embedding model sent to chat); that is a rejection of the request too,
-and answers 400 with OpenAI's sentence.
-A model whose provider has no such operation (rerank on a chat model, for
-example) or whose SDK has no parameter for a field the caller sent answers 400,
-naming the operation or the field. An OpenAI-compatible client does not retry a
-400 or a 404. The provider's rate limit answers 429 with
-`Otari-Error-Code: upstream_rate_limited` and the provider's `Retry-After` when
-it sent one, which a client may retry after waiting. A provider that refuses the
-gateway's own credential (its 401, or a 403 that is not a rejection of the request) answers 424 with
-`Otari-Error-Code: provider_credential_rejected`, which a client does not retry
-either. A provider timeout answers 504, and any other provider failure 502
-(500 on Messages), whose detail says what happened upstream and nothing more:
-`The provider failed the request with HTTP 500` (the provider's own status),
-`The provider closed the connection before answering`, or
-`The gateway could not connect to the provider`. A failure Otari cannot place
-keeps the fixed `LLM provider error`.
-A non-streamed Chat Completions response with no choices is a provider failure
-too, not an answer: it is refused with a 502,
-`The provider returned a completion with no choices` and the code
-`provider_error`, recorded on the usage row as an error, and a routing policy
-moves on to its next candidate. Inside a gateway tool loop this applies to the
-model's first response; a later one is returned as the answer, since the rounds
-before it were already billed. Messages and Responses are not checked: an empty
+moderations, rerank) classify a provider failure the same way:
+
+| Provider outcome | Otari answers | `Otari-Error-Code` and headers | `detail` | Client retry |
+|---|---|---|---|---|
+| Rejects the request (its own 400 or 422) | 400 | | The provider's sentence | No |
+| OpenAI's 403 with error type `invalid_request_error` (logprobs requested from a model that does not return them, an embedding model sent to chat) | 400 | | OpenAI's sentence | No |
+| Unknown model | 404 | | | No |
+| The provider has no such operation for the model (rerank on a chat model), or its SDK has no parameter for a field the caller sent | 400 | | Names the operation or the field | No |
+| Rate limit | 429 | `upstream_rate_limited`; the provider's `Retry-After` when it sent one | | After waiting |
+| Refuses the gateway's own credential (its 401, or a 403 that is not a rejection of the request) | 424 | `provider_credential_rejected` | | No |
+| Timeout | 504 | | | Yes |
+| A non-streamed Chat Completions response with no choices | 502 | `provider_error` | `The provider returned a completion with no choices` | |
+| Any other failure | 502 (500 on Messages) | | What happened upstream and nothing more: `The provider failed the request with HTTP 500` (the provider's own status), `The provider closed the connection before answering`, or `The gateway could not connect to the provider`. A failure Otari cannot place keeps the fixed `LLM provider error` | Yes, unless `x-should-retry: false` (below) |
+
+An OpenAI-compatible client does not retry a 400 or a 404 on its own. On Chat
+Completions, Messages and Responses, a timeout, a dropped connection or a
+provider 5xx also carries the [provider failure headers](#provider-failures).
+
+A chat completion with no choices is a provider failure, not an answer: it is
+recorded on the usage row as an error, and a routing policy moves on to its next
+candidate. Inside a gateway tool loop this applies to the model's first
+response; a later one is returned as the answer, since the rounds before it
+were already billed. Messages and Responses are not checked, since an empty
 `content` or `output` can be a legitimate answer there.
-When the request named a model alias,
-a provider message that names the alias's target names the alias instead.
 
 A 5xx that resending the same request cannot fix also carries
 `x-should-retry: false`, the header the OpenAI and Anthropic SDKs read before
@@ -650,7 +701,7 @@ or over its billing limit, and a fault in the code making the provider call,
 such as a provider adapter that cannot convert the request, which raises before
 anything is sent and has no upstream status. A timeout, a dropped connection, a
 provider's own 5xx or 429, and any failure Otari cannot place carry no such
-header, so a client keeps retrying those as before. A streamed request that
+header, so a client retries those. A streamed request that
 fails before its first chunk carries it too, since that is answered with an
 ordinary HTTP error (see [Error codes](#error-codes)). A routing policy still
 moves on to its next candidate on either failure: the header describes only the
@@ -769,31 +820,10 @@ Bedrock's, or an upstream `504`), and `api_error` otherwise.
 
 ## Caller-orchestrated MCP
 
-Two stored-server endpoints let an application own its own MCP tool loop, as an
-alternative to sending `mcp_servers` with a completion and letting Otari own it.
-`GET /api/v1/mcp/servers/{mcp_server_id}/tools` returns the tool definitions a stored
-MCP server exposes to the authenticated workspace, and `POST /api/v1/mcp/execute`
-runs one exact caller-authorized call and returns the remote server's native MCP
-result.
-
-Otari executes a caller-authorized call; it does not verify a user approval and
-does not claim to. The calling application is the authorization boundary and owns
-any human approval, argument editing, cancellation, and action history. Otari
-enforces authentication, stored-server access, the stored tool allowlist, URL
-safety, and its own execution bounds.
-
-`POST /api/v1/mcp/execute` must never be retried automatically, including by a
+`GET /api/v1/mcp/servers/{mcp_server_id}/tools` lists the tools a stored MCP
+server exposes to the authenticated workspace, and `POST /api/v1/mcp/execute`
+runs one exact caller-authorized call and returns the server's native MCP
+result. Never retry `POST /api/v1/mcp/execute` automatically, including from a
 reverse proxy or service mesh: an `outcome_unknown` response means the tool may
-already have run. See [MCP](mcp.md#caller-orchestrated-mcp) for the request
-shapes, the error and execution-state contract, and the limits.
-
-## Keeping generated clients current
-
-API changes must regenerate both committed artifacts:
-
-```bash
-uv run python scripts/generate_openapi.py
-make postman
-make openapi-check
-make postman-check
-```
+already have run. The request shapes, the error and execution-state contract,
+and the limits are in [Caller-orchestrated MCP](mcp.md#caller-orchestrated-mcp).
