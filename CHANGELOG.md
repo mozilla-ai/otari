@@ -4,6 +4,22 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.30.1](https://github.com/mozilla-ai/otari/releases/tag/v0.30.1) - 2026-10-20
+
+
+
+### Bug Fixes
+
+- **dashboard:** Highlight a picked span at once in the trace panel in [#2476](https://github.com/mozilla-ai/otari/pull/2476) by [@jigjigjig](https://github.com/jigjigjig) ([`31ab233`](https://github.com/mozilla-ai/otari/commit/31ab2330cd36b3fe8d5f18396b1a02d3b7d85934))
+- **health-checks:** Offer the Health page on hosted deployments in [#2491](https://github.com/mozilla-ai/otari/pull/2491) by [@tbille](https://github.com/tbille) ([`a608e09`](https://github.com/mozilla-ai/otari/commit/a608e09e4b2299887622deca526adec0ac9942d5))
+
+
+### Features
+
+- **traces:** Sort the Sessions list by clicking a column header in [#2473](https://github.com/mozilla-ai/otari/pull/2473) by [@jigjigjig](https://github.com/jigjigjig) ([`172038f`](https://github.com/mozilla-ai/otari/commit/172038f7d1d59d5f597445717058a14630fa73cc))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.30.0...v0.30.1
 ## [0.30.0](https://github.com/mozilla-ai/otari/releases/tag/v0.30.0) - 2026-10-20
 
 
