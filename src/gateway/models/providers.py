@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, false, text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -229,6 +229,11 @@ class HostedProvider(Base):
     )
 
 
+HostedModelDisabledReason = Literal["unpriced", "operator"]
+DISABLED_UNPRICED: HostedModelDisabledReason = "unpriced"
+DISABLED_BY_OPERATOR: HostedModelDisabledReason = "operator"
+
+
 class HostedProviderModel(Base):
     """One model the deployment offers on a hosted provider.
 
@@ -241,6 +246,11 @@ class HostedProviderModel(Base):
     Dispatch serves only a model whose row is switched on: a row switched
     off is refused, and so is a model with no row unless the provider
     ``serves_unlisted_models``.
+
+    ``disabled_reason`` says why a row is off, and is null exactly when it is
+    on: ``unpriced`` while it waits for a rate, ``operator`` while an operator
+    has switched it off. ``serves_unpriced`` marks a row switched on without a
+    rate on purpose, so a refresh does not hold it for one.
     """
 
     __tablename__ = "hosted_provider_models"
@@ -249,8 +259,9 @@ class HostedProviderModel(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     provider: Mapped[str] = mapped_column(String(64))
     model: Mapped[str] = mapped_column(String(255))
-    # A model nothing prices is offered but not served.
     enabled: Mapped[bool] = mapped_column(default=True)
+    disabled_reason: Mapped[HostedModelDisabledReason | None] = mapped_column(String(16), default=None)
+    serves_unpriced: Mapped[bool] = mapped_column(default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
