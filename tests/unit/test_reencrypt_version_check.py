@@ -27,12 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.sql import Executable
 from sqlmodel import SQLModel
 
-from gateway.core.config import GatewayConfig
-from gateway.models.providers import ProviderCredential
 from gateway.models.tools import SearchToolCredential
-from gateway.services import provider_store_service as provider_store
 from gateway.services import search_tool_store_service as search_tool_store
-from gateway.services.provider_store_service import reencrypt_credentials, refresh_provider_cache, reset_provider_cache
 from gateway.services.search_tool_store_service import reencrypt_search_tools
 from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
 
@@ -81,20 +77,6 @@ def _secret_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
 
-async def _add_provider(session: AsyncSession, instance: str, api_key: str) -> None:
-    session.add(
-        ProviderCredential(
-            instance=instance,
-            provider_type="openai",
-            encrypted_api_key=encrypt_secret(api_key),
-            last4=api_key[-4:],
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        )
-    )
-    await session.commit()
-
-
 async def _add_search_tool(session: AsyncSession, name: str, api_key: str, *, kind: str = "search") -> None:
     session.add(
         SearchToolCredential(
@@ -107,134 +89,6 @@ async def _add_search_tool(session: AsyncSession, name: str, api_key: str, *, ki
         )
     )
     await session.commit()
-
-
-class TestProviderRotation:
-    def test_an_untouched_row_is_reencrypted(self) -> None:
-        async def scenario(session: AsyncSession, _db: str) -> tuple[int, int, int]:
-            await _add_provider(session, "openai", "sk-live-value")
-            return await reencrypt_credentials(session)
-
-        assert _run(scenario) == (1, 0, 0)
-
-    def test_the_plaintext_survives_the_rotation(self) -> None:
-        """A re-encryption that lost the value would pass every count above."""
-
-        async def scenario(session: AsyncSession, _db: str) -> str:
-            await _add_provider(session, "openai", "sk-live-value")
-            before = (await session.execute(select(ProviderCredential))).scalars().one().encrypted_api_key
-            await reencrypt_credentials(session)
-            await session.commit()
-            session.expire_all()
-            after = (await session.execute(select(ProviderCredential))).scalars().one().encrypted_api_key
-            assert after is not None
-            assert after != before, "re-encryption produced the same ciphertext"
-            return decrypt_secret(after)
-
-        assert _run(scenario) == "sk-live-value"
-
-    def test_a_row_changed_under_the_rotation_is_skipped_not_clobbered(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The whole point: the stored value must still be the competing edit's.
-
-        The window is between the read and the write, so the competing commit has
-        to land there and nowhere else. Hooking the service's own
-        ``encrypt_secret`` puts it exactly there: the row has been read and
-        decrypted, and its UPDATE has not run yet.
-        """
-
-        async def scenario(session: AsyncSession, db_path: str) -> tuple[tuple[int, int, int], str]:
-            await _add_provider(session, "openai", "sk-old-value")
-            real_encrypt = encrypt_secret
-            raced = False
-
-            def encrypt_and_let_someone_else_commit(plaintext: str) -> str:
-                nonlocal raced
-                if not raced:
-                    raced = True
-                    _commit_from_another_connection(
-                        db_path,
-                        update(ProviderCredential)
-                        .where(ProviderCredential.instance == "openai")
-                        .values(encrypted_api_key=encrypt_secret("sk-new-value")),
-                    )
-                return real_encrypt(plaintext)
-
-            monkeypatch.setattr(provider_store, "encrypt_secret", encrypt_and_let_someone_else_commit)
-
-            counts = await reencrypt_credentials(session)
-            await session.commit()
-            session.expire_all()
-            stored = (await session.execute(select(ProviderCredential))).scalars().one()
-            assert stored.encrypted_api_key is not None
-            return counts, decrypt_secret(stored.encrypted_api_key)
-
-        counts, stored_value = _run(scenario)
-        assert counts == (0, 0, 1)
-        assert stored_value == "sk-new-value"
-
-    def test_the_skipped_row_does_not_come_back_through_the_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The database keeps the competing edit; the runtime cache must too.
-
-        The route re-encrypts, commits, and refreshes the overlay on the SAME
-        session, and the factory sets ``expire_on_commit=False``, so a row the
-        identity map still holds would be handed back with the ciphertext read
-        BEFORE the race (CodeRabbit).
-
-        This cell asserts the route's outcome, not the mechanism: it passes with
-        and without ``populate_existing``, because the rotation's own row list
-        dies when it returns and the identity map is weak, so the reload happens
-        by collection timing rather than by rule. Measured directly, holding the
-        pre-race rows across the refresh does serve ``sk-old-value``. That is
-        why the refresh asks for ``populate_existing`` instead of depending on
-        when the garbage collector runs.
-
-        No ``expire_all()`` here, deliberately: the route does not call one, and
-        adding one to the test would hide the question entirely.
-        """
-
-        async def scenario(session: AsyncSession, db_path: str) -> str:
-            await _add_provider(session, "openai", "sk-old-value")
-            real_encrypt = encrypt_secret
-            raced = False
-
-            def encrypt_and_let_someone_else_commit(plaintext: str) -> str:
-                nonlocal raced
-                if not raced:
-                    raced = True
-                    _commit_from_another_connection(
-                        db_path,
-                        update(ProviderCredential)
-                        .where(ProviderCredential.instance == "openai")
-                        .values(encrypted_api_key=encrypt_secret("sk-new-value")),
-                    )
-                return real_encrypt(plaintext)
-
-            monkeypatch.setattr(provider_store, "encrypt_secret", encrypt_and_let_someone_else_commit)
-
-            assert await reencrypt_credentials(session) == (0, 0, 1)
-            await session.commit()
-            reset_provider_cache()
-            await refresh_provider_cache(session, GatewayConfig(providers={}))
-            return str(provider_store._cache["openai"]["api_key"])
-
-        assert _run(scenario) == "sk-new-value"
-
-    def test_an_undecryptable_row_is_left_alone(self) -> None:
-        async def scenario(session: AsyncSession, _db: str) -> tuple[int, int, int]:
-            session.add(
-                ProviderCredential(
-                    instance="broken",
-                    provider_type="openai",
-                    encrypted_api_key="not-a-ciphertext",
-                    last4="text",
-                    created_at=datetime.now(UTC),
-                    updated_at=datetime.now(UTC),
-                )
-            )
-            await session.commit()
-            return await reencrypt_credentials(session)
-
-        assert _run(scenario) == (0, 1, 0)
 
 
 class TestSearchToolRotation:

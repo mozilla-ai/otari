@@ -136,6 +136,16 @@ class ProviderSettings(BaseModel):
         ),
     )
 
+    # Read once at startup by the import it gates, so it is no setting the dashboard shows or changes.
+    import_configured_providers: Annotated[bool, OMITTED] = Field(
+        default=True,
+        description=(
+            "Copy each providers: entry of config.yml onto a hosted provider of its name at startup, once, and serve "
+            "the name from that hosted provider from then on. The providers: block is deprecated; an entry a hosted "
+            "provider cannot hold keeps serving from config.yml. Also settable via OTARI_IMPORT_CONFIGURED_PROVIDERS."
+        ),
+    )
+
     @field_validator("hosted_providers", mode="before")
     @classmethod
     def _empty_block_is_no_providers(cls, value: Any) -> Any:

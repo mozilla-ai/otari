@@ -137,6 +137,7 @@ POST /api/v1/hosted-providers/test                  # dashboard-only
 POST /api/v1/hosted-providers/reencrypt             # dashboard-only
 GET /api/v1/hosted-providers/migration              # dashboard-only
 POST /api/v1/hosted-providers/migration             # dashboard-only
+DELETE /api/v1/hosted-providers/migration/{instance} # dashboard-only
 PATCH /api/v1/hosted-providers/{provider}           # dashboard-only
 DELETE /api/v1/hosted-providers/{provider}          # dashboard-only
 GET /api/v1/hosted-providers/{provider}/models      # dashboard-only
@@ -146,12 +147,6 @@ GET /api/v1/hosted-providers/{provider}/available-models                 # dashb
 PATCH /api/v1/hosted-providers/{provider}/models/{model_id}              # dashboard-only
 DELETE /api/v1/hosted-providers/{provider}/models/{model_id}             # dashboard-only
 # Provider credentials (runtime provider management)
-GET /api/v1/provider-credentials                    # not yet wrapped
-POST /api/v1/provider-credentials                   # not yet wrapped
-POST /api/v1/provider-credentials/test              # not yet wrapped
-PATCH /api/v1/provider-credentials/{instance}       # not yet wrapped
-DELETE /api/v1/provider-credentials/{instance}      # not yet wrapped
-POST /api/v1/provider-credentials/{instance}/test   # not yet wrapped
 # Providers catalog
 GET /api/v1/providers                               # not yet wrapped
 GET /api/v1/providers/catalog                       # not yet wrapped
@@ -303,7 +298,6 @@ POST /api/v1/catalog/selectors/refresh              # not yet wrapped
 # Providers
 GET /api/v1/providers/catalog/{provider_id}         # not yet wrapped
 GET /api/v1/providers/health                        # not yet wrapped
-POST /api/v1/provider-credentials/reencrypt         # not yet wrapped
 # Built-in tool settings and search
 GET /api/v1/tools                                   # not yet wrapped
 GET /api/v1/tool-settings                           # not yet wrapped

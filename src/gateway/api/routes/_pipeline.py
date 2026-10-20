@@ -305,7 +305,6 @@ from gateway.services.provider_kwargs import (
     MissingCredential,
     ResolvedProvider,
     hosted_lookup,
-    keyless_placeholder_api_key,
     missing_credential,
     provider_key,
     require_declared_credential,
@@ -313,11 +312,12 @@ from gateway.services.provider_kwargs import (
     with_failover_retries,
 )
 from gateway.services.providers import (
+    UnknownHostedUpstreamError,
+    dispatch_on_hosted_credential,
     hosted_credential_for,
     hosted_models_for,
-    managed_only_candidates,
     owned_endpoint_http_client,
-    refuse_managed_candidate,
+    serve_on_hosted_provider,
     unpriced_model_refusal,
 )
 from gateway.services.routing import (
@@ -1373,10 +1373,9 @@ class RequestContext:
         # check; callers fall back to `resolve_provider_selector` themselves
         # in that case, same as before this field existed.
         self.resolved_provider = resolved_provider
-        # The ``(instance, model)`` candidates of a multi-candidate plan that only
-        # the deployment's managed credentials would serve, which the walk
-        # refuses by name; set in ``_prepare_for_dispatch``.
-        self.managed_only: frozenset[tuple[str, str]] = frozenset()
+        # Serves a multi-candidate plan's candidate on the deployment's own
+        # credential where nothing declared serves it; set in ``_prepare_for_dispatch``.
+        self.credential_candidate: Callable[[Attempt], Awaitable[Attempt]] | None = None
         # Standalone-only: the workspace's code-execution policy, read in the
         # preamble when the request declares code execution on a deployment with
         # a sandbox, so the staging decision and admission read one row once.
@@ -1583,16 +1582,7 @@ async def _prepare_for_dispatch(
     billing: BillingPort,
 ) -> ResolvedProvider:
     if ctx.plan is not None and len(ctx.plan.attempts) > 1:
-        try:
-            ctx.managed_only = await managed_only_candidates(
-                ctx.config,
-                ctx.plan.attempts,
-                hosted=lambda: port,
-                organization_id=ctx.organization_id,
-            )
-        except asyncio.CancelledError:
-            await release_reservation(ctx)
-            raise
+        ctx.credential_candidate = _hosted_candidate(ctx, port=port, billing=billing)
     if resolved.owned_endpoint is not None:
         # The client re-checks and pins the endpoint's address on every request
         # and follows no redirect; see ``services/providers``.
@@ -1722,7 +1712,7 @@ async def _admit_or_refuse(
             organization_id,
             ctx.request_id,
         )
-        detail = str(exc)
+        detail = exc.public_message
         await release_reservation(ctx)
         await log_gateway_rejection(
             db=ctx.db,
@@ -1877,6 +1867,100 @@ async def _warn_if_hosted_upstream_is_unpriced(
         )
 
 
+def _hosted_candidate(
+    ctx: RequestContext, *, port: ModelProviderPort, billing: BillingPort
+) -> Callable[[Attempt], Awaitable[Attempt]]:
+    """Serve each candidate of a walk that nothing declared serves on the deployment's own credential.
+
+    The walk's counterpart of :func:`_serve_from_hosted_credential`, asked as
+    each candidate is reached, so a candidate never reached never resolves a
+    credential. A candidate the port does not serve comes back unchanged and is
+    passed over as missing a key; one it refuses is skipped. A served one is
+    held at the deployment-paid rate and admitted through the funding gate, and
+    ``ctx.deployment_charge`` follows the candidate last sent, so it is the one
+    that settles.
+    """
+
+    async def _credential(attempt: Attempt) -> Attempt:
+        candidate = ResolvedProvider(
+            instance=attempt.instance, provider=attempt.provider, model=attempt.model, kwargs=attempt.kwargs
+        )
+        try:
+            served = await serve_on_hosted_provider(
+                ctx.config, port, candidate, organization_id=ctx.organization_id, workspace_id=ctx.workspace_id
+            )
+        except HostedAccessDeniedError as exc:
+            selector = attempt.display_model or f"{attempt.instance}:{attempt.model}"
+            raise CandidateCannotServe(
+                HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=model_not_allowed_detail(selector))
+            ) from exc
+        except Exception as exc:
+            logger.error(
+                "ModelProviderPort failed to resolve a credential for %s:%s: %s",
+                attempt.instance,
+                attempt.model,
+                describe_port_error(exc),
+            )
+            raise CandidateCannotServe(
+                HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=HOSTED_CREDENTIAL_UNUSABLE_DETAIL)
+            ) from exc
+        if served is None:
+            ctx.deployment_charge = None
+            return attempt
+        hosted = replace(
+            attempt, instance=served.instance, provider=served.provider, kwargs=served.kwargs, deployment_paid=True
+        )
+        await _grow_reservation(
+            ctx,
+            hosted.instance,
+            hosted.model,
+            deployment_paid=True,
+            refused_detail=budget_exhausted_mid_failover_detail(),
+        )
+        try:
+            charge = await admit_deployment_paid(
+                billing,
+                deployment_paid=True,
+                organization_id=ctx.organization_id,
+                api_key_id=ctx.api_key_id,
+                user_id=ctx.user_id,
+                request_id=ctx.request_id,
+            )
+        except InsufficientFundsError as exc:
+            raise CandidateCannotServe(
+                HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail=exc.public_message,
+                    headers=error_headers(INSUFFICIENT_FUNDS),
+                )
+            ) from exc
+        except Exception as exc:
+            logger.error(
+                "BillingPort failed to admit a deployment-paid candidate: organization=%s request_id=%s: %s",
+                ctx.organization_id,
+                ctx.request_id,
+                describe_port_error(exc),
+            )
+            if ctx.db is not None:
+                try:
+                    await ctx.db.rollback()
+                except DATABASE_ERRORS as rollback_error:
+                    logger.warning(
+                        "Could not roll back a failed funding check: %s", describe_database_error(rollback_error)
+                    )
+            raise CandidateCannotServe(
+                HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=FUNDS_CHECK_UNAVAILABLE_DETAIL)
+            ) from exc
+        if charge is not None and ctx.db is not None and not await release_session(ctx.db):
+            raise CandidateCannotServe(
+                HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=FUNDS_CHECK_UNAVAILABLE_DETAIL)
+            )
+        ctx.deployment_charge = charge
+        return hosted
+
+    return _credential
+
+
 async def _serve_from_hosted_credential(
     ctx: RequestContext,
     resolved: ResolvedProvider,
@@ -2021,8 +2105,8 @@ async def _serve_from_hosted_credential(
         raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
 
     try:
-        upstream = LLMProvider(credential.upstream)
-    except ValueError as exc:
+        served = dispatch_on_hosted_credential(credential, model=resolved.model, alias=resolved.alias)
+    except UnknownHostedUpstreamError as exc:
         # The adapter named an upstream any-llm does not implement, so nothing
         # can be dispatched. That is a defect in this build rather than caller
         # input: log it in full, refund, and surface a non-leaky 502.
@@ -2065,25 +2149,7 @@ async def _serve_from_hosted_credential(
     # overlay binding this port owns that.
     await _warn_if_hosted_upstream_is_unpriced(ctx, resolved, credential.response_provider)
 
-    # A keyless backend's credential carries no key, so it takes the placeholder
-    # a keyless ``config.yml`` instance takes.
-    api_key = credential.api_key or keyless_placeholder_api_key(credential.api_base, None)
-    kwargs: dict[str, Any] = {} if api_key is None else {"api_key": api_key}
-    if credential.api_base is not None:
-        kwargs["api_base"] = credential.api_base
-    if credential.client_args:
-        # The same key a ``config.yml`` instance's extras travel under
-        # (``services/provider_kwargs``), so Bedrock's region reaches the SDK
-        # client exactly as it would from the file.
-        kwargs["client_args"] = dict(credential.client_args)
-    return ResolvedProvider(
-        instance=credential.response_provider,
-        provider=upstream,
-        model=resolved.model,
-        kwargs=kwargs,
-        alias=resolved.alias,
-        deployment_paid=True,
-    )
+    return served
 
 
 async def _bill_vision_side_call(
@@ -2262,7 +2328,7 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
         ctx,
         attempt.instance,
         attempt.model,
-        deployment_paid=False,
+        deployment_paid=attempt.deployment_paid,
         refused_detail=budget_exhausted_mid_failover_detail(),
     )
 
@@ -6045,13 +6111,11 @@ def _failover_kwargs(
     Raising :class:`CandidateCannotServe` for a candidate whose built-in tools were refused,
     so the walk skips it before admitting it, and any-llm's ``MissingApiKeyError`` for a
     candidate nothing declares a credential for, so the walk passes it over as it does
-    any candidate missing a key, or its ``ManagedCredentialUnsupportedError`` for one in
-    ``ctx.managed_only``, which the final answer names.
+    any candidate missing a key.
     """
     config = ctx.config
 
     def _build(attempt: Attempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
-        refuse_managed_candidate(ctx.managed_only, attempt)
         require_declared_credential(config, attempt.instance, attempt.provider, attempt.kwargs)
         fields = tool_ctx.request_fields_for(attempt.provider.value, attempt.model, base_request_fields)
         return with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
@@ -6178,6 +6242,7 @@ async def run_single_attempt_stream(
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
                     build_kwargs=_failover_kwargs(adapter, tool_ctx, ctx),
+                    credential_attempt=ctx.credential_candidate,
                     prepare_kwargs=prepare_kwargs,
                     admit_attempt=_candidate_admission(ctx),
                     on_absorbed=_absorbed,
@@ -7024,6 +7089,7 @@ async def run_standalone_non_stream(
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
                     build_kwargs=_failover_kwargs(adapter, tool_ctx, ctx),
+                    credential_attempt=ctx.credential_candidate,
                     prepare_kwargs=prepare_kwargs,
                     admit_attempt=_candidate_admission(ctx),
                     on_absorbed=_absorbed,

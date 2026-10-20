@@ -3,7 +3,7 @@ import { Dot } from "@/design-system/indicators/Dot"
 import { formatRelative } from "@/shared/helpers/format"
 
 // A provider's reachability, from the shared model-discovery health path, for
-// the deployment providers and hosted providers pages alike. A provider that
+// the hosted providers page. A provider that
 // answers no model listing (its backend never implemented /v1/models) is not
 // unreachable: only discovery is broken, and it may still serve requests, so it
 // gets the amber warning state rather than the red one (issue #447).

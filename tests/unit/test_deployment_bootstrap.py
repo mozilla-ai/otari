@@ -414,7 +414,6 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     # silently withheld from a control plane.
     assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
         "playground",
-        "providers",
         "traces",
     }
 
@@ -436,10 +435,7 @@ def test_hosted_publishes_the_playground_once_it_knows_its_data_plane(tmp_path: 
     assert "playground" in answered["surfaces"]
     # The rest of the hosted set is unchanged by the address: this is one row's
     # availability, not a different edition.
-    assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
-        "providers",
-        "traces",
-    }
+    assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {"traces"}
 
 
 def test_hosted_answers_everything_below_the_edition_the_way_standalone_does(tmp_path: Path) -> None:

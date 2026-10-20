@@ -87,7 +87,6 @@ describe("nav registry", () => {
       "Email domains",
       "Spend & budgets",
       "Providers",
-      "Deployment providers",
       "Guardrails",
       "Org settings",
       "Settings",
@@ -131,7 +130,6 @@ describe("nav registry", () => {
     expect(
       NAV_ITEMS.filter((item) => item.operatorOnly).map((item) => item.to),
     ).toEqual([
-      "/providers",
       "/settings",
       "/admin/accounts",
       "/admin/hosted-providers",
@@ -212,28 +210,24 @@ describe("nav registry", () => {
     expect(navContextForPath("/docs")).toBe("workspace")
   })
 
-  it.each([
-    ["standalone", "providers", "/providers"],
-    ["hosted", "organization_providers", "/organization/provider-keys"],
-  ])(
-    "places %s providers above Org settings in General",
-    (_, surface, path) => {
-      const visible = (item: NavItem) =>
-        item.surface === surface || item.surface === "organizations"
-      const general = visibleNavSections(ORG_NAV_SECTIONS, visible).find(
-        ({ section }) => section.id === "org-general",
-      )
-      expect(general?.items.map((item) => item.to)).toEqual([
-        path,
-        "/organization",
-      ])
-      expect(navContextForPath(path)).toBe("organization")
-      expect(navContextForPath(`${path}/detail`)).toBe("organization")
-      expect(
-        visibleNavSections(NAV_SECTIONS, visible).flatMap(({ items }) => items),
-      ).toEqual([])
-    },
-  )
+  it("places providers above Org settings in General", () => {
+    const path = "/organization/provider-keys"
+    const visible = (item: NavItem) =>
+      item.surface === "organization_providers" ||
+      item.surface === "organizations"
+    const general = visibleNavSections(ORG_NAV_SECTIONS, visible).find(
+      ({ section }) => section.id === "org-general",
+    )
+    expect(general?.items.map((item) => item.to)).toEqual([
+      path,
+      "/organization",
+    ])
+    expect(navContextForPath(path)).toBe("organization")
+    expect(navContextForPath(`${path}/detail`)).toBe("organization")
+    expect(
+      visibleNavSections(NAV_SECTIONS, visible).flatMap(({ items }) => items),
+    ).toEqual([])
+  })
 
   it("splits the tenancy pages across their two surfaces", () => {
     // The organization pages and the workspace pages are separate management
@@ -361,7 +355,6 @@ describe("nav registry", () => {
       "organization_usage",
       "organizations",
       "pricing",
-      "providers",
       "routing",
       "settings",
       "tools",
@@ -375,8 +368,6 @@ describe("nav registry", () => {
     expect(navItemForPath("/organization/usage")?.surface).toBe(
       "organization_usage",
     )
-    // Provider keys sits beside the process-global row on standalone, which is
-    // why the two carry different labels.
     expect(navItemForPath("/organization/provider-keys")?.surface).toBe(
       "organization_providers",
     )
@@ -451,16 +442,11 @@ describe("nav registry", () => {
     expect(general?.label).toBe("General")
     expect(general?.items.map((item) => item.to)).toEqual([
       "/organization/provider-keys",
-      "/providers",
       "/organization/guardrails",
       "/organization",
     ])
-    // The labels are the thing under test, because both rows render on a
-    // standalone deployment and a shared label would leave them
-    // indistinguishable.
     expect(general?.items.map((item) => item.label)).toEqual([
       "Providers",
-      "Deployment providers",
       "Guardrails",
       "Org settings",
     ])

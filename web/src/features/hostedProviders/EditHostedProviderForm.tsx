@@ -29,6 +29,7 @@ import {
 } from "@/shared/api/hostedProviders"
 
 import { movesToAnotherOrigin } from "./endpointOrigin"
+import { ServesUnlistedModelsField } from "./ServesUnlistedModelsField"
 
 // The editor for one hosted provider. Its name and implementation are immutable
 // (the update body cannot change them), so they are named in the description.
@@ -47,6 +48,7 @@ interface EditDraft {
   clientArgs: string
   /** Typed secrets already stored, so blank means "keep it", not "clear it". */
   redacted: string[]
+  servesUnlistedModels: boolean
 }
 
 function draftFrom(provider: HostedProvider): EditDraft {
@@ -60,6 +62,7 @@ function draftFrom(provider: HostedProvider): EditDraft {
     credentials: typed,
     clientArgs: formatClientArgs(rest),
     redacted,
+    servesUnlistedModels: provider.serves_unlisted_models,
   }
 }
 
@@ -135,6 +138,9 @@ export function EditHostedProviderForm({
           ...(provider.client_args === null && clientArgs === null
             ? {}
             : { client_args: clientArgs }),
+          ...(draft.servesUnlistedModels === provider.serves_unlisted_models
+            ? {}
+            : { serves_unlisted_models: draft.servesUnlistedModels }),
         },
       },
       { onSuccess: onClose },
@@ -181,6 +187,12 @@ export function EditHostedProviderForm({
         onChange={(apiBase) => setDraft({ ...draft, apiBase })}
         placeholder="Leave blank for the provider's default endpoint"
         description="Pointing this at another host needs the key retyped above."
+      />
+      <ServesUnlistedModelsField
+        isSelected={draft.servesUnlistedModels}
+        onChange={(servesUnlistedModels) =>
+          setDraft({ ...draft, servesUnlistedModels })
+        }
       />
       <ProviderCredentialFields
         provider={provider.provider}

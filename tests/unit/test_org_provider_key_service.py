@@ -1,7 +1,7 @@
 """Unit tests for organization-scoped provider key resolution and caching.
 
-Mirrors `test_provider_store_service.py`'s shape: pure precedence logic and
-the cache accessors are tested with in-memory fixtures, no database.
+Pure precedence logic and the cache accessors are tested with in-memory
+fixtures, no database.
 """
 
 import time
@@ -121,7 +121,7 @@ def test_reset_clears_the_cache() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# _row_to_entry: decrypt-or-skip, same contract as provider_store_service's
+# _row_to_entry: decrypt-or-skip
 # --------------------------------------------------------------------------- #
 
 

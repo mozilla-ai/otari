@@ -723,7 +723,7 @@ async def require_deployment_operator(
     role against the organization, workspace or deployment they are acting on.
     It is wrong for the deployment-wide routers, where clearing it *is* the
     whole authorization: `/api/v1/keys` mints a key into any workspace,
-    `/api/v1/provider-credentials` holds process-global provider secrets, and
+    `/api/v1/hosted-providers` holds process-global provider secrets, and
     `POST /api/v1/settings/master-key/rotate` replaces the deployment credential. On
     a single-operator deployment every login is that operator and the
     distinction is invisible; once mutually-untrusting tenants sign in to one
@@ -1375,8 +1375,13 @@ def get_request_session_model_provider_port(
 
 
 def model_provider_port_on(request: Request, db: AsyncSession) -> ModelProviderPort:
-    """Resolve the model-provider adapter on ``db``, for a path that asks it only to explain a refusal."""
+    """Resolve the model-provider adapter on ``db``, for a path that resolves it only when it needs it."""
     return get_container(request).resolve(ModelProviderPort, db, uow=get_unit_of_work(db))
+
+
+def billing_port_on(request: Request, db: AsyncSession) -> BillingPort:
+    """Resolve the billing adapter on ``db``, whose commit lands the charge it writes."""
+    return get_container(request).resolve(BillingPort, db)
 
 
 # Deliberately ``get_db`` and not ``PortSessionDep``: every surface that

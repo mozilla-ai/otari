@@ -85,6 +85,7 @@ _SETTING_NAMES = frozenset(
         "idempotency_lease_sec",
         "idempotency_retention_sec",
         "idempotency_sweep_interval_sec",
+        "import_configured_providers",
         "invitation_expiry_hours",
         "invitation_mail_limit_per_address",
         "invitation_mail_limit_per_organization",

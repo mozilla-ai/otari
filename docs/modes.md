@@ -52,9 +52,8 @@ inference, files, batches, or other data-plane operations. Those paths return a
 descriptive `404`. Set `data_plane_url` so the error and dashboard snippets
 point clients to the correct gateway.
 
-The dashboard hides the Providers page, whose stored instances are deployment-wide
-rather than per tenant, leaving the organization-scoped provider keys that a
-standalone deployment also has. It keeps the Hosted providers page, where an
+The dashboard keeps the organization-scoped provider keys that a standalone
+deployment also has, and the Hosted providers page, where an
 operator configures the credentials the deployment pays for (see
 [Hosted providers and BYO credentials](#hosted-providers-and-byo-credentials)).
 It also hides the Playground, whose whole purpose is to dispatch a completion.
@@ -168,7 +167,7 @@ secrets never leave mozilla.ai's infrastructure.
 ## Deployment-paid credentials in standalone
 
 A deployment can serve a model on a credential it owns, once an organization's
-own key, a stored provider and `config.yml` have all missed: the core serves it
+own key and `config.yml` have both missed: the core serves it
 on one of the deployment's hosted providers, and a build may rebind
 `ModelProviderPort` through `OTARI_BOOTSTRAP` to decide differently. The deployment pays that
 upstream bill, so the request also goes through `BillingPort`. Before the
@@ -182,14 +181,13 @@ adapter does nothing, so with no overlay a hosted-provider request is served
 and recorded as deployment-paid on its usage row, and no organization is
 charged.
 
-Today this covers Chat Completions, Messages, Responses and the Playground for a
-plain model or a single-target alias or policy. A routing policy with fallback
-candidates, the pass-through endpoints (embeddings, images, audio, rerank,
-moderations) and batches never serve on a deployment-owned credential. A model
-the deployment offers the organization only that way is refused there with `424`
-(`managed_credential_unsupported`) rather than `provider_not_configured`, before
-anything is sent upstream. A routing policy skips such a candidate as it skips
-one with no credential, and answers with that code only when no candidate served.
+This covers every path that calls a provider: Chat Completions, Messages,
+Responses and the Playground, each candidate of a routing policy with fallbacks,
+the pass-through endpoints (embeddings, images, audio, rerank, moderations) and
+batches. A routing policy asks for each candidate as it reaches it, so the one
+that serves is the one that settles, and one the organization cannot fund is
+skipped. A batch is admitted when it is created and charged when its results
+are accounted.
 
 ## Internal protocol
 

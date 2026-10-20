@@ -4,7 +4,7 @@ Route requests to Google's Gemini models through Otari, using a Gemini API key f
 
 ## What you'll set up
 
-A Gemini provider entry in your `config.yml` (or a single environment variable), then a first request that Otari routes to Gemini.
+A Gemini provider entry in your `config.yml` that reads your key from `GEMINI_API_KEY` (or the key stored on the dashboard's Providers page), then a first request that Otari routes to Gemini.
 
 ## Prerequisites
 
@@ -35,7 +35,7 @@ providers:
 export GEMINI_API_KEY=AIza...
 ```
 
-> Otari routes through [any-llm](https://pypi.org/project/any-llm-sdk/), so a standard `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) in the environment is picked up automatically even if you don't list the provider explicitly.
+> `GEMINI_API_KEY` alone is not enough, and neither is a bare `gemini:` entry: Otari reads the variable only where an entry names it, as the `api_key: ${GEMINI_API_KEY}` line above does. The dashboard's Providers page and an organization's own key work too.
 
 ## Choose a model
 

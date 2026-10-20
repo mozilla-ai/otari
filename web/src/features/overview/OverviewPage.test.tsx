@@ -24,6 +24,7 @@ import {
   HOSTED_SURFACES,
   organizationContext,
   pendingOrganizationInvitation,
+  STANDALONE_SURFACES,
   seriesPoint,
   usageTotals,
   workspaceActivation,
@@ -102,6 +103,8 @@ function strip(over: Partial<AllocationHealth> = {}): AllocationHealth {
 }
 
 interface Bodies {
+  /** What GET /hosted-providers lists. */
+  hostedProviders?: unknown[]
   today?: Partial<UsageSummary["totals"]>
   period?: Partial<UsageSummary["totals"]>
   prev?: Partial<UsageSummary["totals"]>
@@ -193,6 +196,10 @@ function mockApi(b: Bodies) {
         b.health ?? { providers: [], healthy: 0, total: 0, checked_at: null },
       )
     }
+    if (url.includes(`${API_ROOT}/hosted-providers`)) {
+      const hosted = b.hostedProviders ?? []
+      return jsonResponse({ data: hosted, count: hosted.length })
+    }
     if (url.includes(`${API_ROOT}/budgets`))
       return jsonResponse(b.budgets ?? [])
     if (url.includes(`${API_ROOT}/keys`)) return jsonResponse(b.keys ?? [])
@@ -232,7 +239,7 @@ function renderPage(
       wrapper: withRouter({
         url: initial,
         routes: [
-          { path: "/providers", element: <LocationProbe /> },
+          { path: "/admin/hosted-providers", element: <LocationProbe /> },
           { path: "/organization/provider-keys", element: <LocationProbe /> },
         ],
       }),
@@ -267,13 +274,17 @@ function renderPageInWorkspace(
       wrapper: withRouter({
         url: "/overview",
         routes: [
-          { path: "/providers", element: <LocationProbe /> },
+          { path: "/admin/hosted-providers", element: <LocationProbe /> },
           { path: "/organization/provider-keys", element: <LocationProbe /> },
         ],
       }),
     },
   )
 }
+
+const WITHOUT_HOSTED_PROVIDERS = STANDALONE_SURFACES.filter(
+  (surface) => surface !== "hosted_providers",
+)
 
 const WORKSPACE_A = "44444444-4444-4444-4444-444444444444"
 const WORKSPACE_B = "55555555-5555-5555-5555-555555555555"
@@ -675,18 +686,16 @@ describe("OverviewPage", () => {
     // log and still look like it worked.
     expect(
       await screen.findByRole("link", { name: "1 provider unreachable" }),
-    ).toHaveAttribute("href", "/providers")
+    ).toHaveAttribute("href", "/admin/hosted-providers")
     expect(screen.getByRole("link", { name: /^error rate/ })).toHaveAttribute(
       "href",
       "/activity?status=error",
     )
   })
 
-  it("states an unreachable provider without a link on a hosted deployment", async () => {
-    // Provider health reports on `config.providers`, the process-global table a
-    // hosted deployment serves no page for, so both candidate destinations are
-    // wrong: `/providers` is answered with "not available here", and the
-    // organization page lists a different table the instance is not on.
+  it("states an unreachable provider without a link where Hosted providers is not served", async () => {
+    // The organization page lists a different table the instance is not on, so
+    // with no Hosted providers page there is nowhere true to link.
     mockApi({
       health: {
         providers: [],
@@ -698,7 +707,7 @@ describe("OverviewPage", () => {
     renderPage(
       <OverviewPage />,
       "/overview",
-      bootstrap({ deployment_type: "hosted", surfaces: HOSTED_SURFACES }),
+      bootstrap({ surfaces: WITHOUT_HOSTED_PROVIDERS }),
     )
 
     expect(
@@ -814,7 +823,7 @@ describe("OverviewIndex routing", () => {
 
   it("shows a getting-started overview and links to providers on a fresh gateway", async () => {
     // The deployment's own credentials: only a deployment operator is sent to
-    // `/providers`, since `OrganizationOverview` links to the organization's
+    // Hosted providers, since `OrganizationOverview` links to the organization's
     // provider-key page.
     mockApi({ providers: [] })
     const user = userEvent.setup()
@@ -827,23 +836,41 @@ describe("OverviewIndex routing", () => {
     await user.click(
       screen.getByRole("button", { name: "Add your first provider" }),
     )
-    expect(await screen.findByTestId("loc")).toHaveTextContent("/providers")
+    expect(await screen.findByTestId("loc")).toHaveTextContent(
+      "/admin/hosted-providers",
+    )
   })
 
-  it("sends a hosted deployment to the same organization page", async () => {
-    // A hosted deployment does not report the `providers` surface at all, so
-    // the shell answers that route with "not available here". Both topologies
-    // land in the same place now, which is the point: the row that moved is the
-    // fallback, not this answer.
+  it("counts a hosted provider as a configured one", async () => {
+    // Hosted providers are not in GET /providers, which lists config.yml
+    // instances only, so a gateway whose one provider is hosted is not empty.
+    const fetchMock = mockApi({
+      providers: [],
+      hostedProviders: [{ name: "openai" }],
+    })
+    renderPage(<OverviewIndex />)
+
+    expect(await screen.findByText("Overview")).toBeInTheDocument()
+    // Settled on the empty-state inputs (the provider lists and the recent
+    // log) before asserting what they decided.
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          /\/api\/v1\/usage(\?|$)/.test(String(input)),
+        ),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByText("Get started with Otari")).toBeNull()
+  })
+
+  it("falls back to the organization page where Hosted providers is not served", async () => {
     mockApi({ providers: [] })
     const user = userEvent.setup()
     renderPage(
       <OverviewIndex />,
       "/overview",
-      bootstrap({
-        deployment_type: "hosted",
-        surfaces: HOSTED_SURFACES,
-      }),
+      bootstrap({ surfaces: WITHOUT_HOSTED_PROVIDERS }),
     )
 
     await screen.findByText("Get started with Otari")

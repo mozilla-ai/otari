@@ -20,13 +20,17 @@ from gateway.services.providers._hosted_provider_service import (
     OrganizationExists,
     ResolvedHostedProvider,
 )
-from gateway.services.providers._hosted_runtime import hosted_credential_for, hosted_models_for, organization_to_serve
+from gateway.services.providers._hosted_runtime import (
+    UnknownHostedUpstreamError,
+    dispatch_on_hosted_credential,
+    hosted_credential_for,
+    hosted_models_for,
+    organization_to_serve,
+    serve_on_hosted_provider,
+)
 from gateway.services.providers._hosted_sources import HostedSources, refuse_unsafe_configured_endpoints
 from gateway.services.providers._missing_credential import (
-    managed_only_candidates,
     missing_provider_credential,
-    refuse_managed_candidate,
-    refuse_managed_only,
     unpriced_model_refusal,
 )
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
@@ -56,27 +60,27 @@ __all__ = [
     "OwnedEndpoint",
     "ProviderEndpointService",
     "ResolvedHostedProvider",
+    "UnknownHostedUpstreamError",
     "acompletion",
     "amessages",
     "aresponses",
     "cached_owned_endpoint",
+    "dispatch_on_hosted_credential",
     "hosted_credential_for",
     "hosted_implementation",
     "hosted_models_for",
     "load_hosted_names_at_startup",
     "load_provider_endpoints_at_startup",
-    "managed_only_candidates",
     "missing_provider_credential",
     "organization_to_serve",
     "owned_endpoint_http_client",
     "provider_for",
-    "refuse_managed_candidate",
-    "refuse_managed_only",
     "refresh_provider_endpoint_cache",
     "refuse_unsafe_configured_endpoints",
     "reset_hosted_name_index",
     "reset_provider_endpoint_cache",
     "run_hosted_name_refresher",
     "run_provider_endpoint_refresher",
+    "serve_on_hosted_provider",
     "unpriced_model_refusal",
 ]

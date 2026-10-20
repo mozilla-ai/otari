@@ -1,10 +1,8 @@
-"""Provider metadata and runtime provider-credential management for the dashboard.
+"""Provider metadata for the dashboard.
 
 The ``/api/v1/providers`` endpoint reports static, network-free metadata for every
-configured provider. The ``/api/v1/provider-credentials`` endpoints manage the
-``provider_credentials`` table: providers an operator adds at runtime through the
-dashboard, encrypted at rest and merged over config.yml providers. Those describe or
-change the gateway's own configuration, so their router is operator-gated;
+configured provider, and ``/api/v1/providers/health`` their reachability. They
+describe the gateway's own configuration, so their router is operator-gated;
 standalone-mode only (it is not mounted in hybrid).
 
 ``/api/v1/providers/catalog`` is the exception, on ``catalog_router``: it lists the
@@ -14,32 +12,20 @@ at all.
 """
 
 import asyncio
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
-from any_llm import LLMProvider
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     HostedProviderServiceDep,
     get_config,
-    get_db,
     require_deployment_operator,
     verify_catalog_reader,
 )
-from gateway.api.routes._helpers import database_error
-from gateway.core.config import PROVIDER_TYPE_ALIASES, RESERVED_PROVIDER_INSTANCE_NAMES, GatewayConfig
-from gateway.core.database import DATABASE_ERRORS
-from gateway.core.surface import Surface
-from gateway.log_config import logger
-from gateway.models.providers import ProviderCredential
+from gateway.core.config import GatewayConfig
 from gateway.services.model_discovery_service import (
     background_discovery_enabled,
-    discover_provider_models,
-    get_model_cache,
-    test_provider_credentials,
 )
 from gateway.services.provider_health_service import ProviderHealth, check_all_provider_health
 from gateway.services.provider_metadata_service import (
@@ -50,22 +36,6 @@ from gateway.services.provider_metadata_service import (
     list_known_provider_summaries,
     list_provider_info,
 )
-from gateway.services.provider_store_service import (
-    UNSET,
-    delete_credential,
-    get_credential,
-    get_credential_for_update,
-    list_credentials,
-    reencrypt_credentials,
-    refresh_provider_cache,
-    save_credential,
-)
-from gateway.services.secret_box import (
-    SecretBoxUnavailableError,
-    SecretDecryptionError,
-    decrypt_secret,
-)
-from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 router = APIRouter(
     tags=["providers"],
@@ -80,10 +50,6 @@ catalog_router = APIRouter(
     tags=["providers"],
     dependencies=[Depends(verify_catalog_reader)],
 )
-
-# Not hosted: a stored provider is shared by every organization and overrides their own keys.
-# Hiding the page does not stop the API from writing one.
-SURFACE = Surface("providers", hosted=False)
 
 
 class ProviderCapabilitiesSchema(BaseModel):
@@ -113,12 +79,9 @@ class ProviderInfoSchema(BaseModel):
     env_key: str | None = Field(default=None, description="Env var the credential is read from.")
     pricing_urls: list[str] = Field(default_factory=list)
     capabilities: ProviderCapabilitiesSchema
-    source: Literal["config", "dashboard"] = Field(
+    source: Literal["config"] = Field(
         default="config",
-        description=(
-            "Where the instance is defined: 'config' for config.yml (or OTARI_CONFIG_YAML), 'dashboard' for one "
-            "stored through the deployment providers page."
-        ),
+        description="Where the instance is defined: 'config' for config.yml (or OTARI_CONFIG_YAML).",
     )
 
 
@@ -336,386 +299,4 @@ async def provider_health(
         degraded=sum(1 for health in results if not health.ok and health.discovery_unsupported),
         total=len(results),
         checked_at=max(checked_ats).isoformat() if checked_ats else None,
-    )
-
-
-# --------------------------------------------------------------------------- #
-# Runtime provider-credential management (/api/v1/provider-credentials)
-# --------------------------------------------------------------------------- #
-
-
-class StoredProviderResponse(BaseModel):
-    """A runtime-stored provider. The API key is never returned, only ``last4``."""
-
-    instance: str
-    provider_type: str | None = None
-    api_base: str | None = None
-    last4: str | None = None
-    client_args: dict[str, Any] = Field(default_factory=dict)
-    created_at: str | None = None
-    updated_at: str | None = None
-    # False when the stored key cannot be decrypted with the current
-    # OTARI_SECRET_KEY (e.g. the key was rotated or lost). Such a provider is
-    # skipped at runtime, so the dashboard flags it for the operator to fix.
-    decryptable: bool = True
-
-    @classmethod
-    def from_model(cls, row: ProviderCredential, *, decryptable: bool = True) -> "StoredProviderResponse":
-        return cls(**row.to_public_dict(), decryptable=decryptable)
-
-
-def _is_decryptable(row: ProviderCredential) -> bool:
-    """Whether the row's stored key can be read with the current OTARI_SECRET_KEY."""
-    if not row.encrypted_api_key:
-        return True
-    try:
-        decrypt_secret(row.encrypted_api_key)
-    except (SecretBoxUnavailableError, SecretDecryptionError):
-        return False
-    return True
-
-
-class CreateStoredProviderRequest(BaseModel):
-    """Create a stored provider. ``api_key`` is write-only and requires OTARI_SECRET_KEY."""
-
-    instance: str = Field(min_length=1, description="Routing key, e.g. 'openai' or a named instance like 'home_lab'.")
-    provider_type: str | None = Field(
-        default=None,
-        description="any-llm implementation when the instance name is not itself one.",
-    )
-    api_base: str | None = None
-    api_key: str | None = Field(default=None, description="Provider API key. Stored encrypted; never returned.")
-    client_args: dict[str, Any] | None = None
-
-
-class UpdateStoredProviderRequest(BaseModel):
-    """Update a stored provider. Omitted fields are unchanged; ``api_key`` rotates in place."""
-
-    provider_type: str | None = None
-    api_base: str | None = None
-    api_key: str | None = Field(default=None, description="New API key. Omit to keep the existing one. Never returned.")
-    client_args: dict[str, Any] | None = None
-    expected_updated_at: str | None = Field(
-        default=None,
-        description="Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.",
-    )
-
-
-class TestProviderResponse(BaseModel):
-    """Result of a live provider connection test."""
-
-    ok: bool
-    model_count: int
-    error: str | None = None
-    discovery_unsupported: bool = Field(
-        default=False,
-        description=(
-            "True when the test failed only because this backend serves no model-listing endpoint, "
-            "so the credentials could not be verified this way but may still work for requests."
-        ),
-    )
-
-
-class ReencryptProviderCredentialsResponse(BaseModel):
-    """Result of re-encrypting stored provider keys with the primary secret key."""
-
-    reencrypted: int = Field(description="Number of stored provider keys re-encrypted.")
-    unreadable: int = Field(description="Number of encrypted keys left untouched because they could not be decrypted.")
-    skipped: int = Field(
-        default=0,
-        description=(
-            "Number of rows whose stored key changed between the read and the write, so the "
-            "re-encryption was not applied. They already hold whoever wrote them last."
-        ),
-    )
-
-
-class TestProviderRequest(BaseModel):
-    """Credentials to test before saving (from the add-provider form)."""
-
-    instance: str | None = Field(default=None, description="Provider/instance name; the impl when no provider_type.")
-    provider_type: str | None = None
-    api_base: str | None = None
-    api_key: str | None = None
-    client_args: dict[str, Any] | None = None
-
-
-def _validate_instance(instance: str, provider_type: str | None) -> None:
-    """Reject an unroutable instance name or an unknown provider_type, as a 400."""
-    if not instance.strip():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provider instance name must not be blank.",
-        )
-    if ":" in instance or "/" in instance:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provider instance name must not contain ':' or '/'.",
-        )
-    if instance in RESERVED_PROVIDER_INSTANCE_NAMES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Provider instance name '{instance}' is reserved: 'otari' prices the gateway's own "
-                "tools and 'hosted' names a deployment-owned offering."
-            ),
-        )
-    if provider_type:
-        impl = PROVIDER_TYPE_ALIASES.get(provider_type, provider_type)
-        try:
-            LLMProvider(impl)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"provider_type '{provider_type}' is not a known provider implementation.",
-            ) from exc
-
-
-async def _gate_api_base(api_base: str | None) -> None:
-    """Reject persisting an internal ``api_base`` when the SSRF gate is on.
-
-    Mirrors the report-path gate (connection tests, model discovery): a no-op
-    in the default allow-all state, but when the operator sets
-    ``OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false`` a private/link-local/reserved
-    ``api_base`` is refused here, so a blocked endpoint cannot be persisted in
-    the first place (issue #443). Truthy check so an empty/absent api_base
-    (the "use the SDK default endpoint" case) is not treated as a URL.
-    """
-    if not api_base:
-        return
-    try:
-        await validate_provider_api_base(api_base)
-    except UnsafeURLError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-
-
-async def _commit(db: AsyncSession, operation: str, *, conflict_detail: str | None = None) -> None:
-    try:
-        await db.commit()
-    except IntegrityError as exc:
-        # A concurrent create can slip past the pre-check and collide on the
-        # primary key here; surface that as the intended 409, not a 500.
-        await db.rollback()
-        if conflict_detail is not None:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict_detail) from None
-        raise database_error(operation, exc) from None
-    except DATABASE_ERRORS as exc:
-        await db.rollback()
-        raise database_error(operation, exc) from None
-
-
-async def _apply_write(db: AsyncSession, config: GatewayConfig, instance: str) -> None:
-    """Make a committed credential change take effect on this worker.
-
-    Clears the model-discovery cache for the instance (a stale listing would
-    otherwise survive a key change) and re-merges the overlay. The write is
-    already committed, so a refresh failure is logged, not surfaced as a 500;
-    other workers converge within the TTL.
-    """
-    get_model_cache().clear(instance)
-    try:
-        await refresh_provider_cache(db, config)
-    except SQLAlchemyError:
-        logger.warning("Provider overlay refresh failed after writing '%s'; converges within TTL", instance)
-
-
-@router.post("/provider-credentials/test")
-async def test_provider_connection(
-    request: TestProviderRequest,
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> TestProviderResponse:
-    """Test provider credentials without storing them (for the add/edit form).
-
-    Resolves the implementation from ``provider_type`` (honoring the
-    ``*-compatible`` aliases) or the ``instance`` name, then lists the provider's
-    models with the supplied credentials. Nothing is persisted and the key is
-    never echoed.
-    """
-    impl = (
-        PROVIDER_TYPE_ALIASES.get(request.provider_type, request.provider_type)
-        if request.provider_type
-        else (request.instance or "")
-    )
-    if not impl:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provide a provider or a provider type to test.",
-        )
-    result = await test_provider_credentials(
-        impl,
-        api_key=request.api_key,
-        api_base=request.api_base,
-        client_args=request.client_args,
-        # What this form saves is a stored ``providers:`` entry.
-        declared=True,
-        timeout=config.model_discovery_timeout_seconds,
-    )
-    return TestProviderResponse(
-        ok=result.error is None,
-        model_count=len(result.models),
-        error=result.error,
-        discovery_unsupported=result.discovery_unsupported,
-    )
-
-
-@router.post("/provider-credentials/reencrypt")
-async def reencrypt_stored_provider_keys(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> ReencryptProviderCredentialsResponse:
-    """Re-encrypt stored provider keys with the primary OTARI_SECRET_KEY.
-
-    Operators rotate ``OTARI_SECRET_KEY`` by setting it to ``new,old`` first,
-    restarting, running this endpoint, then removing the old key and restarting
-    again. Rows that cannot be decrypted are left untouched and must be recovered
-    by replacing the affected provider keys.
-    """
-    try:
-        reencrypted, unreadable, skipped = await reencrypt_credentials(db)
-        await db.commit()
-    except SecretBoxUnavailableError as exc:
-        await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-    except DATABASE_ERRORS as exc:
-        await db.rollback()
-        raise database_error("reencrypt stored provider keys", exc) from None
-    get_model_cache().clear()
-    try:
-        await refresh_provider_cache(db, config)
-    except SQLAlchemyError:
-        logger.warning("Provider overlay refresh failed after re-encrypting credentials; converges within TTL")
-    return ReencryptProviderCredentialsResponse(reencrypted=reencrypted, unreadable=unreadable, skipped=skipped)
-
-
-@router.get("/provider-credentials")
-async def list_stored_providers(
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> list[StoredProviderResponse]:
-    """List runtime-stored providers. Keys are never returned, only ``last4``."""
-    return [
-        StoredProviderResponse.from_model(row, decryptable=_is_decryptable(row)) for row in await list_credentials(db)
-    ]
-
-
-@router.post("/provider-credentials", status_code=status.HTTP_201_CREATED)
-async def create_stored_provider(
-    request: CreateStoredProviderRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> StoredProviderResponse:
-    """Add a provider at runtime. Storing a key requires OTARI_SECRET_KEY."""
-    _validate_instance(request.instance, request.provider_type)
-    await _gate_api_base(request.api_base)
-    if await get_credential(db, request.instance) is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"A stored provider '{request.instance}' already exists; use PATCH to update it.",
-        )
-    try:
-        row = await save_credential(
-            db,
-            instance=request.instance,
-            provider_type=request.provider_type,
-            api_base=request.api_base,
-            api_key=request.api_key,
-            client_args=request.client_args,
-        )
-    except SecretBoxUnavailableError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-
-    await _commit(
-        db,
-        "create stored provider",
-        conflict_detail=f"A stored provider '{request.instance}' already exists; use PATCH to update it.",
-    )
-    if request.instance in (config._provider_baseline or {}):
-        logger.warning(
-            "Stored provider '%s' shadows the config.yml provider of the same name; the stored credential now wins.",
-            request.instance,
-        )
-    await _apply_write(db, config, request.instance)
-    await db.refresh(row)
-    return StoredProviderResponse.from_model(row)
-
-
-@router.patch("/provider-credentials/{instance}")
-async def update_stored_provider(
-    instance: str,
-    request: UpdateStoredProviderRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> StoredProviderResponse:
-    """Update a stored provider. Omitted fields are left as-is; an explicit ``null`` clears them.
-
-    ``api_key`` follows the same rule: omit it to keep the stored key, send a new
-    one to rotate, or send ``null`` to clear it. The row is locked ``FOR UPDATE``
-    so the ``expected_updated_at`` check and the write it guards are atomic.
-    """
-    existing = await get_credential_for_update(db, instance)
-    if existing is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No stored provider '{instance}'.")
-    if request.expected_updated_at is not None:
-        current = existing.updated_at.isoformat() if existing.updated_at else None
-        if current != request.expected_updated_at:
-            raise HTTPException(
-                status_code=status.HTTP_412_PRECONDITION_FAILED,
-                detail="This provider was modified since you loaded it; reload and retry.",
-            )
-    _validate_instance(instance, request.provider_type)
-    # Distinguish "field omitted" (keep) from "field set to null" (clear).
-    sent = request.model_fields_set
-    if "api_base" in sent:
-        await _gate_api_base(request.api_base)
-    try:
-        row = await save_credential(
-            db,
-            instance=instance,
-            provider_type=request.provider_type if "provider_type" in sent else UNSET,
-            api_base=request.api_base if "api_base" in sent else UNSET,
-            api_key=request.api_key if "api_key" in sent else UNSET,
-            client_args=request.client_args if "client_args" in sent else UNSET,
-        )
-    except SecretBoxUnavailableError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-
-    await _commit(db, "update stored provider")
-    await _apply_write(db, config, instance)
-    await db.refresh(row)
-    return StoredProviderResponse.from_model(row)
-
-
-@router.delete("/provider-credentials/{instance}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_stored_provider(
-    instance: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> None:
-    """Delete a stored provider. A config.yml provider cannot be deleted here."""
-    if not await delete_credential(db, instance):
-        detail = f"No stored provider '{instance}'."
-        if instance in (config._provider_baseline or {}):
-            detail = f"Provider '{instance}' is defined in config.yml and cannot be deleted through the API."
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
-    await _commit(db, "delete stored provider")
-    await _apply_write(db, config, instance)
-
-
-@router.post("/provider-credentials/{instance}/test")
-async def test_stored_provider(
-    instance: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> TestProviderResponse:
-    """Verify a stored provider's key by listing its models, without exposing the key."""
-    if await get_credential(db, instance) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No stored provider '{instance}'.")
-    # Make sure the just-stored credential is merged, then force a live check
-    # rather than trusting a cached listing from before a key change.
-    await _apply_write(db, config, instance)
-    result = await discover_provider_models(config, instance)
-    return TestProviderResponse(
-        ok=result.error is None,
-        model_count=len(result.models),
-        error=result.error,
-        discovery_unsupported=result.discovery_unsupported,
     )

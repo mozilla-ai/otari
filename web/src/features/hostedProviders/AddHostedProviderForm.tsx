@@ -30,6 +30,8 @@ import {
 } from "@/shared/api/hostedProviders"
 import { useProviderDetail } from "@/shared/api/providers"
 
+import { ServesUnlistedModelsField } from "./ServesUnlistedModelsField"
+
 // The form that configures a new hosted provider, in the shape of the
 // organization Providers page's key form: the provider picked from the catalog,
 // the key label spelled the provider's way, its typed credential fields, and the
@@ -50,6 +52,7 @@ interface ProviderDraft {
   apiBase: string
   credentials: CredentialFieldValues
   clientArgs: string
+  servesUnlistedModels: boolean
 }
 
 const EMPTY_DRAFT: ProviderDraft = {
@@ -59,6 +62,7 @@ const EMPTY_DRAFT: ProviderDraft = {
   apiBase: "",
   credentials: {},
   clientArgs: "",
+  servesUnlistedModels: false,
 }
 
 export function AddHostedProviderForm({
@@ -122,7 +126,10 @@ export function AddHostedProviderForm({
   const submit = () => {
     const payload = buildPayload()
     if (!canSubmit || payload === null) return
-    create.mutate(payload, { onSuccess: onClose })
+    create.mutate(
+      { ...payload, serves_unlisted_models: draft.servesUnlistedModels },
+      { onSuccess: onClose },
+    )
   }
 
   return (
@@ -198,6 +205,12 @@ export function AddHostedProviderForm({
         onChange={(apiBase) => setDraft({ ...draft, apiBase })}
         placeholder="https://api.example.com/v1"
         description="Optional. Only needed for a self-hosted or regional endpoint, which may then go without a key."
+      />
+      <ServesUnlistedModelsField
+        isSelected={draft.servesUnlistedModels}
+        onChange={(servesUnlistedModels) =>
+          setDraft({ ...draft, servesUnlistedModels })
+        }
       />
       <ProviderCredentialFields
         provider={draft.provider}
