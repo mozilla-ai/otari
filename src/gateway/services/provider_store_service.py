@@ -23,7 +23,6 @@ only: the caller must not load or refresh this in the hybrid platform path.
 """
 
 import asyncio
-import time
 from typing import Any, Final, cast
 
 from sqlalchemy import CursorResult, select, update
@@ -58,7 +57,6 @@ UNSET: Final = _Unset()
 
 # instance -> decrypted overlay entry (the same shape as a config.providers value)
 _cache: dict[str, dict[str, Any]] = {}
-_cached_at: float | None = None
 # The config-file baseline lives on the config object (config._provider_baseline),
 # captured once, so it is per-config and survives a cache reset without being
 # re-derived from an already-merged providers map.
@@ -88,21 +86,13 @@ def _row_to_entry(row: ProviderCredential) -> dict[str, Any]:
     return entry
 
 
-def cache_is_stale(ttl: float = PROVIDER_CACHE_TTL_SECONDS) -> bool:
-    """Whether the cache has never been loaded or has outlived ``ttl``."""
-    return _cached_at is None or (time.monotonic() - _cached_at) >= ttl
-
-
 def reset_provider_cache() -> None:
     """Drop the overlay cache so the next load starts clean (startup, tests).
 
     The config-file baseline lives on the config object, so it is not touched
     here; a fresh config starts with an empty baseline of its own.
     """
-    global _cached_at  # noqa: PLW0603
-
     _cache.clear()
-    _cached_at = None
 
 
 def apply_to_config(config: GatewayConfig) -> set[str]:
@@ -147,8 +137,6 @@ def forget_stored_providers(config: GatewayConfig, instances: set[str]) -> None:
 
 async def refresh_provider_cache(db: AsyncSession, config: GatewayConfig) -> set[str]:
     """Reload the overlay from the database, apply it, and return shadowed names."""
-    global _cached_at  # noqa: PLW0603
-
     # `populate_existing`: sessions use `expire_on_commit=False`, so without it
     # a row still in the identity map (as after a rotation on this session)
     # would return the values it was loaded with, not what is committed.
@@ -164,7 +152,6 @@ async def refresh_provider_cache(db: AsyncSession, config: GatewayConfig) -> set
             )
     _cache.clear()
     _cache.update(overlay)
-    _cached_at = time.monotonic()
     return apply_to_config(config)
 
 

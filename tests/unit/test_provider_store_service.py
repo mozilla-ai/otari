@@ -1,6 +1,5 @@
 """Unit tests for the stored-provider overlay merged over config providers."""
 
-import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -28,7 +27,6 @@ def _prime(overlay: dict[str, dict[str, Any]]) -> None:
     """Stand in for a database load without needing a session."""
     store._cache.clear()
     store._cache.update(overlay)
-    store._cached_at = time.monotonic()
 
 
 def test_config_providers_untouched_when_no_stored() -> None:
