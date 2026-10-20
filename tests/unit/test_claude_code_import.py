@@ -87,8 +87,8 @@ def test_a_response_id_repeated_across_sessions_is_still_one_event(tmp_path: Pat
     assert result.files_scanned == 2
 
 
-def test_cache_writes_split_by_ttl(tmp_path: Path) -> None:
-    """The 1h share is priced separately, so it is reported apart from the 5m share."""
+def test_cache_writes_report_the_total_with_the_1h_share_inside_it(tmp_path: Path) -> None:
+    """The endpoint reads the 1h count as a subset of the write total, not as writes on top of it."""
     _write_transcript(
         tmp_path,
         "-Users-alice-Projects-otari",
@@ -99,23 +99,25 @@ def test_cache_writes_split_by_ttl(tmp_path: Path) -> None:
                 usage={
                     "input_tokens": 100,
                     "output_tokens": 20,
-                    "cache_read_input_tokens": 900,
-                    "cache_creation_input_tokens": 500,
-                    "cache_creation": {"ephemeral_1h_input_tokens": 200, "ephemeral_5m_input_tokens": 300},
+                    "cache_read_input_tokens": 4000,
+                    "cache_creation_input_tokens": 1200,
+                    "cache_creation": {"ephemeral_1h_input_tokens": 900, "ephemeral_5m_input_tokens": 300},
                 },
             )
         ],
     )
 
-    event = scan_transcripts(tmp_path, label_prefix="host").events[0]
+    result = scan_transcripts(tmp_path, label_prefix="host")
+    event = result.events[0]
 
-    assert (event.cache_write_tokens, event.cache_write_1h_tokens) == (300, 200)
-    assert (event.input_tokens, event.output_tokens, event.cache_read_tokens) == (100, 20, 900)
+    assert (event.cache_write_tokens, event.cache_write_1h_tokens) == (1200, 900)
+    assert (event.input_tokens, event.output_tokens, event.cache_read_tokens) == (100, 20, 4000)
     assert event.as_payload()["cache_tokens_in_prompt"] is False
+    assert result.tokens_by_model == {event.model: 100 + 20 + 4000 + 1200}
 
 
-def test_a_cache_total_below_its_1h_share_never_goes_negative(tmp_path: Path) -> None:
-    """Token counts are unsigned at the endpoint, so an inconsistent transcript clamps to zero."""
+def test_a_1h_share_above_its_cache_total_is_clamped_to_the_total(tmp_path: Path) -> None:
+    """An inconsistent transcript never reports more 1h writes than writes."""
     _write_transcript(
         tmp_path,
         "-Users-alice-Projects-otari",
@@ -133,7 +135,7 @@ def test_a_cache_total_below_its_1h_share_never_goes_negative(tmp_path: Path) ->
 
     event = scan_transcripts(tmp_path, label_prefix="host").events[0]
 
-    assert event.cache_write_tokens == 0
+    assert (event.cache_write_tokens, event.cache_write_1h_tokens) == (100, 100)
 
 
 def test_locally_generated_messages_are_not_imported(tmp_path: Path) -> None:

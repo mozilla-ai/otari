@@ -17,11 +17,11 @@ import { MaintenanceModeCard } from "@/features/settings/MaintenanceModeCard"
 import { RateLimitsCard } from "@/features/settings/RateLimitsCard"
 import { useRotateMasterKey } from "@/shared/api/auth"
 import {
-  useReencryptProviderCredentials,
-  useStoredProviders,
-} from "@/shared/api/providers"
+  useHostedProviders,
+  useReencryptHostedProviders,
+} from "@/shared/api/hostedProviders"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
-import { useDeployment } from "@/shared/hooks/useDeployment"
+import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.
@@ -330,7 +330,9 @@ function ConfigRow({
     // a `w-56` control and a sentence stopped fitting side by side.
     <div className="flex flex-wrap items-start justify-between gap-6 py-4">
       <div className="min-w-0">
-        <code className="font-mono text-body">{field.key}</code>
+        {/* `break-words`: at a larger text size the longest keys are wider
+            than a phone, and a snake_case name has no space to wrap at. */}
+        <code className="font-mono text-body break-words">{field.key}</code>
         {field.description ? (
           // `max-w-prose` for the reason the page header carries one: these
           // rows became full-bleed with the rest of the page, and the longest
@@ -518,14 +520,19 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
 }
 
 function SecretKeyRow() {
-  const storedProviders = useStoredProviders()
-  const reencrypt = useReencryptProviderCredentials()
-  const result = reencrypt.data
-  const storedCount = storedProviders.data?.length ?? 0
-  const unreadableCount = (storedProviders.data ?? []).filter(
+  const hostsHosted = useSurfaces()("hosted_providers")
+  const hostedProviders = useHostedProviders(hostsHosted)
+  const reencrypt = useReencryptHostedProviders()
+  // A configured hosted provider holds no ciphertext, so only stored ones count.
+  const storedHosted = (hostedProviders.data?.data ?? []).filter(
+    (provider) => provider.source === "database",
+  )
+  const unreadableCount = storedHosted.filter(
     (provider) => !provider.decryptable,
   ).length
-  const hasStoredKeys = storedCount > 0
+  const hasStoredKeys = storedHosted.length > 0
+  const isPending = reencrypt.isPending
+  const result = isPending ? undefined : reencrypt.data
 
   return (
     <div className="flex flex-col gap-4 py-4">
@@ -547,16 +554,14 @@ function SecretKeyRow() {
           <Button
             size="sm"
             variant="ghost"
-            isDisabled={!hasStoredKeys || reencrypt.isPending}
+            isDisabled={!hasStoredKeys || isPending}
             onPress={() => reencrypt.mutate()}
           >
-            {reencrypt.isPending
-              ? "Re-encrypting…"
-              : "Re-encrypt provider keys"}
+            {isPending ? "Re-encrypting…" : "Re-encrypt provider keys"}
           </Button>
         </div>
       </div>
-      <ErrorBanner error={storedProviders.error ?? reencrypt.error} />
+      <ErrorBanner error={hostedProviders.error ?? reencrypt.error} />
       {unreadableCount > 0 ? (
         <InfoBanner tone="warning">
           {unreadableCount} stored provider key
@@ -573,7 +578,7 @@ function SecretKeyRow() {
             ? ` ${result.unreadable} still need replacement.`
             : " All decryptable stored keys now use the primary secret key."}
         </p>
-      ) : !storedProviders.isLoading && !hasStoredKeys ? (
+      ) : !hostedProviders.isLoading && !hasStoredKeys ? (
         <p className="text-sm text-muted">
           No stored provider keys need re-encryption.
         </p>

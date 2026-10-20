@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING
 from gateway.core.error_codes import PRICING_REQUIRED
 from gateway.services.model_access import ModelRefusal
 from gateway.services.pricing_service import no_pricing_error_detail
-from gateway.services.provider_kwargs import MissingCredential, missing_declared_credential
+from gateway.services.provider_kwargs import (
+    MissingCredential,
+    missing_declared_credential,
+)
+from gateway.services.providers._hosted_runtime import organization_to_serve
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
@@ -38,8 +42,9 @@ async def missing_provider_credential(
     missing = missing_declared_credential(config, resolved.instance, resolved.provider, resolved.kwargs)
     if missing is None:
         return None
-    if hosted is not None and organization_id is not None:
-        if resolved.instance in await hosted.get_hosted_models(organization_id=organization_id):
+    if hosted is not None:
+        offered = await hosted.get_hosted_models(organization_id=organization_to_serve(organization_id))
+        if resolved.instance in offered:
             return None
     return missing.behind_alias(resolved.alias)
 

@@ -41,13 +41,20 @@ from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS, PROV
 from gateway.log_config import logger as gateway_logger
 from gateway.ports.billing_port import BillingPort, InsufficientFundsError
 from gateway.ports.model_provider_port import (
+    NO_ORGANIZATION,
     HostedAccessDeniedError,
     HostedCredential,
     HostedModels,
     ModelProviderPort,
 )
 from gateway.services.inference import DeploymentCharge
-from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
+from gateway.services.provider_kwargs import (
+    ResolvedProvider,
+    configure_hosted_names,
+    reaches_organization_key,
+    resolve_provider_selector,
+)
+from gateway.types.attempt import Attempt
 
 ORGANIZATION_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 WORKSPACE_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
@@ -81,9 +88,11 @@ class RecordingPort:
         # ``asyncio.CancelledError``, which the call site must deliberately not
         # catch, and typing this narrowly would make that case unexpressible.
         error: BaseException | None = None,
+        roster: HostedModels | BaseException | None = None,
     ) -> None:
         self.credential = credential
         self.error = error
+        self.roster = roster
         self.calls: list[dict[str, Any]] = []
 
     async def resolve_hosted_credential(
@@ -107,7 +116,11 @@ class RecordingPort:
         return self.credential
 
     async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
-        raise AssertionError("dispatch must not ask for the hosted roster")
+        if isinstance(self.roster, BaseException):
+            raise self.roster
+        if self.roster is None:
+            raise AssertionError("dispatch must not ask for the hosted roster")
+        return self.roster
 
 
 def _plain_build_port() -> ModelProviderPort:
@@ -441,29 +454,77 @@ async def test_client_args_alone_does_not_shadow_a_real_key() -> None:
 
 
 @pytest.mark.asyncio
-async def test_request_without_an_organization_is_not_asked_about(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The port keys its access decision on the organization, so there is nothing to ask, and nothing serves it."""
-    released, rejections = _capture_settlement(monkeypatch)
+async def test_request_without_an_organization_is_asked_as_one_no_restriction_names() -> None:
+    """Served on what is restricted to no organization, so the port is asked for exactly that."""
     port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
     ctx = _ctx(resolved_provider=_uncredentialed(), organization_id=None, workspace_id=None)
-    with pytest.raises(HTTPException) as exc_info:
-        await _dispatch(ctx, port)
-    assert port.calls == []
-    _assert_refused_as_unconfigured(exc_info, released, rejections)
+
+    result = await _dispatch(ctx, port)
+
+    assert [call["organization_id"] for call in port.calls] == [NO_ORGANIZATION]
+    assert result.kwargs["api_key"] == "hosted"
+    assert result.deployment_paid is True
 
 
 @pytest.mark.asyncio
-async def test_multi_candidate_plan_is_not_asked_about() -> None:
-    """A routed chain dispatches from the plan's own kwargs, so asking would not serve it."""
+async def test_a_named_hosted_provider_is_dispatched_as_its_implementation_under_its_name() -> None:
+    """``response_provider`` keys usage and pricing; ``implementation`` picks the SDK that calls it."""
+    configure_hosted_names({"openai-eu": "openai"}.get)
+    try:
+        resolved = resolve_provider_selector(GatewayConfig(), "openai-eu:gpt-4o")
+        port = RecordingPort(
+            credential=HostedCredential(
+                api_key="hosted",
+                api_base="https://eu.test/v1",
+                response_provider="openai-eu",
+                implementation="openai",
+            )
+        )
+
+        result = await _dispatch(_ctx(resolved_provider=resolved), port, selector="openai-eu:gpt-4o")
+    finally:
+        configure_hosted_names(None)
+
+    assert [call["provider"] for call in port.calls] == ["openai-eu"]
+    assert (result.instance, result.provider, result.model) == ("openai-eu", LLMProvider.OPENAI, "gpt-4o")
+    assert result.kwargs == {"api_key": "hosted", "api_base": "https://eu.test/v1"}
+
+
+@pytest.mark.asyncio
+async def test_a_multi_candidate_plan_asks_for_each_candidate_only_when_the_walk_reaches_it() -> None:
+    """A routed chain dispatches from the plan's own kwargs, so the port is asked per candidate, as it is sent."""
 
     class _Plan:
-        attempts = (object(), object())
+        attempts = (_uncredentialed(), _uncredentialed())
 
     port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
     ctx = _ctx(resolved_provider=_uncredentialed(), plan=_Plan())
     result = await _dispatch(ctx, port)
     assert result.kwargs == {}
     assert port.calls == []
+    assert ctx.credential_candidate is not None
+
+    served = await ctx.credential_candidate(
+        Attempt(position=2, instance="openai", provider=LLMProvider.OPENAI, model="gpt-4o")
+    )
+
+    assert [call["model"] for call in port.calls] == ["gpt-4o"]
+    assert (served.instance, served.kwargs, served.deployment_paid) == ("openai", {"api_key": "hosted"}, True)
+    assert ctx.deployment_charge is not None
+
+
+@pytest.mark.asyncio
+async def test_a_walk_candidate_the_port_does_not_serve_is_left_to_be_passed_over() -> None:
+    class _Plan:
+        attempts = (_uncredentialed(), _uncredentialed())
+
+    ctx = _ctx(resolved_provider=_uncredentialed(), plan=_Plan())
+    await _dispatch(ctx, RecordingPort())
+    assert ctx.credential_candidate is not None
+    candidate = Attempt(position=1, instance="openai", provider=LLMProvider.OPENAI, model="gpt-4o")
+
+    assert await ctx.credential_candidate(candidate) is candidate
+    assert ctx.deployment_charge is None
 
 
 # ---------------------------------------------------------------------------
@@ -1012,3 +1073,34 @@ async def test_a_request_that_is_not_deployment_paid_is_never_charged() -> None:
         None, cast(Any, db), Decimal("1"), provider="openai", model="gpt-4o", expects_cost=True
     )
     assert db.released == 0
+
+
+def test_an_organization_key_serves_its_provider_first_and_never_a_named_hosted_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The organization's own key comes first for ``openai:*``; ``openai-eu`` is the deployment's endpoint alone."""
+    monkeypatch.setattr(
+        "gateway.services.provider_kwargs.cached_org_provider_kwargs",
+        lambda _workspace_id, provider: {"api_key": "sk-org"} if provider == "openai" else None,
+    )
+    configure_hosted_names({"openai-eu": "openai"}.get)
+    try:
+        bare = resolve_provider_selector(GatewayConfig(), "openai:gpt-4o", workspace_id=uuid.uuid4())
+        named = resolve_provider_selector(GatewayConfig(), "openai-eu:gpt-4o", workspace_id=uuid.uuid4())
+    finally:
+        configure_hosted_names(None)
+
+    assert bare.kwargs["api_key"] == "sk-org"
+    assert "api_key" not in named.kwargs
+
+
+def test_only_a_selector_that_names_no_configured_or_named_hosted_provider_reaches_an_organization_key() -> None:
+    """An organization key's model restriction applies only where that key could serve."""
+    config = GatewayConfig(providers={"groq": {"api_key": "sk-groq"}})
+    configure_hosted_names({"openai-eu": "openai"}.get)
+    try:
+        reached = {name: reaches_organization_key(config, name) for name in ("openai", "groq", "openai-eu")}
+    finally:
+        configure_hosted_names(None)
+
+    assert reached == {"openai": True, "groq": False, "openai-eu": False}

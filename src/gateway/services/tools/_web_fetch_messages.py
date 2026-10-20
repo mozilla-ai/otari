@@ -16,7 +16,7 @@ from anthropic.types import (
 )
 
 from gateway.services.tools._native import SERVER_TOOL_USE_ID_PREFIX, NativeCall
-from gateway.services.tools._web_display import fetch_display_url
+from gateway.services.tools._web_display import fetch_display_url, fetched_display_url
 from gateway.services.tools._web_names import (
     ANTHROPIC_WEB_FETCH_TYPE,
     WEB_FETCH_TOOL_NAME,
@@ -87,7 +87,7 @@ class MessagesWebFetchRendering:
             call,
             WebFetchBlock(
                 type="web_fetch_result",
-                url=fetched.final_url.display_url,
+                url=fetched_display_url(fetched.final_url),
                 content=document,
                 retrieved_at=datetime.now(UTC).isoformat(),
             ),

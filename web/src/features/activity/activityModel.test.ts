@@ -10,8 +10,10 @@ import {
   findGroupsMissingEarlierAttempts,
   formatElapsed,
   formatLatencyCell,
+  formatTokenLane,
   formatToolUsage,
   formatUSD,
+  formatUSDLane,
   getActivityRowClassName,
   indexGroupOutcomes,
   listToolUsage,
@@ -602,7 +604,7 @@ describe("sortChargeLines", () => {
   })
 })
 
-describe("the relocated formatters", () => {
+describe("the row formatters", () => {
   // These disagree with shared/helpers/format.ts on the absent-value spelling,
   // which is the disagreement otari#1335 tracks; pin it so a later swap is a
   // deliberate change rather than a silent one.
@@ -611,6 +613,27 @@ describe("the relocated formatters", () => {
     expect(formatUSD(0)).toBe("$0.00")
     expect(formatLatencyCell(null)).toBe("—")
     expect(formatLatencyCell(842)).toBe("842 ms")
+  })
+
+  it("roll a long total time up into minutes and hours, never below zero", () => {
+    expect(formatLatencyCell(11_000_000)).toBe("3h 03m")
+    expect(formatLatencyCell(259_200_000)).toBe("72h 00m")
+    expect(formatLatencyCell(-5)).toBe("0 ms")
+  })
+
+  it("show a sub-cent charge rather than rounding it to free", () => {
+    expect(formatUSD(0.000001)).toBe("$0.000001")
+    expect(formatUSD(0.0024)).toBe("$0.0024")
+  })
+
+  it("shorten a lane's number only past what the lane holds", () => {
+    expect(formatTokenLane(999_999)).toBe("999,999")
+    expect(formatTokenLane(1_234_567_890)).toBe("1.23B")
+    expect(formatTokenLane(98_765_432)).toBe("98.8M")
+    expect(formatTokenLane(null)).toBe("—")
+    expect(formatUSDLane(1_284.56)).toBe("$1,284.56")
+    expect(formatUSDLane(12_345_678.9)).toBe("$12.3M")
+    expect(formatUSDLane(null)).toBe("—")
   })
 
   it("count elapsed wall-clock time in whole seconds, then minutes", () => {

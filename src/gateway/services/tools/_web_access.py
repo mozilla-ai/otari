@@ -44,6 +44,7 @@ from gateway.services.web_retrieval_policy import (
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
     from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential
+    from gateway.services.tools._web_search import InLoopSearch
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,8 @@ class WebAccessGrant:
     fetch_policy: DomainPolicy
     # The workspace's own search key, set only where it declared a search.
     search_credential: WebSearchCredential | None = None
+    # What its searches run on through the libraries; None where the old backend serves them.
+    in_loop_search: InLoopSearch | None = None
 
 
 def apply_web_access_policy(

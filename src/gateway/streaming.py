@@ -2,19 +2,22 @@
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import aclosing, suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
 
+import anyio
 from any_llm.types.completion import CompletionUsage
 
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.usage import (
     GatewayUsage,
     cache_read_tokens_of,
     cache_tokens_in_prompt_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
+    provider_web_searches_of,
     reasoning_tokens_of,
 )
 from gateway.log_config import logger
@@ -26,6 +29,7 @@ if TYPE_CHECKING:
 A = TypeVar("A")  # Attempt-like, opaque to this module
 C = TypeVar("C")  # Chunk type emitted by the upstream stream
 S = TypeVar("S")  # Settlement type, opaque to this module
+T = TypeVar("T")
 
 
 DEFAULT_FIRST_CHUNK_TIMEOUT_SECONDS = 2.0
@@ -82,16 +86,25 @@ _ANTHROPIC_ERROR = json.dumps(
 )
 
 
-def openai_error_event(fmt: StreamFormat, code: str | None, message: str | None = None) -> str:
+def openai_error_event(
+    fmt: StreamFormat,
+    code: str | None,
+    message: str | None = None,
+    provider_failure: Mapping[str, object] | None = None,
+) -> str:
     """``fmt``'s error event, carrying ``code`` and ``message`` in the OpenAI error object where given.
 
     ``message`` must already be safe to show the caller; without one the event says only that streaming failed.
+    ``provider_failure`` adds the fields a provider's own failure may show (``provider``, ``status``, ``tag``,
+    ``retryable``), under ``error.provider_failure``.
     """
-    if code is None and message is None:
+    if code is None and message is None and provider_failure is None:
         return fmt.error_payload
-    error: dict[str, str] = {"message": message or "An error occurred during streaming", "type": "server_error"}
+    error: dict[str, object] = {"message": message or "An error occurred during streaming", "type": "server_error"}
     if code is not None:
         error["code"] = code
+    if provider_failure is not None:
+        error["provider_failure"] = dict(provider_failure)
     return fmt.error_payload.replace(_OPENAI_ERROR, json.dumps({"error": error}))
 
 
@@ -112,6 +125,9 @@ RESPONSES_STREAM_FORMAT = StreamFormat(
     yield_done_on_error=False,
     keepalive=_SSE_COMMENT_KEEPALIVE,
 )
+
+# The events a Responses stream ends a response with.
+RESPONSES_TERMINAL_EVENTS = frozenset({"response.completed", "response.incomplete", "response.failed"})
 
 ANTHROPIC_STREAM_FORMAT = StreamFormat(
     done_marker="event: done\ndata: {}\n\n",
@@ -141,7 +157,15 @@ def merge_stream_usage(current: CompletionUsage, update: CompletionUsage) -> Com
         # "in prompt" never masks the Anthropic shape.
         cache_tokens_in_prompt=cache_tokens_in_prompt_of(update) and cache_tokens_in_prompt_of(current),
         reasoning_tokens=reasoning_tokens_of(update) or reasoning_tokens_of(current),
+        provider_web_searches=provider_web_searches_of(update) or provider_web_searches_of(current),
     )
+
+
+def _describe_settlement_error(exc: Exception) -> str:
+    """Name a settlement failure without the row data a database error's message can carry."""
+    if isinstance(exc, DATABASE_ERRORS):
+        return describe_database_error(exc)
+    return type(exc).__name__
 
 
 _KEEPALIVE_DUE = object()
@@ -180,7 +204,9 @@ async def _chunks_or_keepalive(stream: AsyncIterator[Any], interval_seconds: flo
     finally:
         if pending is not None:
             pending.cancel()
-            with suppress(BaseException):
+            # Unshielded, a canceled scope would cancel ``pending`` again on every
+            # loop pass and cut short the cleanup its one cancellation starts.
+            with anyio.CancelScope(shield=True), suppress(BaseException):
                 await pending
 
 
@@ -337,9 +363,11 @@ async def streaming_generator(
         if not completed:
             raise IncompleteStreamError(chunks_received)
 
-        # Once the upstream is exhausted, hybrid mode settles before emitting
-        # the buffered terminal suffix. Standalone mode retains the historical
-        # order: chunks, done marker, then reconciliation.
+        # Once the upstream is exhausted, a caller that settles inline does so
+        # before the buffered terminal suffix; otherwise the order is chunks,
+        # done marker, then settlement. A settlement a client disconnect cut off
+        # would never run again, as the stream already counts as settled, so
+        # each one is shielded from the response's canceled scope.
         if settle_before_done:
             settled = True
             settlement: S | None = None
@@ -360,12 +388,12 @@ async def streaming_generator(
                                 yield fmt.keepalive
                         settlement = settlement_task.result()
                     else:
-                        settlement = await on_complete(usage)
+                        settlement = await _shielded(on_complete, usage)
                 elif on_no_usage is not None:
-                    await on_no_usage()
+                    await _shielded(on_no_usage)
             except Exception as log_err:
                 # codeql[py/clear-text-logging-sensitive-data]
-                logger.error("Failed to log streaming usage for %s: %s", label, log_err)
+                logger.error("Failed to log streaming usage for %s: %s", label, _describe_settlement_error(log_err))
             if settlement is not None and attach_settlement is not None:
                 try:
                     attach_settlement(cost_carrier, settlement)
@@ -384,22 +412,12 @@ async def streaming_generator(
             settled = True
             try:
                 if has_usage:
-                    await on_complete(usage)
+                    await _shielded(on_complete, usage)
                 elif on_no_usage is not None:
-                    await on_no_usage()
+                    await _shielded(on_no_usage)
             except Exception as log_err:
                 # codeql[py/clear-text-logging-sensitive-data]
-                logger.error("Failed to log streaming usage for %s: %s", label, log_err)
-    except asyncio.CancelledError:
-        if settlement_task is not None and not settlement_task.done():
-            settlement_task.cancel()
-            with suppress(BaseException):
-                await settlement_task
-        if not settled and on_incomplete is not None:
-            with suppress(Exception):
-                await on_incomplete()
-        settled = True
-        raise
+                logger.error("Failed to log streaming usage for %s: %s", label, _describe_settlement_error(log_err))
     except Exception as e:
         # A carrier may have been buffered just before the upstream failed. It
         # remains an ordinary provider event and must precede the safe error.
@@ -411,25 +429,34 @@ async def streaming_generator(
             yield fmt.done_marker
         settled = True
         try:
-            await on_error(e)
+            await _shielded(on_error, e)
         except Exception as log_err:
-            logger.error("Failed to log streaming error usage: %s", log_err)
+            logger.error("Failed to log streaming error usage: %s", _describe_settlement_error(log_err))
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Streaming error for %s: %s", label, e)
     finally:
-        if settlement_task is not None and not settlement_task.done():
-            settlement_task.cancel()
-            with suppress(BaseException):
-                await settlement_task
-        if not settled and on_incomplete is not None:
-            try:
-                await on_incomplete()
-            except Exception as log_err:
-                # codeql[py/clear-text-logging-sensitive-data]
-                logger.error("Failed to settle incomplete stream for %s: %s", label, log_err)
-        # Iterating the source never closes it, so a stream the client abandoned
-        # would hold the provider's connection until garbage collection.
-        await _close_stream_quietly(stream)
+        # A client disconnect cancels the response's anyio scope, which then
+        # cancels every await made inside it, these included.
+        with anyio.CancelScope(shield=True):
+            if settlement_task is not None and not settlement_task.done():
+                try:
+                    await settlement_task
+                except Exception as log_err:
+                    # codeql[py/clear-text-logging-sensitive-data]
+                    logger.error("Failed to log streaming usage for %s: %s", label, _describe_settlement_error(log_err))
+            if not settled and on_incomplete is not None:
+                try:
+                    await on_incomplete()
+                except Exception as log_err:
+                    logger.error(
+                        "Failed to settle incomplete stream for %s: %s",
+                        # codeql[py/clear-text-logging-sensitive-data]
+                        label,
+                        _describe_settlement_error(log_err),
+                    )
+            # Iterating the source never closes it, so a stream the client abandoned
+            # would hold the provider's connection until garbage collection.
+            await close_stream_quietly(stream)
 
 
 async def iterate_streaming_attempts(
@@ -535,7 +562,7 @@ async def iterate_streaming_attempts(
                     is_final_attempt=is_final_attempt,
                 ),
             )
-            await _close_stream_quietly(stream)
+            await close_stream_quietly(stream)
             last_exception = exc
             continue
         except BaseException as exc:
@@ -549,13 +576,15 @@ async def iterate_streaming_attempts(
                     is_final_attempt=is_final_attempt or not retryable,
                 ),
             )
-            await _close_stream_quietly(stream)
+            await close_stream_quietly(stream)
             last_exception = exc
             if not retryable:
                 raise
             continue
 
-        return attempt, _stitched(first_chunk, stream)
+        first: asyncio.Future[C] = asyncio.get_running_loop().create_future()
+        first.set_result(first_chunk)
+        return attempt, _Prefetched(first, stream)
 
     if last_exception is not None:
         raise last_exception
@@ -602,7 +631,7 @@ async def await_first_chunk(stream: AsyncIterator[C], window_seconds: float) -> 
         first.cancel()
         with suppress(BaseException):
             await first
-        await _close_stream_quietly(stream)
+        await close_stream_quietly(stream)
         raise
     if first.done():
         try:
@@ -610,7 +639,7 @@ async def await_first_chunk(stream: AsyncIterator[C], window_seconds: float) -> 
         except StopAsyncIteration:
             return _empty_async_iter()
         except BaseException:
-            await _close_stream_quietly(stream)
+            await close_stream_quietly(stream)
             raise
     return _Prefetched(first, stream)
 
@@ -647,13 +676,7 @@ class _Prefetched(AsyncIterator[C]):
             first.cancel()
             with suppress(BaseException):
                 await first
-        await _close_stream_quietly(self._remaining)
-
-
-async def _stitched(first: C, remaining: AsyncIterator[C]) -> AsyncIterator[C]:
-    yield first
-    async for chunk in remaining:
-        yield chunk
+        await close_stream_quietly(self._remaining)
 
 
 async def _empty_async_iter() -> AsyncIterator[C]:
@@ -661,8 +684,23 @@ async def _empty_async_iter() -> AsyncIterator[C]:
     yield  # unreachable; makes this a generator
 
 
-async def _close_stream_quietly(stream: AsyncIterator[Any]) -> None:
+async def _shielded(settle: Callable[..., Awaitable[T]], *args: Any) -> T:
+    """Run a settlement callback to the end even when the client has disconnected.
+
+    A disconnect cancels the response's task scope, and anyio then cancels every
+    await left inside it, so a settlement's database writes would stop with the
+    stream and the request would go unbilled. A client that hangs up the
+    moment it reads the last event, as Claude Code's ``WebSearch`` does, lands
+    there on every request.
+    """
+    with anyio.CancelScope(shield=True):
+        result = await settle(*args)
+    return result
+
+
+async def close_stream_quietly(stream: AsyncIterator[Any]) -> None:
+    """Close ``stream`` if it can be closed, even while a client disconnect is canceling the caller."""
     close = getattr(stream, "aclose", None)
     if callable(close):
-        with suppress(BaseException):
+        with anyio.CancelScope(shield=True), suppress(BaseException):
             await close()

@@ -119,9 +119,9 @@ def test_generated_key_authenticates_management_api(tmp_path: Path, monkeypatch:
     monkeypatch.setattr(master_key_service, "generate_master_key", lambda: fixed)
     config = GatewayConfig(database_url=f"sqlite:///{tmp_path / 'mk.db'}", require_pricing=False)
     with TestClient(create_app(config)) as client:
-        ok = client.get(f"{API_ROOT}/provider-credentials", headers={"Otari-Key": f"Bearer {fixed}"})
+        ok = client.get(f"{API_ROOT}/hosted-providers", headers={"Otari-Key": f"Bearer {fixed}"})
         assert ok.status_code == 200
-        bad = client.get(f"{API_ROOT}/provider-credentials", headers={"Otari-Key": "Bearer wrong"})
+        bad = client.get(f"{API_ROOT}/hosted-providers", headers={"Otari-Key": "Bearer wrong"})
         assert bad.status_code == 401
 
 

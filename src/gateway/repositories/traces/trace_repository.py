@@ -30,12 +30,13 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.orm import InstrumentedAttribute
 
-from gateway.core.sql import bucket_expr, canonical_bucket, dialect_name, utc_bound
+from gateway.core.sql import LIKE_ESCAPE, bucket_expr, canonical_bucket, contains_pattern, dialect_name, utc_bound
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import Trace
 from gateway.repositories.base_repository import BaseRepository
-from gateway.types.traces import TraceFilter
+from gateway.types.traces import TraceFilter, TraceSort
 
 # A trace's key: its workspace and its id.
 TraceKey = tuple[uuid.UUID, str]
@@ -50,6 +51,7 @@ class TraceGrowth:
     steps: int
     spans: int
     errors: int
+    failing_errors: int
     input_tokens: int
     output_tokens: int
     cost: Decimal
@@ -58,12 +60,21 @@ class TraceGrowth:
 
 
 def _grown(
-    steps: Any, spans: Any, errors: Any, input_tokens: Any, output_tokens: Any, cost: Any, earliest: Any, latest: Any
+    steps: Any,
+    spans: Any,
+    errors: Any,
+    failing_errors: Any,
+    input_tokens: Any,
+    output_tokens: Any,
+    cost: Any,
+    earliest: Any,
+    latest: Any,
 ) -> dict[str, Any]:
     return {
         "step_count": Trace.step_count + steps,
         "span_count": Trace.span_count + spans,
         "error_count": Trace.error_count + errors,
+        "failing_error_count": Trace.failing_error_count + failing_errors,
         "input_tokens": Trace.input_tokens + input_tokens,
         "output_tokens": Trace.output_tokens + output_tokens,
         "cost_snapshot": Trace.cost_snapshot + cost,
@@ -127,6 +138,7 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
                             row.steps,
                             row.spans,
                             row.errors,
+                            row.failing_errors,
                             row.input_tokens,
                             row.output_tokens,
                             row.cost,
@@ -143,6 +155,7 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
             column("steps", Integer),
             column("spans", Integer),
             column("errors", Integer),
+            column("failing_errors", Integer),
             column("input_tokens", BigInteger),
             column("output_tokens", BigInteger),
             column("cost", Numeric),
@@ -158,6 +171,7 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
                     grown.c.steps,
                     grown.c.spans,
                     grown.c.errors,
+                    grown.c.failing_errors,
                     grown.c.input_tokens,
                     grown.c.output_tokens,
                     grown.c.cost,
@@ -169,17 +183,50 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
         await self.db.flush()
 
     async def page(
-        self, workspace_ids: Collection[uuid.UUID] | None, query: TraceFilter, *, limit: int, offset: int
+        self,
+        workspace_ids: Collection[uuid.UUID] | None,
+        query: TraceFilter,
+        *,
+        limit: int,
+        offset: int,
+        sort: TraceSort = TraceSort(),
     ) -> Sequence[Trace]:
-        """Return up to ``limit`` matching traces after ``offset``, newest activity first."""
+        """Return up to ``limit`` matching traces after ``offset``, in ``sort`` order.
+
+        Ties fall back to newest activity, then the trace's key, so an offset page
+        never repeats or skips a trace whose sort value it shares with another.
+        """
+        key = self._sort_expression(sort)
         result = await self.db.execute(
             select(Trace)
             .where(*_scoped(workspace_ids, _conditions(query)))
-            .order_by(Trace.last_activity_at.desc(), Trace.trace_id)
+            .order_by(
+                key.desc() if sort.descending else key.asc(),
+                Trace.last_activity_at.desc(),
+                Trace.trace_id,
+                Trace.workspace_id,
+            )
             .offset(offset)
             .limit(limit)
         )
         return result.scalars().all()
+
+    def _sort_expression(self, sort: TraceSort) -> ColumnElement[Any] | InstrumentedAttribute[Any]:
+        match sort.key:
+            case "last_activity":
+                return Trace.last_activity_at
+            case "latency":
+                # SQLite stores timestamps as text, so the span is taken in days, which loses
+                # sub-millisecond differences; ties then fall to newest activity. Postgres is exact.
+                if dialect_name(self.db) == "sqlite":
+                    return func.julianday(Trace.last_activity_at) - func.julianday(Trace.started_at)
+                return Trace.last_activity_at - Trace.started_at
+            case "tokens":
+                return Trace.input_tokens + Trace.output_tokens
+            case "cost":
+                return Trace.cost_snapshot
+            case "errors":
+                return Trace.error_count
 
     async def count_matching(self, workspace_ids: Collection[uuid.UUID] | None, query: TraceFilter) -> int:
         """Count the matching traces without loading them."""
@@ -198,6 +245,7 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
     ) -> list[tuple[str, int, int]]:
         """Return ``(bucket, succeeded, failed)`` per populated bucket of trace start, oldest first.
 
+        A trace failed when it holds an error that fails its session, as the writer counted them.
         Only buckets within ``limit`` of the newest trace's: traces started before
         that are never read, so an unbounded window costs no more than a bounded one.
         """
@@ -211,7 +259,7 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
             newest_bucket = newest_bucket.replace(hour=0)
         floor = newest_bucket - (limit - 1) * _GRAIN[bucket]
         key = bucket_expr(dialect_name(self.db), bucket, Trace.started_at).label("bucket")
-        failed = func.sum(case((Trace.error_count > 0, 1), else_=0))
+        failed = func.sum(case((Trace.failing_error_count > 0, 1), else_=0))
         result = await self.db.execute(
             select(key, func.count(), failed)
             .where(*conditions, Trace.started_at >= floor)
@@ -296,7 +344,16 @@ def _conditions(query: TraceFilter) -> list[ColumnElement[bool]]:
         conditions.append(Trace.error_count > 0)
     elif query.has_error is False:
         conditions.append(Trace.error_count == 0)
-    if query.trace_id_prefix:
-        escaped = query.trace_id_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        conditions.append(Trace.trace_id.like(f"{escaped}%", escape="\\"))
+    if query.search:
+        # The list names a session by its name or harness and a short id with the "s-" cut off,
+        # so a search finds any part of those, or of the user.
+        pattern = contains_pattern(query.search)
+        conditions.append(
+            or_(
+                *(
+                    func.lower(field).like(pattern, escape=LIKE_ESCAPE)
+                    for field in (Trace.trace_id, Trace.name, Trace.harness, Trace.user_id)
+                )
+            )
+        )
     return conditions

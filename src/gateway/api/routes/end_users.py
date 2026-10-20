@@ -13,15 +13,31 @@ collection's own path, which no ``{external_id:path}`` route matches, so no
 end user's id can shadow it.
 """
 
+from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
 
-from gateway.api.deps import BudgetServiceDep, ServiceKey, verify_service_key
+from gateway.api.deps import (
+    BudgetServiceDep,
+    ServiceKey,
+    TelemetryStoragePortDep,
+    TraceServiceDep,
+    verify_service_key,
+)
+from gateway.api.routes._helpers import erase_user_records
 from gateway.api.routes.users import TOTAL_COUNT_HEADER
 from gateway.models.api_keys import APIKey
-from gateway.schemas.budgets import EndUserBudgetPublic, EndUserPublic, EndUserPut, EndUserUpdate
+from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.schemas.budgets import (
+    EndUserBudgetPublic,
+    EndUserPublic,
+    EndUserPut,
+    EndUsersDeleted,
+    EndUserUpdate,
+)
 from gateway.services.budgets import BudgetService, check_path_external_id
+from gateway.services.traces import TraceService
 
 
 async def _require_available_owner(api_key: ServiceKey, budgets: BudgetServiceDep) -> None:
@@ -110,6 +126,73 @@ async def update_end_user_by_query(
     return await _update(external_id, request, api_key, budgets)
 
 
+@router.delete("")
+async def delete_end_users(
+    request: Request,
+    api_key: ServiceKey,
+    budgets: BudgetServiceDep,
+    storage: TelemetryStoragePortDep,
+    traces: TraceServiceDep,
+    external_id: Annotated[
+        str | None,
+        Query(min_length=1, description="Delete the end user the service names with this `user` value."),
+    ] = None,
+    created_before: Annotated[
+        datetime | None,
+        Query(description="Delete the end users created before this time, oldest first, up to `limit` of them."),
+    ] = None,
+    limit: Annotated[
+        int, Query(ge=1, le=1000, description="The most end users one call deletes with `created_before`.")
+    ] = 100,
+) -> EndUsersDeleted:
+    """Delete one end user of the calling service key, or a page of those created before a time.
+
+    Requires a service key, and exactly one of ``external_id`` and ``created_before``. ``external_id`` deletes that
+    end user, any id, one containing '/' included, and answers 404 when it has none. ``created_before`` deletes up
+    to ``limit`` of the oldest end users created before then; call again until ``deleted`` is 0. An end user's
+    telemetry and agent traces are erased with it. The end user's row and spend are kept: a request naming it again
+    revives it with what it had spent, so deleting one cannot clear its budget. A deleted end user is neither listed
+    nor counted.
+    """
+    if (external_id is None) == (created_before is None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Give exactly one of external_id and created_before"
+        )
+    if external_id is not None:
+        doomed = [await budgets.get_end_user(api_key=api_key, external_id=external_id)]
+    else:
+        doomed = await budgets.list_end_users(
+            api_key=api_key,
+            external_id=None,
+            budget_id=None,
+            blocked=None,
+            skip=0,
+            limit=limit,
+            created_before=created_before,
+        )
+    return EndUsersDeleted(deleted=await _delete(request, doomed, api_key, budgets, storage, traces))
+
+
+@router.delete("/{external_id:path}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_end_user(
+    request: Request,
+    external_id: ExternalId,
+    api_key: ServiceKey,
+    budgets: BudgetServiceDep,
+    storage: TelemetryStoragePortDep,
+    traces: TraceServiceDep,
+) -> None:
+    """Delete an end user of the calling service key by the id the service names it by.
+
+    Requires a service key. An id no live end user of the key's user goes by answers 404. The end user's telemetry
+    and agent traces are erased; its row and spend are kept, so a request naming it again revives it with what it had
+    spent. An id with a '.' or '..' segment is refused with 400; ``DELETE /end-users?external_id=`` takes any id.
+    """
+    check_path_external_id(external_id)
+    end_user = await budgets.get_end_user(api_key=api_key, external_id=external_id)
+    await _delete(request, [end_user], api_key, budgets, storage, traces)
+
+
 @router.get("/{external_id:path}")
 async def get_end_user(external_id: ExternalId, api_key: ServiceKey, budgets: BudgetServiceDep) -> EndUserPublic:
     """Get an end user of the calling service key by the id the service names it by.
@@ -186,3 +269,20 @@ async def _update(external_id: str, request: EndUserUpdate, api_key: APIKey, bud
     return await budgets.update_end_user(
         api_key=api_key, external_id=external_id, blocked=request.blocked, budget_id=request.budget_id
     )
+
+
+async def _delete(
+    request: Request,
+    end_users: list[EndUserPublic],
+    api_key: APIKey,
+    budgets: BudgetService,
+    storage: TelemetryStoragePort,
+    traces: TraceService,
+) -> int:
+    """Erase these end users' telemetry and traces, then soft-delete them; returns how many were deleted.
+
+    Erasure goes first, as for any user, so a failure answers 5xx with nothing deleted and the call can be repeated.
+    """
+    for end_user in end_users:
+        await erase_user_records(request, storage, traces, end_user.user_id)
+    return await budgets.delete_end_users(api_key=api_key, user_ids=[end_user.user_id for end_user in end_users])

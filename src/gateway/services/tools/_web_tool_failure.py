@@ -4,13 +4,14 @@ Only fields the logging rule lets an error carry (design section 7): the
 provider, its HTTP status, a tag, and whether a retry may help; never a body,
 a URL or exception text. The direct endpoint's 502 carries them as headers,
 and a failed entry in Chat Completions' ``otari_tool_calls`` carries them as its
-``error`` when the call's backend kept them. Today only a call refused past its
-use cap does; the in-loop web backends do not keep a failure yet.
+``error`` when the call's backend kept them: the fetch backend does, and the
+old search backend does not.
 """
 
 from dataclasses import asdict, dataclass
 from typing import Any
 
+import any_fetch
 import any_search
 from gateway.core.error_codes import (
     ERROR_PROVIDER_HEADER,
@@ -21,6 +22,11 @@ from gateway.core.error_codes import (
 
 # The tag of a call refused because the request used up its calls, which reaches no provider.
 CALL_LIMIT_TAG = "call_limit"
+# A provider call that failed before it was sent: an instance's key that cannot be read, an
+# option its provider does not take, or any other exception, which is logged by its class alone.
+MISSING_CREDENTIAL_TAG = "missing_credential"
+UNSUPPORTED_OPTION_TAG = "unsupported_option"
+INTERNAL_ERROR_TAG = "internal_error"
 
 # A retry may help a timeout, a rate limit or a fault on the provider's side.
 _RETRYABLE_TAGS = frozenset({"timeout"})
@@ -50,8 +56,8 @@ class WebToolFailure:
         return cls(provider=provider, status=status, tag=tag, retryable=retryable)
 
     @classmethod
-    def from_provider_error(cls, error: any_search.ProviderError) -> "WebToolFailure":
-        """The failure any-search raised: its provider, status and tag."""
+    def from_provider_error(cls, error: any_search.ProviderError | any_fetch.ProviderError) -> "WebToolFailure":
+        """The failure either library raised: its provider, status and tag."""
         return cls.of(error.provider, error.status, error.tag)
 
     def as_dict(self) -> dict[str, Any]:
@@ -66,3 +72,9 @@ class WebToolFailure:
         if self.status is not None:
             headers[ERROR_STATUS_HEADER] = str(self.status)
         return headers
+
+
+def failed_text(provider: str | None, action: str, tag: str, status: int | None) -> str:
+    """How a failed provider call reads: ``<provider> <action> failed (<tag>)``, plus ``, HTTP <status>`` if any."""
+    detail = tag if status is None else f"{tag}, HTTP {status}"
+    return f"{provider} {action} failed ({detail})"

@@ -19,16 +19,17 @@ from fastapi import HTTPException
 
 from conftest import InstallControlPlane
 from gateway.api.routes import _platform
+from gateway.api.routes._attempt_metrics import record_abandoned_attempt
 from gateway.api.routes._platform import (
     ResolvedAttempt,
     ResolvedRoute,
     default_attempt_kwargs,
-    record_abandoned_attempt,
     run_platform_attempts,
 )
 from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
 from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, error_code_of
 from gateway.metrics import REGISTRY
+from gateway.schemas.inference import SettledCost
 from gateway.services.bedrock_gateway_auth import BEDROCK_READ_TIMEOUT_SECONDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
@@ -473,7 +474,7 @@ async def test_report_platform_usage_returns_completed_cost(
         is_final_attempt=True,
     )
 
-    assert result == _platform.SettledCost(cost_usd="0.012345", pricing_source="managed")
+    assert result == SettledCost(cost_usd="0.012345", pricing_source="managed")
 
 
 @pytest.mark.asyncio
@@ -492,7 +493,7 @@ async def test_report_platform_usage_accepts_opaque_correlation_id(
         is_final_attempt=True,
     )
 
-    assert result == _platform.SettledCost(cost_usd="0.012345", pricing_source="managed")
+    assert result == SettledCost(cost_usd="0.012345", pricing_source="managed")
 
 
 @pytest.mark.asyncio
@@ -526,7 +527,7 @@ async def test_report_platform_usage_returns_none_without_completed_cost(
             "0.000000",
             "reported",
             "managed",
-            _platform.SettledCost(cost_usd="0.000000", pricing_source="managed"),
+            SettledCost(cost_usd="0.000000", pricing_source="managed"),
         ),
     ],
     ids=["unpriced", "unavailable", "priced-zero"],
@@ -535,7 +536,7 @@ async def test_report_platform_usage_applies_pricing_source_gate(
     cost_usd: str,
     usage_status: str,
     pricing_source: str | None,
-    expected: _platform.SettledCost | None,
+    expected: SettledCost | None,
     control_plane_transport: InstallControlPlane,
 ) -> None:
     control_plane_transport(
@@ -646,7 +647,7 @@ async def test_report_platform_usage_retries_then_returns_completed_cost(
         is_final_attempt=True,
     )
 
-    assert result == _platform.SettledCost(cost_usd="0.012345", pricing_source="managed")
+    assert result == SettledCost(cost_usd="0.012345", pricing_source="managed")
     assert post_mock.await_count == 2
     sleep_mock.assert_awaited_once_with(0.25)
 

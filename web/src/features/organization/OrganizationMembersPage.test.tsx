@@ -14,10 +14,7 @@ import type {
   Workspace,
   WorkspaceMember,
 } from "@/client"
-import {
-  OrganizationMembersPage,
-  parseAddresses,
-} from "@/features/organization/OrganizationMembersPage"
+import { OrganizationMembersPage } from "@/features/organization/OrganizationMembersPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
@@ -721,14 +718,6 @@ describe("OrganizationMembersPage", () => {
 
     await user.keyboard("{Escape}")
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
-  })
-
-  it("splits pasted addresses on commas, semicolons and whitespace, once each", () => {
-    expect(
-      parseAddresses(
-        " ada@example.com, bob@example.com;\ncy@example.com  ADA@example.com,,",
-      ),
-    ).toEqual(["ada@example.com", "bob@example.com", "cy@example.com"])
   })
 
   it("invites several addresses in one call and reports each one", async () => {

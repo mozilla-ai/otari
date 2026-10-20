@@ -304,6 +304,9 @@ def shared_test_config(postgres_url: str, providers: dict[str, dict[str, Any]]) 
         # that build their own config (see test_require_pricing.py).
         require_pricing=False,
         providers=providers,
+        # The suite exercises providers: entries as config.yml serves them;
+        # test_configured_provider_import.py turns the copy on.
+        import_configured_providers=False,
     )
 
 
@@ -398,6 +401,8 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         else None
     )
     app.state.feedback_rate_limiter = new_feedback_rate_limiter() if config.feedback_enabled else None
+    # Built on first use and caching each issuer's signing keys, so a test's stub must not serve the next test.
+    app.state.federated_token_verifier = None
     app.state.container = build_container(
         config.bootstrap,
         config=config,

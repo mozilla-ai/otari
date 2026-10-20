@@ -34,6 +34,7 @@ from cohere.errors import BadRequestError as CohereBadRequestError
 from fastapi import HTTPException
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
+from gateway.api.routes._helpers import SHOULD_RETRY_HEADER, with_retry_hint
 from gateway.api.routes._pipeline import (
     _FORWARDED_PARAMS,
     PROVIDER_ACCOUNT_QUOTA_DETAIL,
@@ -52,19 +53,19 @@ from gateway.api.routes._pipeline import (
     refusal_code,
     stream_error_code,
     stream_error_message,
+    with_provider_failure,
 )
 from gateway.api.routes._platform import (
-    SHOULD_RETRY_HEADER,
     _provider_failure_http_exc,
     get_shared_rejection,
-    is_provider_credential_rejection,
-    with_retry_hint,
 )
 from gateway.core.error_codes import PROVIDER_CREDENTIAL_REJECTED, PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.inference import (
+    is_provider_credential_rejection,
     is_retry_futile,
     is_upstream_request_fault,
+    provider_failure,
     upstream_retry_after,
 )
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
@@ -480,7 +481,7 @@ def test_platform_terminal_exc_for_a_missing_credential_is_a_424() -> None:
 
 def test_missing_credential_detail_without_a_variable() -> None:
     detail = MissingCredential("vertexai", None).detail
-    assert "config.yml, store" in detail
+    assert "config.yml, add it on the Hosted providers page" in detail
     assert "${" not in detail
 
 
@@ -1660,3 +1661,103 @@ def test_an_image_refusal_beside_another_rejection_shares_the_generic_400() -> N
 
     assert rejection is not None
     assert rejection.headers == {"Otari-Error-Code": "all_candidates_rejected"}
+
+
+class _BodiedStatusError(_StatusError):
+    """An upstream error with the parsed body an SDK attaches, like Exa's tagged errors."""
+
+    def __init__(self, status_code: int, body: dict[str, Any]) -> None:
+        super().__init__(status_code)
+        self.body = body
+
+
+_EXA_OVERLOADED = {"requestId": "r1", "error": "Service overloaded", "tag": "SERVICE_OVERLOADED"}
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (
+            _BodiedStatusError(503, _EXA_OVERLOADED),
+            {
+                "Otari-Error-Provider": "exa",
+                "Otari-Error-Status": "503",
+                "Otari-Error-Tag": "SERVICE_OVERLOADED",
+                "Otari-Error-Retryable": "true",
+            },
+        ),
+        (
+            _StatusError(500),
+            {
+                "Otari-Error-Provider": "exa",
+                "Otari-Error-Status": "500",
+                "Otari-Error-Tag": "http_error",
+                "Otari-Error-Retryable": "true",
+            },
+        ),
+        (
+            OpenAIAPITimeoutError(request=httpx.Request("POST", "https://api.example/v1")),
+            {"Otari-Error-Provider": "exa", "Otari-Error-Tag": "timeout", "Otari-Error-Retryable": "true"},
+        ),
+        (
+            _openai_connection_error(httpx.ConnectError("refused")),
+            {"Otari-Error-Provider": "exa", "Otari-Error-Tag": "network", "Otari-Error-Retryable": "true"},
+        ),
+    ],
+    ids=["tagged-5xx", "untagged-5xx", "timeout", "network"],
+)
+def test_a_provider_side_failure_names_the_provider_status_and_tag(exc: Exception, expected: dict[str, str]) -> None:
+    error = with_provider_failure(HTTPException(status_code=502, detail="x"), exc, "exa")
+
+    assert error.headers == expected
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        _StatusError(402),
+        _rate_limited_with("3"),
+        _BodiedStatusError(400, {"error": {"message": "credit balance is too low", "code": "billing"}}),
+    ],
+    ids=["billing", "rate-limited", "bad-request"],
+)
+def test_a_4xx_shows_nothing_of_the_gateways_account(exc: Exception) -> None:
+    assert provider_failure(exc, "openai") is None
+
+
+def test_a_provider_code_that_is_not_an_identifier_is_not_repeated() -> None:
+    exc = _BodiedStatusError(503, {"error": {"code": "see https://status.example/ for details"}})
+
+    failure = provider_failure(exc, "openai")
+
+    assert failure is not None
+    assert failure.tag == "http_error"
+
+
+def test_no_provider_no_fields() -> None:
+    assert provider_failure(_StatusError(503), None) is None
+
+
+def test_a_gateway_4xx_is_left_alone() -> None:
+    error = with_provider_failure(HTTPException(status_code=429, detail="x"), _StatusError(503), "exa")
+
+    assert error.headers is None
+
+
+def test_a_stream_error_event_carries_the_providers_failure() -> None:
+    exc = _BodiedStatusError(503, _EXA_OVERLOADED)
+    failure = provider_failure(exc, "exa")
+    assert failure is not None
+
+    event = openai_error_event(
+        OPENAI_STREAM_FORMAT, stream_error_code(exc), stream_error_message(exc), failure.as_dict()
+    )
+
+    payload = json.loads(event.removeprefix("data: "))
+    assert payload["error"]["code"] == "provider_error"
+    assert payload["error"]["provider_failure"] == {
+        "provider": "exa",
+        "status": 503,
+        "tag": "SERVICE_OVERLOADED",
+        "retryable": True,
+    }

@@ -120,8 +120,8 @@ const TABLE_TOP_N = 15
 // the Anthropic console, Grafana-style tooling): one main time-series chart, a
 // metric selector, and a group-by dimension that splits the series into stacked
 // bars. Ungrouped views use the richest encoding each metric has: tokens stack
-// their billed composition (the same encoding as the Activity token bar),
-// requests split success/error. Dragging across the chart zooms the window.
+// their billed composition, requests split success/error. Dragging across the
+// chart zooms the window.
 
 type ChartMetric = "cost" | "tokens" | "requests"
 
@@ -205,7 +205,7 @@ interface BreakdownProps {
   emptyLabel: string
   // How a real group whose column was NULL reads. The default suits an id that
   // has gone missing (a deleted user); a dimension where NULL is a normal state
-  // (gateway rows carry no session label) passes its own wording.
+  // (a request that named no session) passes its own wording.
   unknownLabel?: string
   // How a real group's key reads. The default names the two dimensions whose
   // key is an opaque id from the label the server resolved in the same GROUP

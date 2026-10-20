@@ -15,7 +15,7 @@ from any_llm.types.messages import (
     MessageStreamEvent,
 )
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -32,7 +32,7 @@ from gateway.api.deps import (
     get_unit_of_work_if_needed,
     verify_api_key_or_master_key,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
+from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import (
     container_copies_step,
@@ -66,9 +66,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import (
     ResolvedAttempt,
-    SettledCost,
     _resolve_platform_credentials,
-    with_retry_hint,
 )
 from gateway.api.routes._request_tags import (
     ANTHROPIC_USER_KEY,
@@ -86,14 +84,20 @@ from gateway.exceptions.tools_exceptions import ContainerOnManagedCredentialErro
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.schemas.inference import SettledCost
 from gateway.services.code_execution import ContainerLease, check_container_on_credential, gateway_container_value
 from gateway.services.content_normalizer import stage_container_blocks
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
+    CONVERSATION_CACHE_KEY_FIELD,
     bind_upstream_user,
+    call_messages,
+    conversation_cache_key,
     messages_user_fields,
     upstream_exception_chain,
     upstream_exception_shape,
+    usage_unreported,
+    with_responses_instance,
     with_upstream_user,
 )
 from gateway.services.log_writer import LogWriter
@@ -241,6 +245,35 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
     metadata: AnthropicRequestMetadata = None
+    # Declared so the published contract carries Anthropic's wire name; the
+    # validator below moves it into ``output_format``, so it is never set or forwarded.
+    output_config: dict[str, Any] | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            "Anthropic's output configuration (`effort`, `format`). Forwarded to the provider as "
+            "`output_config`. An alternative to `output_format`; send one or the other."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_output_config(cls, data: Any) -> Any:
+        """Read Anthropic's ``output_config`` as the ``output_format`` any-llm forwards.
+
+        ``output_config`` (``effort``, ``format``) is the Messages API's wire name, and
+        what Claude Code and the Anthropic SDK send; any-llm takes the same object as
+        ``output_format`` and sends it on as ``output_config``.
+        """
+        if not isinstance(data, dict) or "output_config" not in data:
+            return data
+        if data.get("output_format") is not None:
+            raise ValueError("Send output_config or output_format, not both.")
+        data = dict(data)
+        output_config = data.pop("output_config")
+        if output_config is not None:
+            data["output_format"] = output_config
+        return data
 
 
 class CountTokensRequest(BaseModel):
@@ -570,12 +603,13 @@ def _billable_messages_usage(usage: Any) -> GatewayUsage:
         cache_write_1h_tokens=sum(_cache_write_1h_tokens(part) for part in billable_parts),
         cache_tokens_in_prompt=False,
         reasoning_tokens=getattr(getattr(usage, "output_tokens_details", None), "thinking_tokens", None) or 0,
+        provider_web_searches=getattr(getattr(usage, "server_tool_use", None), "web_search_requests", None) or 0,
     )
 
 
 def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
     if isinstance(event, MessageDeltaEvent):
-        return _billable_messages_usage(event.usage)
+        return None if usage_unreported(event.usage) else _billable_messages_usage(event.usage)
     if isinstance(event, MessageStartEvent):
         usage = event.message.usage
         input_tokens = usage.input_tokens or 0
@@ -642,6 +676,14 @@ class _MessagesAdapter:
     # behavior this endpoint has always had.
     log_success_without_usage = False
 
+    def __init__(self, responses_instances: frozenset[str] = frozenset()) -> None:
+        # The provider instances whose Messages traffic goes through their Responses API.
+        self._responses_instances = responses_instances
+
+    def for_instance(self, kwargs: dict[str, Any], instance: str) -> dict[str, Any]:
+        """``kwargs`` for a call to ``instance``, marked for its Responses API when it opted in."""
+        return with_responses_instance(kwargs, instance if instance in self._responses_instances else None)
+
     def error(
         self,
         status_code: int,
@@ -675,7 +717,7 @@ class _MessagesAdapter:
         # same way after ``message_start`` went out.
         return _reached_message_stop()
 
-    def stream_error_payload(self, exc: BaseException) -> str:
+    def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
         if isinstance(exc, IncompleteStreamError):
             error_type, message = _ERR_API, _INCOMPLETE_STREAM_MESSAGE
         else:
@@ -693,7 +735,7 @@ class _MessagesAdapter:
         return _messages_stream_usage(chunk)
 
     def extract_usage(self, result: MessageResponse) -> CompletionUsage | None:
-        if not result.usage:
+        if not result.usage or usage_unreported(result.usage):
             return None
         return _billable_messages_usage(result.usage)
 
@@ -725,11 +767,11 @@ class _MessagesAdapter:
 
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
         provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
-        return await amessages(**provider_kwargs)  # type: ignore[return-value]
+        return await call_messages(amessages, provider_kwargs)  # type: ignore[no-any-return]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
         provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
-        return await amessages(**provider_kwargs)  # type: ignore[return-value]
+        return await call_messages(amessages, provider_kwargs)  # type: ignore[no-any-return]
 
     def prepare_stream_kwargs(
         self,
@@ -819,13 +861,23 @@ class _MessagesAdapter:
         attempt: Attempt,
         base_request_fields: dict[str, Any],
     ) -> dict[str, Any]:
-        return attempt.call_kwargs(base_request_fields)
+        return self.for_instance(attempt.call_kwargs(base_request_fields), attempt.instance)
 
     def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         return kwargs
 
 
 _ADAPTER = _MessagesAdapter()
+
+
+def _adapter_for(config: GatewayConfig) -> _MessagesAdapter:
+    """The adapter for a request under ``config``: the shared one unless an instance set ``messages_api``."""
+    instances = frozenset(
+        name
+        for name, entry in config.providers.items()
+        if isinstance(entry, dict) and entry.get("messages_api") == "responses"
+    )
+    return _MessagesAdapter(instances) if instances else _ADAPTER
 
 
 @router.post("/messages", response_model=None)
@@ -853,6 +905,7 @@ async def create_message(
     fallback across the resolved route, tool-loop requests included (fallback
     applies up to the pre-lock-in point, same as chat).
     """
+    adapter = _adapter_for(config)
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
     merged_betas = _merge_anthropic_betas(request.betas, raw_request)
     if merged_betas is not None:
@@ -891,7 +944,7 @@ async def create_message(
                 request.tools,
                 config=config,
                 providers=target.candidate_providers,
-                dialect=_ADAPTER.name,
+                dialect=adapter.name,
                 code_execution_header=code_execution_header,
                 workspace_executor=target.workspace_executor,
             ),
@@ -899,7 +952,7 @@ async def create_message(
                 request.tools,
                 config=config,
                 providers=target.candidate_providers,
-                dialect=_ADAPTER.name,
+                dialect=adapter.name,
                 code_execution_header=code_execution_header,
                 workspace_executor=target.workspace_executor,
             ),
@@ -910,7 +963,7 @@ async def create_message(
 
     try:
         ctx = await resolve_request_context(
-            adapter=_ADAPTER,
+            adapter=adapter,
             raw_request=raw_request,
             response=response,
             db=db,
@@ -962,10 +1015,10 @@ async def create_message(
             # A no-op in hybrid, which reserves nothing locally. Kept so this exit already settles
             # if the gate ever covers a mode that does pre-debit the estimate.
             await release_reservation(ctx)
-            raise domain_error(_ADAPTER, exc) from exc
+            raise domain_error(adapter, exc) from exc
 
     tool_ctx = await prepare_gateway_tools(
-        adapter=_ADAPTER,
+        adapter=adapter,
         ctx=ctx,
         response=response,
         declared=DeclaredTools(
@@ -1015,7 +1068,9 @@ async def create_message(
         )
         # Only ``user_id`` means anything to a provider here, and the identifier replaces it.
         fields.pop("metadata", None)
+        fields.update(conversation_cache_key(raw_request.headers, session_label=request.session_label))
         scope_prompt_cache_key(fields, ctx)
+        scope_prompt_cache_key(fields, ctx, field=CONVERSATION_CACHE_KEY_FIELD)
         bind_upstream_user(fields, ctx.upstream_user)
         if fields.get("tools"):
             fields["tools"] = openai_to_anthropic_tools(fields["tools"])
@@ -1044,12 +1099,12 @@ async def create_message(
         if files is None or ctx.workspace_id is None or pepper is None:
             # The blocks still name Otari's files, which no provider account holds.
             await release_reservation(ctx)
-            raise domain_error(_ADAPTER, ProviderUploadFailedError())
+            raise domain_error(adapter, ProviderUploadFailedError())
         prepare_kwargs = container_copies_step(
             files=files,
             inputs=container_inputs,
             accounts=ProviderAccounts(pepper=pepper, workspace_id=ctx.workspace_id),
-            render=partial(domain_error, _ADAPTER),
+            render=partial(domain_error, adapter),
         )
 
     # ------------------------------------------------------------------
@@ -1068,7 +1123,7 @@ async def create_message(
                 )
             try:
                 return await run_streaming_with_fallback(
-                    adapter=_ADAPTER,
+                    adapter=adapter,
                     route=route,
                     base_request_fields=request_fields,
                     config=config,
@@ -1087,17 +1142,18 @@ async def create_message(
                     raise
                 raise converted from exc
             except Exception as exc:
-                raise_all_streaming_attempts_failed(_ADAPTER, exc, route)
+                raise_all_streaming_attempts_failed(adapter, exc, route)
 
         # Standalone: single attempt streaming.
         resolved = await resolve_dispatch_provider(
-            ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
+            ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
         )
-        call_kwargs = apply_endpoint_defaults(
-            {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+        call_kwargs = adapter.for_instance(
+            apply_endpoint_defaults({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved),
+            resolved.instance,
         )
         return await run_single_attempt_stream(
-            adapter=_ADAPTER,
+            adapter=adapter,
             ctx=ctx,
             tool_ctx=tool_ctx,
             call_kwargs=call_kwargs,
@@ -1117,7 +1173,7 @@ async def create_message(
         assert route is not None  # guaranteed by the hybrid-mode preamble
         try:
             result = await run_platform_non_stream(
-                adapter=_ADAPTER,
+                adapter=adapter,
                 route=route,
                 base_request_fields=request_fields,
                 tool_ctx=tool_ctx,
@@ -1140,13 +1196,14 @@ async def create_message(
 
     # Standalone non-stream path
     resolved = await resolve_dispatch_provider(
-        ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
+        ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
     )
-    call_kwargs = apply_endpoint_defaults(
-        {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+    call_kwargs = adapter.for_instance(
+        apply_endpoint_defaults({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved),
+        resolved.instance,
     )
     result = await run_standalone_non_stream(
-        adapter=_ADAPTER,
+        adapter=adapter,
         ctx=ctx,
         tool_ctx=tool_ctx,
         call_kwargs=call_kwargs,

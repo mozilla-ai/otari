@@ -73,10 +73,9 @@ export const Dark: Story = {
 
 /**
  * `components` merges over the prose set, for an element whose behavior belongs
- * to the caller. This is how `DocsPage` supplies a link that rewrites its href
- * against the repository, a table wrapped in a focusable scroller, and a code
- * block with a copy control: presentation stays in the component, anything that
- * has to know about the application arrives through this prop.
+ * to the caller, such as a link that rewrites its href: presentation stays in
+ * the component, anything that has to know about the application arrives
+ * through this prop.
  */
 export const CallerOverride: Story = {
   args: {

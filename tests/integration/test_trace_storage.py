@@ -74,7 +74,13 @@ def _span(span_id: str, *, kind: str = "step", minutes: int = 0, **fields: Any) 
 
 
 def _write(
-    workspace_id: uuid.UUID, trace_id: str, *spans: SpanRecord, user_id: str = "alice", session_source: str = "harness"
+    workspace_id: uuid.UUID,
+    trace_id: str,
+    *spans: SpanRecord,
+    user_id: str = "alice",
+    session_source: str = "harness",
+    name: str | None = None,
+    harness: str = "claude-code",
 ) -> TraceWrite:
     return TraceWrite(
         workspace_id=workspace_id,
@@ -82,7 +88,8 @@ def _write(
         user_id=user_id,
         api_key_id=None,
         session_source=session_source,
-        harness="claude-code",
+        harness=harness,
+        name=name,
         spans=spans,
     )
 
@@ -103,6 +110,9 @@ async def test_a_write_creates_the_trace_and_totals_its_spans(
                     parent_span_id="req-1",
                     input_tokens=100,
                     output_tokens=20,
+                    cache_read_tokens=60,
+                    cache_write_tokens=30,
+                    reasoning_tokens=5,
                     cost_snapshot=Decimal("0.0049"),
                 ),
                 _span("tool-1", kind="tool", minutes=1, tool_name="Bash", outcome="error"),
@@ -120,6 +130,8 @@ async def test_a_write_creates_the_trace_and_totals_its_spans(
     assert summary.started_at == _T0
     assert summary.last_activity_at == _T0 + timedelta(minutes=1, seconds=2)
     assert [span.span_id for span in detail.spans] == ["llm-1", "req-1", "tool-1"]
+    llm = detail.spans[0]
+    assert (llm.cache_read_tokens, llm.cache_write_tokens, llm.reasoning_tokens) == (60, 30, 5)
     assert detail.truncated is False
 
 
@@ -229,7 +241,7 @@ async def test_search_pages_newest_activity_first_and_filters(
     first_page = await store.search(scope, TraceFilter(), limit=2, offset=0)
     second_page = await store.search(scope, TraceFilter(), limit=2, offset=2)
     failing = await store.search(scope, TraceFilter(has_error=True), limit=10, offset=0)
-    by_prefix = await store.search(scope, TraceFilter(trace_id_prefix="session-2"), limit=10, offset=0)
+    by_search = await store.search(scope, TraceFilter(search="session-2"), limit=10, offset=0)
     windowed = await store.count(scope, TraceFilter(start=_T0 + timedelta(minutes=1)))
 
     assert [item.trace_id for item in first_page.items] == ["session-2", "session-1"]
@@ -237,18 +249,65 @@ async def test_search_pages_newest_activity_first_and_filters(
     assert [item.trace_id for item in second_page.items] == ["session-0"]
     assert second_page.has_more is False
     assert [item.trace_id for item in failing.items] == ["session-1"]
-    assert [item.trace_id for item in by_prefix.items] == ["session-2"]
+    assert [item.trace_id for item in by_search.items] == ["session-2"]
     assert windowed == 2
 
 
-async def test_a_prefix_search_treats_wildcards_literally(
+async def test_a_search_finds_any_part_of_the_id_harness_or_user_in_any_case(
     store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
 ) -> None:
     workspace, _ = tenants
+    await store.write(
+        (
+            _write(workspace, "s-1a2b3c", _span("req-1"), user_id="alice", harness="claude-code"),
+            _write(workspace, "s-4d5e6f", _span("req-2"), user_id="bob", harness="codex"),
+        )
+    )
+    scope = TraceScope.workspaces(frozenset({workspace}))
+
+    async def found(text: str) -> list[str]:
+        return sorted(
+            item.trace_id for item in (await store.search(scope, TraceFilter(search=text), limit=10, offset=0)).items
+        )
+
+    assert await found("1A2B") == ["s-1a2b3c"]
+    assert await found("CODEX") == ["s-4d5e6f"]
+    assert await found("lic") == ["s-1a2b3c"]
+    assert await found("s-") == ["s-1a2b3c", "s-4d5e6f"]
+    assert await found("gemini") == []
+
+
+async def test_a_search_treats_wildcards_literally(store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]) -> None:
+    workspace, _ = tenants
     await store.write((_write(workspace, "session-1", _span("req-1")),))
 
-    assert await store.count(TraceScope.deployment(), TraceFilter(trace_id_prefix="%")) == 0
-    assert await store.count(TraceScope.deployment(), TraceFilter(trace_id_prefix="session_")) == 0
+    assert await store.count(TraceScope.deployment(), TraceFilter(search="%")) == 0
+    assert await store.count(TraceScope.deployment(), TraceFilter(search="session_")) == 0
+
+
+async def test_a_search_finds_a_session_by_any_part_of_its_name_in_any_case_inside_the_scope_only(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, other = tenants
+    await store.write(
+        (
+            _write(workspace, "s-aaa", _span("req-1"), session_source="client", name="hackbot-1234"),
+            _write(workspace, "s-bbb", _span("req-2"), session_source="client", name="hackbot-1299"),
+            _write(other, "s-ccc", _span("req-3"), session_source="client", name="hackbot-1234"),
+        )
+    )
+    scope = TraceScope.workspaces(frozenset({workspace}))
+
+    exact = await store.search(scope, TraceFilter(search="hackbot-1234"), limit=10, offset=0)
+    prefix = await store.search(scope, TraceFilter(search="hackbot-12"), limit=10, offset=0)
+    middle = await store.search(scope, TraceFilter(search="BOT-12"), limit=10, offset=0)
+
+    assert [(item.trace_id, item.name) for item in exact.items] == [("s-aaa", "hackbot-1234")]
+    assert sorted(item.trace_id for item in prefix.items) == ["s-aaa", "s-bbb"]
+    assert sorted(item.trace_id for item in middle.items) == ["s-aaa", "s-bbb"]
+    assert await store.count(scope, TraceFilter(search="hackbot_")) == 0
+    assert await store.count(scope, TraceFilter(search="HACKBOT-1234")) == 1
+    assert await store.count(scope, TraceFilter(search="S-AAA")) == 1
 
 
 async def test_a_trace_with_more_spans_than_asked_for_says_it_was_cut(
@@ -404,3 +463,21 @@ async def test_a_series_never_reads_traces_older_than_its_buckets_can_reach(
     assert [point.bucket for point in series] == ["2026-10-07T14:00:00Z", "2026-10-07T15:00:00Z"]
     [grouped] = statements
     assert "started_at >=" in grouped
+
+
+async def test_a_series_fails_a_session_for_its_own_errors_and_not_its_tools(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    await store.write(
+        (
+            _write(workspace, "recovered", _span("req-1"), _span("tool-1", kind="tool", outcome="error")),
+            _write(workspace, "failed", _span("req-1", outcome="error"), _span("tool-1", kind="tool", outcome="error")),
+        )
+    )
+
+    series = await store.series(TraceScope.deployment(), TraceFilter(), bucket="hour")
+
+    assert [(point.succeeded, point.failed) for point in series] == [(1, 1)]
+    page = await store.search(TraceScope.deployment(), TraceFilter(has_error=True), limit=10, offset=0)
+    assert sorted((item.trace_id, item.error_count) for item in page.items) == [("failed", 2), ("recovered", 1)]

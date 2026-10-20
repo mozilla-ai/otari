@@ -28,7 +28,7 @@ from gateway.models.budgets import (
 )
 from gateway.models.tenancy import Organization, User, Workspace
 from gateway.models.users import User as ApiUser
-from gateway.repositories.api_keys import ApiKeyRepository
+from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.budgets import (
     BudgetRepositories,
     BudgetRepository,
@@ -326,7 +326,7 @@ async def test_list_in_scopes_matches_what_the_organization_surface_lists(async_
         uow,
         BudgetRepositories.on(uow),
         OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
-        ApiKeyService(ApiKeyRepository(uow)),
+        ApiKeyService(uow, ApiKeyRepositories.on(uow)),
         WorkspaceAccess(
             async_db,
             OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),

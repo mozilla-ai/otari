@@ -18,6 +18,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import update
+from sqlalchemy.orm import Session
 
 from gateway.api.deps import get_web_search_policy_port, reset_config
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig, RateLimitRule
@@ -26,6 +28,7 @@ from gateway.core.settings.pricing import PricingConfig
 from gateway.exceptions.tools_exceptions import SearchToolNotFoundError
 from gateway.inflight import InFlightRegistry
 from gateway.main import create_app
+from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, OrganizationModelPricing
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool, WebToolCredentialSource
 from gateway.ports.web_search_policy_port import WebSearchPolicyScope
 from gateway.schemas.tools import SearchResponse
@@ -1216,3 +1219,193 @@ def test_a_searxng_tools_reported_cost_is_none_so_its_rate_bills(
         assert searxng_client.post(f"{API_ROOT}/search/local", json=SEARCH_PAYLOAD, headers=headers).status_code == 200
     (row,) = _search_rows(searxng_client, master_key_header, "searxng-billed")
     assert Decimal(str(row["cost"])) == Decimal("0.002")
+
+
+# --------------------------------------------------------------------------- #
+# require_pricing
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def strict_client(test_config: GatewayConfig) -> Generator[TestClient]:
+    """``require_pricing`` on, with neither search tool priced."""
+    yield from _client_on(test_config, require_pricing=True)
+
+
+def _on_request_budget(client: TestClient, master_key_header: dict[str, str], user_id: str) -> dict[str, str]:
+    """A key whose user is on a request-count budget, so a search holds a request until it settles."""
+    budget = client.post(f"{API_ROOT}/budgets", json={"request_limit": 5}, headers=master_key_header)
+    assert budget.status_code == 200, budget.text
+    user = client.post(
+        f"{API_ROOT}/users",
+        json={"user_id": user_id, "budget_id": budget.json()["budget_id"]},
+        headers=master_key_header,
+    )
+    assert user.status_code == 200, user.text
+    key = client.post(f"{API_ROOT}/keys", json={"key_name": user_id, "user_id": user_id}, headers=master_key_header)
+    assert key.status_code == 200, key.text
+    return {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
+
+
+def _override(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session, model_key: str, *, origin: str
+) -> None:
+    """The organization's own rate for ``model_key``, at $0.005 a request, written with ``origin``.
+
+    The master key writes it as the deployment's operator, so an organization's
+    own write is that row with its origin changed.
+    """
+    created = client.post(
+        f"{API_ROOT}/organizations/me/pricing",
+        json={"model_key": model_key, "input_price_per_million": 5000.0, "output_price_per_million": 0.0},
+        headers=master_key_header,
+    )
+    assert created.status_code == 201, created.text
+    db_session.execute(
+        update(OrganizationModelPricing).where(OrganizationModelPricing.model_key == model_key).values(origin=origin)
+    )
+    db_session.commit()
+
+
+def test_an_unpriced_search_is_refused_with_402_naming_its_row(
+    strict_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Refused after the budget checks, its hold released, the provider never called, the refusal logged."""
+    headers = _on_request_budget(strict_client, master_key_header, "unpriced-search")
+    run = AsyncMock()
+    with patch("gateway.api.routes.search.run_direct_search", run):
+        resp = strict_client.post(f"{API_ROOT}/search/fake-fast", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert resp.status_code == 402, resp.text
+    assert resp.headers["Otari-Error-Code"] == "pricing_required"
+    assert resp.json()["code"] == "pricing_required"
+    detail = resp.json()["detail"]
+    assert "'fake:fake-fast'" in detail
+    # The deployment pays for the search, so only its operator's price counts.
+    assert "operator has not priced" in detail
+    assert f"POST {API_ROOT}/pricing" in detail
+    # The dashboard can set only otari:web_search, not an instance's row.
+    assert "Tools & Guardrails" not in detail
+    run.assert_not_called()
+    (row,) = _search_rows(strict_client, master_key_header, "unpriced-search")
+    assert (row["status"], row["status_code"], row["error_message"]) == ("error", 402, detail)
+    assert (row["model"], row["provider"]) == ("fake-fast", "fake")
+    user = strict_client.get(f"{API_ROOT}/users/unpriced-search", headers=master_key_header).json()
+    assert (user["reserved"], user["reserved_requests"]) == (0, 0)
+
+
+def test_a_zero_rate_prices_a_search(strict_client: TestClient, master_key_header: dict[str, str]) -> None:
+    """A rate of 0 is a price: the search is served and bills nothing."""
+    headers = _keyed(strict_client, master_key_header, "zero-rate-search")
+    _price(strict_client, master_key_header, "fake:fake-fast", 0.0)
+
+    resp = strict_client.post(f"{API_ROOT}/search/fake-fast", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    (row,) = _search_rows(strict_client, master_key_header, "zero-rate-search")
+    assert (row["status"], row["cost"]) == ("success", 0)
+
+
+def test_a_provider_that_reports_its_cost_still_needs_a_row(
+    strict_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """``fake-search`` reports what it cost; the gate asks for a row all the same, and settlement takes the report."""
+    headers = _keyed(strict_client, master_key_header, "reported-cost-search")
+
+    refused = strict_client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
+    _price(strict_client, master_key_header, "fake:fake-search", 0.0)
+    served = strict_client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert refused.status_code == 402, refused.text
+    assert "'fake:fake-search'" in refused.json()["detail"]
+    assert served.status_code == 200, served.text
+    success = [
+        row
+        for row in _search_rows(strict_client, master_key_header, "reported-cost-search")
+        if row["status"] == "success"
+    ]
+    assert success[0]["cost"] == pytest.approx(0.007)
+
+
+def test_a_budget_exempt_keys_unpriced_search_is_served(
+    strict_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A key that is never debited has no budget for the gate to protect, as for a model."""
+    user = strict_client.post(f"{API_ROOT}/users", json={"user_id": "exempt-search"}, headers=master_key_header)
+    assert user.status_code == 200, user.text
+    key = strict_client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "exempt-search", "user_id": "exempt-search", "exclude_from_budget": True},
+        headers=master_key_header,
+    )
+    assert key.status_code == 200, key.text
+
+    resp = strict_client.post(
+        f"{API_ROOT}/search/fake-fast", json=SEARCH_PAYLOAD, headers={API_KEY_HEADER: f"Bearer {key.json()['key']}"}
+    )
+
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.parametrize(("origin", "status_code"), [(API_ORIGIN, 402), (OPERATOR_ORIGIN, 200)])
+def test_only_the_operators_override_prices_an_instances_search(
+    strict_client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    origin: str,
+    status_code: int,
+) -> None:
+    """The deployment pays for a search on its instance, so only an override the operator set prices it."""
+    headers = _keyed(strict_client, master_key_header, "override-search")
+    _override(strict_client, master_key_header, db_session, "fake:fake-fast", origin=origin)
+
+    resp = strict_client.post(f"{API_ROOT}/search/fake-fast", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert resp.status_code == status_code, resp.text
+
+
+@pytest.mark.parametrize(("origin", "cost"), [(API_ORIGIN, 0.0), (OPERATOR_ORIGIN, 0.005)])
+def test_an_organizations_own_override_does_not_bill_an_instances_search(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    origin: str,
+    cost: float,
+) -> None:
+    """With ``require_pricing`` off, an override the organization wrote does not bill the search either."""
+    headers = _keyed(client, master_key_header, "override-billed")
+    _override(client, master_key_header, db_session, "fake:fake-fast", origin=origin)
+
+    assert client.post(f"{API_ROOT}/search/fake-fast", json=SEARCH_PAYLOAD, headers=headers).status_code == 200
+
+    (row,) = _search_rows(client, master_key_header, "override-billed")
+    assert row["cost"] == pytest.approx(cost)
+
+
+@pytest.fixture
+def strict_default_tool_client(test_config: GatewayConfig, _secret_key: None) -> Generator[TestClient]:
+    """``require_pricing`` on, with ``fake-search`` serving unnamed calls."""
+    yield from _client_on(test_config, require_pricing=True, web_search_default_tool="fake-search")
+
+
+def test_a_search_the_workspaces_own_key_serves_needs_the_web_search_row(
+    strict_default_tool_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A search the organization's own key serves is priced under ``otari:web_search``, not the tool's row."""
+    client = strict_default_tool_client
+    headers = _keyed(client, master_key_header, "org-key-unpriced")
+    _add_org_search_key(client, master_key_header, "tvly-org-secret")
+    _price(client, master_key_header, "fake:fake-search", 9000.0)
+    keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
+    with patch("gateway.services.search_backend.run_keyed_search", keyed):
+        refused = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+        keyed.assert_not_called()
+        _price(client, master_key_header, "otari:web_search", 0.0)
+        served = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert refused.status_code == 402, refused.text
+    detail = refused.json()["detail"]
+    assert "'otari:web_search'" in detail
+    assert "Tools & Guardrails" in detail
+    assert served.status_code == 200, served.text
+    keyed.assert_awaited_once()

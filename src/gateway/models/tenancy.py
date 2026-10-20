@@ -1563,6 +1563,9 @@ class OAuthPendingState(SQLModel, table=True):
     # Hashed for the reason ``state_hash`` is.
     flow_hash: str = Field(max_length=64)
     code_verifier: str | None = Field(default=None, max_length=128)
+    # The OpenID nonce the authorization request sent, which the exchange
+    # checks the ID token against. Null for GitHub, which is not OpenID.
+    nonce: str | None = Field(default=None, max_length=128)
     # Kept rather than re-derived at exchange time so the URI sent with the
     # exchange is the one the authorization request was actually built with,
     # even across a ``public_base_url`` change mid-flight.

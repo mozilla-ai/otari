@@ -44,7 +44,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.users import User as ApiUser
-from gateway.repositories.api_keys import ApiKeyRepository
+from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -552,7 +552,7 @@ def _service(async_db: AsyncSession) -> BudgetService:
         uow,
         BudgetRepositories.on(uow),
         OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
-        ApiKeyService(ApiKeyRepository(uow)),
+        ApiKeyService(uow, ApiKeyRepositories.on(uow)),
         WorkspaceAccess(
             async_db,
             OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),

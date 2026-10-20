@@ -163,6 +163,19 @@ class InlineCost(BaseModel):
     )
 
 
+# A settled cost is checked at this edge: a negative amount or a source name of
+# any shape reaches a client otherwise.
+SETTLED_COST_PATTERN = r"^\d+\.\d{6}$"
+PRICING_SOURCE_PATTERN = r"^[a-z_]{1,32}$"
+
+
+class SettledCost(BaseModel):
+    """An attachable settlement: a priced cost and the basis for it."""
+
+    cost_usd: str = Field(pattern=SETTLED_COST_PATTERN)
+    pricing_source: str = Field(pattern=PRICING_SOURCE_PATTERN)
+
+
 class RerankResult(BaseModel):
     """One document's relevance to the query."""
 

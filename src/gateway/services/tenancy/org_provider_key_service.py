@@ -2,12 +2,9 @@
 
 Decided at otari-ai#1748: `org_provider_keys` and its two override
 tables are the source of truth for organization-scoped BYO provider
-credentials (see `gateway.models.provider_keys`). This module is kept
-separate from `services/provider_store_service.py` on purpose, so that
-module's config.yml-merge overlay for instance-keyed, deployment-global
-credentials stays completely untouched: the two mechanisms are disjoint by
-construction (see `services/provider_kwargs.py`), not layered on top of each
-other.
+credentials (see `gateway.models.provider_keys`). They are disjoint by
+construction from the instance-keyed, deployment-global `config.providers`
+(see `services/provider_kwargs.py`), not layered on top of them.
 
 **Authorization and CRUD** follow `organization_service.py`/
 `workspace_service.py`'s conventions exactly: a `*_for_user` method resolves
@@ -22,13 +19,10 @@ organization surface needs an organization owner/admin, and every mutation on
 a workspace's override or model restrictions needs an organization
 owner/admin *or* an owner/admin of that workspace.
 
-**The dispatch overlay** mirrors `provider_store_service.py`'s shape one for
-one: a module-global, process-wide cache refreshed on a TTL and immediately
-on write, because the completion dispatch path is synchronous and holds no
-database session (see `services/provider_kwargs.py`). The one real
-difference is the cache's key: `provider_store_service` keys by instance name
-alone, because a deployment has one credential per instance; this keys by
-`(workspace_id, provider)`, because a workspace resolves to a *different*
+**The dispatch overlay** is a module-global, process-wide cache refreshed on
+a TTL and immediately on write, because the completion dispatch path is
+synchronous and holds no database session (see `services/provider_kwargs.py`).
+It keys by `(workspace_id, provider)`, because a workspace resolves to a *different*
 key depending on that workspace's own pin, its organization's default, and
 its organization's oldest key, in that order (`resolve_active_key`). One
 global refresh reloads every organization in one pass rather than one query
@@ -106,10 +100,6 @@ from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
-# Same value as provider_store_service.PROVIDER_CACHE_TTL_SECONDS, defined
-# separately: the two overlays are independent mechanisms (see module
-# docstring) and sharing a constant would imply a coupling that does not
-# exist.
 ORG_PROVIDER_CACHE_TTL_SECONDS = 30.0
 
 
@@ -328,9 +318,8 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
 async def load_org_provider_keys_at_startup(db: AsyncSession) -> None:
     """Prime the overlay so the first request does not race the first refresh.
 
-    A failure here is logged rather than raised, the same posture
-    `provider_store_service.load_providers_at_startup` takes: organization
-    provider keys are additive to config.yml providers, and a gateway that
+    A failure here is logged rather than raised: organization provider keys
+    are additive to config.yml providers, and a gateway that
     boots with none cached is better than one that refuses to start because a
     credential load failed.
     """
@@ -381,9 +370,8 @@ def _validated_provider(provider: str) -> str:
     against a resolved selector's ``LLMProvider.value``. Left unguarded, a
     typo, unexpected casing, or an unaliased name (``"OpenAI"``,
     ``"azure-openai"``, trailing whitespace) is accepted with a 201 and then
-    never resolves at dispatch, with no error at either point. Mirrors
-    ``/v1/provider-credentials``'s ``_validate_instance`` provider_type guard,
-    including ``PROVIDER_TYPE_ALIASES`` so an aliased name still resolves; the
+    never resolves at dispatch, with no error at either point. Accepts
+    ``PROVIDER_TYPE_ALIASES`` too, so an aliased name still resolves; the
     canonical value is what gets stored, not the alias, so the cache key
     always matches what dispatch resolves to.
     """
@@ -413,8 +401,7 @@ def _validated_name(name: str | None) -> str:
 async def _gate_api_base(api_base: str | None) -> None:
     """Reject storing an internal ``api_base`` when the SSRF gate is on.
 
-    Mirrors `api/routes/providers.py`'s ``_gate_api_base`` for
-    `/v1/provider-credentials`: a no-op in the default allow-all state, but
+    A no-op in the default allow-all state, but
     when the operator sets ``OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false`` a
     private/link-local/reserved ``api_base`` is refused here rather than
     persisted. Truthy check so an empty/absent api_base (the "use the SDK

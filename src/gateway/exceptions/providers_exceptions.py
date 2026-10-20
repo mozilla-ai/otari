@@ -37,9 +37,8 @@ class OrgProviderKeyUnknownProviderError(TenancyValidationError):
     ``org_provider_key_service.refresh_org_provider_cache``). Left unguarded,
     a typo, unexpected casing, or an unaliased value (``"OpenAI"``,
     ``"azure-openai"``, trailing whitespace) is accepted with a 201 and then
-    never resolves at dispatch, with no error at either point. Mirrors
-    ``/v1/provider-credentials``'s ``_validate_instance`` provider_type guard,
-    including ``PROVIDER_TYPE_ALIASES`` so an aliased name still resolves.
+    never resolves at dispatch, with no error at either point. Accepts
+    ``PROVIDER_TYPE_ALIASES`` too, so an aliased name still resolves.
     """
 
     def __init__(self, provider: str) -> None:
@@ -243,8 +242,20 @@ class HostedModelNotFoundError(TenancyNotFoundError):
 
 
 class HostedProviderAlreadyExistsError(TenancyConflictError):
+    def __init__(self, name: str) -> None:
+        super().__init__(f"A hosted provider named '{name}' is already configured")
+
+
+class HostedProviderApiKeyMissingError(TenancyValidationError):
+    """A provider that needs a key, created without one and without an endpoint of its own.
+
+    A keyless backend needs no key, and a custom endpoint is called with the
+    placeholder key a keyless ``providers:`` instance takes; anything else would
+    be stored unable to serve.
+    """
+
     def __init__(self, provider: str) -> None:
-        super().__init__(f"A hosted provider for '{provider}' is already configured")
+        super().__init__(f"'{provider}' needs an API key, unless it points at an endpoint of its own")
 
 
 class HostedProviderApiBaseMaskedError(TenancyValidationError):
@@ -275,6 +286,13 @@ class HostedProviderClientArgsUnreadableError(TenancyValidationError):
         )
 
 
+class HostedProviderInvalidNameError(TenancyValidationError):
+    """A name a hosted provider cannot take: a selector could not address it, or it is taken by meaning."""
+
+    def __init__(self, name: str, problem: str) -> None:
+        super().__init__(f"The hosted provider name '{name}' {problem}")
+
+
 class HostedProviderKeyRequiredError(TenancyValidationError):
     """The base was repointed at another origin without the key being entered again.
 
@@ -291,6 +309,11 @@ class HostedProviderKeyRequiredError(TenancyValidationError):
 class HostedProviderNotFoundError(TenancyNotFoundError):
     def __init__(self, provider: str) -> None:
         super().__init__(f"Hosted provider '{provider}' not found")
+
+
+class DeploymentProviderNotFoundError(TenancyNotFoundError):
+    def __init__(self, instance: str) -> None:
+        super().__init__(f"Deployment provider '{instance}' not found")
 
 
 class HostedProviderReadOnlyError(TenancyConflictError):
@@ -343,8 +366,10 @@ __all__ = [
     "HostedModelNotFoundError",
     "HostedProviderAlreadyExistsError",
     "HostedProviderApiBaseMaskedError",
+    "HostedProviderApiKeyMissingError",
     "HostedProviderNotFoundError",
     "HostedProviderClientArgsUnreadableError",
+    "HostedProviderInvalidNameError",
     "HostedProviderKeyRequiredError",
     "HostedProviderUnknownOrganizationError",
     "HostedProviderUnknownProviderError",

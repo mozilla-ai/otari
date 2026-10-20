@@ -41,7 +41,7 @@ import json
 import os
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -71,7 +71,7 @@ if TYPE_CHECKING:
 
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
-_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries")
+_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries", "messages_api")
 
 # Providers whose any-llm client is built by an SDK that takes ``max_retries``
 # in its constructor (OpenAI's, Anthropic's and the SDKs generated the same
@@ -301,6 +301,23 @@ def hosted_lookup(provider: LLMProvider) -> HostedLookup:
 _uncredentialed_warned: set[str] = set()
 
 
+def _no_hosted_names(_name: str) -> str | None:
+    return None
+
+
+# The implementation serving a hosted provider whose name is not an
+# implementation's own (``openai-eu``), registered at startup by the
+# composition root (``configure_hosted_names``) as pricing's provider types
+# are: the names live in ``services/providers``, which imports this module.
+_hosted_names: Callable[[str], str | None] = _no_hosted_names
+
+
+def configure_hosted_names(resolver: Callable[[str], str | None] | None) -> None:
+    """Register the lookup from a hosted provider's name to its implementation; None unregisters it."""
+    global _hosted_names  # noqa: PLW0603
+    _hosted_names = resolver or _no_hosted_names
+
+
 def uncredentialed_env_names(config: GatewayConfig, instance: str, entry: Mapping[str, Any]) -> tuple[str, ...] | None:
     """The variables a ``providers:`` entry could have taken its credential from, or ``None``.
 
@@ -360,14 +377,33 @@ def _mapping_declares_a_credential(mapping: Mapping[str, Any]) -> bool:
     return False
 
 
+def configured_instances(config: GatewayConfig) -> frozenset[str]:
+    """The ``providers:`` instances the configuration declares, a dropped uncredentialed one included."""
+    baseline = config._provider_baseline
+    return frozenset(config.providers if baseline is None else baseline)
+
+
+def settle_configured_providers(config: GatewayConfig) -> None:
+    """Rebuild ``providers:`` from what the configuration declares, then drop the entries that declare no credential.
+
+    The baseline is captured on the first start and kept, so a later start on
+    the same config begins from the declaration again, and a dropped entry's
+    name stays reserved (see :func:`configured_instances`).
+    """
+    if config._provider_baseline is None:
+        config._provider_baseline = {name: dict(entry) for name, entry in config.providers.items()}
+    config.providers = {name: dict(entry) for name, entry in config._provider_baseline.items()}
+    prune_uncredentialed_providers(config)
+
+
 def prune_uncredentialed_providers(config: GatewayConfig) -> dict[str, tuple[str, ...]]:
     """Drop every ``providers:`` entry that declares no credential, and say so once.
 
     A hollow entry is worse than no entry: an ``instance:model`` selector that
     matches it never consults an organization's own key for the same provider,
     and a bare ``provider:model`` selector is gated and priced as if the
-    deployment served it, so the credential an operator stored on the dashboard
-    goes unused while every request fails upstream. Returns what was dropped,
+    deployment served it, so a hosted provider of the same name goes unused
+    while every request fails upstream. Returns what was dropped,
     keyed by instance, with the variables that would have filled each.
     """
     pruned = {
@@ -382,7 +418,7 @@ def prune_uncredentialed_providers(config: GatewayConfig) -> dict[str, tuple[str
         _uncredentialed_warned.add(instance)
         logger.warning(
             "providers.%s declares no credential, so the entry is ignored. Name the key it reads "
-            "(api_key: ${%s}), or store one for the provider through the dashboard.",
+            "(api_key: ${%s}), or add the provider on the Hosted providers page.",
             instance,
             # codeql[py/clear-text-logging-sensitive-data]
             env_names[0],
@@ -427,6 +463,16 @@ def warn_about_ignored_provider_variables(config: GatewayConfig) -> None:
         # codeql[py/clear-text-logging-sensitive-data]
         variable,
     )
+
+
+def reaches_organization_key(config: GatewayConfig, instance: str) -> bool:
+    """Whether a selector naming ``instance`` can be served on an organization's own key.
+
+    Neither a ``providers:`` instance nor a hosted provider named otherwise than
+    its implementation ever consults one, so neither is subject to an
+    organization key's model restrictions.
+    """
+    return instance not in config.providers and _hosted_names(instance) is None
 
 
 def get_provider_kwargs(
@@ -820,7 +866,12 @@ def resolve_provider_selector(
         # organization's own offerings may answer. Relabeled like an alias: the
         # caller sees the spelling they sent, and pricing keys on the target.
         alias = resolve_catalog_selector(model_selector, workspace_id=workspace_id)
-    if alias is None and (written := split_selector(model_selector)) is not None and written[0] not in config.providers:
+    if (
+        alias is None
+        and (written := split_selector(model_selector)) is not None
+        and written[0] not in config.providers
+        and _hosted_names(written[0]) is None
+    ):
         # An organization key serves only the ids it offers, so a provider's
         # undated name reaches its one dated build there. A ``providers:``
         # instance sends any id as written and is never rewritten.
@@ -842,6 +893,21 @@ def resolve_provider_selector(
     if split is not None and split[0] in config.providers:
         instance, model = split
         provider = LLMProvider(config.provider_instance_type(instance))
+        return ResolvedProvider(
+            instance=instance,
+            provider=provider,
+            model=model,
+            kwargs=get_provider_kwargs(config, provider, instance=instance),
+            alias=model_selector if alias is not None else None,
+        )
+
+    if split is not None and (implementation := _hosted_names(split[0])) is not None:
+        # A hosted provider named otherwise than its implementation. Reached by
+        # its name alone: an organization key for the implementation would send
+        # the request to another endpoint, so none is consulted, and the
+        # credential is the hosted rung's to resolve.
+        instance, model = split
+        provider = LLMProvider(implementation)
         return ResolvedProvider(
             instance=instance,
             provider=provider,
@@ -956,7 +1022,7 @@ class MissingCredential:
         if self.alias is not None:
             return (
                 f"No credential is configured for the provider behind model '{self.alias}'. "
-                "Declare it under providers: in config.yml, store it on the Providers page, "
+                "Declare it under providers: in config.yml, add it on the Hosted providers page, "
                 "or add an organization provider key."
             )
         # The variable is offered as what a declaration reads its key from: set
@@ -965,7 +1031,7 @@ class MissingCredential:
         declare = f" (api_key: ${{{variable}}})" if variable else ""
         return (
             f"No credential is configured for provider '{self.provider}'. "
-            f"Declare it under providers: in config.yml{declare}, store it on the Providers page, "
+            f"Declare it under providers: in config.yml{declare}, add it on the Hosted providers page, "
             "or add an organization provider key."
         )
 
