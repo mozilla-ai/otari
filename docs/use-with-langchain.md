@@ -20,9 +20,9 @@ Create an API key at [otari.ai](https://otari.ai) and export it:
 export OTARI_API_KEY=<your-otari-key>
 ```
 
-That is all the configuration otari.ai's gateway needs, once your organization
-there has credit or provider keys of its own; without either, it answers 402. For
-a gateway you run yourself, use a key it issued and also export its API root:
+On otari.ai that key is all the configuration there is (your organization needs
+credit or provider keys of its own there, or requests answer 402). For a gateway
+you run yourself, use a key it issued and also export its API root:
 
 ```bash
 export OTARI_BASE_URL=http://localhost:8000/api/v1   # your gateway's URL plus /api/v1
@@ -47,8 +47,11 @@ token usage on streams too.
 `ChatOtari` takes every `ChatOpenAI` argument and works for every provider Otari
 routes to: Otari translates the Chat Completions request for Anthropic, Mistral,
 Gemini and the rest, so the same chain switches provider by changing only
-`model`. The names it accepts are listed under
-[Choosing a model](use-with-pydantic-ai.md#choosing-a-model).
+`model`. Write `model` as Otari spells it, `provider:model`
+(`ChatOtari(model="anthropic:claude-sonnet-4-6")`), or as a routing policy or
+alias name; [Model format](models.md#model-format) has every spelling and
+[Listing available models](models.md#listing-available-models) shows which your
+key can use.
 
 ## Agents and tools
 
@@ -102,10 +105,10 @@ print()
 
 ## One key per project
 
-Give each project (or each client) its own Otari key. Its usage and spend are
-then reported apart, a budget ceiling on the key caps that project alone, and
-revoking the key stops only that project. See [Access control](access-control.md)
-and [Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
+Give each project its own Otari key, so its usage and spend are reported apart, a
+budget on the key caps that project alone, and revoking the key stops only that
+project. See [Access control](access-control.md) and
+[Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
 
 ## Without the package
 

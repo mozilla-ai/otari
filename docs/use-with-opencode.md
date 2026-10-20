@@ -43,18 +43,13 @@ every key it issues.
 
 ## Choosing a model
 
-The provider id is `otari` (from your config) and the model selector is whatever
-your deployment expects:
-
-- **On otari.ai:** any model your organization's catalog lists, which
-  `GET /api/v1/models` returns for your key, for example `otari/openai:gpt-4o`,
-  `otari/anthropic:claude-sonnet-4-6` or `otari/mistral:mistral-large-latest`.
-  `provider/model` works as well as `provider:model`.
-- **On your own gateway:** `provider:model` for any provider it is configured
-  with, for example `otari/openai:gpt-4o`.
-
-Any model in the catalog works; Otari routes the request to the right
-provider and records usage and cost for it the same way as any other client.
+opencode names a model as `<provider id>/<model>`, and the provider id here is
+`otari`, from your config. Everything after `otari/` is sent to Otari unchanged,
+so write it as Otari spells it: `otari/openai:gpt-4o`,
+`otari/anthropic:claude-sonnet-4-6`. [Model format](models.md#model-format) has
+the spellings Otari accepts, and
+[Listing available models](models.md#listing-available-models) shows which
+models your key can use.
 
 ## See also
 

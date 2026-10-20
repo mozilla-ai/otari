@@ -28,9 +28,12 @@ Otari never guesses that two requests belong together from their content.
 | The agent harness's own session id | Codex's `thread-id`, or `session-id` without one, on a request whose `originator` or `User-Agent` starts with `codex` | `harness` |
 | An OTLP span's Claude session | `anthropic.session.id` on an exported span | `otlp` |
 | An OTLP span's conversation | `gen_ai.conversation.id` on an exported span | `otlp` |
+| An OTLP span's Otari label | `otari.session_label` on an exported span | `otlp` |
 
 A request that names no session is a trace of its own. To group a custom
-client's requests, send one of the signals above.
+client's requests, send one of the signals above. An exported span that names
+none of the three OTLP attributes is grouped by its OTel trace instead, and when
+it names more than one, the first in the table wins.
 
 A session belongs to the user whose API key sent it: two people who choose the
 same label get two sessions, and a session id never reaches another workspace.
@@ -122,9 +125,11 @@ include every one of them.
 ## Instrumented agents
 
 An agent that exports OpenTelemetry spans to `/otlp/v1/traces` (see
-[Importing external usage](external-usage.md)) has every span kept on its
-trace, including its own `invoke_agent` and `execute_tool` spans, with the span
-tree it sent. Span names and attribute values are kept only when they are
+[Importing external usage](external-usage.md#opentelemetry)) has every span kept,
+while `trace_capture_enabled` is on, on the agent trace of the exporting key's
+user, including its own `invoke_agent` and `execute_tool` spans, with the span
+tree it sent. Its sessions are grouped by the OTLP attributes in
+[What makes a session](#what-makes-a-session). Span names and attribute values are kept only when they are
 identifier-shaped. A span's `gen_ai.response.finish_reasons` array is kept as
 one value, its reasons joined by a comma: `stop,length`. The read API returns
 each of these spans with the `otel_trace_id` and `otel_span_id` it was exported
@@ -164,8 +169,10 @@ A hybrid data plane records no traces yet: it holds no database to keep them in.
 Traces are written off the request path, within fixed limits: a trace never
 slows or fails a request, and when the writer cannot keep up it drops whole
 requests' spans rather than parts of them. One OTLP export adds at most
-1,000 spans in at most 100 sessions. The
-`gateway_trace_spans_dropped` metric counts what was dropped, by reason.
+1,000 spans in at most 100 sessions; spans past either limit, or that arrive
+while the writer's queue is full, are dropped, and the export and the usage it
+carries are still accepted. The `gateway_trace_spans_dropped` metric counts what
+was dropped, by reason.
 
 The cost on a trace is a snapshot of the usage rows' cost. Usage stays the
 billing record.
