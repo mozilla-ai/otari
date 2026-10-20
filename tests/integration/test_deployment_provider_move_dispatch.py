@@ -219,7 +219,7 @@ def test_embeddings_reach_a_moved_provider(
                 json={"model": "my-vllm:nomic-embed", "input": "hi", "user": "u1"},
                 headers=master_key_header,
             )
-        return response.status_code, call.await_args.kwargs if call.await_args else {}
+        return response.status_code, dict(call.await_args.kwargs) if call.await_args else {}
 
     before, sent_before = _embed()
     _move(client, master_key_header)
@@ -282,7 +282,8 @@ def test_a_batch_runs_and_settles_on_a_moved_provider(
     assert (created.status_code, status.status_code, settled.status_code) == (200, 200, 200), settled.text
     assert created.json()["provider"] == "openai-eu"
     for call in (create, retrieve, results):
-        assert _sent_to(call.await_args.kwargs) == (EU_KEY, EU_BASE)
+        assert call.await_args is not None
+        assert _sent_to(dict(call.await_args.kwargs)) == (EU_KEY, EU_BASE)
     session = db_session_factory()
     try:
         rows = session.execute(

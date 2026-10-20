@@ -11,6 +11,7 @@ from gateway.services.providers._hosted_catalog import (
     KEEP_OWNED_ENDPOINT,
     KEEP_SEARCH_TOOL,
     KEEP_UNATTRIBUTABLE,
+    KEEP_UNLISTED,
     classify_priced_keys,
 )
 
@@ -23,6 +24,7 @@ def _verdicts(
     search_providers: set[str] = set(),  # noqa: B006
     fetch_providers: set[str] = set(),  # noqa: B006
     owned_endpoints: set[str] = set(),  # noqa: B006
+    unlisted_providers: set[str] = set(),  # noqa: B006
 ) -> dict[str, tuple[str, str | None]]:
     results = classify_priced_keys(
         priced,
@@ -31,6 +33,7 @@ def _verdicts(
         search_providers=frozenset(search_providers),
         fetch_providers=frozenset(fetch_providers),
         owned_endpoints=frozenset(owned_endpoints),
+        unlisted_providers=frozenset(unlisted_providers),
     )
     return {verdict.model_key: (verdict.verdict, verdict.reason) for verdict in results}
 
@@ -51,6 +54,12 @@ def test_a_model_an_owned_endpoint_serves_is_kept() -> None:
     verdicts = _verdicts(priced=[("my-vllm:llama", 1)], owned_endpoints={"my-vllm"})
 
     assert verdicts == {"my-vllm:llama": ("kept", KEEP_OWNED_ENDPOINT)}
+
+
+def test_a_model_off_the_roster_of_a_provider_serving_unlisted_models_is_kept() -> None:
+    verdicts = _verdicts(priced=[("my-vllm:llama", 1)], offered={"openai:gpt-4o"}, unlisted_providers={"my-vllm"})
+
+    assert verdicts == {"my-vllm:llama": ("kept", KEEP_UNLISTED)}
 
 
 def test_the_legacy_slash_spelling_is_folded_onto_the_roster() -> None:

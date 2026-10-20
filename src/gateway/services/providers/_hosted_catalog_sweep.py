@@ -124,6 +124,7 @@ class HostedCatalogSweep:
             # prices exactly as the apply, and a listing is never credited to a
             # credential that did not answer it.
             present = {source.name: source.identity for source in sources if source.enabled}
+            unlisted = frozenset(source.name for source in sources if source.serves_unlisted_models)
             for (source, _, _), answer in zip(serving, dialed, strict=True):
                 if present.get(answer.provider) != source.identity:
                     answer.added = []
@@ -140,7 +141,7 @@ class HostedCatalogSweep:
             if not apply:
                 # What an apply would offer, folded in without writing it.
                 offered_keys |= {f"{answer.provider}:{model}" for answer in dialed for model in answer.added}
-            if not offered_keys:
+            if not offered_keys and not unlisted:
                 if not orphaned:
                     raise HostedCatalogEmptyError
                 # With nothing offered there is nothing to judge the price list
@@ -165,6 +166,7 @@ class HostedCatalogSweep:
                 search_providers=frozenset(self.config.search_tool_providers()),
                 fetch_providers=frozenset(self.config.fetch_tool_providers()),
                 owned_endpoints=frozenset(row.name for row in await self.endpoints.list_all()),
+                unlisted_providers=unlisted,
             )
             doomed = [verdict for verdict in verdicts if verdict.verdict == "removed"]
             removed = sorted(verdict.model_key for verdict in doomed)

@@ -26,6 +26,8 @@ from gateway.api.deps import (
 )
 from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes._pipeline import (
+    FUNDS_CHECK_UNAVAILABLE_DETAIL,
+    HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
     PROVIDER_CREDENTIALS_DETAIL,
     _raise_for_unresolvable_model,
     classify_provider_error,
@@ -59,6 +61,7 @@ from gateway.services.budgets import (
 from gateway.services.inference import (
     DeploymentCharge,
     admit_deployment_paid,
+    describe_port_error,
     is_provider_credential_rejection,
     is_upstream_request_fault,
 )
@@ -246,6 +249,8 @@ async def _resolve_batch_provider(
             detail=model_not_allowed_detail(provider),
             headers=error_headers(MODEL_NOT_ALLOWED),
         ) from exc
+    except Exception as exc:
+        raise _hosted_credential_unusable(provider, exc) from exc
     if served is not None:
         return served.provider, served.kwargs, True
     try:
@@ -253,6 +258,12 @@ async def _resolve_batch_provider(
     except MissingApiKeyError as exc:
         raise _not_configured(exc) from exc
     return impl, kwargs, False
+
+
+def _hosted_credential_unusable(provider: str, exc: Exception) -> HTTPException:
+    """The 502 for a port that failed to resolve a credential, logged by class: its message may carry a row."""
+    logger.error("ModelProviderPort failed to resolve a credential for %s: %s", provider, describe_port_error(exc))
+    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=HOSTED_CREDENTIAL_UNUSABLE_DETAIL)
 
 
 def _not_configured(exc: MissingApiKeyError) -> HTTPException:
@@ -509,6 +520,8 @@ async def create_batch(
             detail=model_not_allowed_detail(request.model),
             headers=error_headers(MODEL_NOT_ALLOWED),
         ) from exc
+    except Exception as exc:
+        raise _hosted_credential_unusable(resolved.instance, exc) from exc
     if served is not None:
         resolved, provider = served, served.provider
         try:
@@ -524,6 +537,17 @@ async def create_batch(
         except InsufficientFundsError as exc:
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(exc), headers=error_headers(INSUFFICIENT_FUNDS)
+            ) from exc
+        except Exception as exc:
+            logger.error(
+                "BillingPort failed to admit a deployment-paid batch: organization=%s: %s",
+                organization_id,
+                describe_port_error(exc),
+            )
+            # Whatever the adapter wrote before failing is discarded.
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=FUNDS_CHECK_UNAVAILABLE_DETAIL
             ) from exc
     provider_kwargs = resolved.kwargs
     try:

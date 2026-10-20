@@ -503,6 +503,7 @@ def test_embeddings_on_a_deployment_paid_credential_are_gated_then_charged(
         )
 
     assert response.status_code == status.HTTP_200_OK, response.text
+    assert call.await_args is not None
     assert call.await_args.kwargs["api_key"] == "fleet-key"
     assert [gate for gate, _ in probe.GATES] == ["apply_due_credit", "require_funds_on_deposit"]
     assert [(entry[0], entry[3]) for entry in probe.LEDGER] == [("charge", "openai:text-embedding-3-small")]
