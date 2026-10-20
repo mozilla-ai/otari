@@ -76,8 +76,9 @@ Toolbar            search, filters, refresh. FilterChips goes INSIDE it, and
                    renders the selects and their chips together
 BulkActionBar      only while a selection exists, and fixed to the viewport
                    rather than in flow, so no row moves under the cursor
-DataTable          the subject
-TablePagination    range, page size, two bare arrows. No rule under it
+DataTable          the subject. Scrolls inside itself past ten rows
+TablePagination    directly below, outside the scroll. Hidden while every row
+                   fits one page at the smallest size. No rule under it
 ```
 
 A form page, in order:

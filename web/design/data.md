@@ -16,7 +16,8 @@ Anything else on this list is a metric, and lives in [metrics.md](metrics.md):
 DataTable: { ariaLabel, columns, rows, getRowKey, isLoading?, emptyContent?,
   selectionMode?: "none" | "multiple", selectedKeys?, onSelectionChange?,
   disabledKeys?, sortDescriptor?, onSortChange?, onRowAction?, rowClassName?,
-  resizable?, detailKey?, renderDetail?, mobileLayout?: "table" | "cards" }
+  isResizable?, detailKey?, renderDetail?, mobileLayout?: "table" | "cards",
+  scrollResetKey? }
 
 DataTableColumn: { id, header, cell: (row) => ReactNode, align?: "start" | "end",
   isRowHeader?, allowsSorting?, width?, minWidth? }
@@ -74,6 +75,57 @@ Row states, and the only three:
 | Selected | `primary-subtle`. Translucent, so it still reads over a hovered row |
 
 Never zebra striping, never vertical rules between cells, never a bolder header.
+
+## Building a table
+
+Every table follows the same practice, and most of it arrives with `DataTable`
+rather than being written at the call site.
+
+**Past ten rows a table scrolls inside itself, under a pinned header.**
+`DataTable` measures the header and the first `TABLE_VISIBLE_ROWS` rows as
+rendered and marks its scroller; `design-system.css` turns the mark into a
+`max-height`. Measured, not computed from a row height, because rows differ
+from table to table: a two-line model row caps taller than a one-line key row,
+at the same ten rows. The cap never exceeds `--table-max-height`, the viewport
+less the top bar, a toolbar and a pager, so a table with very thick rows shows
+fewer than ten and the pager stays in reach. A table of ten rows or fewer is its
+own height. The header turns opaque only while capped, on the page's fill or,
+inside a HeroUI `Card`, the card's; a table on any other surface sets
+`--table-fill` on its section. A focused row scrolls clear of the header. The rows hand the wheel
+back to the page at either end, and the cut is left where it falls, the same as
+the horizontal clip. From `md` up, and never on paper: phones get their own
+strategy.
+
+Never write a `max-height` or an `overflow-y` on a table, its frame, or HeroUI's
+scroller. The cap is one rule, and a second one beside it decides nothing.
+
+**More rows than a page pages, in one of two ways:**
+
+| The endpoint | Pages through | |
+| --- | --- | --- |
+| Pages itself (`skip`/`limit` and a count) | `TablePagination` driving the query | Activity, Sessions, Members |
+| Returns every row at once | `useClientPagination(rows, resetKey)` into `TablePagination` | Usage breakdowns, health checks |
+
+`useClientPagination`'s `resetKey` returns to the first page when it changes;
+pass something that moves with the filters, never the rows, which a refetch
+replaces. Either way, pass the page as `scrollResetKey` so a new page opens at
+its first row. A hand-written `slice()` with a "Show all" button is the thing
+this replaces: it grows the page by the whole remainder in one press.
+
+A table that shows every row, because nothing pages it, is still bounded by the
+ten-row cap.
+
+**The controls stay outside the scroll.** Filters, tabs and view toggles sit
+directly above the table and the pager directly below it, each a sibling of
+the `DataTable` or of the `TableScrollFrame` around it. Nothing that configures
+the table goes inside it, where it would scroll away with the rows.
+
+**A row detail opens where the design puts it**, and the table does not decide:
+a page of its own (Models, a drill-in to Activity), a modal or side panel
+(Sessions), or inline under the row through `detailKey`/`renderDetail`
+(Activity, Routing). An inline panel opening below the visible rows is scrolled
+into view inside the table, never by moving the page, and it does not count
+toward the ten rows.
 
 ## The base decides; a per-table class carries only its own lanes
 
