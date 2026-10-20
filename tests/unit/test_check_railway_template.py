@@ -301,9 +301,12 @@ def test_publish_readme_keeps_the_rest_of_the_listing(monkeypatch: pytest.Monkey
     )
 
 
-def test_main_publishes_the_listing_before_checking(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_main_publishes_the_listing_then_checks_the_readme_alone(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     events: list[str] = []
-    snapshot = _snapshot()
+    live = _live_from(_snapshot())
+    _live_service(live, "otari")["source"]["image"] = "mzdotai/otari:latest"
     listing = tmp_path / "listing.md"
     listing.write_text("new\n")
     monkeypatch.setenv("RAILWAY_API_TOKEN", "token")
@@ -311,12 +314,31 @@ def test_main_publishes_the_listing_before_checking(monkeypatch: pytest.MonkeyPa
 
     def fetch(code: str) -> dict[str, Any]:
         events.append("fetch")
-        return {"readme": "new\n", "serializedConfig": _live_from(snapshot)}
+        return {"readme": "new\n", "serializedConfig": live}
 
     monkeypatch.setattr(check, "fetch_template", fetch)
 
     assert check.main(["--listing", str(listing), "--publish-readme"]) == 0
     assert events == ["publish 'new\\n'", "fetch"]
+    # The image drift is otari-railway-template.yml's to report, not the publish's.
+    assert "mzdotai/otari:latest" not in capsys.readouterr().out
+
+
+def test_main_fails_when_the_published_readme_did_not_take(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    listing = tmp_path / "listing.md"
+    listing.write_text("new\n")
+    monkeypatch.setenv("RAILWAY_API_TOKEN", "token")
+    monkeypatch.setattr(check, "publish_readme", lambda code, readme, token: None)
+    monkeypatch.setattr(
+        check, "fetch_template", lambda code: {"readme": "old\n", "serializedConfig": _live_from(_snapshot())}
+    )
+
+    assert check.main(["--listing", str(listing), "--publish-readme"]) == 1
+    out = capsys.readouterr().out
+    assert "still differs" in out
+    assert "+old" in out
 
 
 def test_main_refuses_to_publish_without_a_token(

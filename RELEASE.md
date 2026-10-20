@@ -169,8 +169,8 @@ release PR body. It does not stop the release.
 - `RAILWAY_API_TOKEN`, used by `otari-railway-listing.yml` to publish
   `deploy/railway/listing.md` as the Railway template's README. It is a Railway
   account or workspace token with access to the mozilla-ai workspace that owns
-  the template. Without it the workflow fails and the README is pasted into the
-  template editor by hand.
+  the template. Without it the workflow skips the publish with a warning, and
+  the README is pasted into the template editor by hand.
 - `RELEASE_APP_CLIENT_ID` (a repository variable, not a secret) and
   `RELEASE_APP_PRIVATE_KEY`, used by `otari-release.yml`,
   `otari-tag-release.yml` and `otari-railway-template-bump.yml`. They identify

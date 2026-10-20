@@ -9,9 +9,10 @@ public GraphQL API answers ``template(code: ...)`` with no token: its
 variables, and ``readme`` holds the README published from listing.md.
 
 The README is the one part the API writes. ``--publish-readme`` sends
-listing.md through ``templatePublish`` before checking, with the token in
+listing.md through ``templatePublish`` instead of checking, with the token in
 ``RAILWAY_API_TOKEN``, and passes the listing's other fields back unchanged,
-since the mutation replaces them all.
+since the mutation replaces them all. It then reads the README back and
+compares that alone: the rest is drift only the template editor can fix.
 
 Compared per service (matched by name): the image (``docker.io/`` ignored),
 start command, healthcheck path, the public domain's port, and each variable's
@@ -21,7 +22,7 @@ whitespace. Buckets are compared by name, which is all the serialized config
 carries about one. The README ignores trailing whitespace.
 
 Standard library only, like oss_edition_smoke.py, so CI runs it with no
-environment. Exits 0 when the two agree, 1 on drift, 2 when the fetch fails.
+environment. Exits 0 when the two agree, 1 on drift, 2 when a call to Railway fails.
 
 Usage:
     python scripts/check_railway_template.py
@@ -193,25 +194,33 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--template", type=Path, default=TEMPLATE_PATH, help="the template.json snapshot")
     parser.add_argument("--listing", type=Path, default=LISTING_PATH, help="the template's Railway README")
     parser.add_argument(
-        "--publish-readme", action="store_true", help="publish listing.md as the live README first (RAILWAY_API_TOKEN)"
+        "--publish-readme", action="store_true", help="publish listing.md as the live README (RAILWAY_API_TOKEN)"
     )
     args = parser.parse_args(argv)
 
     snapshot = json.loads(args.template.read_text(encoding="utf-8"))
+    listing = args.listing.read_text(encoding="utf-8")
     try:
         if args.publish_readme:
             token = os.environ.get("RAILWAY_API_TOKEN")
             if not token:
                 raise FetchError("--publish-readme needs a Railway API token in RAILWAY_API_TOKEN")
-            publish_readme(snapshot["code"], args.listing.read_text(encoding="utf-8"), token)
-            print(f"Published {args.listing.name} as the README of the live Railway template {snapshot['code']!r}.")
+            publish_readme(snapshot["code"], listing, token)
         live = fetch_template(snapshot["code"])
     except FetchError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    readme_diff = diff_readme(listing, live.get("readme") or "")
+    if args.publish_readme:
+        if readme_diff:
+            print(f"The live README still differs from {args.listing.name} after publishing:")
+            print("\n".join(readme_diff))
+            return 1
+        print(f"Published {args.listing.name} as the README of the live Railway template {snapshot['code']!r}.")
+        return 0
+
     problems = diff_config(snapshot, live.get("serializedConfig") or {})
-    readme_diff = diff_readme(args.listing.read_text(encoding="utf-8"), live.get("readme") or "")
 
     if not problems and not readme_diff:
         print(f"The live Railway template {snapshot['code']!r} matches template.json and listing.md.")

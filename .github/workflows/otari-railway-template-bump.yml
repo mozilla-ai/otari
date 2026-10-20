@@ -108,16 +108,23 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
           PREVIOUS: ${{ steps.bump.outputs.previous }}
         run: |
-          cat > /tmp/pr-body.md <<EOF
-          Moves the Railway template snapshot in \`deploy/railway/\` from \`mzdotai/otari:$PREVIOUS\` to \`mzdotai/otari:$VERSION\`, following the [v$VERSION release](https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION). Opened by \`.github/workflows/otari-railway-template-bump.yml\`.
+          # A quoted heredoc and string.Template: the shell expands nothing in the
+          # body, and an unknown $NAME fails the run instead of printing empty.
+          python3 - <<'EOF'
+          import os
+          from pathlib import Path
+          from string import Template
 
-          This PR does not change the live template. Railway's public API has no mutation that writes a template's services or variables, so the image tag is changed by hand, and the \`railway-template\` check fails until it is. Before merging:
+          Path("/tmp/pr-body.md").write_text(Template("""\
+          Moves the Railway template snapshot in `deploy/railway/` from `mzdotai/otari:$PREVIOUS` to `mzdotai/otari:$VERSION`, following the [v$VERSION release](https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION). Opened by `.github/workflows/otari-railway-template-bump.yml`.
 
-          1. Wait for the **Publish Otari Docker Image** run for \`v$VERSION\` to push \`mzdotai/otari:$VERSION\`.
-          2. Read the [release notes](https://github.com/$GITHUB_REPOSITORY/releases) from v$PREVIOUS to v$VERSION. A variable a release now requires goes on the live template and into \`template.json\` on this branch, as does a changed variable description.
-          3. In the Railway template editor on the mozilla-ai account, open the **otari** service and set **Source image** to \`mzdotai/otari:$VERSION\`. Save the template.
-          4. Deploy the template once to a throwaway project; check \`/api/v1/health/readiness\` and one \`/api/v1/chat/completions\` request.
-          5. Re-run the \`railway-template\` check. The image line should be gone; the README diff stays until merge, when \`otari-railway-listing.yml\` publishes \`listing.md\` to the live template.
+          This PR does not change the live template. Railway's public API has no mutation that writes a template's services or variables, so the image tag is changed by hand, and the `railway-template` check fails until it is. Before merging:
+
+          1. Wait for the **Publish Otari Docker Image** run for `v$VERSION` to push `mzdotai/otari:$VERSION`.
+          2. Read the [release notes](https://github.com/$GITHUB_REPOSITORY/releases) from v$PREVIOUS to v$VERSION. A variable a release now requires goes on the live template and into `template.json` on this branch, as does a changed variable description.
+          3. In the Railway template editor on the mozilla-ai account, open the **otari** service and set **Source image** to `mzdotai/otari:$VERSION`. Save the template.
+          4. Deploy the template once to a throwaway project; check `/api/v1/health/readiness` and one `/api/v1/chat/completions` request.
+          5. Re-run the `railway-template` check. The image line should be gone; the README diff stays until merge, when `otari-railway-listing.yml` publishes `listing.md` to the live template.
 
           A later release updates this PR in place. Once a commit besides the bump is pushed here, it refuses to, rather than drop that commit; merge this PR, then dispatch the workflow with the newer tag.
 
@@ -137,6 +144,7 @@ jobs:
           - [x] No AI was used.
 
           **AI Model/Tool used:** none, this PR is opened by a release workflow.
+          """).substitute(os.environ))
           EOF
 
       - name: Generate App token
