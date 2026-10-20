@@ -151,6 +151,11 @@ def _span_id(otel_trace_id: str, otel_span_id: str) -> str:
     return f"otlp-{digest}"
 
 
+def _first_int(attributes: Mapping[str, Any], *keys: str) -> int | None:
+    """The first of ``keys`` that holds a count, keeping a reported zero."""
+    return next((count for key in keys if (count := _int(attributes, key)) is not None), None)
+
+
 def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
     attributes = span.attributes
     operation = identifier_or_none(_str(attributes, "gen_ai.operation.name"))
@@ -178,14 +183,13 @@ def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
     if (max_tokens := _int(attributes, "gen_ai.request.max_tokens")) is not None:
         projected["gen_ai.request.max_tokens"] = max_tokens
     input_tokens = _int(attributes, "gen_ai.usage.input_tokens")
-    cache_read = (
-        _int(attributes, "gen_ai.usage.cache_read_tokens")
-        or _int(attributes, "gen_ai.usage.cache_read.input_tokens")
-        or _int(attributes, "gen_ai.usage.cached_tokens")
+    cache_read = _first_int(
+        attributes,
+        "gen_ai.usage.cache_read_tokens",
+        "gen_ai.usage.cache_read.input_tokens",
+        "gen_ai.usage.cached_tokens",
     )
-    cache_write = _int(attributes, "gen_ai.usage.cache_creation.input_tokens") or _int(
-        attributes, "gen_ai.usage.cache_write_tokens"
-    )
+    cache_write = _first_int(attributes, "gen_ai.usage.cache_creation.input_tokens", "gen_ai.usage.cache_write_tokens")
     cached = (cache_read or 0) + (cache_write or 0)
     # The GenAI conventions count cached tokens inside ``input_tokens``, so cached
     # tokens that outnumber it were reported on top of it instead.

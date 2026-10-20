@@ -278,6 +278,25 @@ def test_an_llm_span_counts_the_whole_prompt_whichever_way_the_exporter_reported
     assert span.reasoning_tokens == 12
 
 
+def test_a_reported_zero_cache_count_is_kept_not_stored_as_unknown() -> None:
+    attrs = {
+        "gen_ai.usage.input_tokens": 100,
+        "gen_ai.usage.cache_read.input_tokens": 0,
+        "gen_ai.usage.cache_creation.input_tokens": 0,
+    }
+    [write] = _project(_span("a", attrs=attrs))
+
+    [span] = write.spans
+    assert (span.input_tokens, span.cache_read_tokens, span.cache_write_tokens) == (100, 0, 0)
+
+
+def test_a_span_that_reports_no_cache_count_leaves_it_unknown() -> None:
+    [write] = _project(_span("a", attrs={"gen_ai.usage.input_tokens": 100}))
+
+    [span] = write.spans
+    assert (span.cache_read_tokens, span.cache_write_tokens) == (None, None)
+
+
 def test_cached_tokens_never_lift_the_whole_prompt_past_what_the_store_holds() -> None:
     attrs = {
         "gen_ai.provider.name": "anthropic",
