@@ -157,6 +157,7 @@ class CreateKeyRequest(BaseModel):
         description="Most live end users this key may have on the budgets it assigns (all of its owner's end users "
         "when it assigns none). A request that would create one more is refused with 403 and "
         "end_user_limit_reached; deleting end users frees room. Null is no cap.",
+        json_schema_extra={"example": 1000},
     )
     workspace_id: uuid.UUID | None = Field(
         default=None,
@@ -278,7 +279,7 @@ class UpdateKeyRequest(BaseModel):
     # Tri-state via model_fields_set: absent = unchanged, null = the default alone.
     end_user_budget_ids: list[str] | None = Field(default=None, max_length=MAX_END_USER_BUDGETS)
     # Tri-state via model_fields_set: absent = unchanged, null = no cap.
-    max_end_users: int | None = Field(default=None, ge=0)
+    max_end_users: int | None = Field(default=None, ge=0, json_schema_extra={"example": 1000})
     metadata: dict[str, Any] | None = None
 
 

@@ -4779,6 +4779,7 @@
               }
             ],
             "description": "Most live end users this key may have on the budgets it assigns (all of its owner's end users when it assigns none). A request that would create one more is refused with 403 and end_user_limit_reached; deleting end users frees room. Null is no cap.",
+            "example": 1000,
             "title": "Max End Users"
           },
           "metadata": {
@@ -20819,6 +20820,7 @@
                 "type": "null"
               }
             ],
+            "example": 1000,
             "title": "Max End Users"
           },
           "metadata": {
