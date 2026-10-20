@@ -384,12 +384,15 @@ def configured_instances(config: GatewayConfig) -> frozenset[str]:
 
 
 def settle_configured_providers(config: GatewayConfig) -> None:
-    """Keep the declared ``providers:`` as the baseline, then drop the entries that declare no credential.
+    """Rebuild ``providers:`` from what the configuration declares, then drop the entries that declare no credential.
 
-    The baseline keeps a dropped entry's name reserved (see :func:`configured_instances`).
+    The baseline is captured on the first start and kept, so a later start on
+    the same config begins from the declaration again, and a dropped entry's
+    name stays reserved (see :func:`configured_instances`).
     """
     if config._provider_baseline is None:
         config._provider_baseline = {name: dict(entry) for name, entry in config.providers.items()}
+    config.providers = {name: dict(entry) for name, entry in config._provider_baseline.items()}
     prune_uncredentialed_providers(config)
 
 

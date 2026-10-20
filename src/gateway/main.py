@@ -371,6 +371,54 @@ async def _move_deployment_providers(config: GatewayConfig) -> None:
             )
 
 
+async def _import_configured_providers(config: GatewayConfig) -> None:
+    """Copy the ``providers:`` entries of config.yml onto hosted providers, and stop reading the copied ones.
+
+    The ``providers:`` block is deprecated: an entry is read once, its
+    ``${VAR}`` references as they resolve now, and the hosted provider of its
+    name serves it from then on with every control the Hosted providers page
+    has, every model it lists switched on. An entry a hosted provider cannot
+    hold keeps serving from config.yml, and the start says why.
+    """
+    if not config.providers or not config.import_configured_providers:
+        return
+    try:
+        async with create_unit_of_work() as uow:
+            imports = await build_hosted_provider_service(uow, config=config).import_configured_providers(
+                dict(config.providers)
+            )
+    except Exception as exc:
+        logger.error(
+            "Could not copy the config.yml providers onto hosted providers: %s; they keep serving from config.yml.",
+            describe_database_error(exc),
+        )
+        return
+    for name in (*imports.imported, *imports.already):
+        config.providers.pop(name, None)
+    if imports.imported:
+        logger.info(
+            "Copied %d config.yml provider(s) onto hosted providers: %s",
+            len(imports.imported),
+            ", ".join(imports.imported),
+        )
+    for name in (*imports.imported, *imports.already):
+        logger.warning(
+            "providers.%s in config.yml is served as a hosted provider and no longer read; remove it from config.yml "
+            "and manage it on the Hosted providers page.",
+            name,
+        )
+    for name, reason in imports.kept.items():
+        logger.warning(
+            "providers.%s keeps serving from config.yml because %s. The providers: block is deprecated; add the "
+            "provider on the Hosted providers page instead.",
+            name,
+            reason,
+        )
+
+
+            )
+
+
 # The periodic background workers a standalone deployment runs.
 # A new worker is one entry here.
 #
@@ -895,6 +943,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             await load_guardrail_runner_at_startup()
             await load_provider_endpoints_at_startup()
             await _move_deployment_providers(config)
+            await _import_configured_providers(config)
             await load_hosted_names_at_startup(config)
             # On a Unit of Work of its own, after the session above has closed.
             await _report_hosted_providers_config(config)

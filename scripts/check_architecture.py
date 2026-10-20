@@ -1592,6 +1592,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/tenancy/org_provider_key_repository.py",
         "baseline": ("gateway/services/tenancy/org_provider_key_service.py",),
     },
+    "gateway.models.providers.ConfiguredProviderImport": {
+        "repository": "gateway/repositories/providers/hosted_provider_repository.py",
+        "baseline": (),
+    },
     "gateway.models.providers.HostedProvider": {
         "repository": "gateway/repositories/providers/hosted_provider_repository.py",
         "baseline": (),

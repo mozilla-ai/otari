@@ -25,7 +25,7 @@ from typing import Annotated, Any
 from any_llm import LLMProvider
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from gateway.core.settings_view import OMITTED
+from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
 
 # What a ``hosted_providers:`` entry may not carry, with the reason it is refused.
 _REFUSED_KEYS = {
@@ -133,6 +133,15 @@ class ProviderSettings(BaseModel):
             "its own. Served after every other credential, as a stored hosted provider is, and never written to "
             "the database; a stored hosted provider of the same name wins. Settable as JSON through "
             "OTARI_HOSTED_PROVIDERS, which replaces the file's block whole."
+        ),
+    )
+
+    import_configured_providers: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
+        default=True,
+        description=(
+            "Copy each providers: entry of config.yml onto a hosted provider of its name at startup, once, and serve "
+            "the name from that hosted provider from then on. The providers: block is deprecated; an entry a hosted "
+            "provider cannot hold keeps serving from config.yml. Also settable via OTARI_IMPORT_CONFIGURED_PROVIDERS."
         ),
     )
 

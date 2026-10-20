@@ -260,6 +260,7 @@ def test_a_model_not_switched_on_is_refused_as_not_offered_rather_than_unconfigu
 def configured_openai_client(postgres_url: str) -> Iterator[TestClient]:
     """A deployment whose ``config.yml`` defines an ``openai`` instance, beside a hosted openai."""
     config = GatewayConfig(
+        import_configured_providers=False,
         database_url=postgres_url,
         master_key="test-master-key",
         auto_migrate=False,

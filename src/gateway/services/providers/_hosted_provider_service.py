@@ -22,6 +22,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from any_llm.types.model import Model
 
@@ -77,6 +78,7 @@ from gateway.services.model_discovery_service import (
 )
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.provider_kwargs import configured_instances
+from gateway.services.providers._configured_provider_import import plan_import
 from gateway.services.providers._deployment_provider_move import PlannedMove, plan_move
 from gateway.services.providers._hosted_catalog_sweep import UNDECRYPTABLE, HostedCatalogSweep, LiveByoPairs
 from gateway.services.providers._hosted_credentials import (
@@ -102,6 +104,20 @@ from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecrypt
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 OrganizationExists = Callable[[uuid.UUID], Awaitable[bool]]
+
+
+@dataclass(frozen=True)
+class ConfiguredProviderImports:
+    """What one start did with the ``providers:`` entries of config.yml.
+
+    ``imported`` were copied onto hosted providers now; ``already`` were copied
+    by an earlier start, so config.yml no longer serves them; ``kept`` maps
+    each entry config.yml still serves to why a hosted provider cannot hold it.
+    """
+
+    imported: list[str]
+    already: list[str]
+    kept: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -605,6 +621,40 @@ class HostedProviderService:
             for instance in removed:
                 get_model_cache().clear(instance)
         return DeploymentProviderMigrationPublic(rows=[plan.row for plan in plans])
+
+    async def import_configured_providers(self, entries: Mapping[str, Mapping[str, Any]]) -> ConfiguredProviderImports:
+        """Copy the ``providers:`` entries of config.yml onto hosted providers of their names, once each.
+
+        An entry copied by an earlier start is not copied again, so removing
+        its hosted provider sticks. Each is moved without asking it for its
+        models; see :meth:`create_provider`.
+        """
+        async with self.uow:
+            done = await self.providers.imported_configured_names()
+            hosted_names = {row.name for row in await self.providers.list_all()}
+        imports = ConfiguredProviderImports(imported=[], already=[], kept={})
+        for name, entry in entries.items():
+            if name in done:
+                imports.already.append(name)
+                continue
+            plan = plan_import(name, entry, hosted_names=hosted_names)
+            if plan.create is None:
+                imports.kept[name] = plan.reason or "it cannot be copied"
+                continue
+            try:
+                await self.create_provider(plan.create, discover=False)
+            except TenancyError as exc:
+                # Another replica may have copied it first.
+                async with self.uow:
+                    if name in await self.providers.imported_configured_names():
+                        imports.already.append(name)
+                    else:
+                        imports.kept[name] = str(exc)
+                continue
+            async with self.uow:
+                await self.providers.record_configured_import(name)
+            imports.imported.append(name)
+        return imports
 
     async def discard_deployment_provider(self, instance: str) -> None:
         """Remove a deployment provider the move did not take, which serves nothing.

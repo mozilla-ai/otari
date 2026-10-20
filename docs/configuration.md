@@ -378,6 +378,25 @@ deployment that declares a key does not mint and print one.
 
 ## Provider configuration
 
+> **Deprecated.** The `providers:` block is being retired in favor of hosted
+> providers, which the Hosted providers page and `/api/v1/hosted-providers`
+> manage. At startup, each entry a hosted provider can hold is copied onto a
+> hosted provider of the same name, once: its `${VAR}` values are read at that
+> start, and the hosted provider serves the name from then on, with a serving
+> switch, a test, its models and removal like any other. The start then logs
+> that the entry is no longer read, so it can be taken out of `config.yml`;
+> rotate its key on the Hosted providers page rather than in the environment.
+> Removing the copied provider on the page sticks: the entry is not copied
+> again. An entry a hosted provider cannot hold keeps serving from `config.yml`,
+> and the start logs why: one that sets `models`, `max_retries`,
+> `messages_api` or Vertex AI's `credentials`, `project` or `location`, a
+> keyless Bedrock or SageMaker entry served on the server's own cloud role, a
+> name that names another provider or that a hosted provider already holds, or
+> a key with no `OTARI_SECRET_KEY` to encrypt it. Once copied, an organization's
+> own key for the provider is asked first, where the entry was asked before it.
+> Set `import_configured_providers: false` (`OTARI_IMPORT_CONFIGURED_PROVIDERS`)
+> to keep serving every entry from `config.yml` for now.
+
 The `providers` map is keyed by provider instance. Only a provider it declares
 (or a hosted provider, or an organization's key) serves requests. A standard
 provider needs only its credential, which the entry names:

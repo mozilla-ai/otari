@@ -255,3 +255,17 @@ class HostedProviderModel(Base):
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
     )
+
+
+class ConfiguredProviderImport(Base):
+    """A ``providers:`` entry of config.yml already copied onto a hosted provider of its name.
+
+    Recorded so the entry is read once: from then on the hosted provider is
+    what serves the name, and removing it on the Hosted providers page is not
+    undone by the next start.
+    """
+
+    __tablename__ = "configured_provider_imports"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

@@ -13,7 +13,7 @@ from sqlalchemy import CursorResult, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.providers import HostedProvider, HostedProviderModel, ProviderCredential
+from gateway.models.providers import ConfiguredProviderImport, HostedProvider, HostedProviderModel, ProviderCredential
 from gateway.repositories.base_repository import BaseRepository
 
 # An operator adds hosted providers by hand, so a full listing stays small
@@ -149,6 +149,16 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
     async def delete_deployment_provider(self, row: ProviderCredential) -> None:
         """Remove one stored deployment provider, flushed so the caller's block sees it gone."""
         await self.db.delete(row)
+        await self.db.flush()
+
+    async def imported_configured_names(self) -> set[str]:
+        """The ``providers:`` entries of config.yml already copied onto hosted providers."""
+        result = await self.db.execute(select(ConfiguredProviderImport.name))
+        return set(result.scalars().all())
+
+    async def record_configured_import(self, name: str) -> None:
+        """Record that the ``providers:`` entry ``name`` was copied onto a hosted provider."""
+        self.db.add(ConfiguredProviderImport(name=name))
         await self.db.flush()
 
 
