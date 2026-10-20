@@ -659,9 +659,10 @@ export function ModelDetailView({
           ) : null}
           {listPriceDiffers ? (
             <InfoBanner>
-              A rate marked <em>list</em> differs from the price the provider
-              publishes. What is metered here is the rate shown; the list price
-              is what the provider would charge you directly.
+              Where a rate differs from the price the provider publishes, that
+              price is shown beside it marked <em>list</em>. What is metered
+              here is the rate shown; the list price is what the provider would
+              charge you directly.
             </InfoBanner>
           ) : null}
         </section>
