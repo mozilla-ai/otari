@@ -5,6 +5,7 @@ adapter sends, what it makes of the answer, and how an upstream's failure
 reaches the port's caller.
 """
 
+import asyncio
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -107,7 +108,7 @@ async def test_recommend_on_an_unconfigured_provider_is_not_configured() -> None
 
 
 @pytest.mark.asyncio
-async def test_an_upstream_failure_keeps_its_status_and_names_no_body() -> None:
+async def test_a_rate_limit_keeps_its_status_and_names_no_vendor() -> None:
     with (
         _mock_decision(side_effect=DecisionProviderError("typesafe decisions returned HTTP 429", status_code=429)),
         pytest.raises(RecommendationFailedError) as failure,
@@ -115,6 +116,34 @@ async def test_an_upstream_failure_keeps_its_status_and_names_no_body() -> None:
         await _recommender().recommend(SPAWN, candidates=CANDIDATES)
 
     assert failure.value.upstream_status == 429
+    assert str(failure.value) == "The recommender failed (429)"
+
+
+@pytest.mark.asyncio
+async def test_any_other_upstream_status_is_the_deployments_problem_not_the_callers() -> None:
+    """A rejected key upstream is the operator's to fix, so it is not passed on as the caller's credential."""
+    with (
+        _mock_decision(side_effect=DecisionProviderError("typesafe decisions returned HTTP 401", status_code=401)),
+        pytest.raises(RecommendationFailedError) as failure,
+    ):
+        await _recommender().recommend(SPAWN, candidates=CANDIDATES)
+
+    assert failure.value.upstream_status is None
+    assert "typesafe" not in str(failure.value)
+
+
+@pytest.mark.asyncio
+async def test_an_upstream_slower_than_the_plugin_waits_fails() -> None:
+    async def slow(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        await asyncio.sleep(1)
+        return ANSWER
+
+    with (
+        patch("gateway.adapters.agent_model_recommender_adapter.TIMEOUT_SECONDS", 0.01),
+        patch("gateway.adapters.agent_model_recommender_adapter.request_decision", slow),
+        pytest.raises(RecommendationFailedError, match="in time"),
+    ):
+        await _recommender().recommend(SPAWN, candidates=CANDIDATES)
 
 
 @pytest.mark.asyncio
