@@ -11,7 +11,7 @@ import { OBSERVATION_TYPES, TypeMark } from "./observationTypes"
 import { moveRowFocus } from "./rowFocus"
 import { matchesSearch } from "./search"
 import { buildTree, type FlatItem, flattenTreeOrder } from "./tree"
-import { summarizeTrace, type Trace } from "./types"
+import { type Observation, summarizeTrace, type Trace } from "./types"
 
 function Metrics({
   durationMs,
@@ -158,6 +158,49 @@ function TreeRow({
   )
 }
 
+// A search match, a row of its own for the same reason as TreeRow.
+function SearchRow({
+  obs,
+  isSelected,
+  isTabStop,
+  onSelect,
+}: {
+  obs: Observation
+  isSelected: boolean
+  isTabStop: boolean
+  onSelect: (observationId: string) => void
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        data-trace-row
+        tabIndex={isTabStop ? 0 : -1}
+        aria-current={isSelected ? "true" : undefined}
+        aria-label={`${OBSERVATION_TYPES[obs.type].label}, ${obs.name}, ${formatDuration(obs.endMs - obs.startMs)}`}
+        onClick={() => onSelect(obs.id)}
+        onKeyDown={moveRowFocus}
+        className={`otari-trace-ring flex min-h-11 w-full items-center gap-1 px-3 text-left ${isSelected ? "bg-primary-subtle" : "hover:bg-surface-alt"}`}
+      >
+        <span className={MARK}>
+          <TypeMark type={obs.type} />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col py-0.5 pl-2">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-body">{obs.name}</span>
+            <LevelChip level={obs.level} />
+          </span>
+          <Metrics
+            durationMs={obs.endMs - obs.startMs}
+            cost={obs.cost ?? 0}
+            tokens={(obs.promptTokens ?? 0) + (obs.completionTokens ?? 0)}
+          />
+        </span>
+      </button>
+    </li>
+  )
+}
+
 export function TraceTreeView({
   trace,
   selectedId,
@@ -198,40 +241,15 @@ export function TraceTreeView({
         data-trace-rows
         className="flex flex-col py-1"
       >
-        {matches.map((obs) => {
-          const selected = selectedId === obs.id
-          return (
-            <li key={obs.id}>
-              <button
-                type="button"
-                data-trace-row
-                tabIndex={obs.id === tabStop ? 0 : -1}
-                aria-current={selected ? "true" : undefined}
-                aria-label={`${OBSERVATION_TYPES[obs.type].label}, ${obs.name}, ${formatDuration(obs.endMs - obs.startMs)}`}
-                onClick={() => onSelect(obs.id)}
-                onKeyDown={moveRowFocus}
-                className={`otari-trace-ring flex min-h-11 w-full items-center gap-1 px-3 text-left ${selected ? "bg-primary-subtle" : "hover:bg-surface-alt"}`}
-              >
-                <span className={MARK}>
-                  <TypeMark type={obs.type} />
-                </span>
-                <span className="flex min-w-0 flex-1 flex-col py-0.5 pl-2">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-body">{obs.name}</span>
-                    <LevelChip level={obs.level} />
-                  </span>
-                  <Metrics
-                    durationMs={obs.endMs - obs.startMs}
-                    cost={obs.cost ?? 0}
-                    tokens={
-                      (obs.promptTokens ?? 0) + (obs.completionTokens ?? 0)
-                    }
-                  />
-                </span>
-              </button>
-            </li>
-          )
-        })}
+        {matches.map((obs) => (
+          <SearchRow
+            key={obs.id}
+            obs={obs}
+            isSelected={selectedId === obs.id}
+            isTabStop={tabStop === obs.id}
+            onSelect={onSelect}
+          />
+        ))}
       </ul>
     )
   }

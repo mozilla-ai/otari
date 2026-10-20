@@ -59,8 +59,9 @@ export function useUrlState<K extends string>(
   }: {
     /**
      * Keys whose change alone does not re-render the caller, for state a child
-     * already holds and the URL only mirrors. They read as they were at the
-     * last change to a tracked key.
+     * already holds and the URL only mirrors. A read sees the value as of the
+     * caller's last render. Pass a module constant: a new array each render
+     * re-derives every reader each render.
      */
     untracked?: readonly NoInfer<K>[]
   } = {},
