@@ -113,8 +113,8 @@ async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSes
     ``otari:<tool>``, as settlement prices them. With ``require_pricing`` on, an
     unpriced tool is refused at admission, so this warning is what tells the
     operator *before* the first 402 rather than after. With ``require_pricing``
-    off the tool runs and is recorded at zero cost, which is worth flagging too:
-    the work is real and the invoice is not.
+    off the tool runs, and a call its provider reports no cost for is recorded at
+    zero cost, which is worth flagging too: the work is real and the invoice is not.
     """
     unpriced = [
         tool.name
@@ -137,9 +137,9 @@ async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSes
     else:
         logger.warning(
             "Gateway tool(s) %s are configured but have no pricing (%s). Their calls will be "
-            "recorded at zero cost while still consuming operator resources. Add a "
-            "per-request rate; the convention is USD per million requests, so 10000.0 charges "
-            "$0.01 per call.",
+            "recorded at zero cost, unless their provider reports one, while still consuming operator "
+            "resources. Add a per-request rate; the convention is USD per million requests, so 10000.0 "
+            "charges $0.01 per call.",
             ", ".join(unpriced),
             keys,
         )
