@@ -1311,10 +1311,13 @@ def test_an_unpriced_search_is_refused_with_402_naming_its_row(
     assert resp.json()["code"] == "pricing_required"
     detail = resp.json()["detail"]
     # The new form of the tool's price, not the <provider>:<tool> it was priced under before.
-    assert "a search price for 'fake-fast'" in detail
-    assert "price_per_call" in detail
+    assert "kind 'search' and the tool's name as model_key" in detail
+    assert "fake:fake-fast" not in detail
+    # price_per_call only for a tool declared in config.yml; a stored tool has no entry to carry it.
+    assert "price_per_call on its entry if it is declared in config.yml" in detail
     # The deployment pays for the search, so only its operator's price counts.
-    assert "operator has not set" in detail
+    assert "no price the deployment's operator set" in detail
+    assert len(detail) <= 400
     assert f"POST {API_ROOT}/pricing" in detail
     # The dashboard can set only otari:web_search, not an instance's row.
     assert "Tools & Guardrails" not in detail
@@ -1394,7 +1397,7 @@ def test_a_provider_that_reports_its_cost_still_needs_a_row(
     served = strict_client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
 
     assert refused.status_code == 402, refused.text
-    assert "a search price for 'fake-search'" in refused.json()["detail"]
+    assert "A search on 'fake-search' has no price" in refused.json()["detail"]
     assert served.status_code == 200, served.text
     success = [
         row

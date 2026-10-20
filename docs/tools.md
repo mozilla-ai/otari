@@ -681,7 +681,8 @@ one, and never with the provider's own message.
   reports what each fetch costs (`costDollars.total`).
 - **Tabstack** (`tabstack`) needs an API key, read from the instance's
   `api_key`, such as `${TABSTACK_API_KEY}`. It reports no cost, so a fetch is
-  billed at the instance's rate, its `price_per_call`, else `otari:web_fetch`. Tabstack's
+  billed at the instance's own rate (its `price_per_call`, or a `fetch` price set
+  through the API), else `otari:web_fetch`. Tabstack's
   [pricing](https://docs.tabstack.ai/pricing), read 2026-10-13, is 10 credits a
   page, and a credit costs $0.0001 to $0.0003 depending on the plan and on
   whether the plan's monthly credits are used up, so $0.001 to $0.003 a page.
@@ -912,7 +913,8 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
 - **Mojeek** (`mojeek`) needs an API key, read from the tool's `api_key`, such as
   `${MOJEEK_API_KEY}`. Mojeek takes the key and the query in the request URL,
   which Otari keeps out of its logs. It reports no cost, so a search is billed at
-  the tool's rate, its `price_per_call`. Mojeek's
+  the tool's own rate (its `price_per_call`, or a `search` price set through the
+  API). Mojeek's
   [pricing](https://www.mojeek.com/services/search/web-search-api/), read
   2026-10-13, is per search, in pounds before taxes: £2 per 1,000 on the Startup
   plan, £3 on Business, Enterprise by arrangement; set the rate in dollars at what

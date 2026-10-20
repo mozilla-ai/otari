@@ -221,19 +221,22 @@ def _unpriced_detail(tool: str, rate_key: RateKey, *, organization_key: bool) ->
     """The 402's message: the price ``rate_key`` names for a search on ``tool``, and where to set it.
 
     Of the two, only ``otari:web_search`` can be set on the dashboard (Tools &
-    Guardrails); an instance's own price needs the configuration file or the API.
+    Guardrails); an instance's own price is set through the API, or by
+    ``price_per_call`` for an instance declared in the configuration file.
     """
-    price = describe_rate_key(rate_key)
     if organization_key:
-        missing = f"is priced at {price}, which has no pricing"
+        missing = f"is priced at {describe_rate_key(rate_key)}, which has no pricing"
         how = (
             f"Set a per-request rate for it (POST {API_ROOT}/pricing, the pricing section of config.yml, "
             "or the dashboard's Tools & Guardrails screen)"
         )
     else:
         # The deployment pays for the call, so an organization's own override does not count.
-        missing = f"needs {price}, which the deployment's operator has not set"
-        how = f"Set price_per_call on its config.yml entry, or POST {API_ROOT}/pricing with kind 'search'"
+        missing = "has no price the deployment's operator set"
+        how = (
+            f"Set one with POST {API_ROOT}/pricing using kind 'search' and the tool's name as model_key, "
+            "or with price_per_call on its entry if it is declared in config.yml"
+        )
     return (
         f"A search on '{tool}' {missing}, and require_pricing is on, so it is not run. "
         f"{how}; a zero rate is valid. Or set require_pricing to false to serve searches unpriced."

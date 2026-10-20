@@ -5005,7 +5005,7 @@ async def _apply_tool_charges(
     for unpriced in charges.unpriced:
         logger.warning(
             "Gateway tool '%s' ran %d time(s) as '%s' with no reported cost and no pricing; recorded without cost. "
-            "Price it with POST /api/v1/pricing as %s.",
+            "Price it with POST /api/v1/pricing using %s.",
             unpriced.tool,
             unpriced.calls,
             unpriced.label,

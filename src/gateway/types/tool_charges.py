@@ -78,9 +78,9 @@ RateKey = str | InstanceRateKey
 
 
 def describe_rate_key(rate_key: RateKey) -> str:
-    """How an operator is told which price row to add."""
+    """The price row an operator is told to add, as ``POST /api/v1/pricing`` takes it."""
     if isinstance(rate_key, InstanceRateKey):
-        return f"a {rate_key.kind} price for '{rate_key.name}'"
+        return f"kind '{rate_key.kind}' and model_key '{rate_key.name}'"
     return f"model_key '{rate_key}'"
 
 

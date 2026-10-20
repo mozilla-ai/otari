@@ -498,7 +498,8 @@ budget, and counted by `rate_limits`.
 one, else at the tool's own per-call rate: its `price_per_call`, or a price row
 of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 `kind`, as do the pricing reads and deletes, as a `?kind=` query, and
-`/api/v1/organizations/me/pricing`). A row written under the old
+`/api/v1/organizations/me/pricing`, where only a deployment operator sets a
+`search` or `fetch` override). A row written under the old
 `<provider>:<tool>` key is read after it, until a later release. See
 [Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool) for the order and the organization key's rate.
 

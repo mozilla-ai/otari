@@ -98,8 +98,9 @@ async def warn_if_search_tools_lack_flat_pricing(config: GatewayConfig, db: Asyn
             "cap can overshoot by one search. Set a rate"
         )
     logger.warning(
-        "No flat per-request rate is configured for search tool(s): %s. %s: price_per_call on the tool's "
-        "entry (USD per search), or POST %s/pricing with kind 'search' and the tool's name as model_key.",
+        "No flat per-request rate is configured for search tool(s): %s. %s: POST %s/pricing with kind 'search' "
+        "and the tool's name as model_key, or price_per_call (USD per search) on its entry if it is declared in "
+        "config.yml.",
         ", ".join(sorted(unpriced)),
         consequence,
         API_ROOT,
@@ -209,13 +210,17 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
             and model_key not in legacy_tool_keys
             and instance != GATEWAY_TOOL_PRICING_PROVIDER
         ):
-            if tools_under := sorted(key for key in legacy_tool_keys if key.split(":", 1)[0] == instance):
+            tools_under = sorted({key.split(":", 1)[1] for key in legacy_tool_keys if key.split(":", 1)[0] == instance})
+            if tools_under:
                 logger.warning(
-                    "Skipping pricing for '%s': no search or fetch tool is keyed so, and '%s' is not listed "
-                    "in the providers section. Its tools are priced as %s, or by price_per_call.",
+                    "Skipping pricing for '%s': it names none of %s's search or fetch tools (%s), and '%s' is not "
+                    "listed in the providers section. A tool is priced by price_per_call on its entry, or by "
+                    "POST %s/pricing with its kind and its name as model_key.",
                     model_key,
                     instance,
                     ", ".join(tools_under),
+                    instance,
+                    API_ROOT,
                 )
                 continue
             logger.warning(
@@ -350,9 +355,11 @@ async def warn_about_legacy_tool_prices(config: GatewayConfig, db: AsyncSession)
         return
     logger.warning(
         "Search or fetch tool price(s) stored under the old <provider>:<instance> key: %s. They still price "
-        "their tool until a later release stops reading them. Set price_per_call on the tool's entry, or POST "
-        f"{API_ROOT}/pricing (or an organization override) with kind 'search' or 'fetch' and the instance's "
-        "name as model_key, the built-in fetcher's being builtin_fetch, then delete the old row.",
+        "their tool until a later release stops reading them. Give each tool its own price, then delete the "
+        f"old row: POST {API_ROOT}/pricing with kind 'search' or 'fetch' and the tool's name as model_key "
+        "(builtin_fetch for the built-in fetcher), or price_per_call on its entry if it is declared in "
+        f"config.yml. A deployment operator recreates an organization override the same way, on "
+        f"{API_ROOT}/organizations/me/pricing in that organization.",
         ", ".join(
             [f"{key} (deployment)" for key in sorted(deployment)]
             + [f"{key} (organization override)" for key in sorted(overrides)]

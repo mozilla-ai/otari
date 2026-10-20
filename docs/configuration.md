@@ -921,7 +921,8 @@ generation, embeddings, rerank and direct search are subject to
 `require_pricing`, which also refuses a rate that cannot price the endpoint,
 such as an `images` rate on embeddings, rather than serving it unpriced.
 
-A search tool's rate is its `price_per_call`, in USD, on its own entry:
+A search tool declared in this file takes its rate as `price_per_call`, in USD,
+on its own entry:
 
 ```yaml
 search_tools:
@@ -935,7 +936,8 @@ It is stored as a price row of kind `search` keyed by the tool's name, apart
 from every model price, so no provider entry under `providers:` is needed and a
 model price can never be read as the tool's. The same row can be set through
 `POST /api/v1/pricing` with `"kind": "search"` and the tool's name as
-`model_key`; a `price_per_call` in the file adds a new version at startup only
+`model_key`, which is how a tool stored from the dashboard, with no entry here,
+is priced; a `price_per_call` in the file adds a new version at startup only
 when it differs from the rate in force, so a rate set through the API for a tool
 that has a `price_per_call` lasts until the next restart, as a `pricing:` entry
 without `effective_at` does for a model. That rate is what a search reserves
@@ -957,9 +959,9 @@ calls on that instance, ahead of `otari:web_fetch`.
 A rate written before tools had a kind of their own, under `pricing:` or the
 pricing API as `<provider>:<instance>` (`exa:exa-search`, `builtin:builtin_fetch`),
 still prices its tool, behind the tool's own row, until a later release stops
-reading it; startup names every such row. A key under a tool's provider that
-names no configured tool is a model's like any other and needs its provider
-under `providers:`.
+reading it; startup names every such row and how to replace it. A key under a
+tool's provider that names no configured tool is a model's price like any
+other, never a tool's.
 
 Rerank accepts either unit. A rerank model priced `unit: tokens` is charged
 on the input tokens the provider reports. Providers that bill reranking per

@@ -302,7 +302,10 @@ def test_pricing_under_a_search_tools_provider_naming_no_tool_is_skipped(
         dispose_override()
 
     [skipped] = [record.message for record in caplog.records if "Skipping pricing for 'exa:a-model'" in record.message]
-    assert "priced as exa:exa-search" in skipped
+    # It names the provider's tools and how a tool is priced now, not the old <provider>:<tool> form.
+    assert "none of exa's search or fetch tools (exa-search)" in skipped
+    assert "price_per_call on its entry" in skipped and "with its kind and its name as model_key" in skipped
+    assert "Add 'exa' to the providers section" not in skipped
     assert "exa:exa-search (deployment)" in caplog.text
 
 
