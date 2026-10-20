@@ -59,29 +59,36 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
 async def warn_if_search_tools_lack_flat_pricing(config: GatewayConfig, db: AsyncSession) -> None:
     """Warn at startup for a search tool with no flat per-request rate.
 
-    ``POST /v1/search`` reserves the rate configured for ``<provider>:<tool>``
-    before calling the provider, so an unpriced tool reserves nothing: a user
-    already over their cap is still refused, but one just under it can overshoot
-    by a search, and concurrent searches cannot see each other's holds. The
-    provider's own reported charge is still billed afterwards, so spend stays
-    truthful; it is the pre-flight hold that is missing. An explicit rate of 0 is
-    a deliberate "this tool is free" and is left alone.
+    With ``require_pricing`` on, its direct searches are refused. With it off,
+    they reserve nothing before the provider is called, so a user just under
+    their cap can overshoot by a search. A rate of 0 is a deliberate "this tool
+    is free" and is left alone.
     """
     unpriced: list[str] = []
     for name, entry in config.search_tools.items():
         provider = str(entry.get("provider") or name) if isinstance(entry, dict) else name
-        # use_defaults=False for the same reason the route sets it: a search tool
-        # is not a model, so the community dataset can only produce a false match.
+        # use_defaults=False: a search tool is not a model, so the community
+        # dataset can only produce a false match.
         if await find_model_pricing(db, provider, name, use_defaults=False) is None:
             unpriced.append(f"{provider}:{name}")
     if not unpriced:
         return
+    if config.require_pricing:
+        consequence = (
+            f"require_pricing is on, so POST {API_ROOT}/search refuses their searches with HTTP 402, except on "
+            "keys exempt from budgets. Add a rate for the model key, 0 included"
+        )
+    else:
+        consequence = (
+            "Nothing is reserved against a caller's budget before the search runs, so a user just under their "
+            "cap can overshoot by one search. Add a rate for the model key"
+        )
     logger.warning(
-        "No flat per-request rate is configured for search tool(s): %s. Nothing is reserved against a "
-        "caller's budget before the search runs, so a user just under their cap can overshoot by one "
-        f"search. Add a rate for the model key (config `pricing` section or POST {API_ROOT}/pricing); the "
-        "convention is USD per million requests, so 5000.0 charges $0.005 per search.",
+        "No flat per-request rate is configured for search tool(s): %s. %s (config `pricing` section or POST "
+        "%s/pricing); the convention is USD per million requests, so 5000.0 charges $0.005 per search.",
         ", ".join(sorted(unpriced)),
+        consequence,
+        API_ROOT,
     )
 
 

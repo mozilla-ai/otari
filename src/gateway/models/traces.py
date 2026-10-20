@@ -57,6 +57,8 @@ class Trace(Base):
     span_count: Mapped[int] = mapped_column(default=0, server_default="0")
     # Spans that ended in an error a fallback did not recover.
     error_count: Mapped[int] = mapped_column(default=0, server_default="0")
+    # The ones among them that fail the session, as the trace service decides.
+    failing_error_count: Mapped[int] = mapped_column(default=0, server_default="0")
     # A long session's sum outgrows int32; one span's count does not.
     input_tokens: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     output_tokens: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
@@ -109,6 +111,9 @@ class TraceSpan(Base):
     provider: Mapped[str | None] = mapped_column(String)
     input_tokens: Mapped[int | None] = mapped_column()
     output_tokens: Mapped[int | None] = mapped_column()
+    cache_read_tokens: Mapped[int | None] = mapped_column()
+    cache_write_tokens: Mapped[int | None] = mapped_column()
+    reasoning_tokens: Mapped[int | None] = mapped_column()
     cost_snapshot: Mapped[Decimal | None] = mapped_column(UsdCost())
     tool_name: Mapped[str | None] = mapped_column(String)
     tool_type: Mapped[str | None] = mapped_column(String)

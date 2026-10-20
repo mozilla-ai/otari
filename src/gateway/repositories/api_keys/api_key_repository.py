@@ -100,5 +100,6 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         for key in result.scalars():
             released.append(str(key.config_name))
             key.config_name = None
+            key.declared_digest = None
         await self.db.flush()
         return released

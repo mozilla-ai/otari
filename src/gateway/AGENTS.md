@@ -209,10 +209,12 @@ once, in the request preamble, and reused at admission; the same decision says
 where a referenced upload goes, staged for the gateway's sandbox or copied, for
 each candidate as it is dispatched, into the provider account whose container
 will read it (`FileService.provider_file_ids`). The tool loop is in
-`services/mcp_loop.py`, sandbox and search backends under `services/`, and
-outbound URL checks in `services/url_safety.py`. A request that declares several
+`services/mcp_loop.py`, the sandbox and the older search backend under `services/`,
+the web search and fetch backends on any-search and any-fetch under `services/tools/`,
+and outbound URL checks in `services/url_safety.py`. A request that declares several
 tools gets one loop over all of them: `_open_tool_backends` in `_pipeline.py`
-opens each declared backend into a `CombinedToolBackend` (`services/tools/_combined_backend.py`).
+opens each declared backend into a `CombinedToolBackend` (`services/tools/_combined_backend.py`),
+web search and web fetch as two of them when a search instance serves the request.
 
 Deployment settings establish available backends. Workspace code-execution and
 web-search policy can disable or narrow those settings but cannot widen them.

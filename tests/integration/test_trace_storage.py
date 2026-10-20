@@ -103,6 +103,9 @@ async def test_a_write_creates_the_trace_and_totals_its_spans(
                     parent_span_id="req-1",
                     input_tokens=100,
                     output_tokens=20,
+                    cache_read_tokens=60,
+                    cache_write_tokens=30,
+                    reasoning_tokens=5,
                     cost_snapshot=Decimal("0.0049"),
                 ),
                 _span("tool-1", kind="tool", minutes=1, tool_name="Bash", outcome="error"),
@@ -120,6 +123,8 @@ async def test_a_write_creates_the_trace_and_totals_its_spans(
     assert summary.started_at == _T0
     assert summary.last_activity_at == _T0 + timedelta(minutes=1, seconds=2)
     assert [span.span_id for span in detail.spans] == ["llm-1", "req-1", "tool-1"]
+    llm = detail.spans[0]
+    assert (llm.cache_read_tokens, llm.cache_write_tokens, llm.reasoning_tokens) == (60, 30, 5)
     assert detail.truncated is False
 
 
@@ -404,3 +409,21 @@ async def test_a_series_never_reads_traces_older_than_its_buckets_can_reach(
     assert [point.bucket for point in series] == ["2026-10-07T14:00:00Z", "2026-10-07T15:00:00Z"]
     [grouped] = statements
     assert "started_at >=" in grouped
+
+
+async def test_a_series_fails_a_session_for_its_own_errors_and_not_its_tools(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    await store.write(
+        (
+            _write(workspace, "recovered", _span("req-1"), _span("tool-1", kind="tool", outcome="error")),
+            _write(workspace, "failed", _span("req-1", outcome="error"), _span("tool-1", kind="tool", outcome="error")),
+        )
+    )
+
+    series = await store.series(TraceScope.deployment(), TraceFilter(), bucket="hour")
+
+    assert [(point.succeeded, point.failed) for point in series] == [(1, 1)]
+    page = await store.search(TraceScope.deployment(), TraceFilter(has_error=True), limit=10, offset=0)
+    assert sorted((item.trace_id, item.error_count) for item in page.items) == [("failed", 2), ("recovered", 1)]

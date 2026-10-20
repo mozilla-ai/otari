@@ -102,8 +102,10 @@ class BudgetResponse(BaseModel):
     origin: str | None = Field(
         default=None,
         description=(
-            "'config' while config.yml declares this budget, in which case every start writes the declared "
-            "values back over any change made through the API; null otherwise"
+            "'config' while config.yml declares this budget, in which case a start writes the declared "
+            "values back over any change made through the API when the budget's entry in config.yml "
+            "changed, and once on the first start after upgrading to a version that tracks this; "
+            "null otherwise"
         ),
     )
     created_at: str

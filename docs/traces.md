@@ -9,6 +9,11 @@ answers what an agent run did and cost, not only what one call did.
 No prompt, model output or tool content is recorded. A trace holds names, ids,
 timings, token counts, outcomes and costs.
 
+An LLM call's input tokens are its whole prompt, cached tokens included,
+whichever way its provider reports them. Beside them the call keeps how many
+input tokens were read from or written to the prompt cache, and how many output
+tokens went to reasoning.
+
 ## What makes a session
 
 Requests are grouped into one session only when the client names the session.
@@ -76,8 +81,9 @@ without a name.
 
 ## Turns, steps and tools
 
-- A **step** is one request to the gateway. Every retry is a step of its own,
-  with its own cost.
+- A **step** is one request to the gateway, named for the endpoint that served
+  it, such as `/v1/chat/completions`. Every retry is a step of its own, with its
+  own cost.
 - A **turn** starts at a step whose last input is the user's own text, and
   includes the steps after it that hand tool results back to the model. A turn
   is **failed** when its last step failed, **incomplete** when the response was
@@ -91,16 +97,32 @@ without a name.
   it failed, and when the result arrived. Their start is when the step before
   ended, so their duration is marked approximate.
 
+## Sessions and failures
+
+A session's error count is every span in it that ended in an error a fallback
+did not recover: a failed request, a failed provider call, a guardrail failure,
+a failed connection to an MCP server, and a tool that returned an error. The
+session series (`GET /api/v1/traces/series`, the Sessions chart) counts a
+session as **failed** only when one of those errors is not a tool's. A tool's
+error, such as a missing file or a search that found nothing, goes back to the
+model, which usually carries on, so a run whose requests all succeeded counts as
+succeeded however many tool errors it recovered from. That includes an MCP
+tool: a call the server answers with `isError`, or one that fails in transport,
+reaches the model as a tool error too. Only a failed connection to an MCP
+server fails the session. The error count, and the `has_error` filter, still
+include every one of them.
+
 ## Instrumented agents
 
 An agent that exports OpenTelemetry spans to `/otlp/v1/traces` (see
 [Importing external usage](external-usage.md)) has every span kept on its
 trace, including its own `invoke_agent` and `execute_tool` spans, with the span
 tree it sent. Span names and attribute values are kept only when they are
-identifier-shaped. The read API returns each of these spans with the
-`otel_trace_id` and `otel_span_id` it was exported with, in lowercase hex, so it
-can be joined back to the same trace in another backend. A span the gateway
-records itself has neither.
+identifier-shaped. A span's `gen_ai.response.finish_reasons` array is kept as
+one value, its reasons joined by a comma: `stop,length`. The read API returns
+each of these spans with the `otel_trace_id` and `otel_span_id` it was exported
+with, in lowercase hex, so it can be joined back to the same trace in another
+backend. A span the gateway records itself has neither.
 
 ## Reading traces
 

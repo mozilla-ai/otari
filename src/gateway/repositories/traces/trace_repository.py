@@ -50,6 +50,7 @@ class TraceGrowth:
     steps: int
     spans: int
     errors: int
+    failing_errors: int
     input_tokens: int
     output_tokens: int
     cost: Decimal
@@ -58,12 +59,21 @@ class TraceGrowth:
 
 
 def _grown(
-    steps: Any, spans: Any, errors: Any, input_tokens: Any, output_tokens: Any, cost: Any, earliest: Any, latest: Any
+    steps: Any,
+    spans: Any,
+    errors: Any,
+    failing_errors: Any,
+    input_tokens: Any,
+    output_tokens: Any,
+    cost: Any,
+    earliest: Any,
+    latest: Any,
 ) -> dict[str, Any]:
     return {
         "step_count": Trace.step_count + steps,
         "span_count": Trace.span_count + spans,
         "error_count": Trace.error_count + errors,
+        "failing_error_count": Trace.failing_error_count + failing_errors,
         "input_tokens": Trace.input_tokens + input_tokens,
         "output_tokens": Trace.output_tokens + output_tokens,
         "cost_snapshot": Trace.cost_snapshot + cost,
@@ -127,6 +137,7 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
                             row.steps,
                             row.spans,
                             row.errors,
+                            row.failing_errors,
                             row.input_tokens,
                             row.output_tokens,
                             row.cost,
@@ -143,6 +154,7 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
             column("steps", Integer),
             column("spans", Integer),
             column("errors", Integer),
+            column("failing_errors", Integer),
             column("input_tokens", BigInteger),
             column("output_tokens", BigInteger),
             column("cost", Numeric),
@@ -158,6 +170,7 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
                     grown.c.steps,
                     grown.c.spans,
                     grown.c.errors,
+                    grown.c.failing_errors,
                     grown.c.input_tokens,
                     grown.c.output_tokens,
                     grown.c.cost,
@@ -198,6 +211,7 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
     ) -> list[tuple[str, int, int]]:
         """Return ``(bucket, succeeded, failed)`` per populated bucket of trace start, oldest first.
 
+        A trace failed when it holds an error that fails its session, as the writer counted them.
         Only buckets within ``limit`` of the newest trace's: traces started before
         that are never read, so an unbounded window costs no more than a bounded one.
         """
@@ -211,7 +225,7 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
             newest_bucket = newest_bucket.replace(hour=0)
         floor = newest_bucket - (limit - 1) * _GRAIN[bucket]
         key = bucket_expr(dialect_name(self.db), bucket, Trace.started_at).label("bucket")
-        failed = func.sum(case((Trace.error_count > 0, 1), else_=0))
+        failed = func.sum(case((Trace.failing_error_count > 0, 1), else_=0))
         result = await self.db.execute(
             select(key, func.count(), failed)
             .where(*conditions, Trace.started_at >= floor)

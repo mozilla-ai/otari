@@ -165,6 +165,11 @@ GET /api/v1/settings                                # not yet wrapped
 PATCH /api/v1/settings                              # not yet wrapped
 GET /api/v1/settings/mail                           # not yet wrapped
 POST /api/v1/settings/mail/test                     # not yet wrapped
+GET /api/v1/health-checks                           # operator dashboard only
+POST /api/v1/health-checks/disable-failing          # operator dashboard only
+POST /api/v1/health-checks/run                      # operator dashboard only
+GET /api/v1/health-checks/settings                  # operator dashboard only
+PATCH /api/v1/health-checks/settings                # operator dashboard only
 GET /api/v1/settings/maintenance-mode               # not yet wrapped
 PATCH /api/v1/settings/maintenance-mode             # not yet wrapped
 # Model discovery / metadata

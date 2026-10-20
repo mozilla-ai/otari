@@ -2716,6 +2716,124 @@
     {
       "item": [
         {
+          "name": "Get Health Check Status",
+          "request": {
+            "description": "The settings, the run in progress, and the latest finished run by provider and by offering.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health-checks"
+              ],
+              "raw": "{{baseUrl}}/api/v1/health-checks"
+            }
+          }
+        },
+        {
+          "name": "Disable Failing Models",
+          "request": {
+            "description": "Stop serving every model the latest run found failing, on its hosted provider.\n\nEach stays listed on the Hosted providers page, priced, to be switched back on there.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health-checks",
+                "disable-failing"
+              ],
+              "raw": "{{baseUrl}}/api/v1/health-checks/disable-failing"
+            }
+          }
+        },
+        {
+          "name": "Run Health Checks",
+          "request": {
+            "description": "Start a run within a minute, whether or not the schedule is on.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health-checks",
+                "run"
+              ],
+              "raw": "{{baseUrl}}/api/v1/health-checks/run"
+            }
+          }
+        },
+        {
+          "name": "Get Health Check Settings",
+          "request": {
+            "description": "Whether the checks run on a schedule, how often, and what they send.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health-checks",
+                "settings"
+              ],
+              "raw": "{{baseUrl}}/api/v1/health-checks/settings"
+            }
+          }
+        },
+        {
+          "name": "Update Health Check Settings",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"interval_minutes\": 60,\n  \"schedule_enabled\": true\n}"
+            },
+            "description": "Change the settings. Turning the schedule on starts a run within a minute.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health-checks",
+                "settings"
+              ],
+              "raw": "{{baseUrl}}/api/v1/health-checks/settings"
+            }
+          }
+        }
+      ],
+      "name": "health-checks"
+    },
+    {
+      "item": [
+        {
           "name": "Check Policy",
           "request": {
             "body": {
@@ -7378,7 +7496,7 @@
         {
           "name": "Trace Series",
           "request": {
-            "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
+            "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
             "header": [],
             "method": "GET",
             "url": {
@@ -11050,7 +11168,7 @@
         {
           "name": "Trace Series",
           "request": {
-            "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
+            "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
             "header": [],
             "method": "GET",
             "url": {

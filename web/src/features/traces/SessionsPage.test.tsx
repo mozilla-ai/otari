@@ -203,6 +203,40 @@ describe("SessionsPage", () => {
     )
   })
 
+  it("shows how much of the session's and a call's prompt came from the cache", async () => {
+    const detail = traceDetail()
+    const spans = detail.spans.map((span) =>
+      span.span_id === "llm-1"
+        ? {
+            ...span,
+            input_tokens: 48_210,
+            cache_read_tokens: 41_900,
+            cache_write_tokens: 6_010,
+            reasoning_tokens: 12,
+          }
+        : span,
+    )
+    mockApi({ traces: [traceSummary()], traceDetail: { ...detail, spans } })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    await userEvent.hover(
+      await within(peek).findByRole("button", { name: "48,212 tokens" }),
+    )
+    expect(await screen.findByText("Cached")).toBeInTheDocument()
+    expect(screen.getByText("86.9%")).toBeInTheDocument()
+    await userEvent.click(
+      within(peek).getAllByRole("button", { name: /^Generation, gpt-5/ })[0],
+    )
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: "Attributes" }),
+    )
+    expect(within(peek).getByText("48,210 (41,900 cached)")).toBeInTheDocument()
+    expect(within(peek).getByText("Cache write tokens")).toBeInTheDocument()
+    expect(within(peek).getByText("Reasoning tokens")).toBeInTheDocument()
+  })
+
   it("opens the span a gateway decision is about", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 

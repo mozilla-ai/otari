@@ -478,8 +478,7 @@ class ToolSettings(BaseModel):
             "applies, and the one an unnamed POST /api/v1/search call uses. One whose provider "
             "any-search serves, or 'none' to turn in-loop search off. When unset: the instance the "
             "legacy web_search_provider or web_search_url settings describe, else the only search "
-            "instance, if there is exactly one and any-search serves its provider. Not in effect yet for "
-            "the in-loop tool: see docs/configuration.md."
+            "instance, if there is exactly one and any-search serves its provider."
         ),
     )
     web_fetch_default_tool: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -487,7 +486,7 @@ class ToolSettings(BaseModel):
         description=(
             "The fetch instance for the otari_web_fetch tool and for enriching search results, "
             "unless a search instance names its own fetch_tool. When unset: builtin_fetch, the "
-            "built-in fetcher. Not in effect yet for enrichment: see docs/configuration.md."
+            "built-in fetcher."
         ),
     )
     web_search_max_calls: Annotated[int | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -495,8 +494,8 @@ class ToolSettings(BaseModel):
         ge=1,
         description=(
             "How many search and fetch tool calls one request may make, together. A call past it "
-            "gets a tool error the model can recover from. When unset: 10. Not in effect yet: see "
-            "docs/configuration.md."
+            "gets a tool error the model can recover from. When unset: 10. Requests the old search "
+            "backend serves keep a fixed limit of 10: see docs/configuration.md."
         ),
     )
 
@@ -517,18 +516,15 @@ class ToolSettings(BaseModel):
         return bool(self.web_search_provider) and bool(self.web_search_provider_api_key)
 
     def web_search_configured(self) -> bool:
-        """Whether this deployment can run ``otari_web_search`` at all.
+        """Whether this deployment can run ``otari_web_search`` at all: whether the in-loop default yields a search.
 
         The one question the request path, the per-workspace page and the tool
         catalog all ask, so they cannot disagree about whether a workspace's
-        stored configuration governs anything.
-
-        ``web_search_url`` is read through ``otari_env`` as well as off the
-        field, matching every call site this replaces: the field is env-bridged,
-        so the two agree, and dropping the read here would quietly narrow what
-        counts as configured.
+        stored configuration governs anything. A deployment whose only search
+        configuration is one instance any-search serves answers yes, and
+        ``web_search_default_tool: none`` answers no, whatever else is set.
         """
-        return bool(self.web_search_url or otari_env("WEB_SEARCH_URL")) or self.web_search_provider_configured()
+        return in_loop_default(self) is not None
 
     def search_tool_providers(self) -> set[str]:
         """The distinct providers backing the configured search tools.

@@ -247,6 +247,25 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
             served.setdefault(provider, set()).add(model)
         return served
 
+    async def switch_off(self, provider: str, models: Collection[str]) -> int:
+        """Stop serving these models under ``provider``. Returns how many were still switched on."""
+        if not models:
+            return 0
+        result = cast(
+            CursorResult[Any],
+            await self.db.execute(
+                update(HostedProviderModel)
+                .where(
+                    HostedProviderModel.provider == provider,
+                    HostedProviderModel.model.in_(set(models)),
+                    HostedProviderModel.enabled.is_(True),
+                )
+                .values(enabled=False)
+                .execution_options(synchronize_session=False)
+            ),
+        )
+        return int(result.rowcount or 0)
+
     async def create_many(
         self, provider: str, names: Sequence[str], *, enabled: Mapping[str, bool]
     ) -> Sequence[HostedProviderModel]:

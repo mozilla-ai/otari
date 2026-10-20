@@ -218,8 +218,9 @@ class KeyInfo(BaseModel):
     end_user_budget_ids: list[str]
     max_end_users: int | None = None
     workspace_id: uuid.UUID
-    # Set while config.yml declares this key: every start writes the declared
-    # secret and settings back, so a change made here lasts until the next one.
+    # Set while config.yml declares this key: a start writes the declared secret
+    # and settings back when the key's entry changed, so a change made here lasts
+    # until config.yml changes the entry.
     config_name: str | None = None
     metadata: dict[str, Any]
 

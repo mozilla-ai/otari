@@ -77,7 +77,13 @@ describe("a build that replaces the nav-item module", () => {
       section(DEPLOYMENT_NAV_SECTIONS, "deployment-general")?.items.map(
         (item) => item.label,
       ),
-    ).toEqual(["Settings", "Accounts", "Hosted providers", "Credit grants"])
+    ).toEqual([
+      "Settings",
+      "Accounts",
+      "Hosted providers",
+      "Health",
+      "Credit grants",
+    ])
   })
 
   it("leaves every section no contribution names alone", () => {

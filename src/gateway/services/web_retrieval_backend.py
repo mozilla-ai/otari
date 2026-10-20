@@ -27,8 +27,8 @@ from gateway.services.tools import DEFAULT_MAX_RESULTS as DEFAULT_MAX_RESULTS
 from gateway.services.tools import WEB_FETCH_TOOL_NAME as WEB_FETCH_TOOL_NAME
 from gateway.services.tools import WEB_RETRIEVAL_RESULT_MAX_BYTES as WEB_RETRIEVAL_RESULT_MAX_BYTES
 from gateway.services.tools import WEB_SEARCH_NATIVE_TYPE_PREFIX as WEB_SEARCH_NATIVE_TYPE_PREFIX
+from gateway.services.tools import WEB_SEARCH_PURPOSE_HINT, WebFetchBackend, WebToolFailure, build_web_fetch_backend
 from gateway.services.tools import WEB_SEARCH_TOOL_NAME as WEB_SEARCH_TOOL_NAME
-from gateway.services.tools import WebFetchBackend, WebToolFailure, build_web_fetch_backend
 from gateway.services.tools import web_fetch_tool_definition as web_fetch_tool_definition
 from gateway.services.tools import web_search_tool_definition as web_search_tool_definition
 from gateway.services.traces import RequestTrace
@@ -81,12 +81,6 @@ _CONTENT_TRUNCATE_CHARS = 1500
 # single overlong or multiline value here shouldn't be the thing that makes
 # the result block hard to read.
 _PUBLISHED_DATE_MAX_CHARS = 128
-
-_DEFAULT_PURPOSE_HINT = (
-    "Prefer `web_search` for current information, news, recent events, "
-    "documentation lookups, or any question whose answer changes over time. "
-    "Returns ranked results with extracted page content where available."
-)
 
 
 class WebSearchNotReachableError(RuntimeError):
@@ -181,7 +175,7 @@ class WebRetrievalBackend:
         self._extract_content = extract_content
         self._extract_concurrency = extract_concurrency
         self._search_timeout_s = search_timeout_s
-        self._purpose_hint = purpose_hint or _DEFAULT_PURPOSE_HINT
+        self._purpose_hint = purpose_hint or WEB_SEARCH_PURPOSE_HINT
         # Sanitised copy of provider-specific knobs forwarded to the search
         # backend as extra `/search` query params. Only scalar values survive
         # (see `_search`); complex / None values are dropped so a misconfigured
