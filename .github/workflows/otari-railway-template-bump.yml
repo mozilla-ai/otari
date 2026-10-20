@@ -56,7 +56,6 @@ jobs:
             echo "::error::$TAG is not a published release"
             exit 1
           fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
