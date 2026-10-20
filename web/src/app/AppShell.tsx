@@ -1032,7 +1032,7 @@ function AppShellChrome() {
               })}
             </nav>
             {/* The account block, set off by a rule as in the navigation prototype:
-              the way onto the organization rail, the bundled guide, and the
+              the way onto the organization rail, the documentation, and the
               account control whose menu carries appearance and sign-out. */}
             {/* `-mx-3 px-3` so the rule runs the rail's full width and meets its
               right border, while the rows inside keep the rail's padding. A

@@ -52,7 +52,7 @@ test.describe("hybrid deployment", () => {
       data_plane_url: null,
       // Deployment-wide rather than standalone-only, and unset here: a hybrid
       // gateway may carry a hosted documentation link, and this one configures
-      // none, so the bundled guide stays the target.
+      // none, so the links open docs.otari.ai.
       docs_url: null,
       // Deployment-wide like docs_url, and unset here too.
       terms_url: null,

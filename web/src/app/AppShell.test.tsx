@@ -487,14 +487,14 @@ describe("AppShell responsive layout", () => {
     })
   })
 
-  it("links to the bundled user guide from the top bar", async () => {
+  it("links to the documentation site from the top bar", async () => {
     mockMatchMedia(false)
     await renderShell()
 
     // In the top bar, where the design puts it, rather than inside the account
-    // menu: the guide is read alongside a page rather than instead of one.
+    // menu: the docs are read alongside a page rather than instead of one.
     const guideLink = await screen.findByRole("link", { name: "Documentation" })
-    expect(guideLink).toHaveAttribute("href", "/docs")
+    expect(guideLink).toHaveAttribute("href", "https://docs.otari.ai/")
   })
 
   it("subscribes via the legacy matchMedia API when addEventListener is absent", async () => {
@@ -913,11 +913,11 @@ describe("AppShell entitlement gating", () => {
 
   it("leaves a path the registry does not declare alone", async () => {
     mockMatchMedia(false)
-    // The bundled guide is not a registered destination, so the registry has no
+    // The account page is not a registered destination, so the registry has no
     // opinion on it and must not gate it away with the rest.
     await renderShell(bootstrap({ surfaces: [] }), {
       entitlements: { capabilities: [] },
-      url: "/docs",
+      url: "/account",
     })
 
     expect(await screen.findByText("PAGE CONTENT")).toBeInTheDocument()
@@ -1236,18 +1236,18 @@ describe("AppShell entitlement gating", () => {
     ).toBeInTheDocument()
   })
 
-  it("keeps the bundled guide reachable from the account menu, for the phone", async () => {
+  it("keeps the documentation reachable from the account menu, for the phone", async () => {
     mockMatchMedia(false)
     const user = userEvent.setup()
     await renderShell()
 
     // The top bar's cluster is `hidden md:flex`, and this menu is what the
-    // mobile drawer contains, so without this row the guide has no control
+    // mobile drawer contains, so without this row the docs have no control
     // pointing at it below the breakpoint. The row carries `md:hidden` for the
     // mirror-image reason: above it, the top bar already answers.
     await user.click(screen.getByRole("button", { name: /^Account:/ }))
     const guideRow = await screen.findByRole("link", { name: "Documentation" })
-    expect(guideRow).toHaveAttribute("href", "/docs")
+    expect(guideRow).toHaveAttribute("href", "https://docs.otari.ai/")
     expect(guideRow).toHaveClass("md:hidden")
   })
 

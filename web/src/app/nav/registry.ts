@@ -670,7 +670,6 @@ export function navLabelForPath(pathname: string): string | undefined {
 
 /** Names for the chrome destinations, which no registry entry declares. */
 const CHROME_PAGE_LABELS: Readonly<Record<string, string | undefined>> = {
-  "/docs": "Documentation",
   "/account": "Account",
   "/invitations": "Invitations",
 }

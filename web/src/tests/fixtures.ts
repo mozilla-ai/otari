@@ -197,8 +197,8 @@ export function bootstrap(
     // served this page is the address that serves the API. The hosted-mode
     // snippet tests set it.
     data_plane_url: null,
-    // Null, because a fixture describes a deployment whose documentation is the
-    // bundled guide; the tests about an operator-configured docs site set it.
+    // Null, so Documentation links open docs.otari.ai; the tests about an
+    // operator-configured docs site set it.
     docs_url: null,
     // Unset, like docs_url: this fixture's deployment publishes none. The
     // account-menu tests set them.

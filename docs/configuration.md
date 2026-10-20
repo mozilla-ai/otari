@@ -1244,9 +1244,9 @@ each policy covers.
 
 ## Documentation links
 
-By default the dashboard's Documentation link opens the bundled guide at
-`/#/docs`. Set `docs_url` or `OTARI_DOCS_URL` to point it at an absolute
-HTTP or HTTPS URL. The bundled guide remains available.
+By default the dashboard's Documentation link opens
+[docs.otari.ai](https://docs.otari.ai/). Set `docs_url` or `OTARI_DOCS_URL` to
+point it at another absolute HTTP or HTTPS URL.
 
 ## Legal pages
 

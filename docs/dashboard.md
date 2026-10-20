@@ -353,11 +353,10 @@ daily invitation mail limit), you get the accept link to share,
 and an invitee new to the deployment chooses a password on the page it opens,
 so a deployment without SMTP can still bring people in. See [Configuration](configuration.md#mail).
 
-## Bundled guide and custom documentation
+## Custom documentation
 
-This guide is bundled into the dashboard at `/#/docs`. Set `docs_url` to make
-the dashboard's Documentation link open a different site. The bundled route
-remains available.
+The dashboard's Documentation link opens [docs.otari.ai](https://docs.otari.ai/).
+Set `docs_url` to make it open a different site.
 
 ## Legal pages
 

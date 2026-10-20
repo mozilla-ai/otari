@@ -207,7 +207,7 @@ describe("nav registry", () => {
     expect(navContextForPath("/settings")).toBe("deployment")
     expect(navContextForPath("/organization/members")).toBe("organization")
     // Unregistered paths open in the context the shell starts in.
-    expect(navContextForPath("/docs")).toBe("workspace")
+    expect(navContextForPath("/account")).toBe("workspace")
   })
 
   it("places providers above Org settings in General", () => {
@@ -279,7 +279,7 @@ describe("nav registry", () => {
     // The prefix pass is what a future child route (/routing/new) relies on to
     // inherit its parent's gating; only an exact match outranks it.
     expect(navItemForPath("/routing/new")?.label).toBe("Routing")
-    expect(navItemForPath("/docs")).toBeUndefined()
+    expect(navItemForPath("/account")).toBeUndefined()
   })
 
   it("points every entry at an absolute path", () => {
@@ -537,9 +537,9 @@ describe("navItemForPath", () => {
   })
 
   it("returns nothing for a path the registry does not declare", () => {
-    // The bundled guide and the 404 splat are not destinations, so they are
+    // The account page and the 404 splat are not destinations, so they are
     // never gated.
-    expect(navItemForPath("/docs")).toBeUndefined()
+    expect(navItemForPath("/account")).toBeUndefined()
     expect(navItemForPath("/nope")).toBeUndefined()
   })
 })
@@ -572,9 +572,9 @@ describe("isPathVisible", () => {
   })
 
   it("leaves a path the registry does not declare ungated", () => {
-    // The guide and the 404 splat: the registry governs what it declares and
+    // The account page and the 404 splat: the registry governs what it declares and
     // nothing else, so withholding every surface must not gate them.
-    expect(isPathVisible("/docs", () => false)).toBe(true)
+    expect(isPathVisible("/account", () => false)).toBe(true)
     expect(isPathVisible("/nope", () => false)).toBe(true)
   })
 })

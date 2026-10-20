@@ -782,11 +782,9 @@ class GatewayConfig(
         default=None,
         description=(
             "Where this deployment's documentation lives, as an absolute http(s) URL "
-            "(e.g. 'https://docs.otari.ai/en/'). Unset, the dashboard's Documentation links "
-            "point at the operator guide bundled with the gateway at /#/docs, which is the "
-            "right default for a self-hosted deployment. Set it to retarget those links at "
-            "a product documentation site instead; the bundled guide stays reachable at "
-            "/#/docs either way."
+            "(e.g. 'https://docs.example.com/'). Unset, the dashboard's Documentation links "
+            "open https://docs.otari.ai/. Set it to retarget those links at a documentation "
+            "site of the deployment's own."
         ),
     )
     terms_url: Annotated[str | None, Shown(SettingsGroup.GENERAL)] = Field(

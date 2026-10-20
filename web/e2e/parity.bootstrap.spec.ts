@@ -50,8 +50,7 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // browser reached. Only a hosted control plane sets it; see otari#823.
     data_plane_url: null,
     // No docs_url in this e2e environment, so the dashboard's Documentation
-    // links stay on the operator guide bundled with this gateway; see
-    // docs/configuration.md#documentation-links.
+    // links open docs.otari.ai; see docs/configuration.md#documentation-links.
     docs_url: null,
     // No legal pages configured here; see docs/configuration.md#legal-pages.
     terms_url: null,

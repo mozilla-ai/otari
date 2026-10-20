@@ -135,7 +135,6 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   // a seeded deployment has: the operator identity holds no invitation, and
   // there is no second organization to send it one.
   { route: "/invitations", name: "invitations", heading: /invitations/i },
-  { route: "/docs", name: "docs", heading: /./ },
 ]
 
 async function open(page: Page, route: string, heading: RegExp): Promise<void> {
