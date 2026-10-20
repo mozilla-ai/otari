@@ -143,7 +143,7 @@ describe("mergeCredentialFields", () => {
   })
 
   it("keeps a value whose field has stopped rendering", () => {
-    // `/providers` lets an instance's provider type be retyped mid-edit, which
+    // A different provider type renders different fields, which
     // changes the field list under values that are already out of client_args.
     // Dropping them here would delete the stored credential on save.
     expect(

@@ -82,14 +82,12 @@ class ModelAlias(Base):
 
 
 class ProviderCredential(Base):
-    """A provider instance configured at runtime through the dashboard.
+    """A provider instance the retired Deployment providers page stored.
 
-    The database counterpart of a ``providers:`` entry in config.yml: it is
-    merged over the config-file providers at runtime (see
-    ``provider_store_service``), with the stored row winning on an instance-name
-    collision. The API key is held encrypted (``secret_box``); ``last4`` is kept
-    in clear only so the UI can show which key is set without ever decrypting.
-    Standalone mode only, never used in the hybrid platform path.
+    Nothing serves on it: at startup each row is moved onto a hosted provider of
+    the same name and removed (``migrate_deployment_providers`` in
+    ``services/providers``). A row the move cannot take stays, so the Hosted
+    providers page can say why. The API key is held encrypted (``secret_box``).
     """
 
     __tablename__ = "provider_credentials"

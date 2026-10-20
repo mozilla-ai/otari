@@ -37,6 +37,7 @@ import {
   errorRateHealth,
   providerHealthStatus,
 } from "@/features/overview/overview"
+import { useHostedProviders } from "@/shared/api/hostedProviders"
 import { useModels } from "@/shared/api/models"
 import {
   useDeploymentOperator,
@@ -468,7 +469,7 @@ function OrganizationOverview() {
   // member is not asked here (the matrix has Spend & budgets Hidden for them).
   const managesSpend = canManage(context.data)
   // What this caller could route a request to, which is the setup guide's gate
-  // here: `/providers`, the operator page's answer to the same question,
+  // here: Hosted providers, the operator page's answer to the same question,
   // refuses this caller. The catalog is not operator-gated and is filtered to
   // the selectors this caller may name, the deployment's configured instances
   // plus their organization's own keys, so an empty one means there is nothing
@@ -642,12 +643,14 @@ function OrganizationOverview() {
   )
 }
 
-// The operator index uses the provider list to make the empty gateway a
-// useful getting-started page. The providers query is operator-gated, so this
-// only runs once the gate above has answered.
+// The operator index uses the provider lists to make the empty gateway a
+// useful getting-started page: the `config.yml` instances and the deployment's
+// hosted providers, either of which serves a request. Both queries are
+// operator-gated, so this only runs once the gate above has answered.
 function OperatorOverviewIndex() {
   const providers = useProviders()
-  if (providers.isLoading) {
+  const hosted = useHostedProviders(useSurfaces()("hosted_providers"))
+  if (providers.isLoading || hosted.isLoading) {
     // A visible wait beats a blank screen while the master-key-gated providers
     // query resolves on first paint.
     return <PageLoading />
@@ -657,10 +660,15 @@ function OperatorOverviewIndex() {
   // Its refetch goes down with it: the query is cached for minutes and does not
   // refetch on focus, so without this the page's Refresh could not clear the
   // banner and a recovered backend would need a full reload to be noticed.
+  // A failed hosted read counts none rather than blocking the page; the
+  // configured list is the one whose failure is reported.
+  const providerCount = providers.isSuccess
+    ? providers.data.providers.length + (hosted.data?.data?.length ?? 0)
+    : 0
   return (
     <OverviewPage
-      needsSetup={providers.isSuccess && providers.data.providers.length === 0}
-      hasProviders={providers.isSuccess && providers.data.providers.length > 0}
+      needsSetup={providers.isSuccess && providerCount === 0}
+      hasProviders={providerCount > 0}
       setupError={providers.error}
       refreshSetup={providers.refetch}
       setupFetching={providers.isFetching}
@@ -918,26 +926,18 @@ function OverviewHeader({
   )
 }
 
-// Where "add a provider credential" lives on this deployment. Standalone serves
-// both provider pages and this prefers the deployment's own, which is not the
-// obvious answer once there are two. It is the right one because of who reaches
-// this button: `OverviewIndex` hands a caller who does not operate the
-// deployment to `OrganizationOverview`, which links to the organization's
-// provider-key page, so the only person who can press this is the operator, and
-// `/providers` is where a fresh gateway is set up and carries the first-run
-// panel that continues the flow. Gating on the caller here too would restate a
-// rule already guaranteed one level up. Hosted and a control plane report no
-// `providers` surface, so naming it unconditionally would point an operator at
-// the shell's "not available here" panel.
-//
-// Only correct for *adding* one, which is why provider health does not use it:
-// `/providers/health` reports on `config.providers`, the process-global
-// table, so on a hosted deployment an unreachable instance is not a row the
-// organization page could show. `AttentionStrip` drops the link there rather
-// than sending somebody to a page the instance is not on.
-function useAddProviderRoute(): "/providers" | "/organization/provider-keys" {
+// Where "add a provider credential" lives on this deployment. Only an operator
+// reaches this button (`OverviewIndex` hands anyone else to
+// `OrganizationOverview`, which links to the organization's provider-key page),
+// so it prefers the deployment's own keys, Hosted providers, and falls back to
+// the organization page where this deployment publishes no such surface.
+function useAddProviderRoute():
+  | "/admin/hosted-providers"
+  | "/organization/provider-keys" {
   const serves = useSurfaces()
-  return serves("providers") ? "/providers" : "/organization/provider-keys"
+  return serves("hosted_providers")
+    ? "/admin/hosted-providers"
+    : "/organization/provider-keys"
 }
 
 function GetStartedStrip({
@@ -1023,12 +1023,10 @@ function AttentionStrip({
   isReady: boolean
   hasFailed: boolean
 }) {
-  // Provider health is about `config.providers`, which a hosted deployment
-  // serves no page for, so those two entries state the problem without offering
-  // a destination there. Naming one would be worse than naming none: both
-  // candidates are wrong, `/providers` because the shell answers it with "not
-  // available here" and the organization page because the instance is not on it.
-  const providerProblemsAreReachable = useSurfaces()("providers")
+  // Provider health is shown on Hosted providers. Where this deployment
+  // publishes no such page the entries state the problem without a link, since
+  // the organization page does not list these instances.
+  const providerProblemsAreReachable = useSurfaces()("hosted_providers")
   // A failed source deserves a visible status message; while loading, wait for
   // actionable information instead of reserving space for a transient banner.
   if (hasFailed) {
@@ -1052,13 +1050,17 @@ function AttentionStrip({
     if (down > 0) {
       problems.push({
         text: `${down} provider${down === 1 ? "" : "s"} unreachable`,
-        to: providerProblemsAreReachable ? "/providers" : undefined,
+        to: providerProblemsAreReachable
+          ? "/admin/hosted-providers"
+          : undefined,
       })
     }
     if (degraded > 0) {
       problems.push({
         text: `${degraded} provider${degraded === 1 ? "" : "s"} without model discovery`,
-        to: providerProblemsAreReachable ? "/providers" : undefined,
+        to: providerProblemsAreReachable
+          ? "/admin/hosted-providers"
+          : undefined,
       })
     }
   }

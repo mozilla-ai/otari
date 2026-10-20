@@ -610,7 +610,7 @@ class DeploymentProviderMigrationRequest(SQLModel):
 
 
 class DeploymentProviderMigrationPublic(SQLModel):
-    """The deployment providers stored through the dashboard, and how each moves onto a hosted provider."""
+    """The deployment providers the retired dashboard page stored, and how each moves onto a hosted provider."""
 
     rows: list[DeploymentProviderMigrationRowPublic]
 

@@ -5,15 +5,10 @@ import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { HealthPill } from "@/features/providers/HealthPill"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 
-// The instances stored through the deployment providers page are left out:
-// the move banner carries them onto hosted providers instead.
-
 export function ConfiguredInstancesSection() {
   const providers = useProviders()
   const health = useProviderHealth()
-  const configured = (providers.data?.providers ?? []).filter(
-    (provider) => provider.source === "config",
-  )
+  const configured = providers.data?.providers ?? []
   if (!providers.error && configured.length === 0) return null
 
   const healthByInstance = new Map<string, ProviderHealth>(

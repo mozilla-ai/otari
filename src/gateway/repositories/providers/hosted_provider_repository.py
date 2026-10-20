@@ -131,13 +131,12 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
         await self.db.delete(row)
         await self.db.flush()
 
-    # The deployment providers stored through the dashboard (``provider_credentials``)
+    # The deployment providers the retired dashboard page stored (``provider_credentials``)
     # are what moves onto hosted providers, so the move reads and removes them
-    # here. The table goes once the move has run everywhere; until then the
-    # runtime overlay still reads it through ``services/provider_store_service.py``.
+    # here. The table goes once the move has run everywhere.
 
     async def list_deployment_providers(self) -> Sequence[ProviderCredential]:
-        """Every deployment provider stored through the dashboard, by instance name, bounded."""
+        """Every deployment provider the retired dashboard page stored, by instance name, bounded."""
         result = await self.db.execute(
             select(ProviderCredential).order_by(ProviderCredential.instance).limit(_ALL_PROVIDERS)
         )

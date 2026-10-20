@@ -1699,24 +1699,45 @@ export interface paths {
         };
         /**
          * Preview Deployment Provider Migration
-         * @description What moving the deployment providers stored through the dashboard onto hosted providers would do.
+         * @description What moving the deployment providers the retired dashboard page stored onto hosted providers would do.
          *
-         *     Writes nothing and dials nothing.
+         *     The gateway moves them at startup, so this lists the ones it could not
+         *     move, each with the reason. Writes nothing and dials nothing.
          */
         get: operations["hosted-providers-preview_deployment_provider_migration"];
         put?: never;
         /**
          * Apply Deployment Provider Migration
-         * @description Move the deployment providers stored through the dashboard onto hosted providers of the same name.
+         * @description Move the deployment providers the retired dashboard page stored onto hosted providers of the same name.
          *
-         *     Each is created as a hosted provider, offering what it lists as a create
-         *     does, and the deployment provider is removed once the hosted one offers a
-         *     model. One that cannot move is reported and left in place. ``rows``
+         *     Each is created as a hosted provider that serves models not on its roster,
+         *     offering what it lists as a create does, and the deployment provider is
+         *     removed. One that cannot move is reported and left in place. ``rows``
          *     limits the move to the rows of the preview the caller reviewed, at the
          *     versions it was shown them.
          */
         post: operations["hosted-providers-apply_deployment_provider_migration"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/migration/{instance}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Discard Deployment Provider
+         * @description Remove a deployment provider the move could not take, which serves nothing.
+         */
+        delete: operations["hosted-providers-discard_deployment_provider"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1735,7 +1756,7 @@ export interface paths {
          * Reencrypt Hosted Providers
          * @description Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.
          *
-         *     Run after rotating the key, alongside ``POST /api/v1/provider-credentials/reencrypt``.
+         *     Run after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.
          *     A provider no configured key reads is left as it is, to be re-entered.
          */
         post: operations["hosted-providers-reencrypt_hosted_providers"];
@@ -4792,128 +4813,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/provider-credentials": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Stored Providers
-         * @description List runtime-stored providers. Keys are never returned, only ``last4``.
-         */
-        get: operations["providers-list_stored_providers"];
-        put?: never;
-        /**
-         * Create Stored Provider
-         * @description Add a provider at runtime. Storing a key requires OTARI_SECRET_KEY.
-         */
-        post: operations["providers-create_stored_provider"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/provider-credentials/reencrypt": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reencrypt Stored Provider Keys
-         * @description Re-encrypt stored provider keys with the primary OTARI_SECRET_KEY.
-         *
-         *     Operators rotate ``OTARI_SECRET_KEY`` by setting it to ``new,old`` first,
-         *     restarting, running this endpoint, then removing the old key and restarting
-         *     again. Rows that cannot be decrypted are left untouched and must be recovered
-         *     by replacing the affected provider keys.
-         */
-        post: operations["providers-reencrypt_stored_provider_keys"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/provider-credentials/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Test Provider Connection
-         * @description Test provider credentials without storing them (for the add/edit form).
-         *
-         *     Resolves the implementation from ``provider_type`` (honoring the
-         *     ``*-compatible`` aliases) or the ``instance`` name, then lists the provider's
-         *     models with the supplied credentials. Nothing is persisted and the key is
-         *     never echoed.
-         */
-        post: operations["providers-test_provider_connection"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/provider-credentials/{instance}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Stored Provider
-         * @description Delete a stored provider. A config.yml provider cannot be deleted here.
-         */
-        delete: operations["providers-delete_stored_provider"];
-        options?: never;
-        head?: never;
-        /**
-         * Update Stored Provider
-         * @description Update a stored provider. Omitted fields are left as-is; an explicit ``null`` clears them.
-         *
-         *     ``api_key`` follows the same rule: omit it to keep the stored key, send a new
-         *     one to rotate, or send ``null`` to clear it. The row is locked ``FOR UPDATE``
-         *     so the ``expected_updated_at`` check and the write it guards are atomic.
-         */
-        patch: operations["providers-update_stored_provider"];
-        trace?: never;
-    };
-    "/api/v1/provider-credentials/{instance}/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Test Stored Provider
-         * @description Verify a stored provider's key by listing its models, without exposing the key.
-         */
-        post: operations["providers-test_stored_provider"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/provider-endpoints": {
         parameters: {
             query?: never;
@@ -5551,7 +5450,7 @@ export interface paths {
          * @description Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.
          *
          *     The search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it
-         *     alongside ``POST /api/v1/provider-credentials/reencrypt``. Rows that cannot be
+         *     alongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be
          *     decrypted are left untouched and must be recovered by replacing the affected
          *     tool's key.
          */
@@ -9488,33 +9387,6 @@ export interface components {
             password?: string | null;
         };
         /**
-         * CreateStoredProviderRequest
-         * @description Create a stored provider. ``api_key`` is write-only and requires OTARI_SECRET_KEY.
-         */
-        CreateStoredProviderRequest: {
-            /** Api Base */
-            api_base?: string | null;
-            /**
-             * Api Key
-             * @description Provider API key. Stored encrypted; never returned.
-             */
-            api_key?: string | null;
-            /** Client Args */
-            client_args?: {
-                [key: string]: unknown;
-            } | null;
-            /**
-             * Instance
-             * @description Routing key, e.g. 'openai' or a named instance like 'home_lab'.
-             */
-            instance: string;
-            /**
-             * Provider Type
-             * @description any-llm implementation when the instance name is not itself one.
-             */
-            provider_type?: string | null;
-        };
-        /**
          * CreateUserRequest
          * @description Request model for creating a new user.
          */
@@ -9853,7 +9725,7 @@ export interface components {
         };
         /**
          * DeploymentProviderMigrationPublic
-         * @description The deployment providers stored through the dashboard, and how each moves onto a hosted provider.
+         * @description The deployment providers the retired dashboard page stored, and how each moves onto a hosted provider.
          */
         DeploymentProviderMigrationPublic: {
             /** Rows */
@@ -15011,11 +14883,11 @@ export interface components {
             provider_type: string;
             /**
              * Source
-             * @description Where the instance is defined: 'config' for config.yml (or OTARI_CONFIG_YAML), 'dashboard' for one stored through the deployment providers page.
+             * @description Where the instance is defined: 'config' for config.yml (or OTARI_CONFIG_YAML).
              * @default config
-             * @enum {string}
+             * @constant
              */
-            source: "config" | "dashboard";
+            source: "config";
         };
         /**
          * ProvidersResponse
@@ -15242,28 +15114,6 @@ export interface components {
             task_id: string | null;
             /** Warm */
             warm: boolean;
-        };
-        /**
-         * ReencryptProviderCredentialsResponse
-         * @description Result of re-encrypting stored provider keys with the primary secret key.
-         */
-        ReencryptProviderCredentialsResponse: {
-            /**
-             * Reencrypted
-             * @description Number of stored provider keys re-encrypted.
-             */
-            reencrypted: number;
-            /**
-             * Skipped
-             * @description Number of rows whose stored key changed between the read and the write, so the re-encryption was not applied. They already hold whoever wrote them last.
-             * @default 0
-             */
-            skipped: number;
-            /**
-             * Unreadable
-             * @description Number of encrypted keys left untouched because they could not be decrypted.
-             */
-            unreadable: number;
         };
         /**
          * ReencryptSearchToolsResponse
@@ -16460,33 +16310,6 @@ export interface components {
             tool_type: string | null;
         };
         /**
-         * StoredProviderResponse
-         * @description A runtime-stored provider. The API key is never returned, only ``last4``.
-         */
-        StoredProviderResponse: {
-            /** Api Base */
-            api_base?: string | null;
-            /** Client Args */
-            client_args?: {
-                [key: string]: unknown;
-            };
-            /** Created At */
-            created_at?: string | null;
-            /**
-             * Decryptable
-             * @default true
-             */
-            decryptable: boolean;
-            /** Instance */
-            instance: string;
-            /** Last4 */
-            last4?: string | null;
-            /** Provider Type */
-            provider_type?: string | null;
-            /** Updated At */
-            updated_at?: string | null;
-        };
-        /**
          * StoredSearchToolSchema
          * @description A runtime-stored search or fetch instance. The API key is never returned, only ``last4``.
          */
@@ -16573,45 +16396,6 @@ export interface components {
             task_id: string;
             /** Warm */
             warm: boolean;
-        };
-        /**
-         * TestProviderRequest
-         * @description Credentials to test before saving (from the add-provider form).
-         */
-        TestProviderRequest: {
-            /** Api Base */
-            api_base?: string | null;
-            /** Api Key */
-            api_key?: string | null;
-            /** Client Args */
-            client_args?: {
-                [key: string]: unknown;
-            } | null;
-            /**
-             * Instance
-             * @description Provider/instance name; the impl when no provider_type.
-             */
-            instance?: string | null;
-            /** Provider Type */
-            provider_type?: string | null;
-        };
-        /**
-         * TestProviderResponse
-         * @description Result of a live provider connection test.
-         */
-        TestProviderResponse: {
-            /**
-             * Discovery Unsupported
-             * @description True when the test failed only because this backend serves no model-listing endpoint, so the credentials could not be verified this way but may still work for requests.
-             * @default false
-             */
-            discovery_unsupported: boolean;
-            /** Error */
-            error?: string | null;
-            /** Model Count */
-            model_count: number;
-            /** Ok */
-            ok: boolean;
         };
         /**
          * TestServiceRequest
@@ -17197,30 +16981,6 @@ export interface components {
             vision_describe_model?: string | null;
             /** Vision Strategy */
             vision_strategy?: ("describe" | "ocr" | "off") | null;
-        };
-        /**
-         * UpdateStoredProviderRequest
-         * @description Update a stored provider. Omitted fields are unchanged; ``api_key`` rotates in place.
-         */
-        UpdateStoredProviderRequest: {
-            /** Api Base */
-            api_base?: string | null;
-            /**
-             * Api Key
-             * @description New API key. Omit to keep the existing one. Never returned.
-             */
-            api_key?: string | null;
-            /** Client Args */
-            client_args?: {
-                [key: string]: unknown;
-            } | null;
-            /**
-             * Expected Updated At
-             * @description Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.
-             */
-            expected_updated_at?: string | null;
-            /** Provider Type */
-            provider_type?: string | null;
         };
         /**
          * UpdateToolSettingsRequest
@@ -21225,6 +20985,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DeploymentProviderMigrationPublic"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-discard_deployment_provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -26718,207 +26507,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "providers-list_stored_providers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StoredProviderResponse"][];
-                };
-            };
-        };
-    };
-    "providers-create_stored_provider": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateStoredProviderRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StoredProviderResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "providers-reencrypt_stored_provider_keys": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReencryptProviderCredentialsResponse"];
-                };
-            };
-        };
-    };
-    "providers-test_provider_connection": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TestProviderRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TestProviderResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "providers-delete_stored_provider": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                instance: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "providers-update_stored_provider": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                instance: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateStoredProviderRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StoredProviderResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "providers-test_stored_provider": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                instance: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TestProviderResponse"];
-                };
             };
             /** @description Validation Error */
             422: {

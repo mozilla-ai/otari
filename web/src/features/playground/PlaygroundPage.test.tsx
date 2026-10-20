@@ -447,6 +447,21 @@ describe("the Playground before the first question", () => {
     expect(
       await screen.findByText("No models to chat with"),
     ).toBeInTheDocument()
+    expect(
+      await screen.findByRole("link", { name: "Hosted providers" }),
+    ).toHaveAttribute("href", "/admin/hosted-providers")
+  })
+
+  it("points a caller who does not operate the deployment at the organization's providers", async () => {
+    mockApi({
+      catalog: { ...CATALOG, models: [] },
+      context: { ...context(), deployment_operator: false },
+    })
+    renderPage()
+
+    expect(
+      await screen.findByRole("link", { name: "Providers" }),
+    ).toHaveAttribute("href", "/organization/provider-keys")
   })
 })
 

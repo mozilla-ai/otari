@@ -723,7 +723,7 @@ async def require_deployment_operator(
     role against the organization, workspace or deployment they are acting on.
     It is wrong for the deployment-wide routers, where clearing it *is* the
     whole authorization: `/api/v1/keys` mints a key into any workspace,
-    `/api/v1/provider-credentials` holds process-global provider secrets, and
+    `/api/v1/hosted-providers` holds process-global provider secrets, and
     `POST /api/v1/settings/master-key/rotate` replaces the deployment credential. On
     a single-operator deployment every login is that operator and the
     distinction is invisible; once mutually-untrusting tenants sign in to one

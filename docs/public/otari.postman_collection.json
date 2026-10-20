@@ -2941,7 +2941,7 @@
         {
           "name": "Preview Deployment Provider Migration",
           "request": {
-            "description": "What moving the deployment providers stored through the dashboard onto hosted providers would do.\n\nWrites nothing and dials nothing.",
+            "description": "What moving the deployment providers the retired dashboard page stored onto hosted providers would do.\n\nThe gateway moves them at startup, so this lists the ones it could not\nmove, each with the reason. Writes nothing and dials nothing.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2970,7 +2970,7 @@
               },
               "raw": "{\n  \"rows\": [\n    {\n      \"instance\": \"openai-eu\",\n      \"updated_at\": \"2026-10-19T09:00:00Z\"\n    }\n  ]\n}"
             },
-            "description": "Move the deployment providers stored through the dashboard onto hosted providers of the same name.\n\nEach is created as a hosted provider, offering what it lists as a create\ndoes, and the deployment provider is removed once the hosted one offers a\nmodel. One that cannot move is reported and left in place. ``rows``\nlimits the move to the rows of the preview the caller reviewed, at the\nversions it was shown them.",
+            "description": "Move the deployment providers the retired dashboard page stored onto hosted providers of the same name.\n\nEach is created as a hosted provider that serves models not on its roster,\noffering what it lists as a create does, and the deployment provider is\nremoved. One that cannot move is reported and left in place. ``rows``\nlimits the move to the rows of the preview the caller reviewed, at the\nversions it was shown them.",
             "header": [
               {
                 "key": "Content-Type",
@@ -2993,9 +2993,37 @@
           }
         },
         {
+          "name": "Discard Deployment Provider",
+          "request": {
+            "description": "Remove a deployment provider the move could not take, which serves nothing.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                "migration",
+                ":instance"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/migration/:instance",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "instance",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Reencrypt Hosted Providers",
           "request": {
-            "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nRun after rotating the key, alongside ``POST /api/v1/provider-credentials/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
+            "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nRun after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
             "header": [],
             "method": "POST",
             "url": {
@@ -9428,308 +9456,6 @@
     {
       "item": [
         {
-          "name": "List Stored Providers",
-          "request": {
-            "description": "List runtime-stored providers. Keys are never returned, only ``last4``.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provider-credentials"
-              ],
-              "raw": "{{baseUrl}}/api/v1/provider-credentials"
-            }
-          }
-        },
-        {
-          "name": "Create Stored Provider",
-          "request": {
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"instance\": \"string\"\n}"
-            },
-            "description": "Add a provider at runtime. Storing a key requires OTARI_SECRET_KEY.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provider-credentials"
-              ],
-              "raw": "{{baseUrl}}/api/v1/provider-credentials"
-            }
-          }
-        },
-        {
-          "name": "Reencrypt Stored Provider Keys",
-          "request": {
-            "description": "Re-encrypt stored provider keys with the primary OTARI_SECRET_KEY.\n\nOperators rotate ``OTARI_SECRET_KEY`` by setting it to ``new,old`` first,\nrestarting, running this endpoint, then removing the old key and restarting\nagain. Rows that cannot be decrypted are left untouched and must be recovered\nby replacing the affected provider keys.",
-            "header": [],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provider-credentials",
-                "reencrypt"
-              ],
-              "raw": "{{baseUrl}}/api/v1/provider-credentials/reencrypt"
-            }
-          }
-        },
-        {
-          "name": "Test Provider Connection",
-          "request": {
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"client_args\": {},\n  \"instance\": \"string\",\n  \"provider_type\": \"string\"\n}"
-            },
-            "description": "Test provider credentials without storing them (for the add/edit form).\n\nResolves the implementation from ``provider_type`` (honoring the\n``*-compatible`` aliases) or the ``instance`` name, then lists the provider's\nmodels with the supplied credentials. Nothing is persisted and the key is\nnever echoed.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provider-credentials",
-                "test"
-              ],
-              "raw": "{{baseUrl}}/api/v1/provider-credentials/test"
-            }
-          }
-        },
-        {
-          "name": "Update Stored Provider",
-          "request": {
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"client_args\": {},\n  \"expected_updated_at\": \"string\",\n  \"provider_type\": \"string\"\n}"
-            },
-            "description": "Update a stored provider. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it. The row is locked ``FOR UPDATE``\nso the ``expected_updated_at`` check and the write it guards are atomic.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "method": "PATCH",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provider-credentials",
-                ":instance"
-              ],
-              "raw": "{{baseUrl}}/api/v1/provider-credentials/:instance",
-              "variable": [
-                {
-                  "description": "path parameter",
-                  "key": "instance",
-                  "value": ""
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Delete Stored Provider",
-          "request": {
-            "description": "Delete a stored provider. A config.yml provider cannot be deleted here.",
-            "header": [],
-            "method": "DELETE",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provider-credentials",
-                ":instance"
-              ],
-              "raw": "{{baseUrl}}/api/v1/provider-credentials/:instance",
-              "variable": [
-                {
-                  "description": "path parameter",
-                  "key": "instance",
-                  "value": ""
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Test Stored Provider",
-          "request": {
-            "description": "Verify a stored provider's key by listing its models, without exposing the key.",
-            "header": [],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provider-credentials",
-                ":instance",
-                "test"
-              ],
-              "raw": "{{baseUrl}}/api/v1/provider-credentials/:instance/test",
-              "variable": [
-                {
-                  "description": "path parameter",
-                  "key": "instance",
-                  "value": ""
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "List Providers",
-          "request": {
-            "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and models.dev\ndatasets. No provider is contacted, so this is cheap and always available.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "providers"
-              ],
-              "raw": "{{baseUrl}}/api/v1/providers"
-            }
-          }
-        },
-        {
-          "name": "Provider Catalog",
-          "request": {
-            "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the models.dev catalog, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "providers",
-                "catalog"
-              ],
-              "raw": "{{baseUrl}}/api/v1/providers/catalog"
-            }
-          }
-        },
-        {
-          "name": "Provider Catalog Detail",
-          "request": {
-            "description": "Autofill hints for one provider the add-provider form has selected.\n\nImports only the selected provider's any-llm module (not the whole catalog)\nto report its credential env var, default endpoint, whether a key is required,\nand whether that env var is already set on the server. Returns 404 for an\nunknown provider id.\n\nThe SDK import is offloaded to a worker thread: the first fetch for a given\nprovider imports that provider's module, which would otherwise block the event\nloop (and thus every concurrent request) for the import's duration.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "providers",
-                "catalog",
-                ":provider_id"
-              ],
-              "raw": "{{baseUrl}}/api/v1/providers/catalog/:provider_id",
-              "variable": [
-                {
-                  "description": "path parameter",
-                  "key": "provider_id",
-                  "value": ""
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Provider Health",
-          "request": {
-            "description": "Report every configured provider's reachability, with a last-checked time.\n\nCovers the configured provider instances and every hosted provider switched\non, each hosted provider under its provider name. A hosted provider that a\nconfigured instance of the same name shadows is not reported. One whose\nstored key cannot be decrypted with the configured `OTARI_SECRET_KEY` is\nreported unreachable with that reason.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "providers",
-                "health"
-              ],
-              "query": [
-                {
-                  "description": "",
-                  "disabled": true,
-                  "key": "refresh",
-                  "value": ""
-                }
-              ],
-              "raw": "{{baseUrl}}/api/v1/providers/health?refresh="
-            }
-          }
-        }
-      ],
-      "name": "providers"
-    },
-    {
-      "item": [
-        {
           "name": "List Provider Endpoints",
           "request": {
             "description": "List owned provider endpoints, narrowed by owner when given. Keys are never returned.",
@@ -9904,6 +9630,106 @@
         }
       ],
       "name": "provider-endpoints"
+    },
+    {
+      "item": [
+        {
+          "name": "List Providers",
+          "request": {
+            "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and models.dev\ndatasets. No provider is contacted, so this is cheap and always available.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "providers"
+              ],
+              "raw": "{{baseUrl}}/api/v1/providers"
+            }
+          }
+        },
+        {
+          "name": "Provider Catalog",
+          "request": {
+            "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the models.dev catalog, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "providers",
+                "catalog"
+              ],
+              "raw": "{{baseUrl}}/api/v1/providers/catalog"
+            }
+          }
+        },
+        {
+          "name": "Provider Catalog Detail",
+          "request": {
+            "description": "Autofill hints for one provider the add-provider form has selected.\n\nImports only the selected provider's any-llm module (not the whole catalog)\nto report its credential env var, default endpoint, whether a key is required,\nand whether that env var is already set on the server. Returns 404 for an\nunknown provider id.\n\nThe SDK import is offloaded to a worker thread: the first fetch for a given\nprovider imports that provider's module, which would otherwise block the event\nloop (and thus every concurrent request) for the import's duration.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "providers",
+                "catalog",
+                ":provider_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/providers/catalog/:provider_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Provider Health",
+          "request": {
+            "description": "Report every configured provider's reachability, with a last-checked time.\n\nCovers the configured provider instances and every hosted provider switched\non, each hosted provider under its provider name. A hosted provider that a\nconfigured instance of the same name shadows is not reported. One whose\nstored key cannot be decrypted with the configured `OTARI_SECRET_KEY` is\nreported unreachable with that reason.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "providers",
+                "health"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "refresh",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/providers/health?refresh="
+            }
+          }
+        }
+      ],
+      "name": "providers"
     },
     {
       "item": [
@@ -10456,7 +10282,7 @@
         {
           "name": "Reencrypt Stored Search Tool Keys",
           "request": {
-            "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/provider-credentials/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
+            "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
             "header": [],
             "method": "POST",
             "url": {

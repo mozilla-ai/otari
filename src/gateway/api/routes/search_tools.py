@@ -3,8 +3,7 @@
 ``POST /api/v1/search`` dispatches against the ``search_tools`` map. That map used to
 come only from a config file, so a deployment configured entirely through the
 dashboard and environment variables could not use the endpoint at all (issue
-#601). These endpoints are the missing route in, and they are deliberately the
-same shape as ``/api/v1/provider-credentials``: rows in ``search_tool_credentials``,
+#601). These endpoints are the missing route in: rows in ``search_tool_credentials``,
 the API key encrypted at rest and never returned, merged over the config-file
 tools with the stored row winning on a name collision. A row is a search or a
 fetch instance, as its ``kind`` says, and fetch instances share these routes, so
@@ -239,7 +238,7 @@ async def reencrypt_stored_search_tool_keys(
     """Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.
 
     The search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it
-    alongside ``POST /api/v1/provider-credentials/reencrypt``. Rows that cannot be
+    alongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be
     decrypted are left untouched and must be recovered by replacing the affected
     tool's key.
     """

@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { PageError } from "@/design-system/feedback/PageError"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 
 import type { PlaygroundGate } from "./helpers/playgroundView"
 
@@ -13,7 +14,8 @@ import type { PlaygroundGate } from "./helpers/playgroundView"
  * somebody somewhere different. A failed catalog read is not fixed by adding a
  * provider, so it says so and offers no link; no workspace is an operator's to
  * fix and not the reader's; no models is the one case where there is a page to
- * go to and something to do on it.
+ * go to and something to do on it: the deployment's own keys for an operator,
+ * the organization's for anyone else.
  */
 export function PlaygroundGateNotice({
   gate,
@@ -23,6 +25,8 @@ export function PlaygroundGateNotice({
   /** The catalog read's error, for the one gate that has one. */
   error?: unknown
 }) {
+  const { isOperator } = useDeploymentOperator()
+
   if (gate === "loading") {
     return <PageLoading label="Loading the Playground" />
   }
@@ -48,10 +52,14 @@ export function PlaygroundGateNotice({
       <p className="text-body text-muted">
         Start on the{" "}
         <Link
-          to="/providers"
+          to={
+            isOperator
+              ? "/admin/hosted-providers"
+              : "/organization/provider-keys"
+          }
           className="font-medium text-link hover:text-link-hover"
         >
-          Providers
+          {isOperator ? "Hosted providers" : "Providers"}
         </Link>{" "}
         page.
       </p>

@@ -90,7 +90,7 @@ async def test_the_refusal_names_how_to_declare_the_provider() -> None:
     assert missing is not None
     assert "providers:" in missing.detail
     assert "${COHERE_API_KEY}" in missing.detail
-    assert "Providers page" in missing.detail
+    assert "Hosted providers page" in missing.detail
     assert "organization provider key" in missing.detail
 
 

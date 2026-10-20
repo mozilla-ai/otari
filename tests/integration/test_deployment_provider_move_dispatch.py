@@ -1,14 +1,16 @@
-"""A deployment provider moved onto a hosted provider keeps serving every path it served, end to end.
+"""A deployment provider the retired Deployment providers page stored keeps serving every path, end to end.
 
-Each case stores a deployment provider through ``/provider-credentials`` as the
-Deployment providers page does, sends a request that it serves, moves it onto
-hosted providers, and sends the same request again. The second request must
-reach the same endpoint on the same key: the move changes where the credential
-is stored, never what a caller can reach with it. Model discovery is stubbed;
-each provider call is captured at the any-llm boundary.
+Each case leaves a row in the table that page wrote, as an upgrade finds it,
+then starts the gateway, which moves the row onto a hosted provider of the same
+name, and sends the request the row served. It must reach the same endpoint on
+the same key: the move changes where the credential is stored, never what a
+caller can reach with it. Model discovery is stubbed; each provider call is
+captured at the any-llm boundary.
 """
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import AbstractContextManager, contextmanager
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -30,17 +32,22 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.models.providers import HostedProvider, ProviderCredential
 from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
 from gateway.services.model_discovery_service import ProviderDiscovery
-from gateway.services.secret_box import generate_secret_key
+from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
-from .conftest import shared_test_config
+from .conftest import build_test_client, shared_test_config
 
-MOVE = f"{API_ROOT}/hosted-providers/migration"
 VLLM_BASE = "http://vllm.test/v1"
 EU_BASE = "https://eu.test/v1"
 EU_KEY = "sk-eu-1234"
+MASTER = {"Otari-Key": "Bearer test-master-key"}
+VLLM = {"my-vllm": {"provider_type": "openai", "api_base": VLLM_BASE}}
+EU = {"openai-eu": {"provider_type": "openai", "api_key": EU_KEY, "api_base": EU_BASE}}
+
+Upgrade = Callable[[dict[str, dict[str, Any]]], AbstractContextManager[TestClient]]
 
 
 @pytest.fixture(scope="module")
@@ -81,24 +88,57 @@ def _environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 @pytest.fixture
-def stored(client: TestClient, master_key_header: dict[str, str]) -> Callable[..., None]:
-    """Store a deployment provider as the Deployment providers page does, and the user the requests bill."""
-    created = client.post(f"{API_ROOT}/users", json={"user_id": "u1"}, headers=master_key_header)
-    assert created.status_code == 200, created.text
+def upgraded(test_config: GatewayConfig, db_session_factory: Callable[[], Session]) -> Upgrade:
+    """Leave deployment providers in the retired table, then start the gateway, which moves them."""
 
-    def _store(instance: str, **body: Any) -> None:
-        response = client.post(
-            f"{API_ROOT}/provider-credentials", json={"instance": instance, **body}, headers=master_key_header
-        )
-        assert response.status_code == 201, response.text
+    @contextmanager
+    def _start(rows: dict[str, dict[str, Any]]) -> Iterator[TestClient]:
+        with db_session_factory() as db:
+            for instance, fields in rows.items():
+                api_key = fields.get("api_key")
+                db.add(
+                    ProviderCredential(
+                        instance=instance,
+                        provider_type=fields["provider_type"],
+                        api_base=fields.get("api_base"),
+                        encrypted_api_key=encrypt_secret(api_key) if api_key else None,
+                        last4=api_key[-4:] if api_key else None,
+                        client_args={},
+                        updated_at=datetime.now(UTC),
+                    )
+                )
+            db.commit()
+        for client in build_test_client(test_config):
+            created = client.post(f"{API_ROOT}/users", json={"user_id": "u1"}, headers=MASTER)
+            assert created.status_code == 200, created.text
+            yield client
 
-    return _store
+    return _start
 
 
-def _move(client: TestClient, headers: dict[str, str]) -> None:
-    rows = client.post(MOVE, headers=headers).json()["rows"]
-    assert all(row["outcome"] == "migrated" and row["source_removed"] for row in rows), rows
-    assert client.get(f"{API_ROOT}/provider-credentials", headers=headers).json() == []
+def test_startup_moves_every_row_and_leaves_none_behind(
+    upgraded: Upgrade, db_session_factory: Callable[[], Session]
+) -> None:
+    with upgraded({**VLLM, **EU}):
+        pass
+
+    with db_session_factory() as db:
+        assert db.execute(select(ProviderCredential)).scalars().all() == []
+        hosted = {row.name: row for row in db.execute(select(HostedProvider)).scalars()}
+    assert set(hosted) == {"my-vllm", "openai-eu"}
+    assert not any(row.serves_unlisted_models for row in hosted.values())
+
+
+def test_a_row_startup_cannot_move_is_left_in_place(
+    upgraded: Upgrade, db_session_factory: Callable[[], Session]
+) -> None:
+    """Named after another provider, so a hosted provider cannot keep its name; it stays for the operator."""
+    with upgraded({"groq": {"provider_type": "openai", "api_key": "sk-groq-1234"}}) as client:
+        [row] = client.get(f"{API_ROOT}/hosted-providers/migration", headers=MASTER).json()["rows"]
+
+    assert row["outcome"] == "invalid"
+    with db_session_factory() as db:
+        assert [r.instance for r in db.execute(select(ProviderCredential)).scalars()] == ["groq"]
 
 
 def _completion(model: str) -> ChatCompletion:
@@ -131,87 +171,65 @@ def _chat(client: TestClient, headers: dict[str, str], model: str) -> tuple[int,
     return response.status_code, calls
 
 
-def _sent_to(call: dict[str, Any]) -> tuple[str | None, str | None]:
+def _sent_to(call: Mapping[str, Any]) -> tuple[str | None, str | None]:
     return call.get("api_key"), call.get("api_base")
 
 
-def test_a_keyless_unpriced_backend_serves_every_model_it_lists(
-    client: TestClient, master_key_header: dict[str, str], stored: Callable[..., None]
-) -> None:
-    stored("my-vllm", provider_type="openai", api_base=VLLM_BASE)
-    before, [sent_before] = _chat(client, master_key_header, "my-vllm:llama-3")
+def test_a_keyless_unpriced_backend_serves_every_model_it_lists(upgraded: Upgrade) -> None:
+    with upgraded(VLLM) as client:
+        status, [sent] = _chat(client, MASTER, "my-vllm:llama-3")
+        unlisted, calls = _chat(client, MASTER, "my-vllm:a-model-it-never-listed")
 
-    _move(client, master_key_header)
-    after, [sent_after] = _chat(client, master_key_header, "my-vllm:llama-3")
-    unlisted, calls = _chat(client, master_key_header, "my-vllm:a-model-it-never-listed")
-
-    assert (before, after) == (200, 200)
-    assert _sent_to(sent_after) == _sent_to(sent_before)
-    assert sent_after["api_base"] == VLLM_BASE
+    assert status == 200
+    assert _sent_to(sent) == ("otari-no-key-required", VLLM_BASE)
     # Off by default: a model the provider does not list is refused until it is added.
     assert (unlisted, calls) == (424, [])
 
 
-def test_a_renamed_provider_keeps_its_name_endpoint_and_key(
-    client: TestClient, master_key_header: dict[str, str], stored: Callable[..., None]
-) -> None:
-    stored("openai-eu", provider_type="openai", api_key=EU_KEY, api_base=EU_BASE)
-    before, [sent_before] = _chat(client, master_key_header, "openai-eu:gpt-4o-mini")
+def test_a_renamed_provider_keeps_its_name_endpoint_and_key(upgraded: Upgrade) -> None:
+    with upgraded(EU) as client:
+        status, [sent] = _chat(client, MASTER, "openai-eu:gpt-4o-mini")
 
-    _move(client, master_key_header)
-    after, [sent_after] = _chat(client, master_key_header, "openai-eu:gpt-4o-mini")
-
-    assert (before, after) == (200, 200)
-    assert _sent_to(sent_after) == _sent_to(sent_before) == (EU_KEY, EU_BASE)
+    assert status == 200
+    assert _sent_to(sent) == (EU_KEY, EU_BASE)
 
 
-def test_a_model_switched_off_on_the_roster_is_refused(
-    client: TestClient, master_key_header: dict[str, str], stored: Callable[..., None]
-) -> None:
-    stored("my-vllm", provider_type="openai", api_base=VLLM_BASE)
-    _move(client, master_key_header)
-    roster = client.get(f"{API_ROOT}/hosted-providers/my-vllm/models", headers=master_key_header).json()["data"]
-    [listed] = [row for row in roster if row["model"] == "llama-3"]
-    switched = client.patch(
-        f"{API_ROOT}/hosted-providers/my-vllm/models/{listed['id']}", json={"enabled": False}, headers=master_key_header
-    )
-    assert switched.status_code == 200, switched.text
+def test_a_model_switched_off_on_the_roster_is_refused(upgraded: Upgrade) -> None:
+    with upgraded(VLLM) as client:
+        offered = client.post(
+            f"{API_ROOT}/hosted-providers/my-vllm/models", json={"model": "retired-model"}, headers=MASTER
+        )
+        assert offered.status_code == 201, offered.text
+        switched = client.patch(
+            f"{API_ROOT}/hosted-providers/my-vllm/models/{offered.json()['id']}",
+            json={"enabled": False},
+            headers=MASTER,
+        )
+        assert switched.status_code == 200, switched.text
 
-    status, calls = _chat(client, master_key_header, "my-vllm:llama-3")
+        status, calls = _chat(client, MASTER, "my-vllm:retired-model")
 
     assert (status, calls) == (424, [])
 
 
 def test_a_policy_falls_over_onto_a_moved_provider(
-    client: TestClient,
-    master_key_header: dict[str, str],
-    stored: Callable[..., None],
-    db_session_factory: Callable[[], Session],
+    upgraded: Upgrade, db_session_factory: Callable[[], Session]
 ) -> None:
-    stored("my-vllm", provider_type="openai", api_base=VLLM_BASE)
-    before, calls_before = _chat(client, master_key_header, "fast")
+    with upgraded(VLLM) as client:
+        status, calls = _chat(client, MASTER, "fast")
 
-    _move(client, master_key_header)
-    after, calls_after = _chat(client, master_key_header, "fast")
-
-    assert (before, after) == (200, 200)
-    assert [call["model"] for call in calls_after] == ["openai:gpt-4o", "openai:llama-3"]
-    assert _sent_to(calls_after[1]) == _sent_to(calls_before[1])
-    session = db_session_factory()
-    try:
-        served = session.execute(
+    assert status == 200
+    assert [call["model"] for call in calls] == ["openai:gpt-4o", "openai:llama-3"]
+    assert _sent_to(calls[1]) == ("otari-no-key-required", VLLM_BASE)
+    with db_session_factory() as db:
+        served = db.execute(
             select(UsageLog.provider, UsageLog.deployment_paid).where(UsageLog.status == "success")
         ).all()
-    finally:
-        session.close()
-    # Served on the deployment's own credential once moved, and recorded so.
-    assert sorted(served) == [("my-vllm", False), ("my-vllm", True)]
+    # Served on the deployment's own credential, and recorded so.
+    assert [tuple(row) for row in served] == [("my-vllm", True)]
 
 
-def test_embeddings_reach_a_moved_provider(
-    client: TestClient, master_key_header: dict[str, str], stored: Callable[..., None]
-) -> None:
-    stored("my-vllm", provider_type="openai", api_base=VLLM_BASE)
+def test_embeddings_reach_a_moved_provider(upgraded: Upgrade) -> None:
     embedded = CreateEmbeddingResponse(
         data=[Embedding(embedding=[0.1], index=0, object="embedding")],
         model="nomic-embed",
@@ -219,21 +237,19 @@ def test_embeddings_reach_a_moved_provider(
         usage=Usage(prompt_tokens=3, total_tokens=3),
     )
 
-    def _embed() -> tuple[int, dict[str, Any]]:
-        with patch("gateway.api.routes.embeddings.aembedding", new=AsyncMock(return_value=embedded)) as call:
-            response = client.post(
-                f"{API_ROOT}/embeddings",
-                json={"model": "my-vllm:nomic-embed", "input": "hi", "user": "u1"},
-                headers=master_key_header,
-            )
-        return response.status_code, dict(call.await_args.kwargs) if call.await_args else {}
+    with (
+        upgraded(VLLM) as client,
+        patch("gateway.api.routes.embeddings.aembedding", new=AsyncMock(return_value=embedded)) as call,
+    ):
+        response = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "my-vllm:nomic-embed", "input": "hi", "user": "u1"},
+            headers=MASTER,
+        )
 
-    before, sent_before = _embed()
-    _move(client, master_key_header)
-    after, sent_after = _embed()
-
-    assert (before, after) == (200, 200)
-    assert _sent_to(sent_after) == _sent_to(sent_before)
+    assert response.status_code == 200, response.text
+    assert call.await_args is not None
+    assert _sent_to(call.await_args.kwargs) == ("otari-no-key-required", VLLM_BASE)
 
 
 class _SupportsBatch:
@@ -241,20 +257,8 @@ class _SupportsBatch:
 
 
 def test_a_batch_runs_and_settles_on_a_moved_provider(
-    client: TestClient,
-    master_key_header: dict[str, str],
-    stored: Callable[..., None],
-    db_session_factory: Callable[[], Session],
+    upgraded: Upgrade, db_session_factory: Callable[[], Session]
 ) -> None:
-    stored("openai-eu", provider_type="openai", api_key=EU_KEY, api_base=EU_BASE)
-    _move(client, master_key_header)
-    # A batch is accounted once something prices it.
-    priced = client.post(
-        f"{API_ROOT}/pricing",
-        json={"model_key": "openai-eu:gpt-4o-mini", "input_price_per_million": 1, "output_price_per_million": 2},
-        headers=master_key_header,
-    )
-    assert priced.status_code == 200, priced.text
     batch = Batch(
         id="batch_eu",
         object="batch",
@@ -275,22 +279,28 @@ def test_a_batch_runs_and_settles_on_a_moved_provider(
     ]
 
     with (
+        upgraded(EU) as client,
         patch("gateway.api.routes.batches.AnyLLM.get_provider_class", return_value=_SupportsBatch),
         patch("gateway.api.routes.batches.acreate_batch", new=AsyncMock(return_value=batch)) as create,
         patch("gateway.api.routes.batches.aretrieve_batch", new=AsyncMock(return_value=batch)) as retrieve,
         patch("gateway.api.routes.batches.aretrieve_batch_results", new=results),
     ):
-        created = client.post(f"{API_ROOT}/batches", json=body, headers=master_key_header)
-        status = client.get(f"{API_ROOT}/batches/batch_eu", params={"provider": "openai-eu"}, headers=master_key_header)
-        settled = client.get(
-            f"{API_ROOT}/batches/batch_eu/results", params={"provider": "openai-eu"}, headers=master_key_header
+        # A batch is accounted once something prices it.
+        priced = client.post(
+            f"{API_ROOT}/pricing",
+            json={"model_key": "openai-eu:gpt-4o-mini", "input_price_per_million": 1, "output_price_per_million": 2},
+            headers=MASTER,
         )
+        assert priced.status_code == 200, priced.text
+        created = client.post(f"{API_ROOT}/batches", json=body, headers=MASTER)
+        status = client.get(f"{API_ROOT}/batches/batch_eu", params={"provider": "openai-eu"}, headers=MASTER)
+        settled = client.get(f"{API_ROOT}/batches/batch_eu/results", params={"provider": "openai-eu"}, headers=MASTER)
 
     assert (created.status_code, status.status_code, settled.status_code) == (200, 200, 200), settled.text
     assert created.json()["provider"] == "openai-eu"
     for call in (create, retrieve, results):
         assert call.await_args is not None
-        assert _sent_to(dict(call.await_args.kwargs)) == (EU_KEY, EU_BASE)
+        assert _sent_to(call.await_args.kwargs) == (EU_KEY, EU_BASE)
     session = db_session_factory()
     try:
         rows = session.execute(
@@ -303,3 +313,15 @@ def test_a_batch_runs_and_settles_on_a_moved_provider(
     [(provider, deployment_paid, cost)] = rows
     assert (provider, deployment_paid) == ("openai-eu", True)
     assert cost is not None and cost > 0
+
+
+def test_a_policy_or_an_alias_may_target_a_moved_provider(upgraded: Upgrade) -> None:
+    """The name was accepted while the deployment provider served it, so it still is."""
+    spec = {"select": [{"default": "openai:gpt-4o"}], "on_failure": ["my-vllm:llama-3"]}
+    with upgraded(VLLM) as client:
+        policy = client.post(f"{API_ROOT}/routing/policies", json={"name": "local", "spec": spec}, headers=MASTER)
+        alias = client.post(f"{API_ROOT}/aliases", json={"name": "house", "target": "my-vllm:llama-3"}, headers=MASTER)
+        unknown = client.post(f"{API_ROOT}/aliases", json={"name": "nope", "target": "my-nas:llama-3"}, headers=MASTER)
+
+    assert (policy.status_code, alias.status_code) == (200, 200), (policy.text, alias.text)
+    assert unknown.status_code == 400

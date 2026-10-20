@@ -1,4 +1,4 @@
-"""How a deployment provider stored through the dashboard moves onto a hosted provider.
+"""How a deployment provider the retired dashboard page stored moves onto a hosted provider.
 
 A ``provider_credentials`` row becomes a hosted provider of the same name, so
 an ``instance:model`` selector keeps reaching it, served by the implementation
@@ -62,12 +62,15 @@ def plan_move(credential: ProviderCredential, *, hosted_names: set[str], configu
         public.detail = (
             f"{exc}, so a hosted provider cannot keep it. Add it on the Hosted providers page under its "
             f"implementation's name ('{implementation}') or a name of its own, which requests reach as "
-            "'<name>:<model>', point its callers at that name, then remove the deployment provider."
+            "'<name>:<model>', point its callers at that name, then discard this one."
         )
         return PlannedMove(public)
     if name in hosted_names:
         public.outcome = "conflict"
-        public.detail = f"A hosted provider named '{name}' already exists. Remove or rename one of them."
+        public.detail = (
+            f"A hosted provider named '{name}' already serves that name. Check it holds the right key, then "
+            "discard this one."
+        )
         return PlannedMove(public)
 
     api_key: str | None = None
@@ -76,11 +79,17 @@ def plan_move(credential: ProviderCredential, *, hosted_names: set[str], configu
             api_key = decrypt_secret(credential.encrypted_api_key)
         except (SecretDecryptionError, SecretBoxUnavailableError):
             public.outcome = "unreadable"
-            public.detail = "Its key cannot be decrypted. Re-enter it on the deployment provider, then migrate."
+            public.detail = (
+                "Its key cannot be decrypted with OTARI_SECRET_KEY. Configure the key it was stored under and "
+                "restart, or add the provider again on the Hosted providers page and discard this one."
+            )
             return PlannedMove(public)
     elif not hosted_key_optional(implementation, credential.api_base):
         public.outcome = "invalid"
-        public.detail = f"It holds no key, and '{implementation}' needs one."
+        public.detail = (
+            f"It holds no key, and '{implementation}' needs one as a hosted provider. One served on the "
+            "server's own cloud role belongs under providers: in config.yml; declare it there, then discard this one."
+        )
         return PlannedMove(public)
 
     if credential.provider_type in PROVIDER_TYPE_ALIASES:

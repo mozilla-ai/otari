@@ -100,7 +100,7 @@ The organization view contains tenant-wide administration:
 - Workspaces and organization members
 - Email domains, for joining colleagues automatically
 - Spend and budgets
-- General: Providers, followed by Deployment providers and Org settings.
+- General: Providers, followed by Guardrails and Org settings.
   Providers is the organization's own upstream credentials, the models each one
   reaches, and what this organization pays for them: adding a key offers every
   model the provider lists on it, each carrying a switch that decides whether
@@ -114,9 +114,9 @@ The organization view contains tenant-wide administration:
   removes that. For a provider the deployment has no credential of its own
   for, a workspace uses the key it set to "Always use this key", otherwise the
   organization's default, otherwise the oldest key; a key it set to "Never use
-  this key" is passed over at every step. Deployment providers is
-  the process-wide credential list, which a deployment operator manages and
-  which is served to every organization; it appears in standalone mode only.
+  this key" is passed over at every step. The deployment's own provider
+  credentials, served to every organization, are managed on Hosted providers
+  in the deployment view, or in `config.yml`.
 
 The deployment view, opened from the account menu, holds what belongs to the
 gateway process rather than to any organization on it:
@@ -147,7 +147,7 @@ gateway process rather than to any organization on it:
   list, in both dialogs, makes a provider serve any model a request names, as
   a `config.yml` provider does, priced or not, while a model switched off on
   its list is still refused. It is off by default; a provider moved from the
-  Deployment providers page starts with it off and every model it lists
+  retired Deployment providers page starts with it off and every model it lists
   switched on, priced or not.
   A provider's name opens Models filtered to it, and above the table a summary
   counts the providers reachable, with Re-check all to ask them again. With no
@@ -156,10 +156,11 @@ gateway process rather than to any organization on it:
   a provider is disabled, with a banner saying why, while the server has no
   `OTARI_SECRET_KEY` to encrypt its key with. Below
   the table, Configured providers lists the `providers:` instances of
-  `config.yml` read-only, with their reachability. While deployment providers
-  stored through the Deployment providers page remain, a banner offers to move
-  them here under the same names, listing what each becomes before anything
-  moves.
+  `config.yml` read-only, with their reachability. Providers stored on the
+  retired Deployment providers page are moved here under the same names
+  automatically at startup. Any that could not be moved are listed in a banner
+  with the reason: once the cause is fixed, move it from there, or Discard it,
+  since a row left behind serves nothing.
 
 Accounts and Hosted providers are listed only for a deployment operator, and
 answer anyone else that they are not available to them.

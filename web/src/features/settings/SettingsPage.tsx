@@ -20,10 +20,6 @@ import {
   useHostedProviders,
   useReencryptHostedProviders,
 } from "@/shared/api/hostedProviders"
-import {
-  useReencryptProviderCredentials,
-  useStoredProviders,
-} from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
 import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
 
@@ -525,33 +521,18 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
 
 function SecretKeyRow() {
   const hostsHosted = useSurfaces()("hosted_providers")
-  const storedProviders = useStoredProviders()
   const hostedProviders = useHostedProviders(hostsHosted)
-  const reencrypt = useReencryptProviderCredentials()
-  const reencryptHosted = useReencryptHostedProviders()
+  const reencrypt = useReencryptHostedProviders()
   // A configured hosted provider holds no ciphertext, so only stored ones count.
   const storedHosted = (hostedProviders.data?.data ?? []).filter(
     (provider) => provider.source === "database",
   )
-  const storedCount = (storedProviders.data?.length ?? 0) + storedHosted.length
-  const unreadableCount =
-    (storedProviders.data ?? []).filter((provider) => !provider.decryptable)
-      .length + storedHosted.filter((provider) => !provider.decryptable).length
-  const hasStoredKeys = storedCount > 0
-  const isPending = reencrypt.isPending || reencryptHosted.isPending
-  // Complete only once every store this deployment holds keys in has answered:
-  // a message saying all keys moved while one store failed would invite
-  // removing the old key from under it. A failure shows in the error banner.
-  const hostedResult = hostsHosted
-    ? reencryptHosted.data
-    : { reencrypted: 0, unreadable: 0, skipped: 0 }
-  const result =
-    reencrypt.data && hostedResult && !isPending
-      ? {
-          reencrypted: reencrypt.data.reencrypted + hostedResult.reencrypted,
-          unreadable: reencrypt.data.unreadable + hostedResult.unreadable,
-        }
-      : undefined
+  const unreadableCount = storedHosted.filter(
+    (provider) => !provider.decryptable,
+  ).length
+  const hasStoredKeys = storedHosted.length > 0
+  const isPending = reencrypt.isPending
+  const result = isPending ? undefined : reencrypt.data
 
   return (
     <div className="flex flex-col gap-4 py-4">
@@ -574,23 +555,13 @@ function SecretKeyRow() {
             size="sm"
             variant="ghost"
             isDisabled={!hasStoredKeys || isPending}
-            onPress={() => {
-              reencrypt.mutate()
-              if (hostsHosted) reencryptHosted.mutate()
-            }}
+            onPress={() => reencrypt.mutate()}
           >
             {isPending ? "Re-encrypting…" : "Re-encrypt provider keys"}
           </Button>
         </div>
       </div>
-      <ErrorBanner
-        error={
-          storedProviders.error ??
-          hostedProviders.error ??
-          reencrypt.error ??
-          reencryptHosted.error
-        }
-      />
+      <ErrorBanner error={hostedProviders.error ?? reencrypt.error} />
       {unreadableCount > 0 ? (
         <InfoBanner tone="warning">
           {unreadableCount} stored provider key
@@ -607,7 +578,7 @@ function SecretKeyRow() {
             ? ` ${result.unreadable} still need replacement.`
             : " All decryptable stored keys now use the primary secret key."}
         </p>
-      ) : !storedProviders.isLoading && !hasStoredKeys ? (
+      ) : !hostedProviders.isLoading && !hasStoredKeys ? (
         <p className="text-sm text-muted">
           No stored provider keys need re-encryption.
         </p>

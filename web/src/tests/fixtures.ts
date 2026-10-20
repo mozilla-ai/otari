@@ -158,7 +158,6 @@ export const STANDALONE_SURFACES = [
   "organizations",
   "playground",
   "pricing",
-  "providers",
   "routing",
   "settings",
   "tools",
@@ -168,17 +167,15 @@ export const STANDALONE_SURFACES = [
 ]
 
 // The same list for a hosted (multi-tenant) deployment, kept in step with
-// HOSTED_SURFACES beside it: the process-global provider page drops, because a
-// credential keyed on an instance name alone is served to every tenant, the
-// Playground drops because a control plane serves no inference (otari#822), and
-// health checks drop because a control plane sends no inference of its own to
-// check.
+// HOSTED_SURFACES beside it: the Playground drops because a control plane
+// serves no inference (otari#822), and health checks drop because a control
+// plane sends no inference of its own to check.
 //
 // `organization_providers` and `organization_usage` are not part of that
 // difference: both are on the standalone list above too, because what each page
 // answers is a tenant's question whether or not the deployment has more than
 // one tenant.
-const HOSTED_DROPS = new Set(["providers", "playground", "health_checks"])
+const HOSTED_DROPS = new Set(["playground", "health_checks"])
 
 export const HOSTED_SURFACES = STANDALONE_SURFACES.filter(
   (surface) => !HOSTED_DROPS.has(surface),

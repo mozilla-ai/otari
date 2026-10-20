@@ -10,10 +10,9 @@ import { errorMessage } from "@/design-system/feedback/errorMessage"
 // plus the provider's own reply, and a footer that grows shoves the form up
 // under the operator's hands; in the body it scrolls with everything else.
 //
-// Shared by the deployment providers form and the hosted providers forms, whose
-// test routes answer in the same shape and take different bodies. A stored
-// provider's row test answers through `ConnectionTestRowResult`, in the
-// narrower wording a table cell has room for.
+// Shared by the hosted providers forms. A stored provider's row test answers
+// through `ConnectionTestRowResult`, in the narrower wording a table cell has
+// room for.
 
 /** What a connection test answers. */
 export interface ConnectionTestOutcome {

@@ -377,14 +377,30 @@ def _mapping_declares_a_credential(mapping: Mapping[str, Any]) -> bool:
     return False
 
 
+def configured_instances(config: GatewayConfig) -> frozenset[str]:
+    """The ``providers:`` instances the configuration declares, a dropped uncredentialed one included."""
+    baseline = config._provider_baseline
+    return frozenset(config.providers if baseline is None else baseline)
+
+
+def settle_configured_providers(config: GatewayConfig) -> None:
+    """Keep the declared ``providers:`` as the baseline, then drop the entries that declare no credential.
+
+    The baseline keeps a dropped entry's name reserved (see :func:`configured_instances`).
+    """
+    if config._provider_baseline is None:
+        config._provider_baseline = {name: dict(entry) for name, entry in config.providers.items()}
+    prune_uncredentialed_providers(config)
+
+
 def prune_uncredentialed_providers(config: GatewayConfig) -> dict[str, tuple[str, ...]]:
     """Drop every ``providers:`` entry that declares no credential, and say so once.
 
     A hollow entry is worse than no entry: an ``instance:model`` selector that
     matches it never consults an organization's own key for the same provider,
     and a bare ``provider:model`` selector is gated and priced as if the
-    deployment served it, so the credential an operator stored on the dashboard
-    goes unused while every request fails upstream. Returns what was dropped,
+    deployment served it, so a hosted provider of the same name goes unused
+    while every request fails upstream. Returns what was dropped,
     keyed by instance, with the variables that would have filled each.
     """
     pruned = {
@@ -399,7 +415,7 @@ def prune_uncredentialed_providers(config: GatewayConfig) -> dict[str, tuple[str
         _uncredentialed_warned.add(instance)
         logger.warning(
             "providers.%s declares no credential, so the entry is ignored. Name the key it reads "
-            "(api_key: ${%s}), or store one for the provider through the dashboard.",
+            "(api_key: ${%s}), or add the provider on the Hosted providers page.",
             instance,
             # codeql[py/clear-text-logging-sensitive-data]
             env_names[0],
@@ -1003,7 +1019,7 @@ class MissingCredential:
         if self.alias is not None:
             return (
                 f"No credential is configured for the provider behind model '{self.alias}'. "
-                "Declare it under providers: in config.yml, store it on the Providers page, "
+                "Declare it under providers: in config.yml, add it on the Hosted providers page, "
                 "or add an organization provider key."
             )
         # The variable is offered as what a declaration reads its key from: set
@@ -1012,7 +1028,7 @@ class MissingCredential:
         declare = f" (api_key: ${{{variable}}})" if variable else ""
         return (
             f"No credential is configured for provider '{self.provider}'. "
-            f"Declare it under providers: in config.yml{declare}, store it on the Providers page, "
+            f"Declare it under providers: in config.yml{declare}, add it on the Hosted providers page, "
             "or add an organization provider key."
         )
 

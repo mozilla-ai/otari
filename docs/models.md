@@ -31,7 +31,7 @@ configuration, pricing, aliases, and routing policies.
 ## Configuring a provider
 
 Declare a provider under `providers` in `config.yml`, or add it on the
-standalone Providers page. Either way it serves requests and its models are
+Hosted providers page. Either way it serves requests and its models are
 discovered. Supply the key from the environment with a `${VAR}` reference:
 
 ```yaml
@@ -41,7 +41,7 @@ providers:
 ```
 
 A key reaches a provider only from where a declaration names it: an entry's own
-`api_key` (a `${VAR}` reference included), a key stored on the Providers page, or
+`api_key` (a `${VAR}` reference included), a hosted provider's key, or
 an organization's own provider key, which declares the provider for that
 organization's requests. A provider's native variable (such as `OPENAI_API_KEY`)
 is never read for it otherwise, so an entry with no `api_key`, or one carrying
@@ -132,7 +132,7 @@ serves only its roster unless it serves models not on its roster
 (`serves_unlisted_models`, off by default): it then also serves any model a
 request names, the way a `providers:` instance does, switches on every model
 it offers whether or not something prices it, and still refuses a model its
-roster switches off. A provider moved from the Deployment providers page
+roster switches off. A provider moved from the retired Deployment providers page
 starts with it off and every model it lists switched on.
 
 Each listed model carries the rate a request from the caller would be billed at,

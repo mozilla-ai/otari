@@ -64,7 +64,6 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     heading: /parity/i,
   },
   { route: "/routing", name: "routing", heading: /routing/i },
-  { route: "/providers", name: "providers", heading: /provider/i },
   { route: "/keys", name: "keys", heading: /keys/i },
   // The selected workspace's roster, which is not the organization one below:
   // this page is on the workspace rail and stops at the workspace it names.
@@ -563,34 +562,36 @@ test.describe("the workspace dialogs", () => {
   })
 })
 
-test.describe("the provider dialog", () => {
-  // The `lg` size with a tab row under the header, which no other dialog in the
-  // product has: both ways to attach a provider share one frame.
-  test("the add dialog, on the known-provider tab", async ({ page }) => {
+test.describe("the hosted provider dialog", () => {
+  test("the add dialog, empty", async ({ page }) => {
     await login(page)
-    await gotoRoute(page, "/providers")
+    await gotoRoute(page, "/admin/hosted-providers")
     await expect(
-      page.getByRole("heading", { name: /providers/i }).first(),
+      page.getByRole("heading", { name: /hosted providers/i }).first(),
     ).toBeVisible()
     await page.getByRole("button", { name: "Add provider" }).first().click()
-    const dialog = page.getByRole("dialog", { name: "New provider" })
+    const dialog = page.getByRole("dialog", { name: "Add hosted provider" })
     await expect(
-      dialog.getByRole("button", { name: "Known provider" }),
+      dialog.getByRole("combobox", { name: "Provider" }),
     ).toBeVisible()
-    await captureScreenshot(page, "providers-add-dialog")
+    await captureScreenshot(page, "hosted-providers-add-dialog")
   })
 
-  test("the add dialog, on the custom-endpoint tab", async ({ page }) => {
+  test("the add dialog, on a custom endpoint", async ({ page }) => {
     await login(page)
-    await gotoRoute(page, "/providers")
+    await gotoRoute(page, "/admin/hosted-providers")
     await expect(
-      page.getByRole("heading", { name: /providers/i }).first(),
+      page.getByRole("heading", { name: /hosted providers/i }).first(),
     ).toBeVisible()
     await page.getByRole("button", { name: "Add provider" }).first().click()
-    const dialog = page.getByRole("dialog", { name: "New provider" })
-    await dialog.getByRole("button", { name: "Custom endpoint" }).click()
-    await expect(dialog.getByLabel("API base")).toBeVisible()
-    await captureScreenshot(page, "providers-add-dialog-custom")
+    const dialog = page.getByRole("dialog", { name: "Add hosted provider" })
+    await dialog.getByRole("combobox", { name: "Provider" }).fill("OpenAI")
+    await page.getByRole("option", { name: "OpenAI", exact: true }).click()
+    await dialog
+      .getByRole("textbox", { name: "API base URL" })
+      .fill("http://127.0.0.1:9/v1")
+    await dialog.getByText("Serve models not on its list").click()
+    await captureScreenshot(page, "hosted-providers-add-dialog-custom")
   })
 })
 

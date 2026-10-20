@@ -379,7 +379,7 @@ deployment that declares a key does not mint and print one.
 ## Provider configuration
 
 The `providers` map is keyed by provider instance. Only a provider it declares
-(or the Providers page, or an organization's key) serves requests. A standard
+(or a hosted provider, or an organization's key) serves requests. A standard
 provider needs only its credential, which the entry names:
 
 ```yaml
@@ -526,35 +526,45 @@ providers:
 
 ### Runtime provider management
 
-Standalone operators can store provider credentials through the Providers page
-or `/api/v1/provider-credentials`. Stored entries override config-file entries with
-the same instance name. Config-file entries remain read-only in the dashboard.
+Operators add provider credentials at runtime as hosted providers, on the
+Hosted providers page or through `/api/v1/hosted-providers` (see
+[Hosted providers in config.yml](#hosted-providers-in-configyml) for the
+fields). Config-file entries remain read-only in the dashboard.
 
 Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
 `otari gen-secret-key`. To rotate it, configure the new key before the old key,
-run the provider, hosted provider and search-tool re-encryption endpoints
-(`POST /api/v1/provider-credentials/reencrypt`,
-`POST /api/v1/hosted-providers/reencrypt` and
+run the hosted provider and search-tool re-encryption endpoints
+(`POST /api/v1/hosted-providers/reencrypt` and
 `POST /api/v1/search-tools/reencrypt`), then remove the old key. Losing every
 configured encryption key makes stored credentials unrecoverable.
 
-Providers stored this way are moving onto hosted providers.
-`GET /api/v1/hosted-providers/migration` previews the move and
-`POST /api/v1/hosted-providers/migration` applies it: each stored provider
-becomes a hosted provider of the same name, served by the implementation its
-`provider_type` names, so an `instance:model` selector keeps its name. Every
-model the provider lists is offered and switched on, priced or not, as the
-stored provider served it, on every path: completions, routing-policy
-fallbacks, the pass-through endpoints and batches. A model it does not list is
-refused until it is added on the Hosted providers page, or until "Serve models
-not on its list" is turned on there. The stored provider is removed once the
-hosted one offers a model; one whose provider lists none is kept until its
-models are added. A
-name a hosted provider already holds, or a key no configured
-`OTARI_SECRET_KEY` reads, is reported and left in place. A hosted provider is
-asked after an organization's own key, where a stored provider was asked
-before it, so an organization holding its own key is served on that key once
-its provider has moved.
+#### Upgrading from the Deployment providers page
+
+Earlier releases stored runtime providers on a Deployment providers page
+(`/api/v1/provider-credentials`), which is gone. At startup, each provider it
+stored becomes a hosted provider of the same name, served by the
+implementation its `provider_type` names, so an `instance:model` selector,
+routing policy or alias naming it keeps working. The start asks each provider
+for its models, so the first start after the upgrade can take a little longer,
+and offers every model it lists switched on, priced or not, as the stored
+provider served it, on every path: completions, routing-policy fallbacks, the
+pass-through endpoints and batches. A model it does not list is refused until
+it is added on the Hosted providers page, or until "Serve models not on its
+list" is turned on there.
+
+A provider the move cannot take is logged at startup and listed on the Hosted
+providers page with the reason (`GET /api/v1/hosted-providers/migration`), and
+serves nothing until it is added again: a provider that lists no models, a
+name a hosted provider already holds, a key no configured `OTARI_SECRET_KEY`
+reads, an instance named after another provider (`groq` declared as
+`openai`), or a keyless Bedrock or SageMaker provider served on the server's
+own cloud role, which belongs under `providers:` in `config.yml` instead.
+
+Two things behave differently once moved. A hosted provider is asked after an
+organization's own key, where a stored provider was asked before it, so an
+organization holding its own key is served on that key. And a `config.yml`
+provider of the same name now serves ahead of it, where a stored provider
+used to override the configured one.
 
 ### Hosted providers in config.yml
 

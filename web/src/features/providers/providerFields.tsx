@@ -25,7 +25,7 @@ import {
 // parsing that goes with them.
 //
 // Shared because the same credential is entered on two pages that are otherwise
-// unrelated: `/providers`, where it belongs to the process, and
+// unrelated: `/admin/hosted-providers`, where it belongs to the process, and
 // `/organization/provider-keys`, where it belongs to the tenant. Both take a
 // provider name any-llm has to recognize and both take `client_args`, so a
 // second copy of any of these controls would be a second place for the JSON

@@ -324,20 +324,12 @@ export type UpdateHealthCheckSettings = Schemas["HealthCheckSettingsUpdate"]
 export type HealthCheckProvider = Schemas["ProviderHealthSummary"]
 export type HealthCheckResult = Schemas["HealthCheckResultPublic"]
 export type HealthCheckDisabled = Schemas["HealthCheckDisabled"]
-export type StoredProvider = Schemas["StoredProviderResponse"]
-export type CreateStoredProviderRequest = Schemas["CreateStoredProviderRequest"]
-export type UpdateStoredProviderRequest = Schemas["UpdateStoredProviderRequest"]
-export type TestProviderResult = Schemas["TestProviderResponse"]
-export type ReencryptProviderCredentialsResult =
-  Schemas["ReencryptProviderCredentialsResponse"]
 export type KnownProvider = Schemas["KnownProviderSchema"]
 export type KnownProviderSummary = Schemas["KnownProviderSummarySchema"]
 
-// The organization's own upstream credentials, which are a different table from
-// the four above: a `StoredProvider` is keyed on an instance name and belongs to
-// the process, an `OrgProviderKey` belongs to a tenant and every workspace in it
-// inherits it. Only a hosted deployment shows both concepts, and it shows only
-// this one (`organization_providers` in `GET /v1/bootstrap`'s surfaces).
+// The organization's own upstream credentials: an `OrgProviderKey` belongs to a
+// tenant and every workspace in it inherits it. The deployment's own keys are
+// `HostedProvider` below.
 export type OrgProviderKey = Schemas["OrgProviderKeyPublic"]
 // No alias for the list wrapper: this surface is read through `fetchAllPaged`,
 // which types the envelope itself, so a name for it would have no consumer.

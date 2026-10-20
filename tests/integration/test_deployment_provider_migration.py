@@ -1,10 +1,12 @@
 """Moving the deployment providers stored through the dashboard onto hosted providers, over HTTP.
 
-The deployment providers are created through ``/provider-credentials`` as the
-page creates them, so the move reads what an operator actually stored. Model
-discovery is stubbed, so no case dials a provider.
+The deployment providers are stored as rows of the table the retired page
+wrote, so the move reads what an operator actually stored. Model discovery is
+stubbed, so no case dials a provider.
 """
 
+from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -16,7 +18,7 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.providers import HostedProvider, ProviderCredential
 from gateway.services.model_discovery_service import ProviderDiscovery
-from gateway.services.secret_box import decrypt_secret, generate_secret_key
+from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
 
 from .conftest import shared_test_config
 
@@ -31,7 +33,7 @@ def test_config(postgres_url: str) -> GatewayConfig:
 
 
 @pytest.fixture(autouse=True)
-def _secret_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def _secret_key(monkeypatch: pytest.MonkeyPatch, stored: Callable[..., None]) -> None:
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
 
@@ -52,9 +54,25 @@ def dials(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     return calls
 
 
-def _deployment_provider(client: TestClient, headers: dict[str, str], instance: str, **body: Any) -> None:
-    response = client.post(f"{API_ROOT}/provider-credentials", json={"instance": instance, **body}, headers=headers)
-    assert response.status_code == 201, response.text
+@pytest.fixture
+def stored(db_session_factory: Callable[[], Session]) -> Callable[..., None]:
+    """Store a deployment provider as the retired Deployment providers page did."""
+
+    def _store(instance: str, *, api_key: str | None = None, **fields: Any) -> None:
+        with db_session_factory() as db:
+            db.merge(
+                ProviderCredential(
+                    instance=instance,
+                    encrypted_api_key=encrypt_secret(api_key) if api_key is not None else None,
+                    last4=api_key[-4:] if api_key is not None else None,
+                    client_args=fields.pop("client_args", None) or {},
+                    updated_at=datetime.now(UTC),
+                    **fields,
+                )
+            )
+            db.commit()
+
+    return _store
 
 
 def _rows(response: Any) -> dict[str, dict[str, Any]]:
@@ -63,21 +81,21 @@ def _rows(response: Any) -> dict[str, dict[str, Any]]:
 
 
 def test_the_preview_plans_each_row_and_writes_nothing(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session, dials: list[dict[str, Any]]
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    dials: list[dict[str, Any]],
+    stored: Callable[..., None],
 ) -> None:
-    _deployment_provider(client, master_key_header, "openai", api_key="sk-openai-1111")
-    _deployment_provider(
-        client,
-        master_key_header,
+    stored("openai", api_key="sk-openai-1111")
+    stored(
         "openai-eu",
         provider_type="openai",
         api_key="sk-eu-2222",
         api_base="https://eu.test/v1",
     )
-    _deployment_provider(
-        client, master_key_header, "my-vllm", provider_type="openai-compatible", api_base="http://vllm.test/v1"
-    )
-    _deployment_provider(client, master_key_header, "groq", api_key="sk-groq-3333")
+    stored("my-vllm", provider_type="openai-compatible", api_base="http://vllm.test/v1")
+    stored("groq", api_key="sk-groq-3333")
     taken = client.post(
         f"{API_ROOT}/hosted-providers",
         json={"provider": "groq", "api_key": "sk-hosted-4444"},
@@ -104,10 +122,14 @@ def test_the_preview_plans_each_row_and_writes_nothing(
 
 
 def test_applying_moves_each_row_under_its_name_and_removes_it(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session, dials: list[dict[str, Any]]
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    dials: list[dict[str, Any]],
+    stored: Callable[..., None],
 ) -> None:
-    _deployment_provider(client, master_key_header, "openai", api_key="sk-openai-1111", api_base="https://eu.test/v1")
-    _deployment_provider(client, master_key_header, "vllm", api_base="http://vllm.test/v1", client_args={"timeout": 9})
+    stored("openai", api_key="sk-openai-1111", api_base="https://eu.test/v1")
+    stored("vllm", api_base="http://vllm.test/v1", client_args={"timeout": 9})
 
     rows = _rows(client.post(PATH, headers=master_key_header))
 
@@ -131,12 +153,14 @@ def test_applying_moves_each_row_under_its_name_and_removes_it(
 
 
 def test_a_renamed_provider_moves_under_its_name(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session, dials: list[dict[str, Any]]
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    dials: list[dict[str, Any]],
+    stored: Callable[..., None],
 ) -> None:
     """A request reaches a hosted provider by a name of its own, so the deployment provider goes."""
-    _deployment_provider(
-        client,
-        master_key_header,
+    stored(
         "openai-eu",
         provider_type="openai",
         api_key="sk-eu-2222",
@@ -153,10 +177,10 @@ def test_a_renamed_provider_moves_under_its_name(
 
 
 def test_a_row_that_shadows_a_config_entry_says_the_entry_serves_again(
-    client: TestClient, master_key_header: dict[str, str], dials: list[dict[str, Any]]
+    client: TestClient, master_key_header: dict[str, str], dials: list[dict[str, Any]], stored: Callable[..., None]
 ) -> None:
     """Once the row goes, config.yml's entry of the same name answers ahead of the hosted provider."""
-    _deployment_provider(client, master_key_header, "anthropic", api_key="sk-stored-6666")
+    stored("anthropic", api_key="sk-stored-6666")
 
     [row] = _rows(client.get(PATH, headers=master_key_header)).values()
 
@@ -165,10 +189,14 @@ def test_a_row_that_shadows_a_config_entry_says_the_entry_serves_again(
 
 
 def test_a_provider_that_lists_nothing_keeps_its_deployment_provider(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session, dials: list[dict[str, Any]]
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    dials: list[dict[str, Any]],
+    stored: Callable[..., None],
 ) -> None:
-    """A hosted provider serves only its roster by default, so the row keeps serving until its models are added."""
-    _deployment_provider(client, master_key_header, "openai", api_key="sk-quiet-5555", api_base="https://silent.test")
+    """A hosted provider serves only its roster by default, so a row whose provider lists nothing stays for review."""
+    stored("openai", api_key="sk-quiet-5555", api_base="https://silent.test")
 
     [row] = _rows(client.post(PATH, headers=master_key_header)).values()
 
@@ -183,10 +211,10 @@ def test_a_provider_that_lists_nothing_keeps_its_deployment_provider(
 
 
 def test_a_name_a_hosted_provider_cannot_take_says_how_to_move_it(
-    client: TestClient, master_key_header: dict[str, str], dials: list[dict[str, Any]]
+    client: TestClient, master_key_header: dict[str, str], dials: list[dict[str, Any]], stored: Callable[..., None]
 ) -> None:
     """An instance named after another implementation was legal here and is not for a hosted provider."""
-    _deployment_provider(client, master_key_header, "groq", provider_type="openai", api_key="sk-groq-3333")
+    stored("groq", provider_type="openai", api_key="sk-groq-3333")
 
     [row] = _rows(client.get(PATH, headers=master_key_header)).values()
 
@@ -201,8 +229,9 @@ def test_a_row_no_configured_key_reads_is_left_where_it_is(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
     dials: list[dict[str, Any]],
+    stored: Callable[..., None],
 ) -> None:
-    _deployment_provider(client, master_key_header, "openai", api_key="sk-openai-1111")
+    stored("openai", api_key="sk-openai-1111")
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
     [row] = _rows(client.post(PATH, headers=master_key_header)).values()
@@ -213,11 +242,11 @@ def test_a_row_no_configured_key_reads_is_left_where_it_is(
 
 
 def test_a_row_stored_again_under_a_moved_name_is_a_conflict(
-    client: TestClient, master_key_header: dict[str, str], dials: list[dict[str, Any]]
+    client: TestClient, master_key_header: dict[str, str], dials: list[dict[str, Any]], stored: Callable[..., None]
 ) -> None:
-    _deployment_provider(client, master_key_header, "openai", api_key="sk-openai-5555")
+    stored("openai", api_key="sk-quiet-5555", api_base="https://silent.test")
     client.post(PATH, headers=master_key_header)
-    _deployment_provider(client, master_key_header, "openai", api_key="sk-again-6666")
+    stored("openai", api_key="sk-again-6666")
 
     [row] = _rows(client.post(PATH, headers=master_key_header)).values()
 
@@ -225,15 +254,19 @@ def test_a_row_stored_again_under_a_moved_name_is_a_conflict(
 
 
 def test_a_row_the_reviewed_preview_did_not_show_is_left_where_it_is(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session, dials: list[dict[str, Any]]
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    dials: list[dict[str, Any]],
+    stored: Callable[..., None],
 ) -> None:
     """Another operator's row added after the preview loaded is not moved under this one's confirm."""
-    _deployment_provider(client, master_key_header, "openai", api_key="sk-openai-1111")
+    stored("openai", api_key="sk-openai-1111")
     previewed = _rows(client.get(PATH, headers=master_key_header))
     reviewed = [{"instance": "openai", "updated_at": previewed["openai"]["updated_at"]}]
 
     # Another operator stores a deployment provider after this preview loaded.
-    _deployment_provider(client, master_key_header, "groq", api_key="sk-groq-3333")
+    stored("groq", api_key="sk-groq-3333")
 
     rows = _rows(client.post(PATH, json={"rows": reviewed}, headers=master_key_header))
 
@@ -245,16 +278,17 @@ def test_a_row_the_reviewed_preview_did_not_show_is_left_where_it_is(
 
 
 def test_a_row_edited_after_the_preview_is_left_where_it_is(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session, dials: list[dict[str, Any]]
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    dials: list[dict[str, Any]],
+    stored: Callable[..., None],
 ) -> None:
     """The operator reviewed one key and endpoint; a row since edited is not moved under that confirm."""
-    _deployment_provider(client, master_key_header, "openai", api_key="sk-openai-1111")
+    stored("openai", api_key="sk-openai-1111")
     previewed = _rows(client.get(PATH, headers=master_key_header))
     reviewed = [{"instance": "openai", "updated_at": previewed["openai"]["updated_at"]}]
-    edited = client.patch(
-        f"{API_ROOT}/provider-credentials/openai", json={"api_key": "sk-openai-9999"}, headers=master_key_header
-    )
-    assert edited.status_code == 200, edited.text
+    stored("openai", api_key="sk-openai-9999")
 
     [row] = _rows(client.post(PATH, json={"rows": reviewed}, headers=master_key_header)).values()
 
@@ -269,3 +303,22 @@ def test_the_migration_is_operator_only(client: TestClient, api_key_header: dict
     response = client.post(PATH, headers=api_key_header)
 
     assert response.status_code in (401, 403, 404)
+
+
+def test_a_row_the_move_cannot_take_can_be_discarded(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    db_session: Session,
+    stored: Callable[..., None],
+) -> None:
+    stored("groq", provider_type="openai", api_key="sk-groq-3333")
+
+    refused = client.delete(f"{PATH}/groq", headers=api_key_header)
+    discarded = client.delete(f"{PATH}/groq", headers=master_key_header)
+    again = client.delete(f"{PATH}/groq", headers=master_key_header)
+
+    assert refused.status_code in (401, 403, 404)
+    assert (discarded.status_code, again.status_code) == (204, 404)
+    db_session.expire_all()
+    assert db_session.execute(select(ProviderCredential)).scalars().all() == []

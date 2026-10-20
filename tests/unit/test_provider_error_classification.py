@@ -481,7 +481,7 @@ def test_platform_terminal_exc_for_a_missing_credential_is_a_424() -> None:
 
 def test_missing_credential_detail_without_a_variable() -> None:
     detail = MissingCredential("vertexai", None).detail
-    assert "config.yml, store" in detail
+    assert "config.yml, add it on the Hosted providers page" in detail
     assert "${" not in detail
 
 

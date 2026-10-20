@@ -29,6 +29,7 @@ from gateway.core.config import GatewayConfig, hosted_key_optional
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyError
 from gateway.exceptions.providers_exceptions import (
+    DeploymentProviderNotFoundError,
     HostedModelAlreadyOfferedError,
     HostedModelNameRequiredError,
     HostedModelNotFoundError,
@@ -75,7 +76,7 @@ from gateway.services.model_discovery_service import (
     test_provider_credentials,
 )
 from gateway.services.pricing import DeploymentPricingService
-from gateway.services.provider_store_service import config_file_instances, forget_stored_providers
+from gateway.services.provider_kwargs import configured_instances
 from gateway.services.providers._deployment_provider_move import PlannedMove, plan_move
 from gateway.services.providers._hosted_catalog_sweep import UNDECRYPTABLE, HostedCatalogSweep, LiveByoPairs
 from gateway.services.providers._hosted_credentials import (
@@ -585,7 +586,7 @@ class HostedProviderService:
         async with self.uow:
             hosted_names = {row.name for row in await self.providers.list_all()}
             stored = list(await self.providers.list_deployment_providers())
-        configured = set(config_file_instances(self.config))
+        configured = set(configured_instances(self.config))
         plans = [plan_move(row, hosted_names=hosted_names, configured_instances=configured) for row in stored]
         if apply:
             removed: set[str] = set()
@@ -601,11 +602,21 @@ class HostedProviderService:
                         continue
                 if await self._move(plan):
                     removed.add(plan.row.instance)
-            if removed:
-                forget_stored_providers(self.config, removed)
-                for instance in removed:
-                    get_model_cache().clear(instance)
+            for instance in removed:
+                get_model_cache().clear(instance)
         return DeploymentProviderMigrationPublic(rows=[plan.row for plan in plans])
+
+    async def discard_deployment_provider(self, instance: str) -> None:
+        """Remove a deployment provider the move did not take, which serves nothing.
+
+        Raises:
+            DeploymentProviderNotFoundError: no such deployment provider.
+        """
+        async with self.uow:
+            row = await self.providers.get_deployment_provider(instance)
+            if row is None:
+                raise DeploymentProviderNotFoundError(instance)
+            await self.providers.delete_deployment_provider(row)
 
     async def _move(self, plan: PlannedMove) -> bool:
         """Create the hosted provider a plan names and remove its source; returns whether the source went."""

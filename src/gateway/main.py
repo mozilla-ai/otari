@@ -109,11 +109,10 @@ from gateway.services.pricing_refresh_service import (
     run_price_update_poller,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
-from gateway.services.provider_kwargs import configure_hosted_names, warn_about_ignored_provider_variables
-from gateway.services.provider_store_service import (
-    load_providers_at_startup,
-    reset_provider_cache,
-    run_provider_refresher,
+from gateway.services.provider_kwargs import (
+    configure_hosted_names,
+    settle_configured_providers,
+    warn_about_ignored_provider_variables,
 )
 from gateway.services.providers import (
     hosted_implementation,
@@ -340,6 +339,38 @@ async def _report_hosted_providers_config(config: GatewayConfig) -> None:
         )
 
 
+async def _move_deployment_providers(config: GatewayConfig) -> None:
+    """Move what is left of the deployment providers the retired dashboard page stored onto hosted providers.
+
+    Each becomes a hosted provider of the same name, so ``instance:model``
+    keeps reaching it, with every model it lists switched on. The provider is
+    asked for its models here, so the first start after an upgrade waits on
+    each one, up to the discovery timeout. A row that cannot move is logged
+    with the reason and stays listed on the Hosted providers page.
+    """
+    try:
+        async with create_unit_of_work() as uow:
+            report = await build_hosted_provider_service(uow, config=config).migrate_deployment_providers(apply=True)
+    except Exception as exc:
+        logger.error(
+            "Could not move the deployment providers onto hosted providers: %s; "
+            "review the move on the Hosted providers page.",
+            describe_database_error(exc),
+        )
+        return
+    moved = [row.instance for row in report.rows if row.source_removed]
+    if moved:
+        logger.info("Moved %d deployment provider(s) onto hosted providers: %s", len(moved), ", ".join(moved))
+    for row in report.rows:
+        if not row.source_removed:
+            logger.error(
+                "Deployment provider '%s' was not moved onto a hosted provider (%s), so it serves nothing: %s",
+                row.instance,
+                row.outcome,
+                row.detail or (row.notes[-1] if row.notes else "review the move on the Hosted providers page."),
+            )
+
+
 # The periodic background workers a standalone deployment runs.
 # A new worker is one entry here.
 #
@@ -351,7 +382,6 @@ async def _report_hosted_providers_config(config: GatewayConfig) -> None:
 _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker("alias", lambda _config, _container: run_alias_refresher(), reset_alias_cache),
     _LifespanWorker("policy", lambda _config, _container: run_policy_refresher(), reset_policy_cache),
-    _LifespanWorker("provider", lambda config, _container: run_provider_refresher(config), reset_provider_cache),
     _LifespanWorker(
         "organization provider key",
         lambda _config, _container: run_org_provider_refresher(),
@@ -841,17 +871,13 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 # under: revoke them all when the master key changed across a
                 # restart (e.g. OTARI_MASTER_KEY was rotated).
                 await revoke_sessions_on_master_key_change(config, session)
-                # Overlay dashboard-stored providers before pricing init, so a
-                # provider added at runtime is visible to everything that reads
-                # config.providers (pricing seeding, discovery, dispatch).
-                await load_providers_at_startup(session, config)
-                # After the stored providers, which declare a provider as config.yml does.
+                # Before pricing init, so nothing reads an entry that declares no credential.
+                settle_configured_providers(config)
                 warn_about_ignored_provider_variables(config)
                 # Organization-scoped provider keys (otari-ai#1748, otari#643):
-                # a disjoint overlay from the one above, keyed by
-                # (workspace_id, provider) rather than instance name. Empty on
-                # a fresh database (no workspace or key exists yet), the same
-                # posture load_providers_at_startup takes.
+                # an overlay keyed by (workspace_id, provider) rather than
+                # instance name. Empty on a fresh database (no workspace or key
+                # exists yet).
                 await load_org_provider_keys_at_startup(session)
                 await bootstrap_first_api_key(config, session, app.state.container.resolve(ApiKeyFormatPort, session))
                 await initialize_pricing_from_config(config, session)
@@ -868,6 +894,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # vendor handshake.
             await load_guardrail_runner_at_startup()
             await load_provider_endpoints_at_startup()
+            await _move_deployment_providers(config)
             await load_hosted_names_at_startup(config)
             # On a Unit of Work of its own, after the session above has closed.
             await _report_hosted_providers_config(config)

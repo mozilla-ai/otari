@@ -168,7 +168,6 @@ function renderShell(
     // The harness already mounts the component under test at `url`, so a probe
     // for that same path would be a duplicate route.
     routes: [
-      { path: "/providers", element: <div>PROVIDERS PAGE</div> },
       { path: "/invitations", element: <div>INVITATIONS PAGE</div> },
       {
         path: "/organization/provider-keys",
@@ -255,12 +254,12 @@ describe("AppShell responsive layout", () => {
     await renderShell(bootstrap(), { url: "/organization" })
 
     await user.click(screen.getByRole("button", { name: "Open navigation" }))
-    await user.click(
-      await screen.findByRole("link", { name: "Deployment providers" }),
-    )
+    await user.click(await screen.findByRole("link", { name: "Providers" }))
 
-    expect(await screen.findByText("PROVIDERS PAGE")).toBeInTheDocument()
-    expect(document.title).toBe("Deployment providers · Otari")
+    expect(
+      await screen.findByText("ORG PROVIDER KEYS PAGE"),
+    ).toBeInTheDocument()
+    expect(document.title).toBe("Providers · Otari")
     // Navigating closes the drawer so the page it landed on is not hidden behind it.
     expect(
       screen.getByRole("button", { name: "Open navigation" }),
@@ -286,17 +285,18 @@ describe("AppShell responsive layout", () => {
     )
 
     await user.click(await screen.findByRole("link", { name: "Organization" }))
-    const providers = await screen.findByRole("link", {
-      name: "Deployment providers",
-    })
+    const providers = await screen.findByRole("link", { name: "Providers" })
     expect(providers).not.toHaveAttribute("aria-current")
 
     await user.click(providers)
 
-    expect(await screen.findByText("PROVIDERS PAGE")).toBeInTheDocument()
     expect(
-      screen.getByRole("link", { name: "Deployment providers" }),
-    ).toHaveAttribute("aria-current", "page")
+      await screen.findByText("ORG PROVIDER KEYS PAGE"),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Providers" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    )
     expect(
       screen.getByRole("link", { name: "Org settings" }),
     ).not.toHaveAttribute("aria-current")
@@ -658,9 +658,7 @@ describe("AppShell surface gating", () => {
     // Same reasoning as above, for the other context: the organization rail is
     // its own registry, and nothing else compares it against a full list.
     await renderShell(bootstrap(), { url: "/organization/members" })
-    // Awaited on Providers rather than on any other row: it declares
-    // `operatorOnly`, so it is the last to settle once the membership context
-    // arrives. Waiting on another row would leave the snapshot below a race.
+    // Awaited so the rail has settled before the snapshot below.
     await within(
       screen.getByRole("navigation", { name: "Sidebar" }),
     ).findByRole("link", { name: "Providers" })
@@ -676,7 +674,6 @@ describe("AppShell surface gating", () => {
       "Email domains",
       "Spend & budgets",
       "Providers",
-      "Deployment providers",
       "Guardrails",
       "Org settings",
     ])
@@ -696,11 +693,8 @@ describe("AppShell surface gating", () => {
 
   it("puts the hosted deployment's own Providers row in that same place", async () => {
     mockMatchMedia(false)
-    // The other half of the either/or the two rows encode. A hosted deployment
-    // drops `providers` and reports `organization_providers` in its place, so
-    // the row under General is a different destination with the same label, and
-    // nothing above this asserts that: the registry test reads the declaration,
-    // and the page's own tests render it without a rail.
+    // The registry test reads the declaration and the page's own tests render
+    // it without a rail, so nothing else asserts the hosted rail draws it.
     await renderShell(
       bootstrap({ deployment_type: "hosted", surfaces: HOSTED_SURFACES }),
       { url: "/organization/members" },
@@ -710,9 +704,8 @@ describe("AppShell surface gating", () => {
       name: "Providers",
     })
     expect(providers).toHaveAttribute("href", "/organization/provider-keys")
-    // Where the deployment's own row stands on standalone, with Guardrails then
-    // Org settings after it, read off the rendered order rather than off the
-    // registry.
+    // Guardrails then Org settings after it, read off the rendered order rather
+    // than off the registry.
     expect(
       within(sidebar)
         .getAllByRole("link")
@@ -732,9 +725,7 @@ describe("AppShell surface gating", () => {
     mockMatchMedia(false)
     // A surface the bootstrap omits takes its link with it. Both observability
     // pages read /v1/usage, so both go.
-    await renderShell(
-      bootstrap({ surfaces: ["models", "providers", "settings"] }),
-    )
+    await renderShell(bootstrap({ surfaces: ["models", "settings"] }))
 
     expect(screen.queryByRole("link", { name: "Activity" })).toBeNull()
     expect(screen.queryByRole("link", { name: "Usage" })).toBeNull()
@@ -798,11 +789,11 @@ describe("AppShell entitlement gating", () => {
     // useNavVisibility.test.tsx covers the other two on synthetic entries,
     // which is where they have users today.
     await renderShell(bootstrap({ surfaces: ["models"] }), {
-      url: "/providers",
+      url: "/keys",
     })
 
     expect(
-      await screen.findByText("Deployment providers is not available here"),
+      await screen.findByText("API keys is not available here"),
     ).toBeInTheDocument()
     expect(screen.queryByText("PAGE CONTENT")).toBeNull()
     // The sidebar is behind a menu on a phone, so the panel carries its own way
@@ -863,13 +854,15 @@ describe("AppShell entitlement gating", () => {
     // The case rides on one row, so it is only as good as that row's gate, and
     // a row losing its gate is a registry edit that says nothing about this
     // file. So the premise is asserted rather than assumed.
-    expect(navItemForPath("/providers")?.operatorOnly).toBeDefined()
-    await renderShell(bootstrap(), { operator: true, url: "/organization" })
+    expect(
+      navItemForPath("/admin/hosted-providers")?.operatorOnly,
+    ).toBeDefined()
+    await renderShell(bootstrap(), { operator: true, url: "/settings" })
 
     expect(
       await within(
         screen.getByRole("navigation", { name: "Sidebar" }),
-      ).findByRole("link", { name: "Providers" }),
+      ).findByRole("link", { name: "Hosted providers" }),
     ).toBeInTheDocument()
   })
 
@@ -913,7 +906,7 @@ describe("AppShell entitlement gating", () => {
 
   it("still renders a destination that passes every axis", async () => {
     mockMatchMedia(false)
-    await renderShell(bootstrap(), { url: "/providers" })
+    await renderShell(bootstrap(), { url: "/settings" })
 
     expect(await screen.findByText("PAGE CONTENT")).toBeInTheDocument()
   })
@@ -1533,12 +1526,10 @@ describe("the telemetry the sidebar records", () => {
     const user = userEvent.setup()
     await renderShell(bootstrap(), { url: "/organization" })
 
-    await user.click(
-      await screen.findByRole("link", { name: "Deployment providers" }),
-    )
+    await user.click(await screen.findByRole("link", { name: "Guardrails" }))
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
-      tab_name: "providers",
+      tab_name: "guardrails",
       context: "organization_settings",
     })
   })
@@ -1563,11 +1554,9 @@ describe("the telemetry the sidebar records", () => {
     // Counting those would inflate whichever page people sit on longest.
     mockMatchMedia(false)
     const user = userEvent.setup()
-    await renderShell(bootstrap(), { url: "/providers" })
+    await renderShell(bootstrap(), { url: "/organization/guardrails" })
 
-    await user.click(
-      await screen.findByRole("link", { name: "Deployment providers" }),
-    )
+    await user.click(await screen.findByRole("link", { name: "Guardrails" }))
 
     expect(recordEvent).not.toHaveBeenCalled()
   })

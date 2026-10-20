@@ -5264,69 +5264,6 @@
         "title": "CreateSessionRequest",
         "type": "object"
       },
-      "CreateStoredProviderRequest": {
-        "description": "Create a stored provider. ``api_key`` is write-only and requires OTARI_SECRET_KEY.",
-        "properties": {
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base"
-          },
-          "api_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Provider API key. Stored encrypted; never returned.",
-            "title": "Api Key"
-          },
-          "client_args": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Args"
-          },
-          "instance": {
-            "description": "Routing key, e.g. 'openai' or a named instance like 'home_lab'.",
-            "minLength": 1,
-            "title": "Instance",
-            "type": "string"
-          },
-          "provider_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "any-llm implementation when the instance name is not itself one.",
-            "title": "Provider Type"
-          }
-        },
-        "required": [
-          "instance"
-        ],
-        "title": "CreateStoredProviderRequest",
-        "type": "object"
-      },
       "CreateUserRequest": {
         "description": "Request model for creating a new user.",
         "properties": {
@@ -6000,7 +5937,7 @@
         "type": "object"
       },
       "DeploymentProviderMigrationPublic": {
-        "description": "The deployment providers stored through the dashboard, and how each moves onto a hosted provider.",
+        "description": "The deployment providers the retired dashboard page stored, and how each moves onto a hosted provider.",
         "properties": {
           "rows": {
             "items": {
@@ -16442,12 +16379,9 @@
             "type": "string"
           },
           "source": {
+            "const": "config",
             "default": "config",
-            "description": "Where the instance is defined: 'config' for config.yml (or OTARI_CONFIG_YAML), 'dashboard' for one stored through the deployment providers page.",
-            "enum": [
-              "config",
-              "dashboard"
-            ],
+            "description": "Where the instance is defined: 'config' for config.yml (or OTARI_CONFIG_YAML).",
             "title": "Source",
             "type": "string"
           }
@@ -16930,33 +16864,6 @@
           "warm"
         ],
         "title": "RecordedPool",
-        "type": "object"
-      },
-      "ReencryptProviderCredentialsResponse": {
-        "description": "Result of re-encrypting stored provider keys with the primary secret key.",
-        "properties": {
-          "reencrypted": {
-            "description": "Number of stored provider keys re-encrypted.",
-            "title": "Reencrypted",
-            "type": "integer"
-          },
-          "skipped": {
-            "default": 0,
-            "description": "Number of rows whose stored key changed between the read and the write, so the re-encryption was not applied. They already hold whoever wrote them last.",
-            "title": "Skipped",
-            "type": "integer"
-          },
-          "unreadable": {
-            "description": "Number of encrypted keys left untouched because they could not be decrypted.",
-            "title": "Unreadable",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "reencrypted",
-          "unreadable"
-        ],
-        "title": "ReencryptProviderCredentialsResponse",
         "type": "object"
       },
       "ReencryptSearchToolsResponse": {
@@ -19633,85 +19540,6 @@
         "title": "SpanPublic",
         "type": "object"
       },
-      "StoredProviderResponse": {
-        "description": "A runtime-stored provider. The API key is never returned, only ``last4``.",
-        "properties": {
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base"
-          },
-          "client_args": {
-            "additionalProperties": true,
-            "title": "Client Args",
-            "type": "object"
-          },
-          "created_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
-          },
-          "decryptable": {
-            "default": true,
-            "title": "Decryptable",
-            "type": "boolean"
-          },
-          "instance": {
-            "title": "Instance",
-            "type": "string"
-          },
-          "last4": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last4"
-          },
-          "provider_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider Type"
-          },
-          "updated_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Updated At"
-          }
-        },
-        "required": [
-          "instance"
-        ],
-        "title": "StoredProviderResponse",
-        "type": "object"
-      },
       "StoredSearchToolSchema": {
         "description": "A runtime-stored search or fetch instance. The API key is never returned, only ``last4``.",
         "properties": {
@@ -19893,106 +19721,6 @@
           "warm"
         ],
         "title": "TaskPool",
-        "type": "object"
-      },
-      "TestProviderRequest": {
-        "description": "Credentials to test before saving (from the add-provider form).",
-        "properties": {
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base"
-          },
-          "api_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Key"
-          },
-          "client_args": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Args"
-          },
-          "instance": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Provider/instance name; the impl when no provider_type.",
-            "title": "Instance"
-          },
-          "provider_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider Type"
-          }
-        },
-        "title": "TestProviderRequest",
-        "type": "object"
-      },
-      "TestProviderResponse": {
-        "description": "Result of a live provider connection test.",
-        "properties": {
-          "discovery_unsupported": {
-            "default": false,
-            "description": "True when the test failed only because this backend serves no model-listing endpoint, so the credentials could not be verified this way but may still work for requests.",
-            "title": "Discovery Unsupported",
-            "type": "boolean"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "model_count": {
-            "title": "Model Count",
-            "type": "integer"
-          },
-          "ok": {
-            "title": "Ok",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "ok",
-          "model_count"
-        ],
-        "title": "TestProviderResponse",
         "type": "object"
       },
       "TestServiceRequest": {
@@ -21486,71 +21214,6 @@
           }
         },
         "title": "UpdateSettingsRequest",
-        "type": "object"
-      },
-      "UpdateStoredProviderRequest": {
-        "description": "Update a stored provider. Omitted fields are unchanged; ``api_key`` rotates in place.",
-        "properties": {
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base"
-          },
-          "api_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "New API key. Omit to keep the existing one. Never returned.",
-            "title": "Api Key"
-          },
-          "client_args": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Args"
-          },
-          "expected_updated_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.",
-            "title": "Expected Updated At"
-          },
-          "provider_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider Type"
-          }
-        },
-        "title": "UpdateStoredProviderRequest",
         "type": "object"
       },
       "UpdateToolSettingsRequest": {
@@ -30048,7 +29711,7 @@
     },
     "/api/v1/hosted-providers/migration": {
       "get": {
-        "description": "What moving the deployment providers stored through the dashboard onto hosted providers would do.\n\nWrites nothing and dials nothing.",
+        "description": "What moving the deployment providers the retired dashboard page stored onto hosted providers would do.\n\nThe gateway moves them at startup, so this lists the ones it could not\nmove, each with the reason. Writes nothing and dials nothing.",
         "operationId": "hosted-providers-preview_deployment_provider_migration",
         "responses": {
           "200": {
@@ -30076,7 +29739,7 @@
         ]
       },
       "post": {
-        "description": "Move the deployment providers stored through the dashboard onto hosted providers of the same name.\n\nEach is created as a hosted provider, offering what it lists as a create\ndoes, and the deployment provider is removed once the hosted one offers a\nmodel. One that cannot move is reported and left in place. ``rows``\nlimits the move to the rows of the preview the caller reviewed, at the\nversions it was shown them.",
+        "description": "Move the deployment providers the retired dashboard page stored onto hosted providers of the same name.\n\nEach is created as a hosted provider that serves models not on its roster,\noffering what it lists as a create does, and the deployment provider is\nremoved. One that cannot move is reported and left in place. ``rows``\nlimits the move to the rows of the preview the caller reviewed, at the\nversions it was shown them.",
         "operationId": "hosted-providers-apply_deployment_provider_migration",
         "requestBody": {
           "content": {
@@ -30124,9 +29787,53 @@
         ]
       }
     },
+    "/api/v1/hosted-providers/migration/{instance}": {
+      "delete": {
+        "description": "Remove a deployment provider the move could not take, which serves nothing.",
+        "operationId": "hosted-providers-discard_deployment_provider",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "title": "Instance",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Discard Deployment Provider",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
     "/api/v1/hosted-providers/reencrypt": {
       "post": {
-        "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nRun after rotating the key, alongside ``POST /api/v1/provider-credentials/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
+        "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nRun after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
         "operationId": "hosted-providers-reencrypt_hosted_providers",
         "responses": {
           "200": {
@@ -41195,322 +40902,6 @@
         ]
       }
     },
-    "/api/v1/provider-credentials": {
-      "get": {
-        "description": "List runtime-stored providers. Keys are never returned, only ``last4``.",
-        "operationId": "providers-list_stored_providers",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/StoredProviderResponse"
-                  },
-                  "title": "Response Providers-List Stored Providers",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "List Stored Providers",
-        "tags": [
-          "providers"
-        ]
-      },
-      "post": {
-        "description": "Add a provider at runtime. Storing a key requires OTARI_SECRET_KEY.",
-        "operationId": "providers-create_stored_provider",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateStoredProviderRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StoredProviderResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Create Stored Provider",
-        "tags": [
-          "providers"
-        ]
-      }
-    },
-    "/api/v1/provider-credentials/reencrypt": {
-      "post": {
-        "description": "Re-encrypt stored provider keys with the primary OTARI_SECRET_KEY.\n\nOperators rotate ``OTARI_SECRET_KEY`` by setting it to ``new,old`` first,\nrestarting, running this endpoint, then removing the old key and restarting\nagain. Rows that cannot be decrypted are left untouched and must be recovered\nby replacing the affected provider keys.",
-        "operationId": "providers-reencrypt_stored_provider_keys",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReencryptProviderCredentialsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Reencrypt Stored Provider Keys",
-        "tags": [
-          "providers"
-        ]
-      }
-    },
-    "/api/v1/provider-credentials/test": {
-      "post": {
-        "description": "Test provider credentials without storing them (for the add/edit form).\n\nResolves the implementation from ``provider_type`` (honoring the\n``*-compatible`` aliases) or the ``instance`` name, then lists the provider's\nmodels with the supplied credentials. Nothing is persisted and the key is\nnever echoed.",
-        "operationId": "providers-test_provider_connection",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TestProviderRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TestProviderResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Test Provider Connection",
-        "tags": [
-          "providers"
-        ]
-      }
-    },
-    "/api/v1/provider-credentials/{instance}": {
-      "delete": {
-        "description": "Delete a stored provider. A config.yml provider cannot be deleted here.",
-        "operationId": "providers-delete_stored_provider",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance",
-            "required": true,
-            "schema": {
-              "title": "Instance",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Delete Stored Provider",
-        "tags": [
-          "providers"
-        ]
-      },
-      "patch": {
-        "description": "Update a stored provider. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it. The row is locked ``FOR UPDATE``\nso the ``expected_updated_at`` check and the write it guards are atomic.",
-        "operationId": "providers-update_stored_provider",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance",
-            "required": true,
-            "schema": {
-              "title": "Instance",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateStoredProviderRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StoredProviderResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Update Stored Provider",
-        "tags": [
-          "providers"
-        ]
-      }
-    },
-    "/api/v1/provider-credentials/{instance}/test": {
-      "post": {
-        "description": "Verify a stored provider's key by listing its models, without exposing the key.",
-        "operationId": "providers-test_stored_provider",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance",
-            "required": true,
-            "schema": {
-              "title": "Instance",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TestProviderResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Test Stored Provider",
-        "tags": [
-          "providers"
-        ]
-      }
-    },
     "/api/v1/provider-endpoints": {
       "get": {
         "description": "List owned provider endpoints, narrowed by owner when given. Keys are never returned.",
@@ -43249,7 +42640,7 @@
     },
     "/api/v1/search-tools/reencrypt": {
       "post": {
-        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/provider-credentials/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
+        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
         "operationId": "search-tools-reencrypt_stored_search_tool_keys",
         "responses": {
           "200": {
