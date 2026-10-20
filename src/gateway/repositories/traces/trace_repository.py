@@ -216,7 +216,8 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
             case "last_activity":
                 return Trace.last_activity_at
             case "latency":
-                # SQLite stores timestamps as text, so the span is taken in days.
+                # SQLite stores timestamps as text, so the span is taken in days, which loses
+                # sub-millisecond differences; ties then fall to newest activity. Postgres is exact.
                 if dialect_name(self.db) == "sqlite":
                     return func.julianday(Trace.last_activity_at) - func.julianday(Trace.started_at)
                 return Trace.last_activity_at - Trace.started_at
