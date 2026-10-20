@@ -6,7 +6,7 @@ accept ``budget``. The constraint is replaced through a batch rebuild, since
 SQLite cannot alter one in place.
 
 Revision ID: bea0cc9abb34
-Revises: 557fc0f5bfda
+Revises: 6c3606e98ed9
 Create Date: 2026-10-17
 """
 
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "bea0cc9abb34"
-down_revision: str | Sequence[str] | None = "557fc0f5bfda"
+down_revision: str | Sequence[str] | None = "6c3606e98ed9"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -53,7 +53,6 @@ def _table(per_values: str, *, with_budgets: bool) -> sa.Table:
 
 
 def upgrade() -> None:
-    """Add ``budgets`` and ``mode``, and accept ``per = 'budget'``."""
     with op.batch_alter_table(_TABLE, copy_from=_table(_PER_BEFORE, with_budgets=False)) as batch:
         batch.add_column(sa.Column("budgets", sa.JSON(), nullable=True))
         batch.add_column(sa.Column("mode", sa.String(), nullable=False, server_default="enforce"))
@@ -62,7 +61,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Drop the per-budget rules, then ``budgets`` and ``mode``; report rules become enforced."""
+    """A report rule comes back enforced, since the schema before this has no ``mode`` to keep it reporting."""
     op.execute(sa.text("DELETE FROM rate_limit_rules WHERE per = 'budget'"))
     with op.batch_alter_table(_TABLE, copy_from=_table(_PER_AFTER, with_budgets=True)) as batch:
         batch.drop_constraint(_CHECK, type_="check")

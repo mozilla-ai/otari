@@ -158,6 +158,8 @@ describe("RateLimitsCard", () => {
             max_concurrent: null,
             lease_sec: 900,
             tpm_admission: "used",
+            mode: "enforce",
+            budgets: null,
           },
         },
       ]),
@@ -194,6 +196,8 @@ describe("RateLimitsCard", () => {
         max_concurrent: null,
         lease_sec: 900,
         tpm_admission: "used",
+        mode: "enforce",
+        budgets: null,
       }),
     )
   })
@@ -286,6 +290,7 @@ describe("RateLimitsCard", () => {
             lease_sec: 900,
             tpm_admission: "estimate",
             mode: "enforce",
+            budgets: null,
           },
         },
       ]),
