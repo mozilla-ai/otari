@@ -1,4 +1,3 @@
-import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
@@ -6,10 +5,6 @@ from typing import Annotated, Any
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
-    ChatCompletionMessage,
-    Choice,
-    ChoiceDelta,
-    ChunkChoice,
     CompletionParams,
     CompletionUsage,
 )
@@ -77,6 +72,8 @@ from gateway.services.inference import (
     bind_upstream_user,
     chat_user_fields,
     is_chat_stream_cost_carrier,
+    mock_completion,
+    mock_stream,
     provider_failure,
     require_choices,
     with_upstream_user,
@@ -209,49 +206,6 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     )
 
 
-def _mock_completion(kwargs: dict[str, Any], text: str) -> ChatCompletion:
-    """The completion a request's ``mock_response`` stands for, with no provider called.
-
-    Usage is estimated at four characters a token, as the budget hold estimates a
-    prompt, so the request is priced and settled like any other.
-    """
-    prompt_chars = sum(len(str(message.get("content") or "")) for message in kwargs.get("messages") or [])
-    prompt_tokens = (prompt_chars + 3) // 4
-    completion_tokens = (len(text) + 3) // 4
-    return ChatCompletion(
-        id=f"chatcmpl-mock-{uuid.uuid4().hex}",
-        object="chat.completion",
-        created=int(time.time()),
-        model=str(kwargs.get("model") or ""),
-        choices=[Choice(index=0, message=ChatCompletionMessage(role="assistant", content=text), finish_reason="stop")],
-        usage=CompletionUsage(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens,
-        ),
-    )
-
-
-async def _mock_stream(completion: ChatCompletion) -> AsyncIterator[ChatCompletionChunk]:
-    """``completion`` as a stream: its text in one chunk, then the usage chunk ``include_usage`` asks for."""
-    content = completion.choices[0].message.content
-    yield ChatCompletionChunk(
-        id=completion.id,
-        object="chat.completion.chunk",
-        created=completion.created,
-        model=completion.model,
-        choices=[ChunkChoice(index=0, delta=ChoiceDelta(role="assistant", content=content), finish_reason="stop")],
-    )
-    yield ChatCompletionChunk(
-        id=completion.id,
-        object="chat.completion.chunk",
-        created=completion.created,
-        model=completion.model,
-        choices=[],
-        usage=completion.usage,
-    )
-
-
 def _every_choice_finishes() -> Callable[[ChatCompletionChunk], bool]:
     """A predicate, for one stream, that holds while every choice seen so far has a ``finish_reason``.
 
@@ -372,14 +326,14 @@ class _ChatAdapter:
     async def call_provider(self, kwargs: dict[str, Any]) -> ChatCompletion:
         mock = kwargs.pop("mock_response", None)
         if mock is not None:
-            return _mock_completion(kwargs, mock)
+            return mock_completion(kwargs, mock)
         completion: ChatCompletion = await acompletion(**_with_upstream_user(kwargs))  # type: ignore[assignment]
         return require_choices(completion)
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ChatCompletionChunk]:
         mock = kwargs.pop("mock_response", None)
         if mock is not None:
-            return _mock_stream(_mock_completion(kwargs, mock))
+            return mock_stream(mock_completion(kwargs, mock))
         return await acompletion(**_with_upstream_user(kwargs))  # type: ignore[return-value]
 
     def prepare_stream_kwargs(

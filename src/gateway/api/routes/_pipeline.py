@@ -264,6 +264,7 @@ from gateway.services.inference import (
     is_upstream_connect_failure,
     is_upstream_request_fault,
     is_upstream_stream_interrupted,
+    mock_response_allowed,
     provider_failure,
     upstream_body_messages,
     upstream_error_message,
@@ -2738,8 +2739,7 @@ async def resolve_request_context(
     request_id: str
     session = resolve_session(raw_request.headers, session_label=session_label, tags=tags)
 
-    if mock_response_requested and hybrid_mode:
-        # A hybrid gateway's keys are the platform's, and none of them allows a mock.
+    if mock_response_requested and hybrid_mode and not mock_response_allowed(None):
         raise adapter.error(status.HTTP_403_FORBIDDEN, MOCK_RESPONSE_NOT_ALLOWED_DETAIL, ErrorKind.PERMISSION)
 
     if hybrid_mode:
@@ -2794,14 +2794,14 @@ async def resolve_request_context(
         is_master_key = False
         names_end_user = False
         if session_principal is not None:
-            if mock_response_requested:
+            if mock_response_requested and not mock_response_allowed(None):
                 raise adapter.error(status.HTTP_403_FORBIDDEN, MOCK_RESPONSE_NOT_ALLOWED_DETAIL, ErrorKind.PERMISSION)
             workspace_id = session_principal.workspace_id
             user_id = session_principal.user_id
             key_allowlist = session_principal.allowed_models
         else:
             api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
-            if mock_response_requested and not (api_key is not None and api_key.allow_mock_response):
+            if mock_response_requested and not mock_response_allowed(api_key):
                 raise adapter.error(status.HTTP_403_FORBIDDEN, MOCK_RESPONSE_NOT_ALLOWED_DETAIL, ErrorKind.PERMISSION)
             api_key_id = api_key.id if api_key else None
             # Zero I/O for a keyed request: `api_key.workspace_id` is already an

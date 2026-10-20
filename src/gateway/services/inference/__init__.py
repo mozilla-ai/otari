@@ -37,6 +37,7 @@ from gateway.services.inference._messages_responses_bridge import (
     usage_unreported,
     with_responses_instance,
 )
+from gateway.services.inference._mock_responses import mock_completion, mock_response_allowed, mock_stream
 from gateway.services.inference._passthrough_usage import (
     EMBEDDINGS_BILLING,
     IMAGES_BILLING,
@@ -96,6 +97,9 @@ from gateway.services.inference._upstream_user import (
 )
 
 __all__ = [
+    "mock_completion",
+    "mock_response_allowed",
+    "mock_stream",
     "CONVERSATION_CACHE_KEY_FIELD",
     "admit_deployment_paid",
     "describe_port_error",

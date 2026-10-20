@@ -5,6 +5,7 @@ admitted against budgets, priced and settled, so a load test exercises the
 gateway as production traffic does, without paying for or waiting on a model.
 """
 
+from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -59,7 +60,7 @@ def test_a_mocked_completion_answers_without_the_provider_and_is_billed(
     body = response.json()
     assert body["choices"][0]["message"]["content"] == MOCK
     assert body["usage"]["completion_tokens"] == (len(MOCK) + 3) // 4
-    assert body["usage"]["cost_usd"] > 0
+    assert Decimal(body["usage"]["cost_usd"]) > 0
     row = db_session.query(UsageLog).one()
     assert row.status == "success"
     assert row.cost is not None and row.cost > 0
@@ -105,7 +106,9 @@ def test_the_flag_is_read_and_changed_through_the_keys_api(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     created = client.post(
-        f"{API_ROOT}/keys", json={"key_name": "lt", "user_id": "lt", "allow_mock_response": True}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"key_name": "lt", "user_id": "lt", "allow_mock_response": True},
+        headers=master_key_header,
     ).json()
     turned_off = client.patch(
         f"{API_ROOT}/keys/{created['id']}", json={"allow_mock_response": False}, headers=master_key_header
