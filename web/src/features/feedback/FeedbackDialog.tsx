@@ -105,10 +105,9 @@ export function FeedbackDialog({
             className="otari-form-dialog otari-form-dialog--md flex flex-col p-0 outline-none"
           >
             {returnFocusRef ? <RestoreFocus target={returnFocusRef} /> : null}
-            {/* The sheet's way out on a touch screen, which has no Escape and
-                no backdrop to press. Shown wherever the frame is the sheet,
-                which is by height as well as by width. */}
-            <div className="hidden shrink-0 justify-end pt-1.5 pr-2.5 pl-4 max-sm:flex [@media(height<=639px)]:flex">
+            {/* At every width: Escape and the backdrop are not a visible way
+                out, and a touch screen has neither. */}
+            <div className="flex shrink-0 justify-end pt-1.5 pr-2.5 pl-4">
               <Button
                 aria-label="Close"
                 isIconOnly
@@ -123,7 +122,7 @@ export function FeedbackDialog({
               <div
                 ref={thanksRef}
                 data-feedback-view="sent"
-                className="flex min-h-[16.25rem] flex-1 flex-col items-center justify-center gap-6 px-12 py-10 max-sm:px-6 max-sm:pt-0 max-sm:pb-24"
+                className="flex min-h-[16.25rem] flex-1 flex-col items-center justify-center gap-6 px-12 pb-10 max-sm:px-6 max-sm:pb-24"
               >
                 {/* The hook is on a wrapper because `ProductMark` passes no
                     attribute but `className` through to its `<svg>`. */}
@@ -162,7 +161,7 @@ export function FeedbackDialog({
                 <Modal.Heading id={headingId} className="sr-only">
                   Feedback
                 </Modal.Heading>
-                <div className="flex min-h-52 flex-1 flex-col gap-4 px-6 pt-6 pb-4 max-sm:px-4 max-sm:pt-1">
+                <div className="flex min-h-52 flex-1 flex-col gap-4 px-6 pt-1 pb-4 max-sm:px-4">
                   <ErrorBanner error={error ? NOT_SENT : undefined} />
                   {/* Native, as the playground composer's is: the shared
                       `TextArea` brings a visible label, a caption row and a

@@ -64,7 +64,7 @@ describe("FeedbackDialog", () => {
     expect(dialog).toHaveAccessibleDescription(
       "Every message reaches the people building Otari. We read them all, and they shape what comes next.",
     )
-    // The phone sheet's close control is the frame's only button.
+    // The close control is the frame's only button.
     expect(
       [...dialog.querySelectorAll("button")].map((b) =>
         b.getAttribute("aria-label"),

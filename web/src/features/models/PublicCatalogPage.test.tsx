@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -271,5 +271,8 @@ describe("PublicCatalogPage", () => {
       "aria-current",
       "page",
     )
+
+    await user.click(within(menu).getByRole("button", { name: "Close" }))
+    await waitFor(() => expect(menu).not.toBeInTheDocument())
   })
 })

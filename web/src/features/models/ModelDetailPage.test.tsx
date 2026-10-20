@@ -349,6 +349,9 @@ describe("ModelDetailPage", () => {
         (within(drawer).getByLabelText("cURL") as HTMLTextAreaElement).value,
       ).toContain('"model": "fireworks:z-ai/glm-5.3"'),
     )
+
+    await user.click(within(drawer).getByRole("button", { name: "Close" }))
+    await waitFor(() => expect(drawer).not.toBeInTheDocument())
   })
 
   it("names each offering's model ID among the drawer's providers", async () => {
