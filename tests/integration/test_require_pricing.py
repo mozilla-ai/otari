@@ -11,7 +11,6 @@ from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import update
@@ -371,7 +370,7 @@ def _override(client: TestClient, db: Session, model_key: str, *, origin: str) -
     db.commit()
 
 
-def _in_loop(client: TestClient, tool: str, provider: AsyncMock) -> httpx.Response:
+def _in_loop(client: TestClient, tool: str, provider: AsyncMock) -> Any:
     """A chat request on a priced model that declares ``tool``, its tool loop's model calls answered by ``provider``."""
     client.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
     _price(client, "openai:gpt-4o")

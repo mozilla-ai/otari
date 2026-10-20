@@ -166,11 +166,15 @@ otari:web_fetch
 The dashboard accepts dollars per call. The pricing API stores the value in
 `input_price_per_million`, so one cent per call is `10000`.
 
-With `require_pricing: true`, an unpriced gateway-run tool is refused before the
-model call. For web search and web fetch that check still reads only the
-`otari:web_search` and `otari:web_fetch` rows, whichever instance serves the calls
-and whether or not its provider reports a cost, so price those rows too. A failed tool invocation is recorded
-but not charged. Charges settle on the final usage row alongside model tokens.
+With `require_pricing: true`, a gateway-run tool whose calls no row would price
+is refused before the model call, with a `402` and the code `pricing_required`.
+The check looks for the rows settlement prices the calls with, described below:
+a search or fetch on an instance passes on its own row, and a call the
+deployment pays for does not pass on an organization's own override. A provider
+that reports its cost still needs a row, and a zero rate counts as one. The
+refusal names the tool's `otari:` row, which prices it on any instance. A failed
+tool invocation is recorded but not charged. Charges settle on the final usage
+row alongside model tokens.
 
 The usage row's pricing breakdown has one line per tool and label, and the
 dashboard's request detail shows each line with its label. The label says what
