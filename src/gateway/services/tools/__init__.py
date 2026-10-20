@@ -13,6 +13,8 @@ the last into ``AdmittedWebTools``,
 ``refuse_shadowed_builtin_tools`` refuses connected MCP servers whose tool names shadow a declared built-in,
 and ``apply_web_access_policy`` narrows its web access to what its workspace permits.
 ``web_search_max_results_baseline`` is how many search results a request gets when it names none.
+``tools_to_price`` and ``configured_tools_to_price`` say which pricing rows ``require_pricing`` checks for a
+request's gateway-run tools, and for the deployment's at startup, and ``unpriced_tool_detail`` what its refusal says.
 ``search_provider_catalog`` lists the providers a search or fetch tool may name.
 ``check_tool_entry``, ``check_tool_write``, ``check_kind_unchanged``, ``check_tool_name_is_free`` and
 ``default_to_pin`` hold a write through ``/api/v1/search-tools`` to the instance rules, and
@@ -94,6 +96,12 @@ from gateway.services.tools._search_tool_writes import (
     check_tool_name_is_free,
     check_tool_write,
     default_to_pin,
+)
+from gateway.services.tools._tool_prices import (
+    PricedTool,
+    configured_tools_to_price,
+    tools_to_price,
+    unpriced_tool_detail,
 )
 from gateway.services.tools._use_budget import MAX_USES_EXCEEDED_ERROR, ToolUseBudget, is_capped_call
 from gateway.services.tools._web_access import WebAccessGrant, apply_web_access_policy
@@ -191,6 +199,10 @@ __all__ = [
     "Tool",
     "ToolUseBudget",
     "AdmittedWebTools",
+    "PricedTool",
+    "configured_tools_to_price",
+    "tools_to_price",
+    "unpriced_tool_detail",
     "NO_WEB_TOOLS",
     "WebAccessGrant",
     "WebClaims",

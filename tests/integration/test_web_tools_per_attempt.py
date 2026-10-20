@@ -461,8 +461,8 @@ def test_a_web_access_policy_refusal_skips_only_the_fallback_that_needs_it(
 def test_an_unpriced_tool_skips_only_the_fallback_that_needs_it(
     client: TestClient, api_key_header: dict[str, str], db_session: Session, tool: str
 ) -> None:
-    async def unpriced(_ctx: Any, tools: Any) -> str | None:
-        return _NAMES[tool] if _NAMES[tool] in list(tools) else None
+    async def unpriced(_ctx: Any, tools: Any) -> Any:
+        return next((priced for priced in tools if priced.name == _NAMES[tool]), None)
 
     body = _messages_body("claude-then-vertex", _DECLARATIONS[tool])
     with patch("gateway.api.routes._pipeline._unpriced_tool", new=unpriced):

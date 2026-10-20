@@ -427,6 +427,16 @@ class DirectSearchPricingRequiredError(TenancyError):
     error_code: str = PRICING_REQUIRED
 
 
+class GatewayToolPricingRequiredError(TenancyError):
+    """A request refused because ``require_pricing`` is on and no pricing row prices a gateway-run tool it uses.
+
+    ``message`` names the tool and the row to add.
+    """
+
+    status_code = status.HTTP_402_PAYMENT_REQUIRED
+    error_code: str = PRICING_REQUIRED
+
+
 class WebSearchOptionRefusedError(TenancyValidationError):
     """A request's ``provider_options`` key the provider serving it does not take from a request.
 
