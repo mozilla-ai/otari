@@ -690,7 +690,6 @@ def _context(config: GatewayConfig, *, search: bool, fetch: bool, entry: dict[st
         use_web_search=search,
         web_search_tool_entry=search_entry,
         web_search_url=None,
-        web_search_auth_token=None,
         web_search=in_loop,
         use_web_fetch=fetch,
         web_fetch_tool_entry={"type": "otari_web_fetch"} if fetch else None,
