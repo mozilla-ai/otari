@@ -19,6 +19,7 @@
 * [Routing policies](routing.md)
 * [Health checks](health-checks.md)
 * [OpenAI provider guide](providers/openai.md)
+* [Gemini provider guide](providers/gemini.md)
 
 ## For integrators
 

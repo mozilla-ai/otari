@@ -334,7 +334,9 @@ function ConfigRow({
     // a `w-56` control and a sentence stopped fitting side by side.
     <div className="flex flex-wrap items-start justify-between gap-6 py-4">
       <div className="min-w-0">
-        <code className="font-mono text-body">{field.key}</code>
+        {/* `break-words`: at a larger text size the longest keys are wider
+            than a phone, and a snake_case name has no space to wrap at. */}
+        <code className="font-mono text-body break-words">{field.key}</code>
         {field.description ? (
           // `max-w-prose` for the reason the page header carries one: these
           // rows became full-bleed with the rest of the page, and the longest

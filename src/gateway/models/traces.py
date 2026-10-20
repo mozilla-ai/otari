@@ -38,6 +38,16 @@ class Trace(Base):
         Index("ix_traces_last_activity", "last_activity_at"),
         # Retention's age bound.
         Index("ix_traces_started_at", "started_at"),
+        # Search matches a prefix of the trace id or of the name. A pattern-ops index
+        # serves a prefix ``LIKE`` whatever the database's collation, and indexing both
+        # columns lets PostgreSQL answer the search's ``OR`` from the two together.
+        Index(
+            "ix_traces_workspace_trace_id_pattern",
+            "workspace_id",
+            "trace_id",
+            postgresql_ops={"trace_id": "text_pattern_ops"},
+        ),
+        Index("ix_traces_workspace_name", "workspace_id", "name", postgresql_ops={"name": "text_pattern_ops"}),
     )
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(

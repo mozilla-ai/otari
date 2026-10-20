@@ -74,7 +74,12 @@ def _span(span_id: str, *, kind: str = "step", minutes: int = 0, **fields: Any) 
 
 
 def _write(
-    workspace_id: uuid.UUID, trace_id: str, *spans: SpanRecord, user_id: str = "alice", session_source: str = "harness"
+    workspace_id: uuid.UUID,
+    trace_id: str,
+    *spans: SpanRecord,
+    user_id: str = "alice",
+    session_source: str = "harness",
+    name: str | None = None,
 ) -> TraceWrite:
     return TraceWrite(
         workspace_id=workspace_id,
@@ -83,6 +88,7 @@ def _write(
         api_key_id=None,
         session_source=session_source,
         harness="claude-code",
+        name=name,
         spans=spans,
     )
 
@@ -234,7 +240,7 @@ async def test_search_pages_newest_activity_first_and_filters(
     first_page = await store.search(scope, TraceFilter(), limit=2, offset=0)
     second_page = await store.search(scope, TraceFilter(), limit=2, offset=2)
     failing = await store.search(scope, TraceFilter(has_error=True), limit=10, offset=0)
-    by_prefix = await store.search(scope, TraceFilter(trace_id_prefix="session-2"), limit=10, offset=0)
+    by_prefix = await store.search(scope, TraceFilter(search="session-2"), limit=10, offset=0)
     windowed = await store.count(scope, TraceFilter(start=_T0 + timedelta(minutes=1)))
 
     assert [item.trace_id for item in first_page.items] == ["session-2", "session-1"]
@@ -252,8 +258,31 @@ async def test_a_prefix_search_treats_wildcards_literally(
     workspace, _ = tenants
     await store.write((_write(workspace, "session-1", _span("req-1")),))
 
-    assert await store.count(TraceScope.deployment(), TraceFilter(trace_id_prefix="%")) == 0
-    assert await store.count(TraceScope.deployment(), TraceFilter(trace_id_prefix="session_")) == 0
+    assert await store.count(TraceScope.deployment(), TraceFilter(search="%")) == 0
+    assert await store.count(TraceScope.deployment(), TraceFilter(search="session_")) == 0
+
+
+async def test_a_search_finds_a_session_by_the_start_of_its_name_inside_the_scope_only(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, other = tenants
+    await store.write(
+        (
+            _write(workspace, "s-aaa", _span("req-1"), session_source="client", name="hackbot-1234"),
+            _write(workspace, "s-bbb", _span("req-2"), session_source="client", name="hackbot-1299"),
+            _write(other, "s-ccc", _span("req-3"), session_source="client", name="hackbot-1234"),
+        )
+    )
+    scope = TraceScope.workspaces(frozenset({workspace}))
+
+    exact = await store.search(scope, TraceFilter(search="hackbot-1234"), limit=10, offset=0)
+    prefix = await store.search(scope, TraceFilter(search="hackbot-12"), limit=10, offset=0)
+
+    assert [(item.trace_id, item.name) for item in exact.items] == [("s-aaa", "hackbot-1234")]
+    assert sorted(item.trace_id for item in prefix.items) == ["s-aaa", "s-bbb"]
+    assert await store.count(scope, TraceFilter(search="hackbot_")) == 0
+    assert await store.count(scope, TraceFilter(search="HACKBOT-12")) == 0
+    assert await store.count(scope, TraceFilter(search="S-AAA")) == 0
 
 
 async def test_a_trace_with_more_spans_than_asked_for_says_it_was_cut(

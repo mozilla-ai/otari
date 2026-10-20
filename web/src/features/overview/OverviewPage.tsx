@@ -1224,16 +1224,27 @@ function SpendChart({
           </div>
           {/* Every fourth day, which lands nine labels across a thirty-day
               window: enough to date a bar, few enough not to become a second
-              row of text under a chart that is not the headline. */}
-          <div className="mt-1.5 flex text-mono-micro text-subtle">
-            {series.map((point, i) => (
-              <span
-                key={point.bucket_start}
-                className="min-w-px flex-1 text-center whitespace-nowrap"
-              >
-                {i % 4 === 0 ? shortDate(point.bucket_start) : "\u00a0"}
-              </span>
-            ))}
+              row of text under a chart that is not the headline.
+
+              Placed the way the hover card is: a label at a fraction `f` of
+              the plot shifts left by `f` of its own width, so it sits on its
+              bar yet can never overhang either edge, which on a phone would
+              pan the page. The non-breaking space gives the row its height. */}
+          <div className="relative mt-1.5 text-mono-micro text-subtle">
+            {"\u00a0"}
+            {series.map((point, i) => {
+              if (i % 4 !== 0) return null
+              const at = ((i + 0.5) / series.length) * 100
+              return (
+                <span
+                  key={point.bucket_start}
+                  className="absolute top-0 whitespace-nowrap"
+                  style={{ left: `${at}%`, transform: `translateX(-${at}%)` }}
+                >
+                  {shortDate(point.bucket_start)}
+                </span>
+              )
+            })}
           </div>
         </div>
       </div>

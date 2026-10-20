@@ -340,7 +340,7 @@ export function SessionsPage() {
             start={
               <SearchField
                 label="Search sessions"
-                placeholder="Search by session ID"
+                placeholder="Search by session ID or name"
                 value={query}
                 onChange={(value) => url.patch({ q: value, page: 0 })}
                 className="w-72 max-w-full"

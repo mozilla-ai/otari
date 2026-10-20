@@ -107,6 +107,25 @@ def test_the_same_label_from_two_users_is_two_sessions() -> None:
 
 
 @pytest.mark.parametrize(
+    ("ref", "name"),
+    [
+        (SessionRef(source="client", key="hackbot-1234"), "hackbot-1234"),
+        (SessionRef(source="client", key="the run Alice started"), None),
+        (SessionRef(source="client", key="alice@example.com"), None),
+        (SessionRef(source="client", key="api-key-123456"), None),
+        (SessionRef(source="client", key="API_KEY_0123456789abcdef0123456789abcdef"), None),
+        (SessionRef(source="client", key="ASIAIOSFODNN7EXAMPLE"), None),
+        (SessionRef(source="client", key="alice@example.com:42"), None),
+        (SessionRef(source="client", key="src/secret/notes.txt:42"), None),
+        (SessionRef(source="harness", key="b57732d4"), None),
+        (SessionRef(source="otlp", key="chat-1"), None),
+    ],
+)
+def test_only_an_identifier_shaped_key_the_client_chose_names_the_session(ref: SessionRef, name: str | None) -> None:
+    assert ref.name == name
+
+
+@pytest.mark.parametrize(
     ("headers", "expected"),
     [
         (_CLAUDE_CODE, "claude-code"),
@@ -267,6 +286,18 @@ def test_a_request_in_a_session_writes_into_the_sessions_trace() -> None:
     assert write.trace_id == session.trace_id(_WORKSPACE, "alice")
     assert (write.session_source, write.harness) == ("harness", "claude-code")
     assert write.spans[0].opens_turn is True
+
+
+def test_a_session_the_client_named_is_written_under_that_name() -> None:
+    named = _trace(session=SessionRef(source="client", key="hackbot-1234"), turn=None).finish(
+        status_code=200, completed=True
+    )
+    harness = _trace(session=SessionRef(source="harness", key="b57732d4"), turn=None).finish(
+        status_code=200, completed=True
+    )
+
+    assert (named.session_source, named.name, named.harness) == ("client", "hackbot-1234", "claude-code")
+    assert harness.name is None
 
 
 def test_a_subagents_request_opens_no_turn_but_records_the_tools_it_answers() -> None:
