@@ -61,6 +61,7 @@ from gateway.services.tools._web_tool_failure import (
     MISSING_CREDENTIAL_TAG,
     UNSUPPORTED_OPTION_TAG,
     WebToolFailure,
+    failed_text,
 )
 from gateway.services.web_retrieval_network import truncate_utf8
 from gateway.services.web_retrieval_policy import DomainPolicy, WebURLValidationError, canonicalize_web_url
@@ -341,8 +342,7 @@ class WebSearchBackend:
         The failure itself keeps a status only from 400, as every web tool failure does.
         """
         self._last_failure = failure
-        detail = failure.tag if status is None else f"{failure.tag}, HTTP {status}"
-        return f"[tool error] {failure.provider} search failed ({detail})"
+        return f"[tool error] {failed_text(failure.provider, 'search', failure.tag, status)}"
 
 
 def _results_text(query: str, hits: list[any_search.SearchHit], bodies: dict[int, str], *, first: int) -> str:

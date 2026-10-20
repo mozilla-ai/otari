@@ -72,3 +72,9 @@ class WebToolFailure:
         if self.status is not None:
             headers[ERROR_STATUS_HEADER] = str(self.status)
         return headers
+
+
+def failed_text(provider: str | None, action: str, tag: str, status: int | None) -> str:
+    """How a failed provider call reads: ``<provider> <action> failed (<tag>)``, plus ``, HTTP <status>`` if any."""
+    detail = tag if status is None else f"{tag}, HTTP {status}"
+    return f"{provider} {action} failed ({detail})"

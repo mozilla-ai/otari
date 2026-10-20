@@ -54,7 +54,7 @@ from gateway.services.tools._web_search._litellm import (
     litellm_results,
 )
 from gateway.services.tools._web_search._resolve import ResolvedSearch, resolve_search
-from gateway.services.tools._web_tool_failure import WebToolFailure
+from gateway.services.tools._web_tool_failure import WebToolFailure, failed_text
 
 
 @dataclass(frozen=True)
@@ -260,9 +260,10 @@ async def run_direct_search(search: DirectSearch, client: httpx.AsyncClient) -> 
         failure = WebToolFailure.from_provider_error(exc)
     except SearchProviderError as exc:
         failure = WebToolFailure.of(search.resolved.provider, exc.status, exc.tag)
-    detail = failure.tag if failure.status is None else f"{failure.tag}, HTTP {failure.status}"
     raise DirectSearchFailedError(
-        f"{failure.provider} search failed ({detail})", headers=failure.as_headers(), upstream_status=failure.status
+        failed_text(failure.provider, "search", failure.tag, failure.status),
+        headers=failure.as_headers(),
+        upstream_status=failure.status,
     )
 
 
