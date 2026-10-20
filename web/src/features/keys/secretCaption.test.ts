@@ -22,6 +22,7 @@ const result = (over: Partial<CreateKeyResponse> = {}): CreateKeyResponse => ({
   end_user_budget_id: null,
   end_user_budget_ids: [],
   allow_mock_response: false,
+  max_end_users: null,
   user_id: "alice",
   ...over,
 })

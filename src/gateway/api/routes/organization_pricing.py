@@ -18,6 +18,7 @@ order (override, deployment row, models.dev catalog) is
 `services.pricing_service.find_model_pricing`.
 """
 
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Literal
@@ -32,13 +33,13 @@ from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.models.money import as_float
-from gateway.models.pricing import OrganizationModelPricing
+from gateway.models.pricing import MODEL_KIND, OrganizationModelPricing, PricingKind
 
 # The tier shape comes from the deployment pricing route rather than a second
 # copy here. An override resolves into a transient ``ModelPricing`` and is read by
 # the same cost-math core, so a tier that meant something different on this
 # surface would be a silent mispricing.
-from gateway.models.pricing_schemas import PricingTier
+from gateway.models.pricing_schemas import PRICING_KIND_DESCRIPTION, PricedKind, PricingTier
 from gateway.services.organization_pricing_service import (
     OrganizationPricingService,
     PricingOverrideInput,
@@ -56,16 +57,15 @@ router = APIRouter(
 )
 
 _MODEL_KEY_DESCRIPTION = (
-    "Model identifier in 'provider:model' form, matching the key the deployment price list uses. "
-    "A provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the "
-    "instance a request resolves to."
+    "For a model, 'provider:model', matching the key the deployment price list uses; a provider "
+    "instance name is valid here ('home_lab:llama-3'), because pricing keys on the instance a "
+    "request resolves to. For a search or fetch kind, the instance's name."
 )
-# A pricing row is only ever read back under a prefixed selector, so a bare model
-# name would store a rate nothing bills against: resolution builds
-# ``provider:model`` from the request and would never match it. Enforced as a
-# pattern rather than only in the dashboard, so the rule holds for every client
-# and is published in the schema. The legacy slash form is accepted because the
-# resolution chain still looks for it.
+# A model's pricing row is only ever read back under a prefixed selector, so a
+# bare model name would store a rate nothing bills against: resolution builds
+# ``provider:model`` from the request and would never match it. Enforced on the
+# server, per kind, so the rule holds for every client. The legacy slash form is
+# accepted because the resolution chain still looks for it.
 _MODEL_KEY_PATTERN = r"^[^\s:/]+[:/][^\s]+$"
 _EFFECTIVE_FROM_DESCRIPTION = "ISO 8601 datetime from which this rate applies, inclusive. Defaults to now."
 _EFFECTIVE_FROM_REQUIRED_DESCRIPTION = (
@@ -126,15 +126,17 @@ class OrganizationModelPricingRates(BaseModel):
         return self
 
 
-class OrganizationModelPricingCreate(OrganizationModelPricingRates):
-    """Create one rate override for a model, for a period."""
+class OrganizationModelPricingCreate(PricedKind, OrganizationModelPricingRates):
+    """Create one rate override for a model, or a search or fetch instance, for a period."""
 
-    model_key: str = Field(
-        min_length=1,
-        max_length=255,
-        pattern=_MODEL_KEY_PATTERN,
-        description=_MODEL_KEY_DESCRIPTION,
-    )
+    model_key: str = Field(min_length=1, max_length=255, description=_MODEL_KEY_DESCRIPTION)
+
+    @model_validator(mode="after")
+    def validate_model_key(self) -> "OrganizationModelPricingCreate":
+        """A model key carries its provider (``PricedKind`` checks an instance's)."""
+        if self.row_kind == MODEL_KIND and re.fullmatch(_MODEL_KEY_PATTERN, self.model_key) is None:
+            raise ValueError("model_key must be 'provider:model'")
+        return self
 
 
 class OrganizationModelPricingUpdate(OrganizationModelPricingRates):
@@ -167,6 +169,7 @@ class OrganizationModelPricingPublic(BaseModel):
 
     id: uuid.UUID
     organization_id: uuid.UUID
+    kind: str = Field(description=PRICING_KIND_DESCRIPTION)
     model_key: str
     input_price_per_million: float
     output_price_per_million: float
@@ -185,6 +188,7 @@ class OrganizationModelPricingPublic(BaseModel):
         return cls(
             id=override.id,
             organization_id=override.organization_id,
+            kind=override.kind or MODEL_KIND,
             model_key=override.model_key,
             # Narrowed for the wire only: the response contract is float and the
             # stored rates stay exact. See ``models/money.as_float``.
@@ -283,6 +287,7 @@ async def list_organization_pricing(
         str | None,
         Query(description="Return only this model's periods, in the canonical 'provider:model' form."),
     ] = None,
+    kind: Annotated[PricingKind | None, Query(description="Return only overrides of this kind.")] = None,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
 ) -> OrganizationModelPricingsPublic:
@@ -301,8 +306,8 @@ async def list_organization_pricing(
     refuse a new one that would overlap. Normalized the same way a write is, so
     a legacy ``provider/model`` spelling finds the rows a canonical one stored.
     """
-    normalized = normalize_pricing_key(config, model_key) if model_key else None
-    overrides, total = await service.list_for_caller(identity, model_key=normalized, skip=skip, limit=limit)
+    normalized = normalize_pricing_key(config, model_key) if model_key and kind in (None, MODEL_KIND) else model_key
+    overrides, total = await service.list_for_caller(identity, model_key=normalized, kind=kind, skip=skip, limit=limit)
     return OrganizationModelPricingsPublic(
         data=[OrganizationModelPricingPublic.from_model(override) for override in overrides],
         count=total,
@@ -343,8 +348,8 @@ async def create_organization_pricing(
     the other dormant until the first is deleted. Normalizing on the way in is
     what stops that pair existing at all.
     """
-    model_key = normalize_pricing_key(config, body.model_key)
-    override = await service.create_for_caller(identity, model_key, _to_input(body))
+    model_key = normalize_pricing_key(config, body.model_key) if body.row_kind == MODEL_KIND else body.model_key
+    override = await service.create_for_caller(identity, model_key, _to_input(body), kind=body.row_kind)
     response = OrganizationModelPricingPublic.from_model(override)
     await _commit(db, "create organization pricing")
     return response

@@ -1,7 +1,6 @@
 """Runtime search and fetch instances: dashboard-configured rows, merged over config.
 
-The search counterpart of :mod:`gateway.services.provider_store_service`, and
-deliberately the same shape. A search instance can come from two places:
+A search instance can come from two places:
 ``config.yml`` ``search_tools:`` entries, immutable at runtime and validated at
 startup, and ``search_tool_credentials`` rows written through the dashboard.
 Both mean the same thing to a request, so the dispatch path must see them merged.
@@ -386,7 +385,7 @@ async def save_search_tool(
     if not isinstance(timeout, _Unset):
         row.timeout_seconds = timeout
     if not isinstance(options, _Unset):
-        # Same mask round-trip rule as ``provider_store_service.save_credential``.
+        # A value echoed back as the mask keeps the stored one.
         row.options = restore_redacted_values(options, existing.options if existing else None) or {}
     if not isinstance(api_key, _Unset):
         if api_key:

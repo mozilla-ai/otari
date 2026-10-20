@@ -7,6 +7,7 @@ an error message or an API response: validation errors here name the key,
 never the value.
 """
 
+import hashlib
 import re
 from typing import Annotated, Any, Self
 from urllib.parse import urlsplit
@@ -14,6 +15,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from gateway.auth.models import API_KEY_PREFIX, MIN_API_KEY_LENGTH
+from gateway.core.settings.declarations import declaration_digest
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.models.api_keys import MAX_END_USER_BUDGETS
 from gateway.models.budgets import BUDGET_ID_PATTERN
@@ -68,6 +70,12 @@ class ApiKeyConfig(BaseModel):
         default=False,
         description="Let a chat completion on this key carry mock_response, answered without the provider. Load tests.",
     )
+    max_end_users: int | None = Field(
+        default=None,
+        ge=0,
+        description="Most live end users the key may have on the budgets it assigns, or on any budget when it "
+        "assigns none; null is no cap.",
+    )
     ceiling: str | None = Field(
         default=None,
         description=(
@@ -105,6 +113,16 @@ class ApiKeyConfig(BaseModel):
             msg = "end_user_budget_id must be one of end_user_budget_ids"
             raise ValueError(msg)
         return self
+
+    def declaration_digest(self) -> str:
+        """A digest of this entry, which changes when any field config.yml sets for it, or its secret, does.
+
+        The secret enters as its own SHA-256, so the digest stored beside the key
+        says no more about it than the key's hash already does.
+        """
+        entry = self.model_dump(mode="json", exclude={"secret"})
+        entry["secret_sha256"] = hashlib.sha256(self.secret.get_secret_value().encode()).hexdigest()
+        return declaration_digest(entry)
 
 
 def _https_url_problem(value: str) -> str | None:

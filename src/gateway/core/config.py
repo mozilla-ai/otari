@@ -5,7 +5,7 @@ import os
 import re
 import types
 import typing
-from collections.abc import Container
+from collections.abc import Callable, Container
 from pathlib import Path
 from typing import Annotated, Any, Literal, NamedTuple
 from urllib.parse import urlsplit
@@ -23,6 +23,7 @@ from gateway.core.env import otari_env
 from gateway.core.settings.api_keys import ApiKeySettings
 from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
+from gateway.core.settings.health_checks import HealthCheckFeatureSettings
 from gateway.core.settings.inference import InferenceSettings
 from gateway.core.settings.organizations import OrganizationSettings
 from gateway.core.settings.pricing import PricingSettings
@@ -314,6 +315,39 @@ def _is_keyless(provider_type: str) -> bool:
     return provider_type in KEYLESS_SELF_HOSTED_PROVIDERS or provider_credential_env_names(provider_type) == ()
 
 
+def hosted_provider_name_problem(name: str, provider: str) -> str | None:
+    """Why ``name`` cannot name a hosted provider served by ``provider``, or None when it can.
+
+    The implementation's own name always may. Any other is the prefix of a
+    ``name:model`` selector, so it cannot hold the separators a selector splits
+    on, and it follows the instance-name rules. Another implementation's name
+    is refused, because a request for ``anthropic:...`` must not reach an
+    OpenAI endpoint.
+    """
+    if name == provider:
+        return None
+    if not name or name != name.strip():
+        return "must not be blank or carry surrounding spaces"
+    if len(name) > 64:
+        return "must be at most 64 characters"
+    if ":" in name or "/" in name:
+        return "must not contain ':' or '/'"
+    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
+        return "is reserved"
+    if name in {member.value for member in LLMProvider} or name in PROVIDER_TYPE_ALIASES:
+        return "names another provider"
+    return None
+
+
+def hosted_key_optional(provider_type: str, api_base: str | None) -> bool:
+    """Whether a hosted provider may be configured without a key.
+
+    A keyless backend needs none, and neither does a custom endpoint, which is
+    called with the placeholder key a keyless ``providers:`` instance is.
+    """
+    return _is_keyless(provider_type) or bool(api_base and api_base.strip())
+
+
 def provider_credential_env_names(provider_type: str) -> tuple[str, ...] | None:
     """Environment variables any-llm reads for a provider's credential.
 
@@ -534,6 +568,7 @@ class GatewayConfig(
     PricingSettings,
     ProviderSettings,
     FeedbackSettings,
+    HealthCheckFeatureSettings,
     OrganizationSettings,
     ToolSettings,
     TraceSettings,
@@ -747,11 +782,9 @@ class GatewayConfig(
         default=None,
         description=(
             "Where this deployment's documentation lives, as an absolute http(s) URL "
-            "(e.g. 'https://docs.otari.ai/en/'). Unset, the dashboard's Documentation links "
-            "point at the operator guide bundled with the gateway at /#/docs, which is the "
-            "right default for a self-hosted deployment. Set it to retarget those links at "
-            "a product documentation site instead; the bundled guide stays reachable at "
-            "/#/docs either way."
+            "(e.g. 'https://docs.example.com/'). Unset, the dashboard's Documentation links "
+            "open https://docs.otari.ai/. Set it to retarget those links at a documentation "
+            "site of the deployment's own."
         ),
     )
     terms_url: Annotated[str | None, Shown(SettingsGroup.GENERAL)] = Field(
@@ -1491,8 +1524,8 @@ class GatewayConfig(
             "On by default (the opposite of the other SSRF gates) because operator-supplied api_base "
             "values are master-key gated and the home-lab / self-hosted use case depends on private "
             "endpoints. Set to false to make provider connection tests, model discovery, and the "
-            f"credential write path (POST {API_ROOT}/provider-credentials and PATCH "
-            f"{API_ROOT}/provider-credentials/{{instance}}) refuse an internal api_base. "
+            f"credential write path (POST {API_ROOT}/hosted-providers and PATCH "
+            f"{API_ROOT}/hosted-providers/{{provider}}) refuse an internal api_base. "
             "Chat dispatch (which dials the endpoint on every request) is not gated, so this is not a "
             "general egress control. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
         ),
@@ -1517,12 +1550,11 @@ class GatewayConfig(
     _platform_token: str | None = PrivateAttr(default=None)
     _platform_token_resolved: bool = PrivateAttr(default=False)
 
-    # The config-file providers as loaded, before any dashboard-stored providers
-    # are overlaid onto ``providers`` at runtime. Captured once by
-    # ``provider_store_service`` so every refresh rebuilds the merged view from a
-    # stable base (and a deleted stored row restores the config entry). Kept on
-    # the config, not a module global, so it is per-config and cannot leak
-    # between processes or tests.
+    # The config-file providers as loaded, before the ones that declare no
+    # credential are dropped. Captured once by ``settle_configured_providers``
+    # (``services/provider_kwargs``), so a dropped entry's name stays reserved.
+    # Kept on the config, not a module global, so it is per-config and cannot
+    # leak between processes or tests.
     _provider_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
 
     # The same idea for ``rate_limits``: the config-file rules, before the
@@ -1841,7 +1873,14 @@ class GatewayConfig(
         target = self.aliases.get(name)
         return target if isinstance(target, str) and target else None
 
-    def validate_alias(self, name: str, target: str, *, alias_names: Container[str] | None = None) -> None:
+    def validate_alias(
+        self,
+        name: str,
+        target: str,
+        *,
+        alias_names: Container[str] | None = None,
+        hosted_implementation: Callable[[str], str | None] | None = None,
+    ) -> None:
         """Validate a single alias, raising ``ValueError`` with the reason.
 
         An alias must name a non-empty target selector with a usable
@@ -1857,6 +1896,8 @@ class GatewayConfig(
         chaining check, defaulting to the configured ones. Callers that also
         store aliases elsewhere (the runtime ``model_aliases`` table) pass the
         union, so chaining is rejected no matter which side each alias came from.
+        ``hosted_implementation`` names the implementation behind a hosted
+        provider's name, so a target may name one.
         """
         known_aliases: Container[str] = self.aliases if alias_names is None else alias_names
 
@@ -1882,6 +1923,10 @@ class GatewayConfig(
             msg = f"aliases.{name} target '{target}' points at another alias; alias chaining is not supported."
             raise ValueError(msg)
         if prefix in self.providers:
+            return
+        # A hosted provider's own name, which the caller passes in where the
+        # deployment's database is read: configuration is validated before it is.
+        if hosted_implementation is not None and hosted_implementation(prefix) is not None:
             return
         # No PROVIDER_TYPE_ALIASES mapping here: that normalizes an instance's
         # declared provider_type, not a selector prefix. Request-time routing
@@ -2079,8 +2124,9 @@ class GatewayConfig(
         On top of the shape ``hosted_provider_entries`` checks, an entry for a
         provider that needs a key must carry one: unlike a ``providers:``
         instance, a hosted provider is served on its own credential and never
-        on the provider's environment variable. A keyless self-hosted backend
-        may leave it out. The restriction's organization cannot be checked
+        on the provider's environment variable. A keyless self-hosted backend,
+        or an entry pointing at its own ``api_base``, may leave it out. The
+        restriction's organization cannot be checked
         here, before the database is reachable; boot logs one that names
         nothing.
         """
@@ -2090,15 +2136,18 @@ class GatewayConfig(
                 "hosted_providers is ignored in hybrid mode: a hybrid gateway is served the credentials otari.ai "
                 "resolves for it, and has no hosted providers of its own."
             )
-        for provider, entry in entries.items():
-            if entry.api_key is None and not _is_keyless(provider):
+        for name, entry in entries.items():
+            if (problem := hosted_provider_name_problem(name, entry.provider)) is not None:
+                msg = f"hosted_providers.{name}: the name {problem}."
+                raise ValueError(msg)
+            if entry.api_key is None and not hosted_key_optional(entry.provider, entry.api_base):
                 msg = (
-                    f"hosted_providers.{provider}.api_key is required: {provider} needs a key. "
+                    f"hosted_providers.{name}.api_key is required: {entry.provider} needs a key. "
                     "Reference it as ${VAR} rather than writing it into the file."
                 )
                 raise ValueError(msg)
-            if provider == LLMProvider.BEDROCK.value:
-                _validate_bedrock_client_config(provider, entry.client_args, block="hosted_providers")
+            if entry.provider == LLMProvider.BEDROCK.value:
+                _validate_bedrock_client_config(name, entry.client_args, block="hosted_providers")
 
     def _warn_on_uncredentialed_bare_entry(self, instance: str) -> None:
         """Warn when a settings-less entry names a provider that needs a credential.

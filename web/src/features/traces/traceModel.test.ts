@@ -59,7 +59,12 @@ describe("labels", () => {
     expect(spanLabel(traceSpan({ kind: "step" }))).toBe("Request")
   })
 
-  it("names a session by its agent, or as a single request", () => {
+  it("names a session by the id its client chose, its agent, or as a single request", () => {
+    expect(
+      sessionName(
+        traceSummary({ name: "hackbot-1234", session_source: "client" }),
+      ),
+    ).toBe("hackbot-1234")
     expect(sessionName(traceSummary())).toBe("claude-code")
     expect(
       sessionName(traceSummary({ harness: null, session_source: "none" })),

@@ -3,10 +3,18 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { OrganizationContext, WorkspaceMcpServer } from "@/client"
+import type {
+  OrganizationContext,
+  WorkspaceMcpServer,
+  WorkspaceMcpServerHealth,
+} from "@/client"
 import { WorkspaceMcpServersCard } from "@/features/tools/WorkspaceMcpServersCard"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
-import { organizationContext, workspaceMcpServer } from "@/tests/fixtures"
+import {
+  workspaceMcpServerHealth as health,
+  organizationContext,
+  workspaceMcpServer,
+} from "@/tests/fixtures"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 
@@ -19,12 +27,18 @@ interface Call {
 function mockApi({
   memberships = [{ workspace_id: ALPHA, name: "Alpha", role: "admin" }],
   servers = [] as WorkspaceMcpServer[],
+  written,
+  tested,
   writeStatus,
   writeDetail,
   role = "owner",
 }: {
   memberships?: { workspace_id: string; name: string; role: string }[]
   servers?: WorkspaceMcpServer[]
+  // What a successful write answers with, when it is not the first listed row.
+  written?: WorkspaceMcpServer
+  // What Test connection answers with.
+  tested?: WorkspaceMcpServerHealth
   writeStatus?: number
   writeDetail?: string
   // The caller's organization role; a member-view test lowers it.
@@ -52,7 +66,10 @@ function mockApi({
       if (method === "GET") {
         return Response.json({ data: servers, count: servers.length })
       }
-      return Response.json(servers[0] ?? workspaceMcpServer())
+      if (url.endsWith("/mcp-servers/check")) {
+        return Response.json(tested ?? health())
+      }
+      return Response.json(written ?? servers[0] ?? workspaceMcpServer())
     }
     return Response.json(
       organizationContext({ role, workspace_memberships: memberships }),
@@ -108,7 +125,7 @@ describe("WorkspaceMcpServersCard", () => {
       await screen.findByRole("heading", { level: 1, name: "MCP servers" }),
     ).toBeInTheDocument()
     expect(
-      screen.getByText(/checked for SSRF safety when it is stored/),
+      screen.getByText(/checked for SSRF safety and tested when saved/),
     ).toBeInTheDocument()
     expect(
       await screen.findByRole("button", { name: "Add MCP server" }),
@@ -175,17 +192,16 @@ describe("WorkspaceMcpServersCard", () => {
     )
   })
 
-  it("reads an empty allow-list as every tool, the way the gateway does", async () => {
-    // `mcp_client` takes a falsy `allowed_tools` as no allow-list at all, so a
-    // row holding `[]` exposes every tool exactly as null does. "0 allowed"
-    // would tell an operator the opposite. This form never sends `[]`, but the
-    // API accepts one, so a row can arrive here holding it.
+  it("reads an empty allow-list as admitting no tool, the way the gateway does", async () => {
+    // The tool loop treats `[]` as a deny-all, distinct from null. "All" would
+    // tell an operator the opposite. This form never sends `[]`, but the API
+    // accepts one, so a row can arrive here holding it.
     const servers = [workspaceMcpServer({ allowed_tools: [] })]
     mockApi({ servers })
     await renderLoaded(servers)
 
-    expect(screen.getByText("All")).toBeVisible()
-    expect(screen.queryByText("0 allowed")).not.toBeInTheDocument()
+    expect(screen.getByText("0 allowed")).toBeVisible()
+    expect(screen.queryByText("All")).not.toBeInTheDocument()
   })
 
   it("registers a server from the add form", async () => {
@@ -422,7 +438,7 @@ describe("WorkspaceMcpServersCard", () => {
     // asserted here and in the operator case above.
     expect(screen.getByText("STORED")).toBeVisible()
     expect(
-      screen.getByText(/for an owner or admin of the workspace/),
+      screen.getByText(/Only an owner or admin of the workspace/),
     ).toBeVisible()
     expect(
       screen.queryByRole("button", { name: "Add MCP server" }),
@@ -433,8 +449,289 @@ describe("WorkspaceMcpServersCard", () => {
     expect(
       screen.queryByRole("button", { name: "Delete" }),
     ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Recheck" }),
+    ).not.toBeInTheDocument()
     // Nothing on the page can write, so nothing did.
     await user.click(screen.getByText("github"))
     expect(writes(calls)).toHaveLength(0)
+  })
+
+  it("shows what each server's last connection check found", async () => {
+    const servers = [
+      workspaceMcpServer({
+        name: "github",
+        health: health({
+          tool_count: 3,
+          tools: ["list_issues", "get_issue", "close_issue"],
+        }),
+      }),
+      workspaceMcpServer({
+        id: "66666666-6666-6666-6666-666666666666",
+        name: "wiki",
+        health: health({
+          status: "failing",
+          error: "unauthorized",
+          http_status: 401,
+          tool_count: null,
+        }),
+      }),
+      workspaceMcpServer({
+        id: "77777777-7777-7777-7777-777777777777",
+        name: "jira",
+      }),
+    ]
+    mockApi({ servers })
+    await renderLoaded(servers)
+
+    expect(screen.getByText("CONNECTED")).toBeVisible()
+    expect(screen.getByText("3 tools")).toBeVisible()
+    expect(screen.getByText("TOKEN REJECTED")).toBeVisible()
+    expect(screen.getByText("Not checked")).toBeVisible()
+  })
+
+  it("opens what to fix from the health label, not only on hover", async () => {
+    const servers = [
+      workspaceMcpServer({
+        health: health({
+          status: "failing",
+          error: "unauthorized",
+          http_status: 401,
+          tool_count: null,
+        }),
+      }),
+    ]
+    mockApi({ servers })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "TOKEN REJECTED" }))
+
+    const detail = await screen.findByRole("dialog", {
+      name: "Last check of github",
+    })
+    expect(
+      within(detail).getByText(/Check the authorization token/),
+    ).toBeVisible()
+    expect(within(detail).getByText(/^Checked /)).toBeVisible()
+    expect(within(detail).getByText("list_issues, get_issue")).toBeVisible()
+  })
+
+  it("tests the typed connection without saving, and picks tools from what it lists", async () => {
+    const calls = mockApi({
+      tested: health({ tools: ["list_issues", "get_issue", "close_issue"] }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
+    await user.type(
+      screen.getByLabelText("URL"),
+      "https://mcp.example.com/github",
+    )
+    await user.click(screen.getByRole("button", { name: "Test connection" }))
+
+    expect(await screen.findByText(/3 tools available/)).toBeVisible()
+    const post = writes(calls).find((call) => call.url.endsWith("/check"))
+    expect(post?.body).toEqual({
+      url: "https://mcp.example.com/github",
+      allowed_tools: null,
+    })
+    expect(
+      writes(calls).filter((call) => !call.url.endsWith("/check")),
+    ).toEqual([])
+
+    await user.click(screen.getByRole("button", { name: "get_issue" }))
+    await user.click(screen.getByRole("button", { name: "close_issue" }))
+    expect(screen.getByLabelText("Allowed tools")).toHaveValue(
+      "get_issue, close_issue",
+    )
+    expect(screen.getByRole("button", { name: "get_issue" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await user.click(screen.getByRole("button", { name: "get_issue" }))
+    expect(screen.getByLabelText("Allowed tools")).toHaveValue("close_issue")
+    // Taking the last name off would leave the list blank, which allows every
+    // tool, so the picker refuses; clearing the field is the deliberate way.
+    expect(screen.getByRole("button", { name: "close_issue" })).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "close_issue" }))
+    expect(screen.getByLabelText("Allowed tools")).toHaveValue("close_issue")
+  })
+
+  it("says why a test failed", async () => {
+    mockApi({
+      tested: health({
+        status: "failing",
+        error: "not_found",
+        http_status: 404,
+        tool_count: null,
+        tools: [],
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
+    await user.type(
+      screen.getByLabelText("URL"),
+      "https://mcp.example.com/github",
+    )
+    await user.click(screen.getByRole("button", { name: "Test connection" }))
+
+    expect(await screen.findByText(/The test failed\./)).toBeVisible()
+    expect(screen.getByText(/HTTP 404/)).toBeVisible()
+  })
+
+  it("hides the stored catalog once a test of the same connection fails", async () => {
+    const servers = [workspaceMcpServer({ health: health() })]
+    mockApi({
+      servers,
+      tested: health({
+        status: "failing",
+        error: "timeout",
+        tool_count: null,
+        tools: [],
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    expect(screen.getByText(/2 tools available/)).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "Test connection" }))
+
+    expect(await screen.findByText(/The test failed\./)).toBeVisible()
+    expect(screen.queryByText(/tools available/)).not.toBeInTheDocument()
+  })
+
+  it("tests an edit with the stored token unless a new one is typed", async () => {
+    const servers = [workspaceMcpServer({ has_token: true })]
+    const calls = mockApi({ servers })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    await user.click(screen.getByRole("button", { name: "Test connection" }))
+
+    await waitFor(() =>
+      expect(
+        writes(calls).find((call) => call.url.endsWith("/check"))?.body,
+      ).toEqual({
+        url: servers[0].url,
+        allowed_tools: null,
+        server_id: servers[0].id,
+      }),
+    )
+  })
+
+  it("keeps the add form open on the stored server when its check fails", async () => {
+    // Save and warn: the server is stored either way, so the form turns into
+    // an edit of it rather than inviting a second add of the same name.
+    const failing = workspaceMcpServer({
+      health: health({
+        status: "failing",
+        error: "not_found",
+        http_status: 404,
+        tool_count: null,
+      }),
+    })
+    mockApi({ written: failing })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
+    await user.type(screen.getByLabelText("Name"), "github")
+    await user.type(
+      screen.getByLabelText("URL"),
+      "https://mcp.example.com/github",
+    )
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add MCP server",
+      }),
+    )
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Edit MCP server",
+    })
+    expect(
+      within(dialog).getByText(/Saved, but the connection failed/),
+    ).toBeVisible()
+    expect(within(dialog).getByText(/HTTP 404/)).toBeVisible()
+    expect(
+      within(dialog).getByRole("button", { name: "Save server" }),
+    ).toBeVisible()
+  })
+
+  it("closes the add form when the check finds nothing to fix", async () => {
+    mockApi({ written: workspaceMcpServer({ health: health() }) })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
+    await user.type(screen.getByLabelText("Name"), "github")
+    await user.type(
+      screen.getByLabelText("URL"),
+      "https://mcp.example.com/github",
+    )
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add MCP server",
+      }),
+    )
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  })
+
+  it("says so when an edit's check could not run, even on a server never checked", async () => {
+    // The gateway had no free check slot, so the row comes back with no health
+    // at all: the same as before the edit, which is why "did a check run" is
+    // read off what the edit changed rather than off the health it returned.
+    const servers = [workspaceMcpServer()]
+    mockApi({ servers })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    await user.clear(screen.getByLabelText("URL"))
+    await user.type(screen.getByLabelText("URL"), "https://mcp.example.com/v2")
+    await user.click(screen.getByRole("button", { name: "Save server" }))
+
+    expect(await screen.findByText(/the gateway was busy/)).toBeVisible()
+    expect(screen.getByRole("dialog")).toBeVisible()
+  })
+
+  it("closes on an edit that leaves the connection alone", async () => {
+    const servers = [workspaceMcpServer()]
+    mockApi({ servers })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    await user.clear(screen.getByLabelText("Name"))
+    await user.type(screen.getByLabelText("Name"), "github-prod")
+    await user.click(screen.getByRole("button", { name: "Save server" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  })
+
+  it("rechecks a server from its row", async () => {
+    const servers = [workspaceMcpServer()]
+    const calls = mockApi({ servers })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "Recheck" }))
+
+    await waitFor(() =>
+      expect(
+        writes(calls).some(
+          (call) =>
+            call.method === "POST" &&
+            call.url.endsWith(`/mcp-servers/${servers[0].id}/check`),
+        ),
+      ).toBe(true),
+    )
   })
 })

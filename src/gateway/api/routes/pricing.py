@@ -5,7 +5,6 @@ from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -22,8 +21,8 @@ from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float, to_usd, to_usd_or_none
-from gateway.models.pricing import API_ORIGIN, ModelPricing
-from gateway.models.pricing_schemas import PricingTier
+from gateway.models.pricing import API_ORIGIN, MODEL_KIND, ModelPricing, PricingKind
+from gateway.models.pricing_schemas import PRICING_KIND_DESCRIPTION, PricedKind, PricingTier
 from gateway.models.tenancy import User as TenancyUser
 from gateway.services.alias_service import all_alias_names, resolve_effective_alias
 from gateway.services.merged_catalog_service import hosted_providers_withheld_from
@@ -44,7 +43,12 @@ from gateway.services.pricing_service import (
     default_model_pricing,
     default_pricing_enabled,
     default_pricing_reference,
+    latest_price_version,
     normalize_effective_at,
+    price_history,
+    price_in_effect,
+    price_version_at,
+    priced_model_count,
     pricing_versions_page,
     rates_in_force,
 )
@@ -98,10 +102,12 @@ def _refuse_if_withheld(model_key: str, candidates: list[str], withheld: frozens
 _PENDING_CHANGED_DETAIL = "The pending models.dev refresh changed since it was previewed"
 
 
-class SetPricingRequest(BaseModel):
+class SetPricingRequest(PricedKind):
     """Create a versioned per-model price, with optional cache and context tiers."""
 
-    model_key: str = Field(description="Model identifier in format 'provider:model'")
+    model_key: str = Field(
+        description="Model identifier in format 'provider:model', or a search or fetch instance's name for those kinds"
+    )
     input_price_per_million: float = Field(
         ge=0, description="Price per 1M of the rate's unit: input tokens, requests or images"
     )
@@ -143,6 +149,7 @@ class SetPricingRequest(BaseModel):
 class PricingResponse(BaseModel):
     """Response model for model pricing."""
 
+    kind: str = Field(description=PRICING_KIND_DESCRIPTION)
     model_key: str
     effective_at: str
     input_price_per_million: float
@@ -161,6 +168,7 @@ class PricingResponse(BaseModel):
     def from_model(cls, pricing: "ModelPricing") -> "PricingResponse":
         """Create a PricingResponse from a ModelPricing ORM model."""
         return cls(
+            kind=pricing.kind or MODEL_KIND,
             model_key=pricing.model_key,
             effective_at=pricing.effective_at.isoformat(),
             input_price_per_million=float(pricing.input_price_per_million),
@@ -295,6 +303,18 @@ def _candidate_model_keys(raw_key: str) -> list[str]:
     return candidates
 
 
+_KindQuery = Annotated[PricingKind, Query(description=PRICING_KIND_DESCRIPTION)]
+
+
+def _candidates(model_key: str, kind: PricingKind, withheld: frozenset[str] = frozenset()) -> list[str]:
+    """The stored keys a path's key may be under: a model key's spellings, or an instance's name alone."""
+    if kind != MODEL_KIND:
+        return [model_key]
+    candidates = _candidate_model_keys(model_key)
+    _refuse_if_withheld(model_key, candidates, withheld)
+    return candidates
+
+
 @operator_router.post("/refresh", response_model=PricingRefreshPreviewResponse)
 async def preview_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -310,8 +330,7 @@ async def preview_pricing_refresh(
             detail="Unable to fetch the latest models.dev data",
         ) from None
 
-    protected_model_count = (await db.execute(select(func.count(distinct(ModelPricing.model_key))))).scalar_one()
-    return _preview_response(preview, protected_model_count)
+    return _preview_response(preview, await priced_model_count(db))
 
 
 @operator_router.get("/refresh/pending", response_model=PricingRefreshPreviewResponse)
@@ -332,8 +351,7 @@ async def get_pending_pricing_refresh(
         ) from None
     if preview is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending models.dev refresh")
-    protected_model_count = (await db.execute(select(func.count(distinct(ModelPricing.model_key))))).scalar_one()
-    return _preview_response(preview, protected_model_count)
+    return _preview_response(preview, await priced_model_count(db))
 
 
 @operator_router.get("/snapshots", response_model=list[AcceptedSnapshotResponse])
@@ -440,36 +458,6 @@ async def reject_pricing_refresh(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending models.dev refresh to reject")
 
 
-async def _get_effective_pricing(
-    db: AsyncSession,
-    model_keys: list[str],
-    as_of: datetime,
-) -> ModelPricing | None:
-    for key in model_keys:
-        stmt = (
-            select(ModelPricing)
-            .where(
-                ModelPricing.model_key == key,
-                ModelPricing.effective_at <= as_of,
-            )
-            .order_by(ModelPricing.effective_at.desc())
-            .limit(1)
-        )
-        pricing = (await db.execute(stmt)).scalar_one_or_none()
-        if pricing:
-            return pricing
-    return None
-
-
-async def _get_pricing_history(db: AsyncSession, model_keys: list[str]) -> list[ModelPricing]:
-    for key in model_keys:
-        stmt = select(ModelPricing).where(ModelPricing.model_key == key).order_by(ModelPricing.effective_at.desc())
-        pricings = list((await db.execute(stmt)).scalars().all())
-        if pricings:
-            return pricings
-    return []
-
-
 def _policy_pricing_detail(config: GatewayConfig, request: SetPricingRequest) -> str:
     """400 detail for a price aimed at a routing policy name.
 
@@ -519,9 +507,9 @@ async def set_pricing(
     # leave it unchanged anyway, and this reads as the same lookup request dispatch
     # does. Scope-blind: a name that is an indirection for even one user is still
     # not a model key, so a pricing row stored under it would never be read.
-    if request.model_key in all_policy_names(config):
+    if request.row_kind == MODEL_KIND and request.model_key in all_policy_names(config):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_policy_pricing_detail(config, request))
-    if request.model_key in all_alias_names(config):
+    if request.row_kind == MODEL_KIND and request.model_key in all_alias_names(config):
         alias_target = resolve_effective_alias(config, request.model_key)
         detail = (
             f"'{request.model_key}' is an alias, not a model. Pricing keys on the resolved target, "
@@ -534,7 +522,10 @@ async def set_pricing(
             )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
-    normalized_key = normalize_pricing_key(config, request.model_key)
+    # An instance's name is its key as written; only a model key has spellings to fold.
+    normalized_key = (
+        normalize_pricing_key(config, request.model_key) if request.row_kind == MODEL_KIND else request.model_key
+    )
     effective_at = normalize_effective_at(request.effective_at)
 
     # Resolve the cache rates to persist. A field the client omits inherits the
@@ -547,14 +538,7 @@ async def set_pricing(
     tiers_set = "pricing_tiers" in request.model_fields_set
     latest: ModelPricing | None = None
     if not (cache_read_set and cache_write_set and tiers_set):
-        latest = (
-            await db.execute(
-                select(ModelPricing)
-                .where(ModelPricing.model_key == normalized_key)
-                .order_by(ModelPricing.effective_at.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
+        latest = await latest_price_version(db, normalized_key, request.row_kind)
     # ``to_usd`` on the way in: the request carries JSON numbers (floats) and
     # the columns are exact, so the conversion is spelled here rather than left
     # to happen invisibly at flush.
@@ -574,13 +558,7 @@ async def set_pricing(
         else ([] if tiers_set else (latest.pricing_tiers if latest else []))
     )
 
-    result = await db.execute(
-        select(ModelPricing).where(
-            ModelPricing.model_key == normalized_key,
-            ModelPricing.effective_at == effective_at,
-        )
-    )
-    pricing = result.scalar_one_or_none()
+    pricing = await price_version_at(db, [normalized_key], effective_at, request.row_kind)
 
     if pricing:
         pricing.input_price_per_million = to_usd(request.input_price_per_million)
@@ -592,6 +570,7 @@ async def set_pricing(
         pricing.origin = API_ORIGIN
     else:
         pricing = ModelPricing(
+            kind=request.row_kind,
             model_key=normalized_key,
             effective_at=effective_at,
             input_price_per_million=to_usd(request.input_price_per_million),
@@ -621,17 +600,18 @@ async def list_pricing(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[PricingResponse]:
-    """List all model pricing.
+    """List every stored price version, of every kind.
 
-    A hosted provider restricted to another organization than the caller's is
-    left out, as it is from the catalog.
+    A row's ``kind`` says whether it prices a model or a search or fetch
+    instance. A hosted provider restricted to another organization than the
+    caller's is left out, as it is from the catalog.
     """
     pricings = await pricing_versions_page(db, skip=skip, limit=limit, hidden_providers=withheld)
     return [PricingResponse.from_model(pricing) for pricing in pricings]
 
 
 class CurrentPricingPage(BaseModel):
-    """One page of current model prices, with the total number of priced models."""
+    """One page of current prices, with the total number of priced keys of any kind."""
 
     data: list[PricingResponse]
     count: int
@@ -646,15 +626,16 @@ async def list_current_pricing(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> CurrentPricingPage:
-    """List the rate each priced model is metered at, one row per model key.
+    """List the rate each priced key is metered at, one row per kind and key.
 
     Listing prices answers the stored history, one row per ``effective_at``, so a
-    page of that is a page of revisions rather than a page of models. This
+    page of that is a page of revisions rather than a page of keys. This
     answers one row per key: the newest rate that has taken effect, or the
-    earliest scheduled rate for a key that has none yet. ``count`` is the number
-    of priced models, so a caller can page without reading the collection to
-    learn how long it is. A hosted provider restricted to another organization
-    than the caller's is left out of both.
+    earliest scheduled rate for a key that has none yet. Every kind is returned,
+    a row's ``kind`` telling a model's price from a search or fetch instance's,
+    and ``count`` is the number of priced keys of any kind, so a caller can page
+    without reading the collection to learn how long it is. A hosted provider
+    restricted to another organization than the caller's is left out of both.
     """
 
     rows, count = await current_rates_page(db, skip=skip, limit=limit, hidden_providers=withheld)
@@ -673,16 +654,16 @@ async def get_pricing_history(
     model_key: str,
     db: Annotated[AsyncSession, Depends(get_db)],
     withheld: WithheldProviders,
+    kind: _KindQuery = MODEL_KIND,
 ) -> list[PricingResponse]:
-    """Return the full pricing history for a model.
+    """Return the full pricing history for a model, or for a search or fetch instance.
 
     A 404 for a model of a hosted provider restricted to another organization
     than the caller's.
     """
 
-    candidates = _candidate_model_keys(model_key)
-    _refuse_if_withheld(model_key, candidates, withheld)
-    pricings = await _get_pricing_history(db, candidates)
+    candidates = _candidates(model_key, kind, withheld)
+    pricings = await price_history(db, candidates, kind)
     if not pricings:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -705,16 +686,16 @@ async def get_pricing(
     db: Annotated[AsyncSession, Depends(get_db)],
     withheld: WithheldProviders,
     as_of: Annotated[datetime | None, Query(description="ISO datetime for effective lookup", title="as_of")] = None,
+    kind: _KindQuery = MODEL_KIND,
 ) -> PricingResponse:
-    """Get pricing for a specific model as of a timestamp.
+    """Get pricing for a specific model, or a search or fetch instance, as of a timestamp.
 
     A 404 for a model of a hosted provider restricted to another organization
     than the caller's.
     """
 
-    candidates = _candidate_model_keys(model_key)
-    _refuse_if_withheld(model_key, candidates, withheld)
-    pricing = await _get_effective_pricing(db, candidates, normalize_effective_at(as_of))
+    candidates = _candidates(model_key, kind, withheld)
+    pricing = await price_in_effect(db, candidates, normalize_effective_at(as_of), kind)
 
     if not pricing:
         raise HTTPException(
@@ -735,27 +716,17 @@ async def delete_pricing(
             description="ISO datetime identifying a specific pricing row to delete",
         ),
     ] = None,
+    kind: _KindQuery = MODEL_KIND,
 ) -> None:
-    """Delete pricing entries for a model."""
+    """Delete pricing entries for a model, or for a search or fetch instance."""
 
-    candidates = _candidate_model_keys(model_key)
+    candidates = _candidates(model_key, kind)
     targets: list[ModelPricing] = []
 
     if effective_at is not None:
         normalized_effective_at = normalize_effective_at(effective_at)
-        for key in candidates:
-            stmt = (
-                select(ModelPricing)
-                .where(
-                    ModelPricing.model_key == key,
-                    ModelPricing.effective_at == normalized_effective_at,
-                )
-                .limit(1)
-            )
-            pricing = (await db.execute(stmt)).scalar_one_or_none()
-            if pricing:
-                targets = [pricing]
-                break
+        if version := await price_version_at(db, candidates, normalized_effective_at, kind):
+            targets = [version]
         if not targets:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -764,7 +735,7 @@ async def delete_pricing(
                 ),
             )
     else:
-        targets = await _get_pricing_history(db, candidates)
+        targets = await price_history(db, candidates, kind)
         if not targets:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

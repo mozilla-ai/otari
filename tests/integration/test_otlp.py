@@ -642,6 +642,30 @@ def test_otlp_json_hex_ids_are_read_as_the_spec_encodes_them(
     assert (stored.otel_trace_id, stored.otel_span_id) == ("5b8efff798038103d269b633813fc60c", "eee19b7ec3c1b174")
 
 
+def test_otlp_finish_reasons_sent_as_an_array_reach_the_trace(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    headers = _exempt_key(client, master_key_header)
+    writer = _install_writer(client, monkeypatch)
+    reasons = {"arrayValue": {"values": [{"stringValue": "stop"}, {"stringValue": "length"}]}}
+    span = _agent_span(
+        "1" * 32,
+        "2" * 16,
+        name="chat",
+        attributes=[
+            _attr("gen_ai.operation.name", "chat"),
+            {"key": "gen_ai.response.finish_reasons", "value": reasons},
+        ],
+    )
+
+    resp = client.post("/otlp/v1/traces", json=_otlp_traces(span), headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    [write] = writer.writes
+    [stored] = write.spans
+    assert stored.attributes == {"gen_ai.response.finish_reasons": "stop,length"}
+
+
 def test_otlp_malformed_span_numbers_never_fail_the_export(
     client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -800,8 +824,8 @@ def test_otlp_claude_platform_request_is_booked_once(
     assert (request.provider, request.model) == ("anthropic", "claude-opus-4-8")
     assert (request.prompt_tokens, request.cache_read_tokens, request.cache_write_tokens) == (1000, 200, 100)
     assert request.cache_write_1h_tokens == 40
-    # Input counts the cache, so 700 fresh tokens; both TTLs bill at the one cache-write rate.
-    expected = _usd(700, "15") + _usd(200, "1.5") + _usd(100, "18.75") + _usd(50, "75")
+    # Input counts the cache, so 700 fresh tokens; the 40 1h writes bill at twice the input rate.
+    expected = _usd(700, "15") + _usd(200, "1.5") + _usd(60, "18.75") + _usd(40, "30") + _usd(50, "75")
     assert request.cost == expected
     assert rows["msg_claude_1:compaction"].cost == _usd(300, "15") + _usd(20, "75")
 

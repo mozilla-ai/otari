@@ -1,7 +1,7 @@
 """Tool-definition format conversion + per-format purpose-hint injection.
 
-The duck-typed pool interface (``MCPClientPool`` / ``SandboxBackend`` /
-``WebSearchBackend``) exposes ``openai_tools`` in the OpenAI Chat-Completions
+The duck-typed pool interface (``MCPClientPool`` / ``SandboxBackend`` / the web
+search and fetch backends) exposes ``openai_tools`` in the OpenAI Chat-Completions
 shape::
 
     [{"type": "function", "function": {"name", "description", "parameters"}}]

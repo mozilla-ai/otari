@@ -91,14 +91,8 @@ const URL_DEFAULTS = {
 // The organization's own upstream credentials: one BYO key per provider that
 // every workspace under the tenant inherits.
 //
-// Not the workspace rail's `/providers`, which manages `provider_credentials`,
-// keyed on an instance name and therefore owned by the process rather than by
-// anyone in particular. The two pages look alike and are not the same thing.
-// A standalone deployment reports both surfaces and shows both pages, under
-// different labels; a hosted one reports `organization_providers` alone, since
-// one `provider_credentials` row would serve every tenant
-// (`STANDALONE_SURFACES` / `HOSTED_SURFACES` in
-// `src/gateway/api/routes/bootstrap.py`).
+// Not the deployment rail's Hosted providers, the keys the process serves
+// every tenant on. The two pages look alike and are not the same thing.
 //
 // The per-workspace half of the same API (`/workspaces/{id}/provider-keys`:
 // pin, disable, restrict to models) is deliberately not here. Those are one

@@ -156,11 +156,13 @@ token is booked once even though a request repeats its usage on several spans:
 
 - A Messages API request is booked from its `anthropic.messages.create` span,
   keyed by the response id, at the model that served it, with its cache reads
-  and cache writes, and a second row for its compactions' tokens. Cache writes
-  bill at the one cache-write rate; the 1-hour share is kept as its own count,
+  and cache writes, and a second row for its compactions' tokens. The 1-hour
+  share of its cache writes is kept as its own count and bills at twice the
+  input rate ([Cache and tiered pricing](configuration.md#cache-and-tiered-pricing)),
   except from a streamed request's SDK span, which splits out only the writes
-  made before the first output token. When the SDK and the API both export the
-  request, the second span is a duplicate.
+  made before the first output token, so all of its writes bill at the
+  cache-write rate. When the SDK and the API both export the request, the
+  second span is a duplicate.
 - A Managed Agents session is booked from its `anthropic.model_request` spans,
   labeled with the session id, which also groups the session's threads into one
   agent trace.

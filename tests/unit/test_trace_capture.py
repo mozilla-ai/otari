@@ -8,10 +8,11 @@ what it writes.
 import asyncio
 import uuid
 from collections.abc import MutableMapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -101,6 +102,44 @@ def test_a_usage_row_becomes_an_llm_span_with_what_billing_recorded() -> None:
     assert span.start_time == _T0 + timedelta(milliseconds=100)
 
 
+@pytest.mark.parametrize(
+    ("prompt_tokens", "cache_tokens_in_prompt"),
+    [
+        pytest.param(300, False, id="anthropic-adds-cached-tokens-on-top"),
+        pytest.param(48_210, True, id="openai-counts-them-inside"),
+    ],
+)
+def test_an_llm_span_counts_the_whole_prompt_whichever_way_the_provider_reported_its_cache(
+    prompt_tokens: int, cache_tokens_in_prompt: bool
+) -> None:
+    trace = _trace()
+
+    trace.record_llm_call(
+        _llm_call(
+            _usage_row(
+                prompt_tokens=prompt_tokens,
+                cache_read_tokens=41_900,
+                cache_write_tokens=6_010,
+                cache_tokens_in_prompt=cache_tokens_in_prompt,
+                reasoning_tokens=12,
+            )
+        )
+    )
+
+    [span] = trace.spans
+    assert (span.input_tokens, span.cache_read_tokens, span.cache_write_tokens) == (48_210, 41_900, 6_010)
+    assert (span.output_tokens, span.reasoning_tokens) == (20, 12)
+
+
+def test_a_failed_attempt_reports_no_prompt() -> None:
+    trace = _trace()
+
+    trace.record_llm_call(_llm_call(_usage_row(status="error", prompt_tokens=None, completion_tokens=None)))
+
+    [span] = trace.spans
+    assert (span.input_tokens, span.cache_read_tokens, span.cache_write_tokens) == (None, None, None)
+
+
 def test_an_absorbed_attempt_is_a_recovered_error() -> None:
     """A failover the next candidate made up for is visible, and does not fail the request."""
     trace = _trace()
@@ -170,6 +209,41 @@ def test_the_step_ends_with_what_the_client_got(
     step = write.spans[0]
     assert (step.kind, step.span_id, step.outcome, step.error_class) == ("step", "req-1", outcome, error_class)
     assert (write.trace_id, write.session_source) == ("req-1", "none")
+
+
+def test_a_step_is_named_for_the_endpoint_that_served_it() -> None:
+    write = _trace().finish(status_code=200, completed=True)
+
+    assert write.spans[0].name == "/v1/chat/completions"
+
+
+def test_a_step_whose_endpoint_is_not_an_endpoint_label_is_still_recorded() -> None:
+    write = replace(_trace(), endpoint="/Users/alice/notes.txt").finish(status_code=200, completed=True)
+
+    assert write.spans[0].name == "request"
+
+
+def test_an_llm_call_never_starts_before_its_step() -> None:
+    """Latency is rounded to the millisecond, so a call measured from the step's start can reach back past it."""
+    trace = _trace()
+    # Ended 2,900.4 ms after the step started, with its latency rounded up to 2,901 ms.
+    trace.record_llm_call(_llm_call(_usage_row(timestamp=_T0 + timedelta(microseconds=2_900_400), latency_ms=2901)))
+
+    step, llm = trace.finish(status_code=200, completed=True).spans
+
+    assert step.start_time is not None and llm.start_time is not None
+    assert llm.start_time >= step.start_time
+
+
+def test_an_llm_call_that_ended_before_its_step_began_never_starts_after_it_ends() -> None:
+    """A wall clock stepped back between the two readings must not turn the span inside out."""
+    trace = _trace()
+    trace.record_llm_call(_llm_call(_usage_row(timestamp=_T0 - timedelta(seconds=1), latency_ms=500)))
+
+    [llm] = trace.spans
+
+    assert llm.start_time is not None and llm.end_time is not None
+    assert llm.start_time <= llm.end_time
 
 
 # ---------------------------------------------------------------------------
@@ -524,8 +598,7 @@ async def test_a_response_that_breaks_off_is_an_incomplete_step() -> None:
 
 @pytest.mark.asyncio
 async def test_a_web_fetch_records_a_timed_tool_span() -> None:
-    service = AsyncMock(spec=WebFetchService)
-    service.fetch.return_value = WebFetchResult(
+    page = WebFetchResult(
         text="Hello",
         content_type="text/html",
         content_kind="html",
@@ -534,11 +607,11 @@ async def test_a_web_fetch_records_a_timed_tool_span() -> None:
         redirect_count=0,
     )
     trace = _trace()
-    backend = WebRetrievalBackend(
-        enable_search=False, enable_fetch=True, retrieval_service=service, fetch_policy=DomainPolicy(), trace=trace
-    )
-    async with backend:
-        await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": "https://example.com"})
+    # The old backend hands the fetch to the fetch backend, which records the span; it records none itself.
+    backend = WebRetrievalBackend(enable_search=False, enable_fetch=True, fetch_policy=DomainPolicy(), trace=trace)
+    with patch.object(WebFetchService, "fetch", new=AsyncMock(return_value=page)):
+        async with backend:
+            await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": "https://example.com"})
 
     [span] = trace.spans
     assert (span.kind, span.tool_name, span.tool_type, span.outcome) == (

@@ -2235,6 +2235,45 @@
           }
         },
         {
+          "name": "Delete End Users",
+          "request": {
+            "description": "Delete one end user of the calling service key, or a page of those created before a time.\n\nRequires a service key, and exactly one of ``external_id`` and ``created_before``. ``external_id`` deletes that\nend user, any id, one containing '/' included, and answers 404 when it has none. ``created_before`` deletes up\nto ``limit`` of the oldest end users created before then; call again until ``deleted`` is 0. An end user's\ntelemetry and agent traces are erased with it. The end user's row and spend are kept: a request naming it again\nrevives it with what it had spent, so deleting one cannot clear its budget. A deleted end user is neither listed\nnor counted.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "end-users"
+              ],
+              "query": [
+                {
+                  "description": "Delete the end user the service names with this `user` value.",
+                  "disabled": true,
+                  "key": "external_id",
+                  "value": ""
+                },
+                {
+                  "description": "Delete the end users created before this time, oldest first, up to `limit` of them.",
+                  "disabled": true,
+                  "key": "created_before",
+                  "value": ""
+                },
+                {
+                  "description": "The most end users one call deletes with `created_before`.",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/end-users?external_id=&created_before=&limit="
+            }
+          }
+        },
+        {
           "name": "Get End User",
           "request": {
             "description": "Get an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no end user of the key's user goes by answers 404. An id with a '.' or '..'\nsegment is refused with 400; ``GET /end-users?external_id=`` reads any end user.",
@@ -2322,6 +2361,33 @@
               }
             ],
             "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "end-users",
+                ":external_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/end-users/:external_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "external_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete End User",
+          "request": {
+            "description": "Delete an end user of the calling service key by the id the service names it by.\n\nRequires a service key. An id no live end user of the key's user goes by answers 404. The end user's telemetry\nand agent traces are erased; its row and spend are kept, so a request naming it again revives it with what it had\nspent. An id with a '.' or '..' segment is refused with 400; ``DELETE /end-users?external_id=`` takes any id.",
+            "header": [],
+            "method": "DELETE",
             "url": {
               "host": [
                 "{{baseUrl}}"
@@ -2650,6 +2716,124 @@
     {
       "item": [
         {
+          "name": "Get Health Check Status",
+          "request": {
+            "description": "The settings, the run in progress, and the latest finished run by provider and by offering.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health-checks"
+              ],
+              "raw": "{{baseUrl}}/api/v1/health-checks"
+            }
+          }
+        },
+        {
+          "name": "Disable Failing Models",
+          "request": {
+            "description": "Stop serving every model the latest run found failing, on its hosted provider.\n\nEach stays listed on the Hosted providers page, priced, to be switched back on there.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health-checks",
+                "disable-failing"
+              ],
+              "raw": "{{baseUrl}}/api/v1/health-checks/disable-failing"
+            }
+          }
+        },
+        {
+          "name": "Run Health Checks",
+          "request": {
+            "description": "Start a run within a minute, whether or not the schedule is on.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health-checks",
+                "run"
+              ],
+              "raw": "{{baseUrl}}/api/v1/health-checks/run"
+            }
+          }
+        },
+        {
+          "name": "Get Health Check Settings",
+          "request": {
+            "description": "Whether the checks run on a schedule, how often, and what they send.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health-checks",
+                "settings"
+              ],
+              "raw": "{{baseUrl}}/api/v1/health-checks/settings"
+            }
+          }
+        },
+        {
+          "name": "Update Health Check Settings",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"interval_minutes\": 60,\n  \"schedule_enabled\": true\n}"
+            },
+            "description": "Change the settings. Turning the schedule on starts a run within a minute.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health-checks",
+                "settings"
+              ],
+              "raw": "{{baseUrl}}/api/v1/health-checks/settings"
+            }
+          }
+        }
+      ],
+      "name": "health-checks"
+    },
+    {
+      "item": [
+        {
           "name": "Check Policy",
           "request": {
             "body": {
@@ -2755,6 +2939,108 @@
           }
         },
         {
+          "name": "Preview Deployment Provider Migration",
+          "request": {
+            "description": "What moving the deployment providers the retired dashboard page stored onto hosted providers would do.\n\nThe gateway moves them at startup, so this lists the ones it could not\nmove, each with the reason. Writes nothing and dials nothing.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                "migration"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/migration"
+            }
+          }
+        },
+        {
+          "name": "Apply Deployment Provider Migration",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"rows\": [\n    {\n      \"instance\": \"openai-eu\",\n      \"updated_at\": \"2026-10-19T09:00:00Z\"\n    }\n  ]\n}"
+            },
+            "description": "Move the deployment providers the retired dashboard page stored onto hosted providers of the same name.\n\nEach is created as a hosted provider that serves models not on its roster,\noffering what it lists as a create does, and the deployment provider is\nremoved. One that cannot move is reported and left in place. ``rows``\nlimits the move to the rows of the preview the caller reviewed, at the\nversions it was shown them.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                "migration"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/migration"
+            }
+          }
+        },
+        {
+          "name": "Discard Deployment Provider",
+          "request": {
+            "description": "Remove a deployment provider the move could not take, which serves nothing.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                "migration",
+                ":instance"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/migration/:instance",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "instance",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reencrypt Hosted Providers",
+          "request": {
+            "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nRun after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                "reencrypt"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/reencrypt"
+            }
+          }
+        },
+        {
           "name": "Refresh Catalog",
           "request": {
             "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. A model list whose\nprovider nothing defines any more, such as a removed ``config.yml`` entry,\ngoes too, and is named in ``orphaned_rosters``. Where no provider offers a\nmodel, only those lists go and every price stays; with none of them either,\nthe sweep answers 409. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
@@ -2792,6 +3078,40 @@
                 "preview"
               ],
               "raw": "{{baseUrl}}/api/v1/hosted-providers/refresh/preview"
+            }
+          }
+        },
+        {
+          "name": "Test Hosted Provider",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_key\": \"<your OpenAI API key>\",\n  \"provider\": \"openai\"\n}"
+            },
+            "description": "Ask a provider what it lists on the given credentials, storing nothing.\n\nBacks the form's \"Test connection\". With ``name`` naming a stored provider,\na field left out is read from it, so an edit can be tested without typing\nthe key again; pointing the stored key at another origin still needs it.\nFailure comes back in the body.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                "test"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/test"
             }
           }
         },
@@ -3252,7 +3572,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allow_mock_response\": false,\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"end_user_budget_ids\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"end_user_budget_ids\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"max_end_users\": 0,\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
             "description": "Create a new API key in the caller's organization.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.\n\n``workspace_id`` names a workspace in the caller's organization, and omitting\nit mints into that organization's default workspace. A key resolves that\norganization's provider credentials and bills there, so minting into another\norganization's workspace would spend its budget on its credentials.",
             "header": [
@@ -3312,7 +3632,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allow_mock_response\": false,\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"end_user_budget_ids\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"end_user_budget_ids\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"max_end_users\": 0,\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
             },
             "description": "Update an API key in the caller's organization.\n\nRequires master key authentication.",
             "header": [
@@ -6102,6 +6422,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Return only overrides of this kind.",
+                  "disabled": true,
+                  "key": "kind",
+                  "value": ""
+                },
+                {
                   "description": "Number of records to skip",
                   "disabled": true,
                   "key": "skip",
@@ -6114,7 +6440,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/pricing?model_key=&skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/pricing?model_key=&kind=&skip=&limit="
             }
           }
         },
@@ -7007,7 +7333,7 @@
         {
           "name": "List Traces",
           "request": {
-            "description": "List agent sessions, most recently active first.",
+            "description": "List agent sessions, most recently active first unless ``sort`` says otherwise.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7032,6 +7358,18 @@
                   "description": "",
                   "disabled": true,
                   "key": "limit",
+                  "value": ""
+                },
+                {
+                  "description": "What to order by. Latency runs from a session's start to its last activity.",
+                  "disabled": true,
+                  "key": "sort",
+                  "value": ""
+                },
+                {
+                  "description": "The direction of `sort`.",
+                  "disabled": true,
+                  "key": "order",
                   "value": ""
                 },
                 {
@@ -7083,13 +7421,13 @@
                   "value": ""
                 },
                 {
-                  "description": "A trace id, or the start of one.",
+                  "description": "Part of a trace id, session name, harness or user id, in any case.",
                   "disabled": true,
                   "key": "q",
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/traces?skip=&limit=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces?skip=&limit=&sort=&order=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -7161,7 +7499,7 @@
                   "value": ""
                 },
                 {
-                  "description": "A trace id, or the start of one.",
+                  "description": "Part of a trace id, session name, harness or user id, in any case.",
                   "disabled": true,
                   "key": "q",
                   "value": ""
@@ -7204,7 +7542,7 @@
         {
           "name": "Trace Series",
           "request": {
-            "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
+            "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7275,7 +7613,7 @@
                   "value": ""
                 },
                 {
-                  "description": "A trace id, or the start of one.",
+                  "description": "Part of a trace id, session name, harness or user id, in any case.",
                   "disabled": true,
                   "key": "q",
                   "value": ""
@@ -7400,7 +7738,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -7538,7 +7876,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -7670,7 +8008,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -7796,7 +8134,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -8780,7 +9118,7 @@
         {
           "name": "List Pricing",
           "request": {
-            "description": "List all model pricing.\n\nA hosted provider restricted to another organization than the caller's is\nleft out, as it is from the catalog.",
+            "description": "List every stored price version, of every kind.\n\nA row's ``kind`` says whether it prices a model or a search or fetch\ninstance. A hosted provider restricted to another organization than the\ncaller's is left out, as it is from the catalog.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8846,7 +9184,7 @@
         {
           "name": "List Current Pricing",
           "request": {
-            "description": "List the rate each priced model is metered at, one row per model key.\n\nListing prices answers the stored history, one row per ``effective_at``, so a\npage of that is a page of revisions rather than a page of models. This\nanswers one row per key: the newest rate that has taken effect, or the\nearliest scheduled rate for a key that has none yet. ``count`` is the number\nof priced models, so a caller can page without reading the collection to\nlearn how long it is. A hosted provider restricted to another organization\nthan the caller's is left out of both.",
+            "description": "List the rate each priced key is metered at, one row per kind and key.\n\nListing prices answers the stored history, one row per ``effective_at``, so a\npage of that is a page of revisions rather than a page of keys. This\nanswers one row per key: the newest rate that has taken effect, or the\nearliest scheduled rate for a key that has none yet. Every kind is returned,\na row's ``kind`` telling a model's price from a search or fetch instance's,\nand ``count`` is the number of priced keys of any kind, so a caller can page\nwithout reading the collection to learn how long it is. A hosted provider\nrestricted to another organization than the caller's is left out of both.",
             "header": [],
             "method": "GET",
             "url": {
@@ -9035,7 +9373,7 @@
         {
           "name": "Get Pricing",
           "request": {
-            "description": "Get pricing for a specific model as of a timestamp.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
+            "description": "Get pricing for a specific model, or a search or fetch instance, as of a timestamp.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
             "header": [],
             "method": "GET",
             "url": {
@@ -9054,9 +9392,15 @@
                   "disabled": true,
                   "key": "as_of",
                   "value": ""
+                },
+                {
+                  "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+                  "disabled": true,
+                  "key": "kind",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/pricing/:model_key?as_of=",
+              "raw": "{{baseUrl}}/api/v1/pricing/:model_key?as_of=&kind=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -9070,7 +9414,7 @@
         {
           "name": "Delete Pricing",
           "request": {
-            "description": "Delete pricing entries for a model.",
+            "description": "Delete pricing entries for a model, or for a search or fetch instance.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -9089,9 +9433,15 @@
                   "disabled": true,
                   "key": "effective_at",
                   "value": ""
+                },
+                {
+                  "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+                  "disabled": true,
+                  "key": "kind",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/pricing/:model_key?effective_at=",
+              "raw": "{{baseUrl}}/api/v1/pricing/:model_key?effective_at=&kind=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -9105,7 +9455,7 @@
         {
           "name": "Get Pricing History",
           "request": {
-            "description": "Return the full pricing history for a model.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
+            "description": "Return the full pricing history for a model, or for a search or fetch instance.\n\nA 404 for a model of a hosted provider restricted to another organization\nthan the caller's.",
             "header": [],
             "method": "GET",
             "url": {
@@ -9119,7 +9469,15 @@
                 ":model_key",
                 "history"
               ],
-              "raw": "{{baseUrl}}/api/v1/pricing/:model_key/history",
+              "query": [
+                {
+                  "description": "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.",
+                  "disabled": true,
+                  "key": "kind",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/pricing/:model_key/history?kind=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -9132,308 +9490,6 @@
         }
       ],
       "name": "pricing"
-    },
-    {
-      "item": [
-        {
-          "name": "List Stored Providers",
-          "request": {
-            "description": "List runtime-stored providers. Keys are never returned, only ``last4``.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provider-credentials"
-              ],
-              "raw": "{{baseUrl}}/api/v1/provider-credentials"
-            }
-          }
-        },
-        {
-          "name": "Create Stored Provider",
-          "request": {
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"instance\": \"string\"\n}"
-            },
-            "description": "Add a provider at runtime. Storing a key requires OTARI_SECRET_KEY.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provider-credentials"
-              ],
-              "raw": "{{baseUrl}}/api/v1/provider-credentials"
-            }
-          }
-        },
-        {
-          "name": "Reencrypt Stored Provider Keys",
-          "request": {
-            "description": "Re-encrypt stored provider keys with the primary OTARI_SECRET_KEY.\n\nOperators rotate ``OTARI_SECRET_KEY`` by setting it to ``new,old`` first,\nrestarting, running this endpoint, then removing the old key and restarting\nagain. Rows that cannot be decrypted are left untouched and must be recovered\nby replacing the affected provider keys.",
-            "header": [],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provider-credentials",
-                "reencrypt"
-              ],
-              "raw": "{{baseUrl}}/api/v1/provider-credentials/reencrypt"
-            }
-          }
-        },
-        {
-          "name": "Test Provider Connection",
-          "request": {
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"client_args\": {},\n  \"instance\": \"string\",\n  \"provider_type\": \"string\"\n}"
-            },
-            "description": "Test provider credentials without storing them (for the add/edit form).\n\nResolves the implementation from ``provider_type`` (honoring the\n``*-compatible`` aliases) or the ``instance`` name, then lists the provider's\nmodels with the supplied credentials. Nothing is persisted and the key is\nnever echoed.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provider-credentials",
-                "test"
-              ],
-              "raw": "{{baseUrl}}/api/v1/provider-credentials/test"
-            }
-          }
-        },
-        {
-          "name": "Update Stored Provider",
-          "request": {
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"client_args\": {},\n  \"expected_updated_at\": \"string\",\n  \"provider_type\": \"string\"\n}"
-            },
-            "description": "Update a stored provider. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it. The row is locked ``FOR UPDATE``\nso the ``expected_updated_at`` check and the write it guards are atomic.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "method": "PATCH",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provider-credentials",
-                ":instance"
-              ],
-              "raw": "{{baseUrl}}/api/v1/provider-credentials/:instance",
-              "variable": [
-                {
-                  "description": "path parameter",
-                  "key": "instance",
-                  "value": ""
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Delete Stored Provider",
-          "request": {
-            "description": "Delete a stored provider. A config.yml provider cannot be deleted here.",
-            "header": [],
-            "method": "DELETE",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provider-credentials",
-                ":instance"
-              ],
-              "raw": "{{baseUrl}}/api/v1/provider-credentials/:instance",
-              "variable": [
-                {
-                  "description": "path parameter",
-                  "key": "instance",
-                  "value": ""
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Test Stored Provider",
-          "request": {
-            "description": "Verify a stored provider's key by listing its models, without exposing the key.",
-            "header": [],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provider-credentials",
-                ":instance",
-                "test"
-              ],
-              "raw": "{{baseUrl}}/api/v1/provider-credentials/:instance/test",
-              "variable": [
-                {
-                  "description": "path parameter",
-                  "key": "instance",
-                  "value": ""
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "List Providers",
-          "request": {
-            "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and models.dev\ndatasets. No provider is contacted, so this is cheap and always available.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "providers"
-              ],
-              "raw": "{{baseUrl}}/api/v1/providers"
-            }
-          }
-        },
-        {
-          "name": "Provider Catalog",
-          "request": {
-            "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the models.dev catalog, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "providers",
-                "catalog"
-              ],
-              "raw": "{{baseUrl}}/api/v1/providers/catalog"
-            }
-          }
-        },
-        {
-          "name": "Provider Catalog Detail",
-          "request": {
-            "description": "Autofill hints for one provider the add-provider form has selected.\n\nImports only the selected provider's any-llm module (not the whole catalog)\nto report its credential env var, default endpoint, whether a key is required,\nand whether that env var is already set on the server. Returns 404 for an\nunknown provider id.\n\nThe SDK import is offloaded to a worker thread: the first fetch for a given\nprovider imports that provider's module, which would otherwise block the event\nloop (and thus every concurrent request) for the import's duration.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "providers",
-                "catalog",
-                ":provider_id"
-              ],
-              "raw": "{{baseUrl}}/api/v1/providers/catalog/:provider_id",
-              "variable": [
-                {
-                  "description": "path parameter",
-                  "key": "provider_id",
-                  "value": ""
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Provider Health",
-          "request": {
-            "description": "Report every configured provider's reachability, with a last-checked time.\n\nCovers the configured provider instances and every hosted provider switched\non, each hosted provider under its provider name. A hosted provider that a\nconfigured instance of the same name shadows is not reported. One whose\nstored key cannot be decrypted with the configured `OTARI_SECRET_KEY` is\nreported unreachable with that reason.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "providers",
-                "health"
-              ],
-              "query": [
-                {
-                  "description": "",
-                  "disabled": true,
-                  "key": "refresh",
-                  "value": ""
-                }
-              ],
-              "raw": "{{baseUrl}}/api/v1/providers/health?refresh="
-            }
-          }
-        }
-      ],
-      "name": "providers"
     },
     {
       "item": [
@@ -9612,6 +9668,106 @@
         }
       ],
       "name": "provider-endpoints"
+    },
+    {
+      "item": [
+        {
+          "name": "List Providers",
+          "request": {
+            "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and models.dev\ndatasets. No provider is contacted, so this is cheap and always available.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "providers"
+              ],
+              "raw": "{{baseUrl}}/api/v1/providers"
+            }
+          }
+        },
+        {
+          "name": "Provider Catalog",
+          "request": {
+            "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the models.dev catalog, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "providers",
+                "catalog"
+              ],
+              "raw": "{{baseUrl}}/api/v1/providers/catalog"
+            }
+          }
+        },
+        {
+          "name": "Provider Catalog Detail",
+          "request": {
+            "description": "Autofill hints for one provider the add-provider form has selected.\n\nImports only the selected provider's any-llm module (not the whole catalog)\nto report its credential env var, default endpoint, whether a key is required,\nand whether that env var is already set on the server. Returns 404 for an\nunknown provider id.\n\nThe SDK import is offloaded to a worker thread: the first fetch for a given\nprovider imports that provider's module, which would otherwise block the event\nloop (and thus every concurrent request) for the import's duration.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "providers",
+                "catalog",
+                ":provider_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/providers/catalog/:provider_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Provider Health",
+          "request": {
+            "description": "Report every configured provider's reachability, with a last-checked time.\n\nCovers the configured provider instances and every hosted provider switched\non, each hosted provider under its provider name. A hosted provider that a\nconfigured instance of the same name shadows is not reported. One whose\nstored key cannot be decrypted with the configured `OTARI_SECRET_KEY` is\nreported unreachable with that reason.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "providers",
+                "health"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "refresh",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/providers/health?refresh="
+            }
+          }
+        }
+      ],
+      "name": "providers"
     },
     {
       "item": [
@@ -10164,7 +10320,7 @@
         {
           "name": "Reencrypt Stored Search Tool Keys",
           "request": {
-            "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/provider-credentials/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
+            "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
             "header": [],
             "method": "POST",
             "url": {
@@ -10295,7 +10451,7 @@
               },
               "raw": "{\n  \"query\": \"string\",\n  \"url\": \"string\"\n}"
             },
-            "description": "Test a configured or stored instance with one search or one fetch.\n\nTakes ``query`` for a search instance or ``url`` for a fetch instance, and\nanswers as ``POST /search-tools/test`` does. ``builtin_fetch`` has no test\nyet, and answers a 400.",
+            "description": "Test a configured or stored instance with one search or one fetch.\n\nTakes ``query`` for a search instance or ``url`` for a fetch instance, and\nanswers as ``POST /search-tools/test`` does. ``builtin_fetch``, the built-in\nfetcher, fetches as a fetch tool call does, with no domain policy.",
             "header": [
               {
                 "key": "Content-Type",
@@ -10685,7 +10841,7 @@
         {
           "name": "List Traces",
           "request": {
-            "description": "List agent sessions, most recently active first.",
+            "description": "List agent sessions, most recently active first unless ``sort`` says otherwise.",
             "header": [],
             "method": "GET",
             "url": {
@@ -10708,6 +10864,18 @@
                   "description": "",
                   "disabled": true,
                   "key": "limit",
+                  "value": ""
+                },
+                {
+                  "description": "What to order by. Latency runs from a session's start to its last activity.",
+                  "disabled": true,
+                  "key": "sort",
+                  "value": ""
+                },
+                {
+                  "description": "The direction of `sort`.",
+                  "disabled": true,
+                  "key": "order",
                   "value": ""
                 },
                 {
@@ -10759,13 +10927,13 @@
                   "value": ""
                 },
                 {
-                  "description": "A trace id, or the start of one.",
+                  "description": "Part of a trace id, session name, harness or user id, in any case.",
                   "disabled": true,
                   "key": "q",
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/traces?skip=&limit=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/traces?skip=&limit=&sort=&order=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -10835,7 +11003,7 @@
                   "value": ""
                 },
                 {
-                  "description": "A trace id, or the start of one.",
+                  "description": "Part of a trace id, session name, harness or user id, in any case.",
                   "disabled": true,
                   "key": "q",
                   "value": ""
@@ -10876,7 +11044,7 @@
         {
           "name": "Trace Series",
           "request": {
-            "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
+            "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
             "header": [],
             "method": "GET",
             "url": {
@@ -10945,7 +11113,7 @@
                   "value": ""
                 },
                 {
-                  "description": "A trace id, or the start of one.",
+                  "description": "Part of a trace id, session name, harness or user id, in any case.",
                   "disabled": true,
                   "key": "q",
                   "value": ""
@@ -11066,7 +11234,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -11221,7 +11389,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -11433,7 +11601,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -11591,7 +11759,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
                   "disabled": true,
                   "key": "source_label",
                   "value": ""
@@ -12534,7 +12702,7 @@
               },
               "raw": "{\n  \"name\": \"string\",\n  \"url\": \"string\"\n}"
             },
-            "description": "Register an MCP server for a workspace. Organization owners/admins or this workspace's owners/admins.\n\nThe authorization token is encrypted at rest and never returned. The URL\nis checked for SSRF safety here as well as on the request path, and must\nuse https when a token is set. A name already used in this workspace is\nrefused with a 409.",
+            "description": "Register an MCP server for a workspace. Organization owners/admins or this workspace's owners/admins.\n\nThe authorization token is encrypted at rest and never returned. The URL\nis checked for SSRF safety here as well as on the request path, and must\nuse https when a token is set. A name already used in this workspace is\nrefused with a 409.\n\nOnce stored, the server is connected to and its tools listed, and the\noutcome is returned as `health`. A server that fails this check is still\nstored, and `health.error` says why.",
             "header": [
               {
                 "key": "Content-Type",
@@ -12565,6 +12733,49 @@
           }
         },
         {
+          "name": "Check Workspace Mcp Server Connection",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"url\": \"string\"\n}"
+            },
+            "description": "Check connection details without storing them. Organization owners/admins or this workspace's owners/admins.\n\nWhat a form's Test button calls before it saves. Answers with what a stored\nserver's `health` would say, and records nothing. Pass `server_id` and omit\n`authorization_token` to test with that server's stored token. The URL is\nchecked for SSRF safety first, with the same 400 a create gets.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "mcp-servers",
+                "check"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers/check",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Update Workspace Mcp Server",
           "request": {
             "body": {
@@ -12576,7 +12787,7 @@
               },
               "raw": "{\n  \"allowed_tools\": [\n    \"string\"\n  ],\n  \"authorization_token\": \"string\",\n  \"enabled\": false,\n  \"name\": \"string\",\n  \"purpose_hint\": \"string\",\n  \"url\": \"string\"\n}"
             },
-            "description": "Update a server. Organization owners/admins or this workspace's owners/admins.\n\nOnly the fields sent are applied. Omit `authorization_token` to leave the\nstored token alone, send an empty string to clear it, or send a value to\nrotate it.",
+            "description": "Update a server. Organization owners/admins or this workspace's owners/admins.\n\nOnly the fields sent are applied. Omit `authorization_token` to leave the\nstored token alone, send an empty string to clear it, or send a value to\nrotate it. A change to the URL, the token or the allow-list checks the\nserver again, as creating it does.",
             "header": [
               {
                 "key": "Content-Type",
@@ -12631,6 +12842,41 @@
                 ":server_id"
               ],
               "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers/:server_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "server_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Check Workspace Mcp Server",
+          "request": {
+            "description": "Check a server's connection now. Organization owners/admins or this workspace's owners/admins.\n\nOpens one session, lists the server's tools, and stores the outcome as\n`health`. A server that fails is still a 200, with `health.status` set to\n`failing`. A 429 means every check slot on this gateway was busy and\nnothing was recorded.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "mcp-servers",
+                ":server_id",
+                "check"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers/:server_id/check",
               "variable": [
                 {
                   "description": "path parameter",

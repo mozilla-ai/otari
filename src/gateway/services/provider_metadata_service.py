@@ -17,6 +17,7 @@ join client-side.
 
 import os
 from dataclasses import dataclass, field
+from typing import Literal
 
 from any_llm import AnyLLM, LLMProvider
 
@@ -55,6 +56,8 @@ class ProviderInfo:
     env_key: str | None = None
     pricing_urls: list[str] = field(default_factory=list)
     capabilities: ProviderCapabilities = field(default_factory=ProviderCapabilities)
+    # Where the instance is defined; the configuration is the one source left.
+    source: Literal["config"] = "config"
 
 
 def _any_llm_metadata(provider_type: str) -> object | None:
@@ -136,10 +139,7 @@ def provider_info(config: GatewayConfig, instance: str) -> ProviderInfo:
 
 def list_provider_info(config: GatewayConfig) -> list[ProviderInfo]:
     """Static metadata for every configured provider, sorted by instance name."""
-    return sorted(
-        (provider_info(config, instance) for instance in config.providers),
-        key=lambda info: info.instance,
-    )
+    return sorted((provider_info(config, instance) for instance in config.providers), key=lambda info: info.instance)
 
 
 @dataclass

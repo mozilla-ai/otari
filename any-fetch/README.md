@@ -54,7 +54,9 @@ fails the call rather than degrading it. A missing key raises `MissingCredential
 `AnyFetchError`, and none carries a response body, a URL or a key.
 
 `ProviderMetadata` says what a host needs before calling: where the key comes from, the provider's
-`tier` (`production` or `test`), `max_urls_per_call`, whether it `renders_javascript`, the
+`tier` (`production` or `test`), `max_urls_per_call`, whether it `renders_javascript`, whether it
+`reports_final_url` (when false, `final_url` is the URL as asked, because the provider follows
+redirects without saying where they led, so a caller cannot check a redirect it followed), the
 `formats` it returns text in, and its native options as `OptionSpec`s (`name`, `type`, `enum`,
 `default`, `description` and `operator_only`, for an option only a deployment's operator should
 set; the library accepts it from anyone, and enforcing that is the host's job).
@@ -119,8 +121,9 @@ Python SDK asks for, when `max_chars` is not passed. A longer page is cut there 
 only, so `text.maxCharacters` is refused. The other native options are `highlights`, `summary` and `extras`, whose answers stay in
 `raw`, and `maxAgeHours`, `livecrawlTimeout` and `snapshotAsOf`.
 
-`final_url` is the URL Exa answered for, `published` its `publishedDate`, and the cost
-`costDollars.total`. `content_type` is empty: Exa does not say what the page was served as.
+`final_url` is the URL Exa answered for, which is the URL as asked even after a redirect, so
+`reports_final_url` is false: a caller cannot check where a redirect Exa followed led.
+`published` is its `publishedDate`, and the cost `costDollars.total`. `content_type` is empty: Exa does not say what the page was served as.
 
 A page Exa could not fetch comes back as `FetchedPage.error`, with Exa's tag, such as
 `CRAWL_NOT_FOUND`, and the page's HTTP status. A page with no text, which Exa reports as
@@ -154,7 +157,9 @@ back. The native options are `content` (`main`, the default, or `full`), `effort
 documents up to 15 seconds for a fetch at `standard` effort, the default `timeout`, and 15 to 60
 at `max`, which renders the page in a browser, so pass a `timeout` to match.
 
-`final_url` is the `url` Tabstack answered for, which is the URL as asked even after a redirect.
+`final_url` is the `url` Tabstack answered for, which is the URL as asked even after a redirect, so
+`reports_final_url` is false: a caller cannot check where a redirect Tabstack followed led, for
+example against its own allow or deny lists.
 `content_type` is empty and `published` is `None`: Tabstack does not say what the page was
 served as, and its `created_at` is not a date to rely on, since for a PDF it carries the PDF's
 own date format rather than the ISO 8601 it documents. The metadata stays in `raw`. Tabstack

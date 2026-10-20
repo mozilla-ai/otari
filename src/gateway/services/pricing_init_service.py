@@ -1,21 +1,30 @@
 """Pricing initialization from configuration."""
 
-from sqlalchemy import func, select
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any
+
+from sqlalchemy import distinct, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger
-from gateway.models.pricing import ModelPricing
+from gateway.models.money import to_usd
+from gateway.models.pricing import MODEL_KIND, ModelPricing, PricingKind
+from gateway.repositories.pricing import OrganizationModelPricingRepository
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     find_model_pricing,
     gateway_tool_pricing_key,
+    legacy_tool_price_keys,
     normalize_effective_at,
+    resolve_tool_rate,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tools import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
+from gateway.types.tool_charges import instance_rate_key
 
 
 async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: AsyncSession) -> None:
@@ -32,13 +41,20 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
     """
     if not config.require_pricing:
         return
-    # Tool rows are excluded: pricing only ``otari:web_search`` leaves every *model*
-    # unpriced, which is precisely the state this warning exists to announce.
+    # Tool rows are excluded: pricing only ``otari:web_search`` or a search tool
+    # leaves every *model* unpriced, which is precisely the state this warning
+    # exists to announce. A tool's row written under its old model-kind key counts
+    # as a tool's too.
+    legacy = sorted(legacy_tool_price_keys(config))
     count = (
         await db.execute(
             select(func.count())
             .select_from(ModelPricing)
-            .where(ModelPricing.model_key.notlike(f"{GATEWAY_TOOL_PRICING_PROVIDER}:%"))
+            .where(
+                ModelPricing.kind == MODEL_KIND,
+                ModelPricing.model_key.notlike(f"{GATEWAY_TOOL_PRICING_PROVIDER}:%"),
+                ModelPricing.model_key.notin_(legacy),
+            )
         )
     ).scalar_one()
     if count > 0:
@@ -59,29 +75,35 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
 async def warn_if_search_tools_lack_flat_pricing(config: GatewayConfig, db: AsyncSession) -> None:
     """Warn at startup for a search tool with no flat per-request rate.
 
-    ``POST /v1/search`` reserves the rate configured for ``<provider>:<tool>``
-    before calling the provider, so an unpriced tool reserves nothing: a user
-    already over their cap is still refused, but one just under it can overshoot
-    by a search, and concurrent searches cannot see each other's holds. The
-    provider's own reported charge is still billed afterwards, so spend stays
-    truthful; it is the pre-flight hold that is missing. An explicit rate of 0 is
-    a deliberate "this tool is free" and is left alone.
+    With ``require_pricing`` on, its direct searches are refused. With it off,
+    they reserve nothing before the provider is called, so a user just under
+    their cap can overshoot by a search. A rate of 0 is a deliberate "this tool
+    is free" and is left alone.
     """
     unpriced: list[str] = []
     for name, entry in config.search_tools.items():
         provider = str(entry.get("provider") or name) if isinstance(entry, dict) else name
-        # use_defaults=False for the same reason the route sets it: a search tool
-        # is not a model, so the community dataset can only produce a false match.
-        if await find_model_pricing(db, provider, name, use_defaults=False) is None:
-            unpriced.append(f"{provider}:{name}")
+        if await resolve_tool_rate(db, (instance_rate_key("search", name, provider),)) is None:
+            unpriced.append(name)
     if not unpriced:
         return
+    if config.require_pricing:
+        consequence = (
+            f"require_pricing is on, so POST {API_ROOT}/search refuses their searches with HTTP 402, except on "
+            "keys exempt from budgets. Set a rate, 0 included"
+        )
+    else:
+        consequence = (
+            "Nothing is reserved against a caller's budget before the search runs, so a user just under their "
+            "cap can overshoot by one search. Set a rate"
+        )
     logger.warning(
-        "No flat per-request rate is configured for search tool(s): %s. Nothing is reserved against a "
-        "caller's budget before the search runs, so a user just under their cap can overshoot by one "
-        f"search. Add a rate for the model key (config `pricing` section or POST {API_ROOT}/pricing); the "
-        "convention is USD per million requests, so 5000.0 charges $0.005 per search.",
+        "No flat per-request rate is configured for search tool(s): %s. %s: POST %s/pricing with kind 'search' "
+        "and the tool's name as model_key, or price_per_call (USD per search) on its entry if it is declared in "
+        "config.yml.",
         ", ".join(sorted(unpriced)),
+        consequence,
+        API_ROOT,
     )
 
 
@@ -173,9 +195,10 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
 
     logger.info("Loading pricing configuration for %s model(s)", len(config.pricing))
 
-    # A search tool's flat rate is keyed ``<provider>:<tool>``, and its provider is
-    # never under ``providers``.
-    search_providers = config.search_tool_providers()
+    # A search or fetch instance's rate written here under its old
+    # ``<provider>:<instance>`` key keeps loading, matched whole (the deprecation
+    # warning names it); its provider is never under ``providers``.
+    legacy_tool_keys = legacy_tool_price_keys(config)
 
     for raw_model_key, pricing_config in config.pricing.items():
         model_key = normalize_pricing_key(config, raw_model_key)
@@ -184,9 +207,22 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         if (
             instance not in config.providers
             and instance not in config.decision_providers
-            and instance not in search_providers
+            and model_key not in legacy_tool_keys
             and instance != GATEWAY_TOOL_PRICING_PROVIDER
         ):
+            tools_under = sorted({key.split(":", 1)[1] for key in legacy_tool_keys if key.split(":", 1)[0] == instance})
+            if tools_under:
+                logger.warning(
+                    "Skipping pricing for '%s': it names none of %s's search or fetch tools (%s), and '%s' is not "
+                    "listed in the providers section. A tool is priced by price_per_call on its entry, or by "
+                    "POST %s/pricing with its kind and its name as model_key.",
+                    model_key,
+                    instance,
+                    ", ".join(tools_under),
+                    instance,
+                    API_ROOT,
+                )
+                continue
             logger.warning(
                 "Skipping pricing for '%s': provider '%s' is not listed in the providers section. "
                 "The provider may still work if its credentials come from the environment, but its "
@@ -207,6 +243,7 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         existing_pricing = (
             await db.execute(
                 select(ModelPricing).where(
+                    ModelPricing.kind == MODEL_KIND,
                     ModelPricing.model_key == model_key,
                     ModelPricing.effective_at == effective_at,
                 )
@@ -242,3 +279,89 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         await db.rollback()
         raise
     logger.info("Pricing initialization complete")
+
+
+async def initialize_tool_prices_from_config(config: GatewayConfig, db: AsyncSession) -> None:
+    """Store each configured search and fetch instance's ``price_per_call`` as its own price row.
+
+    A new version only when the rate in force differs from the one configured,
+    so an unchanged file adds nothing on a restart and a changed one takes effect.
+    """
+    sections: tuple[tuple[PricingKind, dict[str, Any]], ...] = (
+        ("search", config.search_tools),
+        ("fetch", config.fetch_tools),
+    )
+    configured = [
+        (kind, name, to_usd(entry["price_per_call"]))
+        for kind, entries in sections
+        for name, entry in entries.items()
+        if isinstance(entry, dict) and entry.get("price_per_call") is not None
+    ]
+    now = datetime.now(UTC)
+    for kind, name, price in configured:
+        per_million = price * 1_000_000
+        latest = (
+            await db.execute(
+                select(ModelPricing)
+                .where(ModelPricing.kind == kind, ModelPricing.model_key == name, ModelPricing.effective_at <= now)
+                .order_by(ModelPricing.effective_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if latest is not None and latest.input_price_per_million == per_million and latest.unit == "requests":
+            continue
+        db.add(
+            ModelPricing(
+                kind=kind,
+                model_key=name,
+                effective_at=now,
+                input_price_per_million=per_million,
+                output_price_per_million=Decimal(0),
+                pricing_tiers=[],
+                unit="requests",
+                origin="config",
+            )
+        )
+        logger.info("Priced %s tool '%s' at $%s per call", kind, name, price)
+    try:
+        await db.commit()
+    except SQLAlchemyError:
+        await db.rollback()
+        raise
+
+
+async def warn_about_legacy_tool_prices(config: GatewayConfig, db: AsyncSession) -> None:
+    """Warn at startup for a tool's price still stored under its old ``<provider>:<instance>`` key.
+
+    Such a row still prices its tool, as a second spelling of the tool's own key,
+    until a later release stops reading it. Names only, as stored.
+    """
+    legacy = sorted(legacy_tool_price_keys(config))
+    if not legacy:
+        return
+    deployment = set(
+        (
+            await db.scalars(
+                select(distinct(ModelPricing.model_key)).where(
+                    ModelPricing.kind == MODEL_KIND, ModelPricing.model_key.in_(legacy)
+                )
+            )
+        ).all()
+    )
+    overrides = {
+        key for _id, _organization_id, key in await OrganizationModelPricingRepository(db).ids_for_keys(legacy)
+    }
+    if not deployment and not overrides:
+        return
+    logger.warning(
+        "Search or fetch tool price(s) stored under the old <provider>:<instance> key: %s. They still price "
+        "their tool until a later release stops reading them. Give each tool its own price, then delete the "
+        f"old row: POST {API_ROOT}/pricing with kind 'search' or 'fetch' and the tool's name as model_key "
+        "(builtin_fetch for the built-in fetcher), or price_per_call on its entry if it is declared in "
+        f"config.yml. A deployment operator recreates an organization override the same way, on "
+        f"{API_ROOT}/organizations/me/pricing in that organization.",
+        ", ".join(
+            [f"{key} (deployment)" for key in sorted(deployment)]
+            + [f"{key} (organization override)" for key in sorted(overrides)]
+        ),
+    )

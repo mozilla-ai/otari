@@ -74,7 +74,9 @@ class UsageLog(Base):
     # Provenance. "gateway" for requests Otari served itself; a source slug (e.g.
     # "claude_code") for usage imported through POST /v1/usage/external-events.
     # source_event_id is the upstream event id used for idempotent import (NULL for
-    # gateway rows); source_label carries optional session/project attribution.
+    # gateway rows); source_label carries optional session/project attribution:
+    # the imported label, or on a gateway row the trace id of the session the
+    # request named (see ``services/traces/_identity.py``).
     source: Mapped[str] = mapped_column(default=SERVED_HERE_SLUG, index=True)
     source_event_id: Mapped[str | None] = mapped_column()
     source_label: Mapped[str | None] = mapped_column()

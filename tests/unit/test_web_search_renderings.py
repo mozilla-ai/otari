@@ -3,18 +3,28 @@
 from __future__ import annotations
 
 import json
+from contextlib import AsyncExitStack
+from dataclasses import replace
 from typing import Any
 
 import pytest
 
+from gateway.core.config import GatewayConfig
+from gateway.services.tool_usage import is_tool_error
 from gateway.services.tools import (
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     WEB_SEARCH_CALL_ID_PREFIX,
     WEB_SEARCH_TOOL_NAME,
+    CombinedToolBackend,
     Dialect,
     NativeCall,
+    WebToolCallCap,
+    build_web_search_backends,
     native_rendering,
+    owning_backend,
+    resolve_in_loop_search,
 )
+from gateway.services.web_retrieval_policy import DomainPolicy
 
 
 class _SearchBackendLike:
@@ -201,3 +211,94 @@ def test_chat_sources_stay_within_the_model_facing_results_byte_limit() -> None:
     assert len(json.dumps(ended["sources"]).encode()) <= WEB_RETRIEVAL_RESULT_MAX_BYTES
     assert len(ended["sources"]) == 3
     assert ended["sources"][-1]["url"] == "https://short.example"
+
+
+# ---------------------------------------------------------------------------
+# The search backend on any-search, as the loop hands it to a rendering: the
+# member of the request's pool that ran the call
+# ---------------------------------------------------------------------------
+
+_HITS = [
+    {"url": "https://example.com/a", "title": "A", "snippet": "Snippet A.", "published": "2026-01-15T09:30:00Z"},
+    {"url": "https://example.org/b", "title": "", "snippet": "Snippet B.", "published": "2026-02-01"},
+]
+
+
+async def _ran_on_the_libraries(
+    dialect: Dialect, options: dict[str, Any] | None = None, *, cap: int = 10, calls: int = 1
+) -> list[Any]:
+    """The rendering of the last of ``calls`` searches on a ``fake`` instance, in a pool beside the fetch backend."""
+    config = GatewayConfig(
+        search_tools={"fake-search": {"provider": "fake", "options": {"hits": _HITS, **(options or {})}}},
+        web_search_default_tool="fake-search",
+        web_search_extract=False,
+    )
+    search = resolve_in_loop_search(config, None)
+    assert search is not None
+    backends = build_web_search_backends(
+        config,
+        search,
+        search_tool_entry={},
+        fetch_declared=True,
+        fetch_policy=DomainPolicy(),
+        cap=WebToolCallCap(cap),
+        purpose_hint=None,
+        web_provider_client=None,
+        tally=None,
+        trace=None,
+    )
+    pool = CombinedToolBackend(backends)
+    call = _call()
+    async with AsyncExitStack() as stack:
+        for backend in backends:
+            await stack.enter_async_context(backend)
+        owner = owning_backend(pool, WEB_SEARCH_TOOL_NAME)
+        for _ in range(calls):
+            text = await owner.call_tool(WEB_SEARCH_TOOL_NAME, dict(call.arguments))
+        ended: list[Any] = _rendering(dialect).ran(replace(call, failed=is_tool_error(text)), owner)
+        return ended
+
+
+@pytest.mark.asyncio
+async def test_the_anthropic_pair_cites_a_library_searchs_hits_with_iso_dates() -> None:
+    use, result = await _ran_on_the_libraries(Dialect.MESSAGES)
+
+    assert use.input == {"query": "what is the latest python?"}
+    assert [(citation.url, citation.title, citation.page_age) for citation in result.content] == [
+        ("https://example.com/a", "A", "2026-01-15T09:30:00+00:00"),
+        ("https://example.org/b", "https://example.org/b", "2026-02-01"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_library_search_has_nothing_to_cite() -> None:
+    assert await _ran_on_the_libraries(Dialect.MESSAGES, {"error": "timeout"}) == []
+
+
+@pytest.mark.asyncio
+async def test_a_chat_search_on_the_libraries_ends_with_its_sources_and_iso_dates() -> None:
+    [ended] = await _ran_on_the_libraries(Dialect.CHAT)
+
+    assert ended["status"] == "completed"
+    assert ended["sources"] == [
+        {"url": "https://example.com/a", "title": "A", "published_date": "2026-01-15T09:30:00+00:00"},
+        {"url": "https://example.org/b", "title": "https://example.org/b", "published_date": "2026-02-01"},
+    ]
+    assert "Snippet" not in str(ended)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_chat_search_on_the_libraries_carries_the_providers_failure() -> None:
+    [ended] = await _ran_on_the_libraries(Dialect.CHAT, {"error": "upstream_error", "error_status": 503})
+
+    assert ended["status"] == "failed"
+    assert ended["error"] == {"provider": "fake", "status": 503, "tag": "upstream_error", "retryable": True}
+    assert "sources" not in ended
+
+
+@pytest.mark.asyncio
+async def test_a_chat_search_past_the_requests_call_limit_fails_with_the_call_limit_tag() -> None:
+    [ended] = await _ran_on_the_libraries(Dialect.CHAT, cap=1, calls=2)
+
+    assert ended["status"] == "failed"
+    assert ended["error"] == {"provider": None, "status": None, "tag": "call_limit", "retryable": False}

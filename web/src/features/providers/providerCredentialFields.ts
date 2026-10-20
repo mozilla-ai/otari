@@ -147,10 +147,10 @@ export function credentialFieldsFor(
  * SageMaker selector resolve with nothing configured), and it reports no model
  * listing, so a connection test cannot tell an operator any of this either.
  *
- * Scoped to the call sites that collect a bring-your-own credential rather
- * than applied to every picker: a deployment operator adding a SageMaker
- * *instance* on `/providers` to give it an endpoint and a model list, backed
- * by the host's own credentials, is a configuration that does work.
+ * Scoped to the call sites that collect a credential rather than applied to
+ * every picker: a SageMaker instance declared in config.yml with an endpoint
+ * and a model list, backed by the host's own credentials, is a configuration
+ * that does work.
  *
  * The old platform form excluded `platform` here too. otari has no such
  * pseudo-provider: `AnyLLM.get_supported_providers()` carries no `platform`
@@ -222,8 +222,8 @@ export function splitClientArgs(
  * can see.
  *
  * Driven by what `splitClientArgs` took out rather than by the current field
- * list, because the two can disagree: `/providers` lets an instance's provider
- * type be retyped mid-edit, and a field that stops rendering must not take the
+ * list, because the two can disagree: a different provider type renders
+ * different fields, and a field that stops rendering must not take the
  * stored option with it.
  */
 export function mergeCredentialFields(

@@ -4,6 +4,10 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
+from opentelemetry.proto.common.v1.common_pb2 import AnyValue, ArrayValue, KeyValue
+
+from gateway.api.routes.otlp import _attributes
 from gateway.core.config import GatewayConfig
 from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, project_otlp_spans
 from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT
@@ -118,6 +122,65 @@ def test_text_in_a_span_name_or_attribute_never_reaches_the_document() -> None:
     assert "merger" not in repr(span)
 
 
+@pytest.mark.parametrize(
+    ("reasons", "stored"),
+    [(["stop"], "stop"), (("tool_calls",), "tool_calls"), (["stop", "length"], "stop,length"), ("stop", "stop")],
+)
+def test_finish_reasons_sent_as_an_array_are_kept(reasons: Any, stored: str) -> None:
+    [write] = _project(
+        _span("c1", attrs={"gen_ai.operation.name": "chat", "gen_ai.response.finish_reasons": reasons}),
+    )
+
+    [span] = write.spans
+    assert span.attributes == {"gen_ai.response.finish_reasons": stored}
+
+
+@pytest.mark.parametrize(
+    "reasons",
+    [
+        ["stop", "the model ran out of room"],
+        ["stop", 1],
+        ["stop", None],
+        [],
+        ["x" * 100, "y" * 100],
+        {"first": "stop"},
+        ["stop,length"],
+        "stop,length",
+    ],
+)
+def test_finish_reasons_that_are_not_all_identifiers_are_dropped_and_the_span_kept(reasons: Any) -> None:
+    [write] = _project(
+        _span("c1", attrs={"gen_ai.operation.name": "chat", "gen_ai.response.finish_reasons": reasons}),
+    )
+
+    [span] = write.spans
+    assert span.attributes == {}
+
+
+@pytest.mark.parametrize(("sent", "stored"), [(1024, 1024), ("1024", 1024), (10**12, _INT32_MAX)])
+def test_the_requested_max_tokens_is_kept(sent: Any, stored: int) -> None:
+    [write] = _project(_span("c1", attrs={"gen_ai.operation.name": "chat", "gen_ai.request.max_tokens": sent}))
+
+    [span] = write.spans
+    assert span.attributes == {"gen_ai.request.max_tokens": stored}
+
+
+@pytest.mark.parametrize("sent", [-1, 1.5, True, "lots"])
+def test_a_max_tokens_that_is_not_a_count_is_dropped_and_the_span_kept(sent: Any) -> None:
+    [write] = _project(_span("c1", attrs={"gen_ai.operation.name": "chat", "gen_ai.request.max_tokens": sent}))
+
+    [span] = write.spans
+    assert span.attributes == {}
+
+
+def test_an_array_attribute_is_read_only_where_a_trace_asks_for_it() -> None:
+    reasons = AnyValue(array_value=ArrayValue(values=[AnyValue(string_value="stop")]))
+    received = [KeyValue(key="gen_ai.response.finish_reasons", value=reasons)]
+
+    assert _attributes(received) == {"gen_ai.response.finish_reasons": None}
+    assert _attributes(received, arrays=True) == {"gen_ai.response.finish_reasons": ("stop",)}
+
+
 def test_a_span_with_no_ids_is_skipped() -> None:
     assert _project(_span("", trace_id="")) == []
 
@@ -170,6 +233,79 @@ def test_token_counts_are_clamped_and_malformed_ones_dropped() -> None:
     assert tokens(True) is None
     assert tokens(2**62) == _INT32_MAX
     assert tokens(str(2**40)) == _INT32_MAX
+
+
+@pytest.mark.parametrize(
+    ("provider", "input_tokens", "cache_read_key", "cache_write_key"),
+    [
+        pytest.param(
+            "anthropic",
+            48_210,
+            "gen_ai.usage.cache_read.input_tokens",
+            "gen_ai.usage.cache_creation.input_tokens",
+            id="inside-as-the-conventions-count-them",
+        ),
+        pytest.param(
+            "openai",
+            48_210,
+            "gen_ai.usage.cached_tokens",
+            "gen_ai.usage.cache_write_tokens",
+            id="inside-under-older-names",
+        ),
+        pytest.param(
+            "anthropic",
+            300,
+            "gen_ai.usage.cache_read_tokens",
+            "gen_ai.usage.cache_write_tokens",
+            id="on-top-when-they-outnumber-it",
+        ),
+    ],
+)
+def test_an_llm_span_counts_the_whole_prompt_whichever_way_the_exporter_reported_its_cache(
+    provider: str, input_tokens: int, cache_read_key: str, cache_write_key: str
+) -> None:
+    attrs = {
+        "gen_ai.provider.name": provider,
+        "gen_ai.usage.input_tokens": input_tokens,
+        cache_read_key: 41_900,
+        cache_write_key: 6_010,
+        "gen_ai.usage.reasoning.output_tokens": 12,
+    }
+    [write] = _project(_span("a", attrs=attrs))
+
+    [span] = write.spans
+    assert (span.input_tokens, span.cache_read_tokens, span.cache_write_tokens) == (48_210, 41_900, 6_010)
+    assert span.reasoning_tokens == 12
+
+
+def test_a_reported_zero_cache_count_is_kept_not_stored_as_unknown() -> None:
+    attrs = {
+        "gen_ai.usage.input_tokens": 100,
+        "gen_ai.usage.cache_read.input_tokens": 0,
+        "gen_ai.usage.cache_creation.input_tokens": 0,
+    }
+    [write] = _project(_span("a", attrs=attrs))
+
+    [span] = write.spans
+    assert (span.input_tokens, span.cache_read_tokens, span.cache_write_tokens) == (100, 0, 0)
+
+
+def test_a_span_that_reports_no_cache_count_leaves_it_unknown() -> None:
+    [write] = _project(_span("a", attrs={"gen_ai.usage.input_tokens": 100}))
+
+    [span] = write.spans
+    assert (span.cache_read_tokens, span.cache_write_tokens) == (None, None)
+
+
+def test_cached_tokens_never_lift_the_whole_prompt_past_what_the_store_holds() -> None:
+    attrs = {
+        "gen_ai.provider.name": "anthropic",
+        "gen_ai.usage.input_tokens": 10,
+        "gen_ai.usage.cache_read_tokens": _INT32_MAX,
+    }
+    [write] = _project(_span("a", attrs=attrs))
+
+    assert write.spans[0].input_tokens == _INT32_MAX
 
 
 def test_span_times_are_clamped_to_the_window_a_trace_can_live_in() -> None:

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Iterator, Mapping
+from dataclasses import replace
 from typing import Literal, TypeVar
 
 import httpx
@@ -15,6 +17,7 @@ from openai import APITimeoutError as _OpenAIAPITimeoutError
 
 from gateway.core.retry_after import bounded_retry_after
 from gateway.services.provider_kwargs import missing_credential
+from gateway.services.tools import WebToolFailure
 from gateway.streaming import IncompleteStreamError
 
 # Statuses on which the billing-message probe runs. A 402 is payment required by
@@ -290,6 +293,57 @@ def _body_error_field(body: Mapping[str, object], name: str) -> str | None:
     for candidate in (error.get(name) if isinstance(error, Mapping) else None, body.get(name)):
         if isinstance(candidate, str) and candidate:
             return candidate
+    return None
+
+
+# A provider's own error code, as safe to repeat in a header: letters, digits and
+# a few separators, short. Anything else in a body is the provider's text.
+_ERROR_TAG = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+
+
+def upstream_error_tag(exc: BaseException) -> str | None:
+    """The provider's own code for a failure, from the error body an SDK attached, or ``None``.
+
+    Exa names its errors in a top-level ``tag`` (``SERVICE_OVERLOADED``); most
+    others in ``error.code`` or ``code``. Only a short identifier is returned,
+    never a message, so it is safe to show the caller.
+    """
+    for current in upstream_exception_chain(exc):
+        body = _parsed_body(current)
+        if body is None:
+            continue
+        for name in ("tag", "code"):
+            value = _body_error_field(body, name)
+            if value is not None and _ERROR_TAG.match(value):
+                return value
+    return None
+
+
+_SERVER_ERROR = 500
+
+
+def provider_failure(exc: BaseException, provider: str | None) -> WebToolFailure | None:
+    """What a failure on the provider's own side may show the caller, or ``None``.
+
+    The same four fields a direct search's 502 carries (decision 67): the
+    provider, its HTTP status, a tag and whether a retry may help. Only for a
+    failure the provider itself caused: a timeout, a lost connection or a 5xx,
+    where the tag is the provider's own code when its error body names one
+    (Exa's ``SERVICE_OVERLOADED``). A 4xx keeps its fixed answer: billing, quota
+    and a rejected credential describe the gateway's own account, and a 429
+    already carries ``upstream_rate_limited``.
+    """
+    if provider is None:
+        return None
+    kind, status_code = upstream_exception_shape(exc)
+    if kind == "timeout":
+        return WebToolFailure.of(provider, None, "timeout")
+    if kind == "conn_err":
+        # A search's ``network`` stays non-retryable; a completion's lost
+        # connection is one the fallback walk already retries.
+        return replace(WebToolFailure.of(provider, None, "network"), retryable=True)
+    if status_code is not None and status_code >= _SERVER_ERROR:
+        return WebToolFailure.of(provider, status_code, upstream_error_tag(exc) or "http_error")
     return None
 
 

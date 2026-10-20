@@ -364,6 +364,26 @@ def test_unknown_user_block_is_refused() -> None:
         _translate(_kwargs(messages=messages))
 
 
+def test_a_document_by_url_becomes_a_file_url() -> None:
+    document = {"type": "document", "source": {"type": "url", "url": "https://example.com/a.pdf"}}
+    messages = [{"role": "user", "content": [document]}]
+    assert _translate(_kwargs(messages=messages))["input_data"] == [
+        {"role": "user", "content": [{"type": "input_file", "file_url": "https://example.com/a.pdf"}]}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("fields", "parameter"),
+    [
+        ({"messages": ["hi"]}, "messages"),
+        ({"output_format": "json"}, "output_format"),
+    ],
+)
+def test_a_malformed_request_field_is_refused(fields: dict[str, Any], parameter: str) -> None:
+    with pytest.raises(UnsupportedParameterError, match=parameter):
+        _translate(_kwargs(**fields))
+
+
 # ---------- response ----------
 
 
@@ -410,6 +430,17 @@ async def test_response_translates_to_a_message() -> None:
 async def test_stop_reasons(fields: dict[str, Any], output: list[dict[str, Any]], stop_reason: str) -> None:
     result = await _via_responses(_response(output, **fields))
     assert result.stop_reason == stop_reason
+
+
+@pytest.mark.asyncio
+async def test_function_call_arguments_that_are_not_a_json_object_become_an_empty_input() -> None:
+    output = [_call("read", "{not json", call_id="call_a"), _call("read", "[1, 2]", call_id="call_b")]
+    result = await _via_responses(_response(output))
+    assert [block.model_dump(exclude_none=True) for block in result.content] == [
+        {"type": "tool_use", "id": "call_a", "name": "read", "input": {}},
+        {"type": "tool_use", "id": "call_b", "name": "read", "input": {}},
+    ]
+    assert result.stop_reason == "tool_use"
 
 
 @pytest.mark.asyncio
@@ -538,6 +569,34 @@ async def test_incomplete_stream_reports_max_tokens() -> None:
     assert wire[-3] == {"type": "content_block_stop", "index": 0}
     assert wire[-2]["delta"] == {"stop_reason": "max_tokens"}
     assert wire[-1] == {"type": "message_stop"}
+
+
+@pytest.mark.asyncio
+async def test_streamed_refusal_reaches_the_client_as_text_and_stops_as_a_refusal() -> None:
+    # No output_item.done, which would also carry the refusal: the delta alone must.
+    events = _stream(
+        {"type": "response.output_item.added", "output_index": 0, "item": {"type": "message", "id": "m"}},
+        {"type": "response.refusal.delta", "output_index": 0, "content_index": 0, "delta": "I can't"},
+    )
+    wire = await _collect(await _via_responses(_aiter(events), stream=True))
+    assert [e for e in wire if e["type"].startswith("content_block")] == [
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "I can't"}},
+        {"type": "content_block_stop", "index": 0},
+    ]
+    assert wire[-2]["delta"] == {"stop_reason": "refusal"}
+
+
+@pytest.mark.asyncio
+async def test_refusal_sent_only_on_done_still_reaches_the_client_and_stops_as_a_refusal() -> None:
+    refusal = {"type": "message", "content": [{"type": "refusal", "refusal": "I can't"}]}
+    events = _stream(
+        {"type": "response.output_item.added", "output_index": 0, "item": {"type": "message", "id": "m"}},
+        {"type": "response.output_item.done", "output_index": 0, "item": refusal},
+    )
+    wire = await _collect(await _via_responses(_aiter(events), stream=True))
+    assert {"type": "text_delta", "text": "I can't"} in [e.get("delta") for e in wire]
+    assert wire[-2]["delta"] == {"stop_reason": "refusal"}
 
 
 @pytest.mark.asyncio

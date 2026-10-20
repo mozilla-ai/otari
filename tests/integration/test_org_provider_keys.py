@@ -45,8 +45,7 @@ from gateway.schemas.providers import (
     OrgProviderKeyUpdateRequest,
     WorkspaceProviderKeyOverrideRequest,
 )
-from gateway.services.provider_kwargs import resolve_provider_selector
-from gateway.services.provider_store_service import apply_to_config, reset_provider_cache
+from gateway.services.provider_kwargs import resolve_provider_selector, settle_configured_providers
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import OrgProviderKeyService
 from gateway.services.tenancy.org_provider_key_service import (
@@ -804,11 +803,10 @@ async def test_a_config_entry_without_a_credential_does_not_shadow_an_organizati
     await refresh_org_provider_cache(async_db)
 
     # The config.yml entry is there in name only (``api_key: ${OPENAI_API_KEY}``
-    # with the variable empty). Once the deployment overlay is applied it is
+    # with the variable empty). Once the configured providers are settled it is
     # gone, so the selector is bare and the organization's own key serves it.
     config = GatewayConfig(providers={"openai": {"api_key": ""}})
-    reset_provider_cache()
-    apply_to_config(config)
+    settle_configured_providers(config)
     assert "openai" not in config.providers
 
     resolved = resolve_provider_selector(config, "openai:gpt-4o", workspace_id=workspace.id)

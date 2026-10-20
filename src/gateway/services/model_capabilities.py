@@ -6,16 +6,19 @@ file/image content block to the provider (native) or extract it to text
 text-only local model means the block is silently dropped and the model answers
 as if no file were attached.
 
-Resolution order (most → least authoritative):
+Resolution order, from most to least authoritative:
 
-1. **Operator override** — ``config.model_capabilities[provider/model]`` (or the
+1. **Operator override**: ``config.model_capabilities[provider/model]`` (or the
    bare model key). The only fully reliable signal for local models.
-2. **any-llm provider metadata** — trusted only for hosted providers. Local /
+2. **Known model exceptions**: a hosted model its provider's metadata
+   over-reports, such as DeepSeek's ``deepseek-v4-pro``, which ignores an image
+   and answers without it while its provider takes images on ``deepseek-flash``.
+3. **any-llm provider metadata**: trusted only for hosted providers. Local /
    OpenAI-compatible servers (ollama, vllm, llamacpp, lmstudio) set the flags on
    a shared base class and over-report (e.g. Ollama claims PDF support but its
    adapter silently drops document blocks), so we ignore metadata there and fall
    through to the safe default.
-3. **Default** — ``False`` (extract). A needless extraction still yields a
+4. **Default**: ``False`` (extract). A needless extraction still yields a
    correct answer; a wrong passthrough does not.
 """
 
@@ -40,6 +43,12 @@ _LOCAL_PROVIDERS: frozenset[LLMProvider] = frozenset(
     }
 )
 
+# Hosted models whose provider's any-llm flags over-report, by provider and model.
+# Seen live: ``deepseek-v4-pro`` accepts an image and answers as if none came.
+_MODEL_EXCEPTIONS: dict[tuple[LLMProvider, str], tuple[bool, bool]] = {
+    (LLMProvider.DEEPSEEK, "deepseek-v4-pro"): (False, False),
+}
+
 
 @dataclass(frozen=True)
 class Capabilities:
@@ -47,7 +56,7 @@ class Capabilities:
 
     image: bool
     pdf: bool
-    source: str  # "config" | "provider_metadata" | "default"
+    source: str  # "config" | "model_exception" | "provider_metadata" | "default"
 
 
 def resolve_capabilities(
@@ -76,6 +85,10 @@ def resolve_capabilities(
         override = config.model_capabilities.get(key)
         if override is not None:
             return Capabilities(override.supports_image, override.supports_pdf, "config")
+
+    exception = _MODEL_EXCEPTIONS.get((provider, model))
+    if exception is not None:
+        return Capabilities(*exception, "model_exception")
 
     if provider not in _LOCAL_PROVIDERS:
         try:

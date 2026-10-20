@@ -357,14 +357,17 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   const isHosted = useDeployment().deployment_type === "hosted"
 
   // Latest rate per key. /api/v1/pricing is history-shaped (one row per
-  // effective_at), and the newest row is the one in force.
-  const currentRates = (pricing.data ?? []).reduce(
-    (rates, row) =>
-      rates.has(row.model_key)
-        ? rates
-        : rates.set(row.model_key, row.input_price_per_million),
-    new Map<string, number>(),
-  )
+  // effective_at), and the newest row is the one in force. A gateway tool's
+  // rate is a model-kind row; a search tool's own is priced on its card.
+  const currentRates = (pricing.data ?? [])
+    .filter((row) => row.kind === "model")
+    .reduce(
+      (rates, row) =>
+        rates.has(row.model_key)
+          ? rates
+          : rates.set(row.model_key, row.input_price_per_million),
+      new Map<string, number>(),
+    )
 
   const data = query.data
   const disabled = !data

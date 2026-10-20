@@ -46,6 +46,7 @@ import any_fetch
 import any_search
 from gateway.core.settings.tools import (
     BUILTIN_FETCH,
+    BUILTIN_FETCH_INSTANCE,
     BUILTIN_FETCH_PROVIDER,
     PROVIDER_DEFAULT_OPTIONS,
     SEARCH_PROVIDERS_REQUIRING_API_BASE,
@@ -79,6 +80,12 @@ from gateway.models.tools import (
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
+from gateway.types.tool_charges import (
+    ORGANIZATION_KEY_LABEL_PREFIX,
+    RateKey,
+    gateway_tool_pricing_key,
+    instance_rate_key,
+)
 
 # What runs a resolved call: one of the libraries, or the old code, which in
 # the loop is the old backend and on the direct endpoint the old SearXNG client
@@ -91,13 +98,9 @@ Runner = Literal["library", "old"]
 DIRECT_TIMEOUT_S = 30.0
 IN_LOOP_TIMEOUT_S = 15.0
 
-# The rows that price any backend of each tool (design L), under the key the
-# pricing service gives a gateway-run tool. Spelled out here rather than imported,
-# since the pricing modules import this package.
-_SEARCH_FALLBACK_RATE = f"otari:{WEB_SEARCH_TOOL_NAME}"
-_FETCH_FALLBACK_RATE = f"otari:{WEB_FETCH_TOOL_NAME}"
-# The label of a call an organization key serves, before the provider: never a pricing row.
-_ORG_LABEL_PREFIX = "org"
+# The rows that price any backend of each tool (design L).
+_SEARCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_SEARCH_TOOL_NAME)
+_FETCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_FETCH_TOOL_NAME)
 _NO_OPTIONS: Mapping[str, Any] = MappingProxyType({})
 
 
@@ -121,7 +124,7 @@ class _Resolved:
     options: Mapping[str, Any] = field(repr=False, hash=False)
     timeout: float
     label: str | None
-    rate_keys: tuple[str, ...]
+    rate_keys: tuple[RateKey, ...]
     on_credential: bool = False
 
 
@@ -138,6 +141,29 @@ class ResolvedFetch(_Resolved):
     """What one web fetch runs on, always through any-fetch: the count is ``max_chars``."""
 
     max_chars: int | None
+
+
+@dataclass(frozen=True)
+class InLoopSearch:
+    """What one request's in-loop searches run on through the libraries, and the fetch that enriches their hits."""
+
+    search: ResolvedSearch
+    enrichment: ResolvedFetch
+
+
+def resolve_in_loop_search(
+    config: ToolSettings, policy: ResolvedWebSearchConfig | None, *, request_options: Mapping[str, Any] | None = None
+) -> InLoopSearch | None:
+    """The in-loop search on the libraries, or ``None`` when the old backend serves it or nothing does.
+
+    Raises what :func:`resolve_search` raises for a request option the provider
+    does not take, and what it and :func:`resolve_fetch` raise for a credential
+    they cannot use.
+    """
+    search = resolve_search(config, policy, requested=None, request_options=request_options)
+    if search is None or search.runner != "library":
+        return None
+    return InLoopSearch(search, resolve_fetch(config, policy, requested=None, for_search=search))
 
 
 def resolve_search(
@@ -217,6 +243,11 @@ def resolve_fetch(
     return _fetch_on_instance(instances.get(configured_fetch_default(config)) or instances[BUILTIN_FETCH])
 
 
+def builtin_fetch_resolved() -> ResolvedFetch:
+    """``builtin_fetch`` as :func:`resolve_fetch` answers it, for code that holds no config."""
+    return _fetch_on_instance(BUILTIN_FETCH_INSTANCE)
+
+
 def _fetch_instances(config: ToolSettings) -> dict[str, ToolInstance]:
     """The fetch instances any-fetch can run, each other one left out with a warning, as if it named nothing."""
     served = set(any_fetch.AnyFetch.get_supported_providers())
@@ -239,6 +270,7 @@ def _search_on_instance(
     workspace: Mapping[str, Any] = _NO_OPTIONS,
     request: Mapping[str, Any],
 ) -> ResolvedSearch:
+    """A search on ``instance``: its runner, its layered options and the rate keys it is billed under."""
     runner: Runner = "library" if instance.library_backed else "old"
     own = dict(instance.options)
     # Contract C8: a searxng instance that names no engines searches the deployment's.
@@ -275,7 +307,7 @@ def _search_on_instance(
         timeout=instance.timeout or (IN_LOOP_TIMEOUT_S if in_loop else DIRECT_TIMEOUT_S),
         label=label,
         # On the direct endpoint, the instance's own row alone (contract C5).
-        rate_keys=(label, _SEARCH_FALLBACK_RATE) if in_loop else (label,),
+        rate_keys=_instance_rate_keys("search", instance, _SEARCH_FALLBACK_RATE if in_loop else None),
         fetch_tool=instance.fetch_tool,
     )
 
@@ -369,7 +401,16 @@ def _search_on_credential(
     )
 
 
+def _instance_rate_keys(
+    kind: Literal["search", "fetch"], instance: ToolInstance, fallback: str | None
+) -> tuple[RateKey, ...]:
+    """The instance's rate key, then ``fallback``."""
+    own = instance_rate_key(kind, instance.name, instance.provider)
+    return (own, fallback) if fallback is not None else (own,)
+
+
 def _fetch_on_instance(instance: ToolInstance) -> ResolvedFetch:
+    """A fetch on ``instance``: its checked options, its label and the rate keys it is billed under."""
     options = _layered(
         "fetch",
         instance.provider,
@@ -392,7 +433,7 @@ def _fetch_on_instance(instance: ToolInstance) -> ResolvedFetch:
         timeout=instance.timeout
         or (NETWORK_DEADLINE_SECONDS if instance.provider == BUILTIN_FETCH_PROVIDER else IN_LOOP_TIMEOUT_S),
         label=label,
-        rate_keys=(label, _FETCH_FALLBACK_RATE),
+        rate_keys=_instance_rate_keys("fetch", instance, _FETCH_FALLBACK_RATE),
     )
 
 
@@ -455,7 +496,7 @@ def _credential_layer(credential: WebToolCredential) -> str:
     return "the organization's key"
 
 
-def _credential_billing(credential: WebToolCredential, fallback: str) -> tuple[str | None, tuple[str, ...]]:
+def _credential_billing(credential: WebToolCredential, fallback: str) -> tuple[str | None, tuple[RateKey, ...]]:
     """The label and rate keys of a call a credential serves (design L).
 
     A hybrid data plane settles nothing itself, so the control plane's
@@ -463,7 +504,7 @@ def _credential_billing(credential: WebToolCredential, fallback: str) -> tuple[s
     """
     if credential.source == WebToolCredentialSource.HYBRID:
         return None, ()
-    return f"{_ORG_LABEL_PREFIX}:{credential.provider}", (fallback,)
+    return f"{ORGANIZATION_KEY_LABEL_PREFIX}{credential.provider}", (fallback,)
 
 
 def _layered(

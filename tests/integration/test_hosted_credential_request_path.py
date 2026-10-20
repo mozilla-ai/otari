@@ -89,6 +89,7 @@ def overlay_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generato
 
 def _config(postgres_url: str, *, bootstrap: str | None = None) -> GatewayConfig:
     return GatewayConfig(
+        import_configured_providers=False,
         database_url=postgres_url,
         master_key="test-master-key",
         auto_migrate=False,

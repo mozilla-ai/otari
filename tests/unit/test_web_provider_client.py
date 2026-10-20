@@ -13,7 +13,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from gateway.api.deps import WebProviderClientDep, get_web_provider_client, reset_config
+from gateway.api.deps import (
+    WebProviderClientDep,
+    get_optional_web_provider_client,
+    get_web_provider_client,
+    reset_config,
+)
 from gateway.core.config import GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
@@ -58,6 +63,14 @@ def test_an_app_whose_lifespan_is_not_running_has_no_client() -> None:
     request = Request({"type": "http", "app": FastAPI()})
     with pytest.raises(RuntimeError, match="lifespan"):
         get_web_provider_client(request)
+
+
+def test_the_tool_ports_read_the_client_without_depending_on_it(tmp_path: Path) -> None:
+    """Every completion route takes the tool ports, so one that runs no web tool must not need the client."""
+    app, _ = _app(tmp_path)
+    with TestClient(app):
+        assert get_optional_web_provider_client(Request({"type": "http", "app": app})) is app.state.web_provider_client
+    assert get_optional_web_provider_client(Request({"type": "http", "app": app})) is None
 
 
 def _through(monkeypatch: pytest.MonkeyPatch, handler: Any) -> list[dict[str, Any]]:

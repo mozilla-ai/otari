@@ -156,6 +156,13 @@ class CreateKeyRequest(BaseModel):
         description="When true, a chat completion on this key may carry mock_response: Otari answers with that text "
         "without calling the provider, and meters and bills the request as usual. For load tests.",
     )
+    max_end_users: int | None = Field(
+        default=None,
+        ge=0,
+        description="Most live end users this key may have on the budgets it assigns (all of its owner's end users "
+        "when it assigns none). A request that would create one more is refused with 403 and "
+        "end_user_limit_reached; deleting end users frees room. Null is no cap.",
+    )
     workspace_id: uuid.UUID | None = Field(
         default=None,
         description="Workspace this key belongs to, which must be one in the caller's "
@@ -188,6 +195,7 @@ class CreateKeyResponse(BaseModel):
     end_user_budget_id: str | None
     end_user_budget_ids: list[str]
     allow_mock_response: bool
+    max_end_users: int | None
     metadata: dict[str, Any]
 
 
@@ -215,9 +223,11 @@ class KeyInfo(BaseModel):
     # The budgets a request may start an end user on: the key's list, or its default alone.
     end_user_budget_ids: list[str]
     allow_mock_response: bool = False
+    max_end_users: int | None = None
     workspace_id: uuid.UUID
-    # Set while config.yml declares this key: every start writes the declared
-    # secret and settings back, so a change made here lasts until the next one.
+    # Set while config.yml declares this key: a start writes the declared secret
+    # and settings back when the key's entry changed, so a change made here lasts
+    # until config.yml changes the entry.
     config_name: str | None = None
     metadata: dict[str, Any]
 
@@ -244,6 +254,7 @@ class KeyInfo(BaseModel):
             end_user_budget_id=key.end_user_budget_id,
             end_user_budget_ids=key.assignable_end_user_budgets(),
             allow_mock_response=bool(key.allow_mock_response),
+            max_end_users=key.max_end_users,
             config_name=key.config_name,
             metadata=dict(key.metadata_) if key.metadata_ else {},
         )
@@ -275,6 +286,8 @@ class UpdateKeyRequest(BaseModel):
     # Tri-state via model_fields_set: absent = unchanged, null = the default alone.
     end_user_budget_ids: list[str] | None = Field(default=None, max_length=MAX_END_USER_BUDGETS)
     allow_mock_response: bool | None = None
+    # Tri-state via model_fields_set: absent = unchanged, null = no cap.
+    max_end_users: int | None = Field(default=None, ge=0)
     metadata: dict[str, Any] | None = None
 
 
@@ -399,6 +412,7 @@ async def create_key(
         end_user_budget_id=request.end_user_budget_id,
         end_user_budget_ids=end_user_budget_ids,
         allow_mock_response=request.allow_mock_response,
+        max_end_users=request.max_end_users,
         metadata_=request.metadata,
     )
 
@@ -523,6 +537,8 @@ async def update_key(
         key.end_user_budget_ids = end_user_budget_ids
     if request.allow_mock_response is not None:
         key.allow_mock_response = request.allow_mock_response
+    if "max_end_users" in request.model_fields_set:
+        key.max_end_users = request.max_end_users
     if request.metadata is not None:
         key.metadata_ = request.metadata
 

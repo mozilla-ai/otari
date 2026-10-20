@@ -24,6 +24,7 @@ and several search instances with no default between them.
 """
 
 import copy
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -246,6 +247,12 @@ def _validate_tool_entry(kind: ToolKind, name: str, entry: Any) -> str:
     if options is not None and not isinstance(options, dict):
         msg = f"{section}.{name}.options must be a mapping."
         raise ValueError(msg)
+    price = entry.get("price_per_call")
+    if price is not None and (
+        isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price < 0
+    ):
+        msg = f"{section}.{name}.price_per_call must be a finite, non-negative number of USD."
+        raise ValueError(msg)
     return provider
 
 
@@ -313,6 +320,12 @@ class ToolInstance:
     fetch_tool: str | None = None
 
 
+# The fetch instance that always exists, on otari's own fetcher.
+BUILTIN_FETCH_INSTANCE = ToolInstance(
+    name=BUILTIN_FETCH, kind="fetch", provider=BUILTIN_FETCH_PROVIDER, library_backed=True
+)
+
+
 @dataclass(frozen=True)
 class SynthesizedSearchInstance:
     """The in-loop search backend the legacy settings describe.
@@ -349,8 +362,9 @@ class ToolSettings(BaseModel):
             "web_search_default_tool). Each entry may declare a 'provider' (defaults to the name; "
             "GET /api/v1/search-tools/providers lists them), an 'api_key' where the provider needs "
             "one, an 'api_base' (a searxng entry without one inherits web_search_url), a 'timeout' "
-            "in seconds, an 'options' mapping of provider-native defaults, and a 'fetch_tool' naming "
-            "the fetch instance that enriches its results."
+            "in seconds, an 'options' mapping of provider-native defaults, a 'fetch_tool' naming "
+            "the fetch instance that enriches its results, and a 'price_per_call' in USD, the rate a "
+            "search with no reported cost is billed at."
         ),
     )
     fetch_tools: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
@@ -358,9 +372,9 @@ class ToolSettings(BaseModel):
         description=(
             "Named fetch instances, for the otari_web_fetch tool and for enriching search results. "
             "Each entry may declare a 'provider' (defaults to the name), an 'api_key' where the "
-            "provider needs one, an 'api_base', a 'timeout' in seconds and an 'options' mapping. "
-            "'builtin_fetch', the built-in fetcher, always exists and cannot be declared. A name is "
-            "unique across search_tools and fetch_tools."
+            "provider needs one, an 'api_base', a 'timeout' in seconds, an 'options' mapping and a "
+            "'price_per_call' in USD. 'builtin_fetch', the built-in fetcher, always exists and cannot be "
+            "declared. A name is unique across search_tools and fetch_tools."
         ),
     )
     web_fetch_enabled: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
@@ -472,8 +486,7 @@ class ToolSettings(BaseModel):
             "applies, and the one an unnamed POST /api/v1/search call uses. One whose provider "
             "any-search serves, or 'none' to turn in-loop search off. When unset: the instance the "
             "legacy web_search_provider or web_search_url settings describe, else the only search "
-            "instance, if there is exactly one and any-search serves its provider. Not in effect yet for "
-            "the in-loop tool: see docs/configuration.md."
+            "instance, if there is exactly one and any-search serves its provider."
         ),
     )
     web_fetch_default_tool: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -481,7 +494,7 @@ class ToolSettings(BaseModel):
         description=(
             "The fetch instance for the otari_web_fetch tool and for enriching search results, "
             "unless a search instance names its own fetch_tool. When unset: builtin_fetch, the "
-            "built-in fetcher. Not in effect yet: see docs/configuration.md."
+            "built-in fetcher."
         ),
     )
     web_search_max_calls: Annotated[int | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -489,8 +502,8 @@ class ToolSettings(BaseModel):
         ge=1,
         description=(
             "How many search and fetch tool calls one request may make, together. A call past it "
-            "gets a tool error the model can recover from. When unset: 10. Not in effect yet: see "
-            "docs/configuration.md."
+            "gets a tool error the model can recover from. When unset: 10. Requests the old search "
+            "backend serves keep a fixed limit of 10: see docs/configuration.md."
         ),
     )
 
@@ -511,18 +524,15 @@ class ToolSettings(BaseModel):
         return bool(self.web_search_provider) and bool(self.web_search_provider_api_key)
 
     def web_search_configured(self) -> bool:
-        """Whether this deployment can run ``otari_web_search`` at all.
+        """Whether this deployment can run ``otari_web_search`` at all: whether the in-loop default yields a search.
 
         The one question the request path, the per-workspace page and the tool
         catalog all ask, so they cannot disagree about whether a workspace's
-        stored configuration governs anything.
-
-        ``web_search_url`` is read through ``otari_env`` as well as off the
-        field, matching every call site this replaces: the field is env-bridged,
-        so the two agree, and dropping the read here would quietly narrow what
-        counts as configured.
+        stored configuration governs anything. A deployment whose only search
+        configuration is one instance any-search serves answers yes, and
+        ``web_search_default_tool: none`` answers no, whatever else is set.
         """
-        return bool(self.web_search_url or otari_env("WEB_SEARCH_URL")) or self.web_search_provider_configured()
+        return in_loop_default(self) is not None
 
     def search_tool_providers(self) -> set[str]:
         """The distinct providers backing the configured search tools.
@@ -532,6 +542,23 @@ class ToolSettings(BaseModel):
         writer has to accept them alongside real provider instances.
         """
         return {str(entry.get("provider") or name) for name, entry in self.search_tools.items()}
+
+    def legacy_search_tool_keys(self) -> set[str]:
+        """The ``<provider>:<tool>`` keys the search tools were priced and allow-listed under.
+
+        Read only to honor a price row or allow-list entry written before tools
+        had a namespace of their own, and matched whole, never by prefix: a
+        search provider can share its name with a model provider, as DeepSeek
+        does, whose models' keys then carry the same prefix.
+        """
+        return {f"{entry.get('provider') or name}:{name}" for name, entry in self.search_tools.items()}
+
+    def legacy_fetch_tool_keys(self) -> set[str]:
+        """The ``<provider>:<instance>`` keys the fetch instances were priced under, ``builtin:builtin_fetch`` included.
+
+        Matched whole, for the reason :meth:`legacy_search_tool_keys` gives.
+        """
+        return {f"{instance.provider}:{name}" for name, instance in effective_fetch_instances(self).items()}
 
     def search_tools_without_backend_url(self) -> list[str]:
         """Search tools whose provider needs an ``api_base`` and has none to inherit.
@@ -702,11 +729,7 @@ def effective_fetch_instances(settings: ToolSettings) -> dict[str, ToolInstance]
     So is one that breaks the name rules, which only a stored row can, since a
     configured one stops startup.
     """
-    instances = {
-        BUILTIN_FETCH: ToolInstance(
-            name=BUILTIN_FETCH, kind="fetch", provider=BUILTIN_FETCH_PROVIDER, library_backed=True
-        ),
-    }
+    instances = {BUILTIN_FETCH: BUILTIN_FETCH_INSTANCE}
     for name, entry in settings.fetch_tools.items():
         if isinstance(entry, dict) and name not in settings.search_tools and not instance_name_problems(name):
             instances[name] = _instance("fetch", name, entry, library_backed=True)

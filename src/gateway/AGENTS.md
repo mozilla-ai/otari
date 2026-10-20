@@ -209,10 +209,12 @@ once, in the request preamble, and reused at admission; the same decision says
 where a referenced upload goes, staged for the gateway's sandbox or copied, for
 each candidate as it is dispatched, into the provider account whose container
 will read it (`FileService.provider_file_ids`). The tool loop is in
-`services/mcp_loop.py`, sandbox and search backends under `services/`, and
-outbound URL checks in `services/url_safety.py`. A request that declares several
+`services/mcp_loop.py`, the sandbox and the older search backend under `services/`,
+the web search and fetch backends on any-search and any-fetch under `services/tools/`,
+and outbound URL checks in `services/url_safety.py`. A request that declares several
 tools gets one loop over all of them: `_open_tool_backends` in `_pipeline.py`
-opens each declared backend into a `CombinedToolBackend` (`services/tools/_combined_backend.py`).
+opens each declared backend into a `CombinedToolBackend` (`services/tools/_combined_backend.py`),
+web search and web fetch as two of them when a search instance serves the request.
 
 Deployment settings establish available backends. Workspace code-execution and
 web-search policy can disable or narrow those settings but cannot widen them.
@@ -234,10 +236,13 @@ for example, enforces the workspace search disable switch.
 
 ## Provider and search credential stores
 
-`provider_store_service.py` and `search_tool_store_service.py` overlay
-encrypted stored rows on a preserved config baseline and refresh them across
-workers. Stored values win over config values of the same name; config entries
-remain read-only through the management API.
+`search_tool_store_service.py` overlays encrypted stored rows on a preserved
+config baseline and refreshes them across workers. Stored values win over config
+values of the same name; config entries remain read-only through the management
+API. A provider credential the deployment stores is a hosted provider (below);
+the `provider_credentials` rows the Deployment providers page used to store are
+moved onto hosted providers at startup (`_move_deployment_providers` in
+`main.py`), and nothing else reads them.
 
 `secret_box.py` owns encryption through `OTARI_SECRET_KEY`. Public responses
 return metadata such as `last4`, never plaintext credentials.

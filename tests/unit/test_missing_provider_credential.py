@@ -7,9 +7,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 from any_llm import LLMProvider
+from any_llm.exceptions import MissingApiKeyError
 
+from gateway.api.routes._platform import get_shared_rejection
 from gateway.core.config import GatewayConfig
-from gateway.core.error_codes import PRICING_REQUIRED, PROVIDER_NOT_CONFIGURED
+from gateway.core.error_codes import ERROR_CODE_HEADER, PRICING_REQUIRED, PROVIDER_NOT_CONFIGURED
+from gateway.ports.model_provider_port import NO_ORGANIZATION
 from gateway.services.provider_kwargs import ResolvedProvider
 from gateway.services.providers import missing_provider_credential, unpriced_model_refusal
 
@@ -87,7 +90,7 @@ async def test_the_refusal_names_how_to_declare_the_provider() -> None:
     assert missing is not None
     assert "providers:" in missing.detail
     assert "${COHERE_API_KEY}" in missing.detail
-    assert "Providers page" in missing.detail
+    assert "Hosted providers page" in missing.detail
     assert "organization provider key" in missing.detail
 
 
@@ -99,10 +102,11 @@ async def test_a_provider_the_hosted_port_serves_is_not_missing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_hosted_port_is_not_asked_without_an_organization() -> None:
+async def test_without_an_organization_the_hosted_port_is_asked_as_one_no_restriction_names() -> None:
+    """A request with no organization is served on what is restricted to none, so that is what it is asked."""
     port = _hosted("cohere")
-    assert await missing_provider_credential(_CONFIG, _cohere({}), hosted=port, organization_id=None) is not None
-    port.get_hosted_models.assert_not_awaited()
+    assert await missing_provider_credential(_CONFIG, _cohere({}), hosted=port, organization_id=None) is None
+    port.get_hosted_models.assert_awaited_once_with(organization_id=NO_ORGANIZATION)
 
 
 @pytest.mark.asyncio
@@ -141,3 +145,10 @@ async def test_a_plan_with_several_candidates_keeps_the_pricing_refusal() -> Non
 async def test_an_unresolved_selector_keeps_the_pricing_refusal() -> None:
     refusal = await unpriced_model_refusal(_CONFIG, "nonsense", None, plan=None, hosted=None, organization_id=_ORG)
     assert refusal.code == PRICING_REQUIRED
+
+
+def test_candidates_that_all_lacked_a_credential_are_answered_as_unconfigured() -> None:
+    plain = get_shared_rejection([MissingApiKeyError("openai", "OPENAI_API_KEY")] * 2)
+    assert plain is not None
+    assert plain.status_code == 424
+    assert (plain.headers or {})[ERROR_CODE_HEADER] == PROVIDER_NOT_CONFIGURED

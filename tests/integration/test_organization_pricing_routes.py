@@ -10,6 +10,7 @@ request actually bills at the override rate.
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -29,6 +30,7 @@ from gateway.exceptions.pricing_exceptions import (
     OrganizationPricingManagedModelError,
     OrganizationPricingNotFoundError,
     OrganizationPricingOverlapError,
+    OrganizationPricingToolRateError,
 )
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing, OrganizationModelPricing
@@ -47,7 +49,8 @@ from gateway.services.organization_pricing_service import (
     OrganizationPricingService,
     PricingOverrideInput,
 )
-from gateway.services.pricing_service import find_model_pricing
+from gateway.services.pricing import ToolRate
+from gateway.services.pricing_service import find_model_pricing, resolve_tool_rate
 from gateway.services.provider_kwargs import credential_ladder_exhausted, get_provider_kwargs
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy.org_provider_key_service import refresh_org_provider_cache, reset_org_provider_cache
@@ -56,6 +59,7 @@ from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     reset_key_workspace_cache,
 )
+from gateway.types.tool_charges import instance_rate_key
 
 from .conftest import build_test_client, shared_test_config
 
@@ -648,6 +652,127 @@ async def test_a_deployment_operator_may_price_a_model_the_deployment_supplies(a
     created = await service.create_for_caller(identity, _MANAGED_KEY, _rates())
 
     assert created.model_key == _MANAGED_KEY
+
+
+@pytest.mark.asyncio
+async def test_only_the_operator_sets_a_search_tools_rate(async_db: AsyncSession) -> None:
+    """A search instance runs on the deployment's own key, so its rate is the operator's.
+
+    Stored under its kind and name, beside a model override spelled the same.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-tool-rate", created_by_user_id=None
+    )
+    admin = await _identity(async_db, organization, role="admin", name="admin person")
+    operator = await _operator(async_db, organization)
+    service = OrganizationPricingService(async_db, _MANAGED_CONFIG, model_provider=None)
+
+    with pytest.raises(OrganizationPricingToolRateError, match="only the deployment operator sets its rate"):
+        await service.create_for_caller(admin, "exa", _rates(input_price_per_million=0.0), kind="search")
+    created = await service.create_for_caller(operator, "exa", _rates(unit="requests"), kind="search")
+    model = await service.create_for_caller(operator, "exa:exa", _rates())
+
+    assert (created.kind, created.model_key) == ("search", "exa")
+    assert (model.kind, model.model_key) == ("model", "exa:exa")
+
+    # A search rate is per call, on a create and on a replacement alike.
+    with pytest.raises(TenancyValidationError, match="unit is 'requests'"):
+        await service.create_for_caller(operator, "exa-news", _rates(unit="tokens"), kind="search")
+    with pytest.raises(TenancyValidationError, match="unit is 'requests'"):
+        await service.replace_for_caller(operator, created.id, _rates(unit="tokens"))
+
+
+@pytest.mark.asyncio
+async def test_an_operator_override_on_a_tools_old_key_outranks_a_new_deployment_row(async_db: AsyncSession) -> None:
+    """The old ``<provider>:<instance>`` key is a spelling of the instance's own, so every override comes first.
+
+    An organization's agreed rate under the old key must survive the deployment
+    pricing the instance under its own kind and name, as ``price_per_call`` does.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-old-tool-key", created_by_user_id=None
+    )
+    operator = await _operator(async_db, organization)
+    service = OrganizationPricingService(async_db, _MANAGED_CONFIG, model_provider=None)
+    earlier = datetime.now(UTC) - timedelta(days=1)
+    async_db.add_all(
+        [
+            ModelPricing(
+                model_key="mojeek:mojeek",
+                effective_at=earlier,
+                input_price_per_million=6_000.0,
+                output_price_per_million=0.0,
+                unit="requests",
+            ),
+            ModelPricing(
+                kind="search",
+                model_key="mojeek",
+                effective_at=earlier,
+                input_price_per_million=4_000.0,
+                output_price_per_million=0.0,
+                unit="requests",
+            ),
+        ]
+    )
+    await service.create_for_caller(
+        operator,
+        "mojeek:mojeek",
+        _rates(input_price_per_million=3_000.0, output_price_per_million=0.0, effective_from=earlier),
+    )
+    await async_db.flush()
+    key = instance_rate_key("search", "mojeek", "mojeek")
+
+    agreed = await resolve_tool_rate(async_db, (key,), label="mojeek:mojeek", organization_id=organization.id)
+    listed = await resolve_tool_rate(async_db, (key,), label="mojeek:mojeek")
+
+    assert agreed == ToolRate(key, Decimal("0.003"), "organization")
+    assert listed == ToolRate(key, Decimal("0.004"), "deployment")
+
+
+def test_a_tool_kind_override_is_keyed_by_a_bare_instance_name(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    refused = client.post(_ENDPOINT, json=_body(kind="search", model_key="exa:exa"), headers=master_key_header)
+    assert refused.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, refused.text
+
+    created = client.post(
+        _ENDPOINT, json=_body(kind="search", model_key="exa", unit="requests"), headers=master_key_header
+    )
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    assert created.json()["kind"] == "search"
+    listed = client.get(_ENDPOINT, params={"kind": "search"}, headers=master_key_header).json()
+    assert [row["model_key"] for row in listed["data"]] == ["exa"]
+
+
+def test_a_tool_kind_override_is_per_call_and_named_as_its_instance(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Its unit defaults to requests and may be nothing else; the name follows the instance name rule."""
+    defaulted = client.post(_ENDPOINT, json=_body(kind="fetch", model_key="team fetch"), headers=master_key_header)
+    assert defaulted.status_code == status.HTTP_201_CREATED, defaulted.text
+    assert (defaulted.json()["model_key"], defaulted.json()["unit"]) == ("team fetch", "requests")
+
+    refused = client.post(
+        _ENDPOINT, json=_body(kind="search", model_key="exa", unit="tokens"), headers=master_key_header
+    )
+    assert refused.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, refused.text
+
+
+def test_a_lookup_with_no_kind_finds_a_tool_override_by_its_bare_name(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The key is normalized as a model's only when it has a separator, which a tool's name never does."""
+    for name in ("exa", "team fetch", "deepseek"):
+        kind = "fetch" if " " in name else "search"
+        created = client.post(_ENDPOINT, json=_body(kind=kind, model_key=name), headers=master_key_header)
+        assert created.status_code == status.HTTP_201_CREATED, created.text
+
+        listed = client.get(_ENDPOINT, params={"model_key": name}, headers=master_key_header)
+        assert listed.status_code == status.HTTP_200_OK, listed.text
+        assert [(row["kind"], row["model_key"]) for row in listed.json()["data"]] == [(kind, name)]
 
 
 @pytest.mark.asyncio

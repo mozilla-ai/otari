@@ -14,7 +14,7 @@ from typing import Any, Never, cast
 from sqlalchemy import ColumnElement, CursorResult, and_, delete, func, select
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.pricing import ModelPricing
+from gateway.models.pricing import MODEL_KIND, ModelPricing
 from gateway.repositories.base_repository import BaseRepository
 
 # A key list long enough to exceed SQLite's default limit on bind parameters in
@@ -26,7 +26,8 @@ class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
     """Repository for `model_pricing` rows, the deployment price list.
 
     A version is written by the service, which owns the inherit-forward rule a
-    new version follows.
+    new version follows. Every read and delete here is of model-kind rows: a
+    search or fetch tool's price is not a model on the list.
     """
 
     def __init__(self, uow: UnitOfWork):
@@ -39,7 +40,9 @@ class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
         for start in range(0, len(keys), _KEY_CHUNK):
             chunk = keys[start : start + _KEY_CHUNK]
             result = await self.db.execute(
-                select(ModelPricing.model_key).where(ModelPricing.model_key.in_(chunk)).distinct()
+                select(ModelPricing.model_key)
+                .where(ModelPricing.kind == MODEL_KIND, ModelPricing.model_key.in_(chunk))
+                .distinct()
             )
             priced |= set(result.scalars().all())
         return priced
@@ -57,7 +60,7 @@ class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
         latest: dict[str, ModelPricing] = {}
         for start in range(0, len(keys), _KEY_CHUNK):
             chunk = keys[start : start + _KEY_CHUNK]
-            conditions: list[ColumnElement[bool]] = [ModelPricing.model_key.in_(chunk)]
+            conditions: list[ColumnElement[bool]] = [ModelPricing.kind == MODEL_KIND, ModelPricing.model_key.in_(chunk)]
             if as_of is not None:
                 conditions.append(ModelPricing.effective_at <= as_of)
             newest = (
@@ -73,6 +76,7 @@ class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
                 select(ModelPricing).join(
                     newest,
                     and_(
+                        ModelPricing.kind == MODEL_KIND,
                         ModelPricing.model_key == newest.c.model_key,
                         ModelPricing.effective_at == newest.c.effective_at,
                     ),
@@ -123,6 +127,7 @@ class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
         """
         result = await self.db.execute(
             select(ModelPricing.model_key, func.count())
+            .where(ModelPricing.kind == MODEL_KIND)
             .group_by(ModelPricing.model_key)
             .order_by(ModelPricing.model_key)
         )
@@ -134,7 +139,10 @@ class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
         for start in range(0, len(model_keys), _KEY_CHUNK):
             chunk = list(model_keys[start : start + _KEY_CHUNK])
             result = cast(
-                CursorResult[Any], await self.db.execute(delete(ModelPricing).where(ModelPricing.model_key.in_(chunk)))
+                CursorResult[Any],
+                await self.db.execute(
+                    delete(ModelPricing).where(ModelPricing.kind == MODEL_KIND, ModelPricing.model_key.in_(chunk))
+                ),
             )
             deleted += result.rowcount
         await self.db.flush()
