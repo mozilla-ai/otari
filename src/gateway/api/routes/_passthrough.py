@@ -1190,10 +1190,13 @@ async def run_decision(
         await log_rejection(str(exc), row_model=selector, row_provider=None, status_code=400)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     provider_name, model = quote.provider, quote.model
+    # From here a refusal names what was quoted, which a bound recommender may
+    # have chosen apart from ``selector``.
+    quoted = f"{provider_name}:{model}"
 
     key_allowlist = await resolve_request_allowlist(db, api_key)
-    if key_allowlist is not None and not is_model_allowed(key_allowlist, f"{provider_name}:{model}"):
-        not_allowed_detail = model_not_allowed_detail(selector)
+    if key_allowlist is not None and not is_model_allowed(key_allowlist, quoted):
+        not_allowed_detail = model_not_allowed_detail(quoted)
         await log_rejection(not_allowed_detail, row_model=model, row_provider=provider_name, status_code=403)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
 
@@ -1247,7 +1250,7 @@ async def run_decision(
         and pricing_required_but_missing(pricing, require_pricing=config.require_pricing)
     ):
         await refund_reservation(db, reservation)
-        no_pricing_detail = no_pricing_error_detail(selector)
+        no_pricing_detail = no_pricing_error_detail(quoted)
         await log_rejection(no_pricing_detail, row_model=model, row_provider=provider_name, status_code=402)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -1430,7 +1433,7 @@ class DecisionScaffold:
         default_output_tokens: int,
         call: DecisionCall[ResultT],
     ) -> ResultT:
-        """Run the scaffold around ``call``, with ``selector`` as the name a refusal reports."""
+        """Run the scaffold around ``call``, with ``selector`` as the name a refusal before its quote reports."""
         return await run_decision(
             raw_request=raw_request,
             response=response,
