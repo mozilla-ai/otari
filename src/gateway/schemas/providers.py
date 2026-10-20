@@ -568,8 +568,9 @@ class DeploymentProviderMigrationRowPublic(SQLModel):
     ``migrate`` in a preview and ``migrated`` once applied; ``conflict``,
     ``unreadable``, ``invalid`` and ``failed`` leave the row where it is, with
     ``detail`` saying why. ``source_removed`` says whether the deployment
-    provider was removed: it is kept when it changed while the move ran.
-    ``notes`` are what an operator should check afterwards.
+    provider was removed: it is kept while the hosted provider offers no model,
+    and when it changed while the move ran. ``notes`` are what an operator
+    should check afterwards.
     """
 
     instance: str

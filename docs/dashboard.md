@@ -146,8 +146,9 @@ gateway process rather than to any organization on it:
   a provider's row asks the same of what it stores. Serve models not on its
   list, in both dialogs, makes a provider serve any model a request names, as
   a `config.yml` provider does, priced or not, while a model switched off on
-  its list is still refused; such a provider carries an Any model badge, and
-  every provider moved from the Deployment providers page arrives with it on.
+  its list is still refused. It is off by default; a provider moved from the
+  Deployment providers page starts with it off and every model it lists
+  switched on, priced or not.
   A provider's name opens Models filtered to it, and above the table a summary
   counts the providers reachable, with Re-check all to ask them again. With no
   provider yet, the page walks through adding the first one, and offers to

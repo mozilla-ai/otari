@@ -174,13 +174,17 @@ class HostedProviderService:
                 data=[self._public(source) for source in sources[skip : skip + limit]], count=len(sources)
             )
 
-    async def create_provider(self, request: HostedProviderCreateRequest) -> HostedProviderPublic:
+    async def create_provider(
+        self, request: HostedProviderCreateRequest, *, switch_on_listed: bool = False
+    ) -> HostedProviderPublic:
         """Configure a provider, offering everything it lists on the new key.
 
         A name the configuration already defines may be created too, and the
         row then wins over the entry. A provider that will not list yields a
         provider with no models rather than a failed create: the credential may
-        still be right for dispatch.
+        still be right for dispatch. ``switch_on_listed`` switches on every
+        model it lists whether or not something prices it, for a provider that
+        already served them elsewhere.
 
         Raises:
             HostedProviderUnknownProviderError: ``provider`` names no any-llm implementation.
@@ -227,7 +231,9 @@ class HostedProviderService:
             except HostedProviderConflict as conflict:
                 # The pre-check races the insert; the unique constraint decides.
                 raise HostedProviderAlreadyExistsError(conflict.name) from conflict
-            await self.offers.offer(name, discovered, defaults, serves_unlisted=request.serves_unlisted_models)
+            await self.offers.offer(
+                name, discovered, defaults, serves_unlisted=request.serves_unlisted_models or switch_on_listed
+            )
             public = HostedProviderPublic.from_row(
                 row,
                 client_args=request.client_args,
@@ -564,11 +570,13 @@ class HostedProviderService:
     ) -> DeploymentProviderMigrationPublic:
         """Move the deployment providers stored through the dashboard onto hosted providers, or preview it.
 
-        Each becomes a hosted provider of the same name that serves unlisted
-        models, its models discovered as on any create, and the deployment
-        provider is removed. One that cannot move (a name a hosted provider
-        already holds, a key no configured key reads) is reported and left
-        where it is; so is one edited while this ran.
+        Each becomes a hosted provider of the same name, every model it lists
+        offered and switched on, priced or not, as the deployment provider
+        served them. The deployment provider is removed once the hosted one
+        offers a model, so a provider that will not list keeps serving as it
+        did until the operator adds its models. One that cannot move (a name a
+        hosted provider already holds, a key no configured key reads) is
+        reported and left where it is; so is one edited while this ran.
 
         ``reviewed`` binds an apply to the preview the caller reviewed, by
         instance and the version it was shown at: a row it does not name, or
@@ -605,7 +613,7 @@ class HostedProviderService:
             return False
         row = plan.row
         try:
-            await self.create_provider(plan.create)
+            await self.create_provider(plan.create, switch_on_listed=True)
         except TenancyError as exc:
             row.outcome = "failed"
             row.detail = str(exc)
@@ -613,6 +621,12 @@ class HostedProviderService:
         row.outcome = "migrated"
         async with self.uow:
             row.models = len(await self.models.names_for_provider(plan.name))
+            if row.models == 0:
+                row.notes.append(
+                    "The provider listed no models, so the deployment provider is kept. Add its models on the "
+                    "hosted provider, then remove the deployment provider."
+                )
+                return False
             source = await self.providers.get_deployment_provider(row.instance)
             if source is None or source.updated_at != plan.updated_at:
                 row.notes.append(

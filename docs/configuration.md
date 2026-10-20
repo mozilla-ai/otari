@@ -542,11 +542,14 @@ Providers stored this way are moving onto hosted providers.
 `GET /api/v1/hosted-providers/migration` previews the move and
 `POST /api/v1/hosted-providers/migration` applies it: each stored provider
 becomes a hosted provider of the same name, served by the implementation its
-`provider_type` names, so an `instance:model` selector keeps its name. The
-hosted provider serves models not on its roster, as the stored provider served
-any model a request named, so it keeps serving a model its upstream does not
-list or nothing prices, on every path: completions, routing-policy fallbacks,
-the pass-through endpoints and batches. The stored provider is then removed. A
+`provider_type` names, so an `instance:model` selector keeps its name. Every
+model the provider lists is offered and switched on, priced or not, as the
+stored provider served it, on every path: completions, routing-policy
+fallbacks, the pass-through endpoints and batches. A model it does not list is
+refused until it is added on the Hosted providers page, or until "Serve models
+not on its list" is turned on there. The stored provider is removed once the
+hosted one offers a model; one whose provider lists none is kept until its
+models are added. A
 name a hosted provider already holds, or a key no configured
 `OTARI_SECRET_KEY` reads, is reported and left in place. A hosted provider is
 asked after an organization's own key, where a stored provider was asked

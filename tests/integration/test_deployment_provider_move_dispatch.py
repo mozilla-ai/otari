@@ -69,7 +69,11 @@ def _environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
     async def _discover(impl_name: str, **_: object) -> ProviderDiscovery:
         return ProviderDiscovery(
-            provider=impl_name, models=[Model(id="llama-3", object="model", created=0, owned_by=impl_name)]
+            provider=impl_name,
+            models=[
+                Model(id=model, object="model", created=0, owned_by=impl_name)
+                for model in ("llama-3", "nomic-embed", "gpt-4o-mini")
+            ],
         )
 
     monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _discover)
@@ -131,19 +135,21 @@ def _sent_to(call: dict[str, Any]) -> tuple[str | None, str | None]:
     return call.get("api_key"), call.get("api_base")
 
 
-@pytest.mark.parametrize("model", ["my-vllm:llama-3", "my-vllm:a-model-it-never-listed"])
-def test_a_keyless_unpriced_backend_serves_every_model_it_served(
-    client: TestClient, master_key_header: dict[str, str], stored: Callable[..., None], model: str
+def test_a_keyless_unpriced_backend_serves_every_model_it_lists(
+    client: TestClient, master_key_header: dict[str, str], stored: Callable[..., None]
 ) -> None:
     stored("my-vllm", provider_type="openai", api_base=VLLM_BASE)
-    before, [sent_before] = _chat(client, master_key_header, model)
+    before, [sent_before] = _chat(client, master_key_header, "my-vllm:llama-3")
 
     _move(client, master_key_header)
-    after, [sent_after] = _chat(client, master_key_header, model)
+    after, [sent_after] = _chat(client, master_key_header, "my-vllm:llama-3")
+    unlisted, calls = _chat(client, master_key_header, "my-vllm:a-model-it-never-listed")
 
     assert (before, after) == (200, 200)
     assert _sent_to(sent_after) == _sent_to(sent_before)
     assert sent_after["api_base"] == VLLM_BASE
+    # Off by default: a model the provider does not list is refused until it is added.
+    assert (unlisted, calls) == (424, [])
 
 
 def test_a_renamed_provider_keeps_its_name_endpoint_and_key(
@@ -164,7 +170,8 @@ def test_a_model_switched_off_on_the_roster_is_refused(
 ) -> None:
     stored("my-vllm", provider_type="openai", api_base=VLLM_BASE)
     _move(client, master_key_header)
-    [listed] = client.get(f"{API_ROOT}/hosted-providers/my-vllm/models", headers=master_key_header).json()["data"]
+    roster = client.get(f"{API_ROOT}/hosted-providers/my-vllm/models", headers=master_key_header).json()["data"]
+    [listed] = [row for row in roster if row["model"] == "llama-3"]
     switched = client.patch(
         f"{API_ROOT}/hosted-providers/my-vllm/models/{listed['id']}", json={"enabled": False}, headers=master_key_header
     )
