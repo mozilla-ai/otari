@@ -98,6 +98,8 @@ def test_each_row_already_off_gets_the_reason_its_timestamps_support(before: tup
     hour = timedelta(hours=1)
     _row(engine, "on", enabled=True, priced_at=_OFFERED - hour)
     _row(engine, "never-priced")
+    # Switched off after the offer by an operator or the health checks, which nothing recorded.
+    _row(engine, "never-priced-and-switched-off", updated_at=_OFFERED + hour)
     # The case an earlier refresh left behind: priced after the offer, the switch never touched.
     _row(engine, "priced-by-a-later-refresh", priced_at=_OFFERED + hour)
     # Switched off by the old refresh when its rate went, then priced again.
@@ -110,6 +112,7 @@ def test_each_row_already_off_gets_the_reason_its_timestamps_support(before: tup
     assert _reasons(engine) == {
         "on": None,
         "never-priced": "unpriced",
+        "never-priced-and-switched-off": "operator",
         "priced-by-a-later-refresh": "unpriced",
         "off-then-priced-again": "unpriced",
         "offered-priced-then-switched-off": "operator",

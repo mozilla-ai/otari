@@ -13,11 +13,13 @@ operator, so it is backfilled as ``serves_unpriced``.
 Rows already off carry no record of why, so the backfill reads it from the
 timestamps. A model offered at a rate has that rate stored before its row, so a
 row whose first rate was stored after the row itself was offered unpriced and
-priced later, by a refresh or by hand, which until now left it off. Such a row,
-or one with no rate at all, is ``unpriced`` unless the row changed after its
-first rate arrived. Every other row off is ``operator``, the reading that never
-serves a model on its own, and the migration logs those rows so an operator can
-switch on any that were only waiting for a price.
+priced later, by a refresh or by hand, which until now left it off. Such a row
+is ``unpriced`` unless the row changed after its first rate arrived, and so is a
+row with no rate at all that has not changed since it was offered. Every other
+row off is ``operator``, the reading that never serves a model on its own: a
+row changed after the offer may have been switched off by an operator or by the
+health checks, which nothing recorded. The migration logs those rows so an
+operator can switch on any that were only waiting for a price.
 
 Revision ID: ae8d42792fd8
 Revises: c0e83c6fe801
@@ -76,7 +78,7 @@ def _utc_or_none(value: datetime | None) -> datetime | None:
 def disabled_reason(created_at: datetime, updated_at: datetime | None, first_priced_at: datetime | None) -> str:
     """Why a row already off is off, as far as its timestamps can tell."""
     if first_priced_at is None:
-        return _UNPRICED
+        return _UNPRICED if updated_at is None else _OPERATOR
     priced_later = first_priced_at > created_at
     untouched_since = updated_at is None or updated_at <= first_priced_at
     return _UNPRICED if priced_later and untouched_since else _OPERATOR
