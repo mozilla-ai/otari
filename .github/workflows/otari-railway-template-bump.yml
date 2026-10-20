@@ -125,7 +125,11 @@ jobs:
           # to otari-bot[bot] whichever account dispatched the run.
           sign-commits: true
           base: main
-          branch: chore/railway-template-${{ steps.ver.outputs.version }}
+          # One branch for every release, not one per version. Each run
+          # recomputes the bump from main, so a release that lands before the
+          # last bump merged has to update that PR; a rival PR merged second
+          # would move the pin backward.
+          branch: chore/railway-template-bump
           delete-branch: true
           add-paths: deploy/railway
           commit-message: "chore(railway): pin the template to otari ${{ steps.ver.outputs.version }}"
