@@ -36654,7 +36654,7 @@
             }
           },
           {
-            "description": "The start of a trace id, or of a session's name (the id its client chose).",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
@@ -36668,7 +36668,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The start of a trace id, or of a session's name (the id its client chose).",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -36884,7 +36884,7 @@
             }
           },
           {
-            "description": "The start of a trace id, or of a session's name (the id its client chose).",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
@@ -36898,7 +36898,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The start of a trace id, or of a session's name (the id its client chose).",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -37179,7 +37179,7 @@
             }
           },
           {
-            "description": "The start of a trace id, or of a session's name (the id its client chose).",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
@@ -37193,7 +37193,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The start of a trace id, or of a session's name (the id its client chose).",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -43758,7 +43758,7 @@
             }
           },
           {
-            "description": "The start of a trace id, or of a session's name (the id its client chose).",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
@@ -43772,7 +43772,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The start of a trace id, or of a session's name (the id its client chose).",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -43988,7 +43988,7 @@
             }
           },
           {
-            "description": "The start of a trace id, or of a session's name (the id its client chose).",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
@@ -44002,7 +44002,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The start of a trace id, or of a session's name (the id its client chose).",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }
@@ -44283,7 +44283,7 @@
             }
           },
           {
-            "description": "The start of a trace id, or of a session's name (the id its client chose).",
+            "description": "Part of a trace id, session name, harness or user id, in any case.",
             "in": "query",
             "name": "q",
             "required": false,
@@ -44297,7 +44297,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The start of a trace id, or of a session's name (the id its client chose).",
+              "description": "Part of a trace id, session name, harness or user id, in any case.",
               "title": "Q"
             }
           }

@@ -80,6 +80,7 @@ def _write(
     user_id: str = "alice",
     session_source: str = "harness",
     name: str | None = None,
+    harness: str = "claude-code",
 ) -> TraceWrite:
     return TraceWrite(
         workspace_id=workspace_id,
@@ -87,7 +88,7 @@ def _write(
         user_id=user_id,
         api_key_id=None,
         session_source=session_source,
-        harness="claude-code",
+        harness=harness,
         name=name,
         spans=spans,
     )
@@ -240,7 +241,7 @@ async def test_search_pages_newest_activity_first_and_filters(
     first_page = await store.search(scope, TraceFilter(), limit=2, offset=0)
     second_page = await store.search(scope, TraceFilter(), limit=2, offset=2)
     failing = await store.search(scope, TraceFilter(has_error=True), limit=10, offset=0)
-    by_prefix = await store.search(scope, TraceFilter(search="session-2"), limit=10, offset=0)
+    by_search = await store.search(scope, TraceFilter(search="session-2"), limit=10, offset=0)
     windowed = await store.count(scope, TraceFilter(start=_T0 + timedelta(minutes=1)))
 
     assert [item.trace_id for item in first_page.items] == ["session-2", "session-1"]
@@ -248,13 +249,35 @@ async def test_search_pages_newest_activity_first_and_filters(
     assert [item.trace_id for item in second_page.items] == ["session-0"]
     assert second_page.has_more is False
     assert [item.trace_id for item in failing.items] == ["session-1"]
-    assert [item.trace_id for item in by_prefix.items] == ["session-2"]
+    assert [item.trace_id for item in by_search.items] == ["session-2"]
     assert windowed == 2
 
 
-async def test_a_prefix_search_treats_wildcards_literally(
+async def test_a_search_finds_any_part_of_the_id_harness_or_user_in_any_case(
     store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
 ) -> None:
+    workspace, _ = tenants
+    await store.write(
+        (
+            _write(workspace, "s-1a2b3c", _span("req-1"), user_id="alice", harness="claude-code"),
+            _write(workspace, "s-4d5e6f", _span("req-2"), user_id="bob", harness="codex"),
+        )
+    )
+    scope = TraceScope.workspaces(frozenset({workspace}))
+
+    async def found(text: str) -> list[str]:
+        return sorted(
+            item.trace_id for item in (await store.search(scope, TraceFilter(search=text), limit=10, offset=0)).items
+        )
+
+    assert await found("1A2B") == ["s-1a2b3c"]
+    assert await found("CODEX") == ["s-4d5e6f"]
+    assert await found("lic") == ["s-1a2b3c"]
+    assert await found("s-") == ["s-1a2b3c", "s-4d5e6f"]
+    assert await found("gemini") == []
+
+
+async def test_a_search_treats_wildcards_literally(store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]) -> None:
     workspace, _ = tenants
     await store.write((_write(workspace, "session-1", _span("req-1")),))
 
@@ -262,7 +285,7 @@ async def test_a_prefix_search_treats_wildcards_literally(
     assert await store.count(TraceScope.deployment(), TraceFilter(search="session_")) == 0
 
 
-async def test_a_search_finds_a_session_by_the_start_of_its_name_inside_the_scope_only(
+async def test_a_search_finds_a_session_by_any_part_of_its_name_in_any_case_inside_the_scope_only(
     store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
 ) -> None:
     workspace, other = tenants
@@ -277,12 +300,14 @@ async def test_a_search_finds_a_session_by_the_start_of_its_name_inside_the_scop
 
     exact = await store.search(scope, TraceFilter(search="hackbot-1234"), limit=10, offset=0)
     prefix = await store.search(scope, TraceFilter(search="hackbot-12"), limit=10, offset=0)
+    middle = await store.search(scope, TraceFilter(search="BOT-12"), limit=10, offset=0)
 
     assert [(item.trace_id, item.name) for item in exact.items] == [("s-aaa", "hackbot-1234")]
     assert sorted(item.trace_id for item in prefix.items) == ["s-aaa", "s-bbb"]
+    assert sorted(item.trace_id for item in middle.items) == ["s-aaa", "s-bbb"]
     assert await store.count(scope, TraceFilter(search="hackbot_")) == 0
-    assert await store.count(scope, TraceFilter(search="HACKBOT-12")) == 0
-    assert await store.count(scope, TraceFilter(search="S-AAA")) == 0
+    assert await store.count(scope, TraceFilter(search="HACKBOT-1234")) == 1
+    assert await store.count(scope, TraceFilter(search="S-AAA")) == 1
 
 
 async def test_a_trace_with_more_spans_than_asked_for_says_it_was_cut(

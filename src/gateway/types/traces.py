@@ -304,7 +304,7 @@ class TraceFilter:
     harnesses: tuple[str, ...] = ()
     session_sources: tuple[str, ...] = ()
     has_error: bool | None = None
-    # Matches the start of a trace's id or of its name.
+    # Matches any part of a trace's id, name, harness or user id, in any case.
     search: str | None = None
 
 

@@ -58,3 +58,11 @@ export const CustomPlaceholder: Story = {
 }
 
 export const Disabled: Story = { args: { isDisabled: true, className: "w-72" } }
+
+/**
+ * `maxLength` stops typing and pasting at the length the query behind the field
+ * accepts, so a pasted id past it never reaches the API as a refused request.
+ */
+export const MaxLength: Story = {
+  args: { maxLength: 12, value: "hackbot-1234", className: "w-72" },
+}

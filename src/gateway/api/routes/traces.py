@@ -64,7 +64,7 @@ def _filters(
     ] = None,
     q: Annotated[
         str | None,
-        Query(max_length=128, description="The start of a trace id, or of a session's name (the id its client chose)."),
+        Query(max_length=128, description="Part of a trace id, session name, harness or user id, in any case."),
     ] = None,
 ) -> TraceFilter:
     return TraceFilter(
@@ -76,7 +76,7 @@ def _filters(
         harnesses=tuple(harness or ()),
         session_sources=tuple(session_source or ()),
         has_error=has_error,
-        search=q or None,
+        search=(q or "").strip() or None,
     )
 
 

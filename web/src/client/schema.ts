@@ -24926,7 +24926,7 @@ export interface operations {
                 session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
                 /** @description Only sessions with, or without, an unrecovered error. */
                 has_error?: boolean | null;
-                /** @description The start of a trace id, or of a session's name (the id its client chose). */
+                /** @description Part of a trace id, session name, harness or user id, in any case. */
                 q?: string | null;
             };
             header?: never;
@@ -24974,7 +24974,7 @@ export interface operations {
                 session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
                 /** @description Only sessions with, or without, an unrecovered error. */
                 has_error?: boolean | null;
-                /** @description The start of a trace id, or of a session's name (the id its client chose). */
+                /** @description Part of a trace id, session name, harness or user id, in any case. */
                 q?: string | null;
             };
             header?: never;
@@ -25054,7 +25054,7 @@ export interface operations {
                 session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
                 /** @description Only sessions with, or without, an unrecovered error. */
                 has_error?: boolean | null;
-                /** @description The start of a trace id, or of a session's name (the id its client chose). */
+                /** @description Part of a trace id, session name, harness or user id, in any case. */
                 q?: string | null;
             };
             header?: never;
@@ -28076,7 +28076,7 @@ export interface operations {
                 session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
                 /** @description Only sessions with, or without, an unrecovered error. */
                 has_error?: boolean | null;
-                /** @description The start of a trace id, or of a session's name (the id its client chose). */
+                /** @description Part of a trace id, session name, harness or user id, in any case. */
                 q?: string | null;
             };
             header?: never;
@@ -28124,7 +28124,7 @@ export interface operations {
                 session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
                 /** @description Only sessions with, or without, an unrecovered error. */
                 has_error?: boolean | null;
-                /** @description The start of a trace id, or of a session's name (the id its client chose). */
+                /** @description Part of a trace id, session name, harness or user id, in any case. */
                 q?: string | null;
             };
             header?: never;
@@ -28204,7 +28204,7 @@ export interface operations {
                 session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
                 /** @description Only sessions with, or without, an unrecovered error. */
                 has_error?: boolean | null;
-                /** @description The start of a trace id, or of a session's name (the id its client chose). */
+                /** @description Part of a trace id, session name, harness or user id, in any case. */
                 q?: string | null;
             };
             header?: never;

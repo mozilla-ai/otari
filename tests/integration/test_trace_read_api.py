@@ -247,6 +247,12 @@ def test_the_series_counts_sessions_by_whether_they_failed(client: TestClient, w
     assert series["points"] == [{"bucket": "2026-10-07T12:00:00Z", "succeeded": 1, "failed": 1}]
 
 
+def test_a_search_ignores_the_spaces_around_it(client: TestClient, world: dict[str, str]) -> None:
+    listed = _operator_get(client, world, "/traces", {"q": "  ONE "}).json()
+
+    assert [item["trace_id"] for item in listed["items"]] == ["s-one"]
+
+
 def test_the_header_master_key_reads_the_default_organization(
     client: TestClient, master_key_header: dict[str, str], world: dict[str, str]
 ) -> None:

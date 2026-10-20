@@ -7415,7 +7415,7 @@
                   "value": ""
                 },
                 {
-                  "description": "The start of a trace id, or of a session's name (the id its client chose).",
+                  "description": "Part of a trace id, session name, harness or user id, in any case.",
                   "disabled": true,
                   "key": "q",
                   "value": ""
@@ -7493,7 +7493,7 @@
                   "value": ""
                 },
                 {
-                  "description": "The start of a trace id, or of a session's name (the id its client chose).",
+                  "description": "Part of a trace id, session name, harness or user id, in any case.",
                   "disabled": true,
                   "key": "q",
                   "value": ""
@@ -7607,7 +7607,7 @@
                   "value": ""
                 },
                 {
-                  "description": "The start of a trace id, or of a session's name (the id its client chose).",
+                  "description": "Part of a trace id, session name, harness or user id, in any case.",
                   "disabled": true,
                   "key": "q",
                   "value": ""
@@ -10901,7 +10901,7 @@
                   "value": ""
                 },
                 {
-                  "description": "The start of a trace id, or of a session's name (the id its client chose).",
+                  "description": "Part of a trace id, session name, harness or user id, in any case.",
                   "disabled": true,
                   "key": "q",
                   "value": ""
@@ -10977,7 +10977,7 @@
                   "value": ""
                 },
                 {
-                  "description": "The start of a trace id, or of a session's name (the id its client chose).",
+                  "description": "Part of a trace id, session name, harness or user id, in any case.",
                   "disabled": true,
                   "key": "q",
                   "value": ""
@@ -11087,7 +11087,7 @@
                   "value": ""
                 },
                 {
-                  "description": "The start of a trace id, or of a session's name (the id its client chose).",
+                  "description": "Part of a trace id, session name, harness or user id, in any case.",
                   "disabled": true,
                   "key": "q",
                   "value": ""

@@ -19,6 +19,7 @@ export function SearchField({
   label,
   placeholder = "Search",
   isDisabled,
+  maxLength,
   className = "",
 }: {
   value: string
@@ -30,6 +31,7 @@ export function SearchField({
   label: string
   placeholder?: string
   isDisabled?: boolean
+  maxLength?: number
   className?: string
 }) {
   return (
@@ -38,6 +40,7 @@ export function SearchField({
       value={value}
       onChange={onChange}
       isDisabled={isDisabled}
+      maxLength={maxLength}
       className={className}
     >
       <HeroSearchField.Group>

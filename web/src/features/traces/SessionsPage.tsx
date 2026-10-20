@@ -14,8 +14,6 @@ import { useIsMobile } from "@/design-system/hooks/useIsMobile"
 import { Chip } from "@/design-system/indicators/Chip"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { FilterChips } from "@/design-system/navigation/FilterChips"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { ActivityTimeline } from "@/features/activity/ActivityTimeline"
 import {
   DEFAULT_TRACE_SORT,
@@ -35,6 +33,7 @@ import {
 } from "@/shared/helpers/timeRange"
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useDebounced } from "@/shared/hooks/useDebounced"
 
 import { formatDuration, formatTraceTimestamp } from "./format"
 import { toTrace } from "./fromApi"
@@ -56,7 +55,6 @@ const URL_DEFAULTS = {
   start_date: "",
   end_date: "",
   q: "",
-  level: "",
   page: "0",
   size: String(DEFAULT_PAGE_SIZE),
   peek: "",
@@ -82,10 +80,8 @@ const sortKeyOf = (column: string) =>
   (Object.keys(SORT_COLUMNS) as TraceSortKey[]).find(
     (key) => SORT_COLUMNS[key] === column,
   )
-const LEVEL_OPTIONS = [
-  { value: "", label: "All levels" },
-  { value: "failed", label: "Errors" },
-]
+// The API refuses a longer `q`; a pasted id past it would leave the list loading.
+const SEARCH_MAX_LENGTH = 128
 const MINUTE_MS = 60_000
 // Where "All" starts its chart when nothing has been recorded yet.
 const ALL_FALLBACK_MS = 30 * 24 * 3_600_000
@@ -206,7 +202,6 @@ export function SessionsPage() {
   const [now, setNow] = useState(() => Date.now())
 
   const query = url.get("q")
-  const level = url.get("level")
   const page = Math.max(0, url.getNumber("page"))
   // Snapped to an offered size, as Activity does, so a hand-edited URL cannot
   // reach the API as a limit it refuses.
@@ -234,11 +229,10 @@ export function SessionsPage() {
       ? null
       : Math.floor((now - extentSeconds * 1000) / MINUTE_MS) * MINUTE_MS
 
+  const search = useDebounced(query.trim().slice(0, SEARCH_MAX_LENGTH))
   const base = {
     workspaceId: workspace?.workspace_id ?? "",
-    q: query.trim(),
-    failedOnly: level === "failed",
-    harness: [],
+    q: search,
   }
   // The chart covers the whole extent; a range picked on it narrows the list.
   const seriesFilters: TraceFilters = {
@@ -389,27 +383,19 @@ export function SessionsPage() {
             ariaLabel="Session volume over the selected window"
             unitLabel="Sessions"
           />
-          <FilterChips
-            chips={[]}
-            start={
-              <SearchField
-                label="Search sessions"
-                placeholder="Search by session ID or name"
-                value={query}
-                onChange={(value) => url.patch({ q: value, page: 0 })}
-                className="w-72 max-w-full"
-              />
-            }
-            end={<RefreshButton onRefresh={refresh} />}
-          >
-            <FilterSelect
-              ariaLabel="Level"
-              label="Level"
-              value={level}
-              onChange={(value) => url.patch({ level: value, page: 0 })}
-              options={LEVEL_OPTIONS}
+          <div className="otari-toolbar flex flex-wrap items-center gap-2">
+            <SearchField
+              label="Search sessions"
+              placeholder="Search by ID, name, agent or user"
+              value={query}
+              onChange={(value) => url.patch({ q: value, page: 0 })}
+              maxLength={SEARCH_MAX_LENGTH}
+              className="w-72 max-w-full"
             />
-          </FilterChips>
+            <div className="ml-auto flex items-center gap-3">
+              <RefreshButton onRefresh={refresh} />
+            </div>
+          </div>
 
           <TableScrollFrame className="otari-sessions-table">
             <DataTable
@@ -420,7 +406,11 @@ export function SessionsPage() {
               sortDescriptor={sortDescriptor}
               onSortChange={onSortChange}
               isLoading={traces.isPending && !traces.data}
-              emptyContent="No sessions in this window. A request joins a session when its client names one; otherwise it is a session of its own."
+              emptyContent={
+                search
+                  ? `No sessions in this window match “${search}”.`
+                  : "No sessions in this window. A request joins a session when its client names one; otherwise it is a session of its own."
+              }
               mobileLayout="cards"
               onRowAction={openPeek}
               rowClassName={(session) =>

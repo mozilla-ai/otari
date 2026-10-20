@@ -32,7 +32,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import InstrumentedAttribute
 
-from gateway.core.sql import bucket_expr, canonical_bucket, dialect_name, utc_bound
+from gateway.core.sql import LIKE_ESCAPE, bucket_expr, canonical_bucket, contains_pattern, dialect_name, utc_bound
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import Trace
 from gateway.repositories.base_repository import BaseRepository
@@ -345,15 +345,15 @@ def _conditions(query: TraceFilter) -> list[ColumnElement[bool]]:
     elif query.has_error is False:
         conditions.append(Trace.error_count == 0)
     if query.search:
-        conditions.append(or_(_starts_with(Trace.trace_id, query.search), _starts_with(Trace.name, query.search)))
+        # The list names a session by its name or harness and a short id with the "s-" cut off,
+        # so a search finds any part of those, or of the user.
+        pattern = contains_pattern(query.search)
+        conditions.append(
+            or_(
+                *(
+                    func.lower(field).like(pattern, escape=LIKE_ESCAPE)
+                    for field in (Trace.trace_id, Trace.name, Trace.harness, Trace.user_id)
+                )
+            )
+        )
     return conditions
-
-
-def _starts_with(column: Any, prefix: str) -> ColumnElement[bool]:
-    """Whether the column starts with ``prefix``, case-sensitively on every dialect.
-
-    The ``LIKE`` is what an index serves. SQLite's ignores ASCII case, so the
-    comparison of the column's leading characters is what holds the case there.
-    """
-    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return and_(column.like(f"{escaped}%", escape="\\"), func.substr(column, 1, len(prefix)) == prefix)

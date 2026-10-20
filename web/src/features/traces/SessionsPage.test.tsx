@@ -7,7 +7,6 @@ import type { ScopedBudget } from "@/client"
 import { SessionsPage } from "@/features/traces/SessionsPage"
 import { jsonResponse, mockApi, renderPage } from "@/tests/activity"
 import { scopedBudget } from "@/tests/fixtures"
-import { pickOption } from "@/tests/select"
 import { traceDetail, traceSummary } from "@/tests/traceFixtures"
 
 afterEach(() => {
@@ -346,22 +345,31 @@ describe("SessionsPage", () => {
     )
   })
 
-  it("narrows the list to sessions with errors from the first page", async () => {
+  it("stops the search at the 128 characters the API accepts", async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions?page=2")
-    await vi.waitFor(() => expect(listReads(calls)[0]?.get("skip")).toBe("100"))
-    await pickOption(user, "Level", "Errors")
+    renderPage(<SessionsPage />, "/sessions")
+    const search = await screen.findByRole("searchbox", {
+      name: "Search sessions",
+    })
+    await user.click(search)
+    await user.paste("x".repeat(150))
 
+    expect(search).toHaveValue("x".repeat(128))
     await vi.waitFor(() =>
-      expect(
-        listReads(calls).some(
-          (params) =>
-            params.get("has_error") === "true" && params.get("skip") === "0",
-        ),
-      ).toBe(true),
+      expect(listReads(calls).at(-1)?.get("q")).toBe("x".repeat(128)),
     )
+  })
+
+  it("names the search when nothing matches it", async () => {
+    mockApi({ traces: [] })
+
+    renderPage(<SessionsPage />, "/sessions?q=codex")
+
+    expect(
+      await screen.findByText("No sessions in this window match “codex”."),
+    ).toBeInTheDocument()
   })
 
   it("reads the window a link names", async () => {
