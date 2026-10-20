@@ -126,6 +126,11 @@ from gateway.services.providers import (
     run_provider_endpoint_refresher,
 )
 from gateway.services.rate_limits import load_rate_limit_rules_at_startup, run_rate_limit_refresher
+from gateway.services.routing import (
+    load_agent_recommenders_at_startup,
+    reset_agent_recommenders,
+    run_agent_recommender_refresher,
+)
 from gateway.services.runtime_settings_service import apply_overrides_from_db
 from gateway.services.search_tool_store_service import (
     load_search_tools_at_startup,
@@ -378,6 +383,11 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     ),
     # No reset: the stored rules live on the config, which the startup load rebuilds.
     _LifespanWorker("rate limit rule", lambda config, _container: run_rate_limit_refresher(config)),
+    _LifespanWorker(
+        "subagent recommender",
+        lambda _config, _container: run_agent_recommender_refresher(),
+        reset_agent_recommenders,
+    ),
     _LifespanWorker("price snapshot", lambda _config, _container: run_price_snapshot_refresher()),
     # Started whatever ``pricing_refresh`` says, because that policy is
     # runtime-settable and each tick re-reads it.
@@ -869,6 +879,9 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             await load_guardrail_runner_at_startup()
             await load_provider_endpoints_at_startup()
             await load_hosted_names_at_startup(config)
+            # Before the first recommendation, which would otherwise answer with
+            # the configured model while the rows may have switched it off.
+            await load_agent_recommenders_at_startup()
             # On a Unit of Work of its own, after the session above has closed.
             await _report_hosted_providers_config(config)
             container: Container = app.state.container

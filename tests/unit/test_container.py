@@ -173,14 +173,17 @@ def test_file_storage_refuses_a_container_built_without_config() -> None:
         container.resolve(FileStoragePort, NO_SESSION)
 
 
-def test_the_recommender_asks_the_configured_decision_model_and_is_shared() -> None:
-    """The core answers from the deployment's own decision provider, with one adapter for every request."""
+def test_the_recommender_asks_the_deployments_decision_model_afresh_per_request() -> None:
+    """The core answers from the deployment's own decision model, with an adapter per request.
+
+    Fresh per resolve, because one keeps the recommender it quoted for the call that follows.
+    """
     container = build_container(config=GatewayConfig(), workspace_listener=None)
 
     recommender = container.resolve(AgentModelRecommenderPort, NO_SESSION)
 
     assert isinstance(recommender, DecisionProviderRecommender)
-    assert container.resolve(AgentModelRecommenderPort, NO_SESSION) is recommender
+    assert container.resolve(AgentModelRecommenderPort, NO_SESSION) is not recommender
 
 
 def test_the_recommender_refuses_a_container_built_without_config() -> None:
