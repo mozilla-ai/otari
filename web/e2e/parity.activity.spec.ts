@@ -143,28 +143,28 @@ test.describe("activity log", () => {
     // shareable and survives the back button.
     await gotoRoute(
       page,
-      `${SCOPED}&model=${PARITY.models.priced.model}&size=25`,
+      `${SCOPED}&model=${PARITY.models.priced.model}&size=15`,
     )
     await expect(
       filterChip(page, "Model", PARITY.models.priced.model),
     ).toBeVisible()
-    await expect(rows(page)).toHaveCount(25)
-    await expect(page.getByText(`1–25 of ${COUNTS.priced}`)).toBeVisible()
+    await expect(rows(page)).toHaveCount(15)
+    await expect(page.getByText(`1–15 of ${COUNTS.priced}`)).toBeVisible()
 
     await page.getByRole("button", { name: "Next page" }).click()
-    await expect(rows(page)).toHaveCount(COUNTS.priced - 25)
+    await expect(rows(page)).toHaveCount(COUNTS.priced - 15)
     await expect(
-      page.getByText(`26–${COUNTS.priced} of ${COUNTS.priced}`),
+      page.getByText(`16–${COUNTS.priced} of ${COUNTS.priced}`),
     ).toBeVisible()
 
     // A bookmarked deep page opens where it was left, rather than snapping back
     // to the first page as the window re-anchors on mount.
     await gotoRoute(
       page,
-      `${SCOPED}&model=${PARITY.models.priced.model}&size=25&page=1`,
+      `${SCOPED}&model=${PARITY.models.priced.model}&size=15&page=1`,
     )
     await expect(
-      page.getByText(`26–${COUNTS.priced} of ${COUNTS.priced}`),
+      page.getByText(`16–${COUNTS.priced} of ${COUNTS.priced}`),
     ).toBeVisible()
   })
 

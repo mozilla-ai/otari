@@ -27,7 +27,7 @@ import { SpendCeilingDialog } from "./SpendCeilingDialog"
 // leaving them out would let the page read as uncapped. The second is marked, so
 // a figure nobody here can change does not look editable.
 
-const DEFAULT_PAGE_SIZE = 25
+const DEFAULT_PAGE_SIZE = 30
 
 function spentLabel(ceiling: OrganizationSpendCeiling): string {
   const spent = formatUsd(ceiling.current_spend)

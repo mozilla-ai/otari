@@ -84,7 +84,7 @@ import {
 // gateway-run tool calls, which decides if the Tool filter is worth offering.
 const TOOL_BREAKDOWN: SummaryDimension[] = ["tool"]
 
-const DEFAULT_PAGE_SIZE = 50
+const DEFAULT_PAGE_SIZE = 45
 
 // The only breakdown this page reads: the in-window models behind the typeahead.
 // The typeahead reads `by_model`; the source picker's option list piggybacks on

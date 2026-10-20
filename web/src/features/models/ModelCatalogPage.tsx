@@ -68,7 +68,7 @@ import { useDebounced } from "@/shared/hooks/useDebounced"
 // session as the public catalog (`PublicCatalogPage`), where there is no
 // router to link through and no organization to ask about.
 
-const DEFAULT_PAGE_SIZE = 25
+const DEFAULT_PAGE_SIZE = 30
 
 function SearchInput({
   value,

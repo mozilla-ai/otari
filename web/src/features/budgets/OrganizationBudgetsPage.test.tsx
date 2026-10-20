@@ -428,7 +428,7 @@ describe("OrganizationBudgetsPage", () => {
     // worst-case aggregate, and a second reader wanting every row is what kept
     // it a walk; that reader moved to the summary endpoint in otari#1425.
     const requests = mockApi({
-      ceilings: Array.from({ length: 30 }, (_, index) =>
+      ceilings: Array.from({ length: 35 }, (_, index) =>
         spendCeiling({
           id: `cccccccc-1111-2222-3333-${String(index).padStart(12, "0")}`,
         }),
@@ -439,13 +439,13 @@ describe("OrganizationBudgetsPage", () => {
     const table = await screen.findByRole("grid", {
       name: "Organization spend ceilings",
     })
-    // A header row and a page of 25, not all 30.
+    // A header row and a page of 30, not all 35.
     await waitFor(() => {
-      expect(within(table).getAllByRole("row")).toHaveLength(26)
+      expect(within(table).getAllByRole("row")).toHaveLength(31)
     })
     expect(
       requests.some((request) =>
-        request.url.includes("/spend-ceilings?skip=0&limit=25"),
+        request.url.includes("/spend-ceilings?skip=0&limit=30"),
       ),
     ).toBe(true)
   })
@@ -453,7 +453,7 @@ describe("OrganizationBudgetsPage", () => {
   it("pages the ceilings without reading the rest", async () => {
     const user = userEvent.setup()
     const requests = mockApi({
-      ceilings: Array.from({ length: 30 }, (_, index) =>
+      ceilings: Array.from({ length: 35 }, (_, index) =>
         spendCeiling({
           id: `cccccccc-1111-2222-3333-${String(index).padStart(12, "0")}`,
         }),
@@ -463,13 +463,13 @@ describe("OrganizationBudgetsPage", () => {
 
     await screen.findByRole("grid", { name: "Organization spend ceilings" })
     await user.click(
-      screen.getByRole("button", { name: "Next page, spend ceilings" }),
+      await screen.findByRole("button", { name: "Next page, spend ceilings" }),
     )
 
     await waitFor(() => {
       expect(
         requests.some((request) =>
-          request.url.includes("/spend-ceilings?skip=25&limit=25"),
+          request.url.includes("/spend-ceilings?skip=30&limit=30"),
         ),
       ).toBe(true)
     })
@@ -489,7 +489,7 @@ describe("OrganizationBudgetsPage", () => {
     // back, and the two walk down a page per request until they meet zero.
     const user = userEvent.setup()
     const requests = mockApi({
-      ceilings: Array.from({ length: 30 }, (_, index) =>
+      ceilings: Array.from({ length: 35 }, (_, index) =>
         spendCeiling({
           id: `cccccccc-1111-2222-3333-${String(index).padStart(12, "0")}`,
         }),
@@ -499,11 +499,11 @@ describe("OrganizationBudgetsPage", () => {
 
     await screen.findByRole("grid", { name: "Organization spend ceilings" })
     await user.click(
-      screen.getByRole("button", { name: "Next page, spend ceilings" }),
+      await screen.findByRole("button", { name: "Next page, spend ceilings" }),
     )
     await waitFor(() => {
       expect(
-        requests.some((request) => request.url.includes("skip=25&limit=25")),
+        requests.some((request) => request.url.includes("skip=30&limit=30")),
       ).toBe(true)
     })
 

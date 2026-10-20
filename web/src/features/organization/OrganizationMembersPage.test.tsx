@@ -943,7 +943,7 @@ describe("OrganizationMembersPage", () => {
     // ceilings and spend, the table has nothing left to join against and can
     // ask for the window it shows.
     const requests = mockApi({
-      members: Array.from({ length: 30 }, (_, index) =>
+      members: Array.from({ length: 35 }, (_, index) =>
         organizationMember({
           organization_member_id: `member-${index}`,
           user_id: `user-${index}`,
@@ -954,13 +954,13 @@ describe("OrganizationMembersPage", () => {
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Member 00")
-    // The window's worth, not the roster: 24 is the last of a page of 25.
-    expect(screen.getByText("Member 24")).toBeInTheDocument()
-    expect(screen.queryByText("Member 25")).toBeNull()
+    // The window's worth, not the roster: 29 is the last of a page of 30.
+    expect(screen.getByText("Member 29")).toBeInTheDocument()
+    expect(screen.queryByText("Member 30")).toBeNull()
     await waitFor(() => {
       expect(
         requests.some((request) =>
-          request.url.includes("/organizations/me/members?skip=0&limit=25"),
+          request.url.includes("/organizations/me/members?skip=0&limit=30"),
         ),
       ).toBe(true)
     })
@@ -969,7 +969,7 @@ describe("OrganizationMembersPage", () => {
   it("pages the roster without reading the rest", async () => {
     const user = userEvent.setup()
     const requests = mockApi({
-      members: Array.from({ length: 30 }, (_, index) =>
+      members: Array.from({ length: 35 }, (_, index) =>
         organizationMember({
           organization_member_id: `member-${index}`,
           user_id: `user-${index}`,
@@ -985,11 +985,11 @@ describe("OrganizationMembersPage", () => {
     await waitFor(() => {
       expect(
         requests.some((request) =>
-          request.url.includes("/organizations/me/members?skip=25&limit=25"),
+          request.url.includes("/organizations/me/members?skip=30&limit=30"),
         ),
       ).toBe(true)
     })
-    expect(await screen.findByText("Member 25")).toBeInTheDocument()
+    expect(await screen.findByText("Member 30")).toBeInTheDocument()
   })
 
   it("reads the roster alone, and the rest only when the editor opens", async () => {

@@ -154,7 +154,7 @@ many rows this page actually rendered, which is what the range reads from, and
 non-counting endpoint says there is more.
 
 `TablePagination` carries the range, the page size and two bare arrows. Page sizes
-are `PAGE_SIZE_OPTIONS` (25, 50, 100); do not invent a fourth. There is no rule
+are `PAGE_SIZE_OPTIONS` (15, 30, 45, 60); do not invent a fifth. There is no rule
 under it, because the page ends there.
 
 Known cost, accepted: with the boxes gone, "which arrow can I press" rests on

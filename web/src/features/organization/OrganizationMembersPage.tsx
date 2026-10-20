@@ -109,7 +109,7 @@ import {
 // nothing. otari-ai#1727 decides how the two tables converge.
 
 /** One workspace a person is in, with the ceiling they hold there. */
-const DEFAULT_PAGE_SIZE = 25
+const DEFAULT_PAGE_SIZE = 30
 
 interface WorkspacePlacement {
   workspaceId: string

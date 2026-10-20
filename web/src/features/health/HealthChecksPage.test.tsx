@@ -189,7 +189,7 @@ describe("HealthChecksPage", () => {
   })
 
   it("pages the failing models", async () => {
-    const failing = Array.from({ length: 30 }, (_, i) => ({
+    const failing = Array.from({ length: 20 }, (_, i) => ({
       ...status().results[0],
       selector: `bedrock:model-${String(i).padStart(2, "0")}`,
     }))
@@ -197,14 +197,14 @@ describe("HealthChecksPage", () => {
     await renderPage()
 
     const models = await screen.findByRole("grid", { name: "Models" })
-    expect(within(models).getAllByRole("row").slice(1)).toHaveLength(25)
-    expect(within(models).queryByText("bedrock:model-25")).toBeNull()
+    expect(within(models).getAllByRole("row").slice(1)).toHaveLength(15)
+    expect(within(models).queryByText("bedrock:model-15")).toBeNull()
 
     await userEvent.click(screen.getByRole("button", { name: "Next page" }))
 
     const second = screen.getByRole("grid", { name: "Models" })
     expect(within(second).getAllByRole("row").slice(1)).toHaveLength(5)
-    expect(within(second).getByText("bedrock:model-29")).toBeInTheDocument()
+    expect(within(second).getByText("bedrock:model-19")).toBeInTheDocument()
   })
 
   it("keeps the pager away while every failing model fits one page", async () => {
