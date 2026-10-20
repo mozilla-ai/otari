@@ -25,9 +25,6 @@ on:
       - 'cli/**'
       - 'any-search/**'
       - 'any-fetch/**'
-      # The dashboard bundles this guide (web/src/features/docs/DocsPage.tsx), so a
-      # change to it changes the built app.
-      - 'docs/dashboard.md'
       # The suite boots the gateway through `uv run otari serve`, so its
       # dependency resolution is part of what has to still work.
       - 'pyproject.toml'
@@ -41,7 +38,6 @@ on:
       - 'cli/**'
       - 'any-search/**'
       - 'any-fetch/**'
-      - 'docs/dashboard.md'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-dashboard-parity.yml'

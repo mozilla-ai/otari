@@ -55,10 +55,10 @@ export function HostedModelForm({
   onClose: () => void
   onSaved: () => void
 }) {
-  const add = useAddHostedModel(provider.provider)
-  const reprice = useUpdateHostedModel(provider.provider)
+  const add = useAddHostedModel(provider.name)
+  const reprice = useUpdateHostedModel(provider.name)
   const available = useHostedAvailableModels(
-    provider.provider,
+    provider.name,
     isOpen && editing === undefined,
   )
   const [draft, setDraft] = useState<PriceDraft>(() =>
@@ -136,8 +136,8 @@ export function HostedModelForm({
       title={editing ? "Edit model price" : "Add model"}
       description={
         editing
-          ? `What this deployment charges for the model on ${provider.provider}. Requests are billed at this rate from the moment it is saved.`
-          : `What ${provider.provider} serves here, and at what price. Leave the rates blank to serve at the catalog's rates.`
+          ? `What this deployment charges for the model on ${provider.name}. Requests are billed at this rate from the moment it is saved.`
+          : `What ${provider.name} serves here, and at what price. Leave the rates blank to serve at the catalog's rates.`
       }
       submitLabel={editing ? "Save" : "Add model"}
       onSubmit={submit}

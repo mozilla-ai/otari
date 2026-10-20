@@ -93,7 +93,7 @@ def test_estimate_cost_reserves_cache_write_using_the_context_tier() -> None:
     assert estimate == _micro_dollars(Decimal(200_000) * Decimal("7.5"), Decimal(100) * Decimal("22.5"))
 
 
-def test_estimate_cost_prices_a_one_hour_cache_write_at_the_cache_write_rate() -> None:
+def test_estimate_cost_reserves_a_one_hour_cache_write_at_twice_the_input_rate() -> None:
     estimate = estimate_cost(
         _pricing(),
         prompt_chars=1_000 * 4,
@@ -102,7 +102,7 @@ def test_estimate_cost_prices_a_one_hour_cache_write_at_the_cache_write_rate() -
         cache_write_ttl="1h",
     )
 
-    assert estimate == _micro_dollars(Decimal(1_000) * Decimal("3.75"))
+    assert estimate == _micro_dollars(1_000 * 6)
 
 
 def test_estimate_cost_falls_back_to_input_when_cache_write_is_unpriced() -> None:

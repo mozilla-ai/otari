@@ -52,9 +52,8 @@ inference, files, batches, or other data-plane operations. Those paths return a
 descriptive `404`. Set `data_plane_url` so the error and dashboard snippets
 point clients to the correct gateway.
 
-The dashboard hides the Providers page, whose stored instances are deployment-wide
-rather than per tenant, leaving the organization-scoped provider keys that a
-standalone deployment also has. It keeps the Hosted providers page, where an
+The dashboard keeps the organization-scoped provider keys that a standalone
+deployment also has, and the Hosted providers page, where an
 operator configures the credentials the deployment pays for (see
 [Hosted providers and BYO credentials](#hosted-providers-and-byo-credentials)).
 It also hides the Playground, whose whole purpose is to dispatch a completion.
@@ -108,8 +107,16 @@ the organization's own provider key serves the request. Where that is missing
 too, one of the deployment's **hosted providers** does.
 
 A hosted provider is a credential the deployment's operator configures for the
-deployment to serve requests on: one per provider, with a roster of the models
-offered on it and the rate each is charged at on the deployment price list.
+deployment to serve requests on, under a name that defaults to its provider
+(a name of its own, such as `openai-eu`, lets two endpoints of one provider
+be served side by side), with a roster of the models offered on it and the rate
+each is charged at on the deployment price list. A hosted provider named after its
+provider is reached by a bare `provider:model` request once neither a
+`providers:` instance nor the organization's own key answers. One with a name
+of its own is reached only by that name (`openai-eu:gpt-4o`): an organization's
+key for the provider never serves it, because that key belongs to another
+endpoint. A request whose workspace belongs to no organization is served only
+on a hosted provider restricted to no organization.
 Only a model switched on in that roster is served on the hosted credential: a
 model switched off, or one the roster does not list, is refused with `424`. The
 deployment settles the upstream bill for a hosted model, which is why its rate
@@ -160,7 +167,7 @@ secrets never leave mozilla.ai's infrastructure.
 ## Deployment-paid credentials in standalone
 
 A deployment can serve a model on a credential it owns, once an organization's
-own key, a stored provider and `config.yml` have all missed: the core serves it
+own key and `config.yml` have both missed: the core serves it
 on one of the deployment's hosted providers, and a build may rebind
 `ModelProviderPort` through `OTARI_BOOTSTRAP` to decide differently. The deployment pays that
 upstream bill, so the request also goes through `BillingPort`. Before the
@@ -174,9 +181,13 @@ adapter does nothing, so with no overlay a hosted-provider request is served
 and recorded as deployment-paid on its usage row, and no organization is
 charged.
 
-Today this covers Chat Completions, Messages, Responses and the Playground for a
-plain model or a single-target alias or policy. A routing policy with fallback
-candidates and the pass-through endpoints never reach `ModelProviderPort`.
+This covers every path that calls a provider: Chat Completions, Messages,
+Responses and the Playground, each candidate of a routing policy with fallbacks,
+the pass-through endpoints (embeddings, images, audio, rerank, moderations) and
+batches. A routing policy asks for each candidate as it reaches it, so the one
+that serves is the one that settles, and one the organization cannot fund is
+skipped. A batch is admitted when it is created and charged when its results
+are accounted.
 
 ## Internal protocol
 

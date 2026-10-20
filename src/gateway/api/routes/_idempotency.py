@@ -33,6 +33,7 @@ from gateway.core.config import (
     REQUEST_ID_HEADER,
     ROUTER_HEADER,
     ROUTER_TASK_HEADER,
+    TAGS_HEADER,
     GatewayConfig,
 )
 from gateway.core.unit_of_work import UnitOfWork
@@ -75,6 +76,10 @@ _REQUEST_SHAPING_HEADERS = (
     CONVERSATION_HEADER,
     END_USER_BUDGET_HEADER,
 )
+# Shaping headers added after keys were first stored. Each counts only when
+# sent, so a retry without it still matches a claim fingerprinted before it
+# existed; it is named in its option so two of them cannot collide.
+_LATER_SHAPING_HEADERS = (TAGS_HEADER,)
 
 INVALID_IDEMPOTENCY_KEY_DETAIL = (
     f"{IDEMPOTENCY_KEY_HEADER} must be 1 to {IdempotentRequest.MAX_KEY_LENGTH} printable ASCII characters."
@@ -114,6 +119,15 @@ def _header_values(raw_request: Request, name: str) -> str | None:
     return ",".join(values) if values else None
 
 
+def _shaping_options(raw_request: Request) -> list[str | None]:
+    options = [_header_values(raw_request, name) for name in _REQUEST_SHAPING_HEADERS]
+    for name in _LATER_SHAPING_HEADERS:
+        value = _header_values(raw_request, name)
+        if value is not None:
+            options.append(f"{name}: {value}")
+    return options
+
+
 class IdempotencyGuard:
     """One request's hold on its ``Idempotency-Key``, released unless the request completes.
 
@@ -147,7 +161,7 @@ class IdempotencyGuard:
             self._key,
             endpoint=endpoint,
             body=await self._raw_request.body(),
-            options=[_header_values(self._raw_request, name) for name in _REQUEST_SHAPING_HEADERS],
+            options=_shaping_options(self._raw_request),
             user_id=user_id,
             api_key_id=api_key_id,
         )

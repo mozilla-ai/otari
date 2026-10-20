@@ -21,8 +21,10 @@ from gateway.services.provider_kwargs import split_selector
 # and the reason is the whole value of showing the group at all.
 KEEP_GATEWAY_TOOL = "prices a gateway-run tool, not a model"
 KEEP_SEARCH_TOOL = "prices a configured search tool, not a model"
+KEEP_FETCH_TOOL = "prices a configured fetch tool, not a model"
 KEEP_DEPLOYMENT_INSTANCE = "served by a provider instance configured on this deployment"
 KEEP_OWNED_ENDPOINT = "served by a provider endpoint a workspace or user owns"
+KEEP_UNLISTED = "served by a hosted provider that serves models not on its roster"
 KEEP_UNATTRIBUTABLE = "no provider prefix to attribute it to"
 
 # How many model names a sweep's response carries per group. The counts are
@@ -60,7 +62,9 @@ def _keep_reason(
     *,
     deployment_instances: frozenset[str],
     search_providers: frozenset[str],
+    fetch_providers: frozenset[str],
     owned_endpoints: frozenset[str],
+    unlisted_providers: frozenset[str],
 ) -> str | None:
     """What keeps an unoffered key on the catalog, or None when nothing does."""
     if prefix is None:
@@ -69,10 +73,14 @@ def _keep_reason(
         return KEEP_GATEWAY_TOOL
     if prefix in search_providers:
         return KEEP_SEARCH_TOOL
+    if prefix in fetch_providers:
+        return KEEP_FETCH_TOOL
     if prefix in deployment_instances:
         return KEEP_DEPLOYMENT_INSTANCE
     if prefix in owned_endpoints:
         return KEEP_OWNED_ENDPOINT
+    if prefix in unlisted_providers:
+        return KEEP_UNLISTED
     return None
 
 
@@ -82,7 +90,9 @@ def classify_priced_keys(
     offered: frozenset[str],
     deployment_instances: frozenset[str],
     search_providers: frozenset[str] = frozenset(),
+    fetch_providers: frozenset[str] = frozenset(),
     owned_endpoints: frozenset[str] = frozenset(),
+    unlisted_providers: frozenset[str] = frozenset(),
 ) -> list[CatalogVerdict]:
     """Decide, for each priced key, whether the hosted-providers surface is what lists it.
 
@@ -93,6 +103,8 @@ def classify_priced_keys(
     a workspace or user owns keeps its rates: such a request settles at the
     deployment price list when its organization holds no override, and an
     endpoint's name can never be a provider's, so nothing hosted serves under it.
+    A hosted provider in ``unlisted_providers`` serves models its roster does
+    not list, so every rate under it can still price a request and is kept.
 
     An organization holding its own key for a provider keeps nothing here. A
     deployment rate under a hosted provider is what lets any organization be
@@ -105,7 +117,9 @@ def classify_priced_keys(
     ``<provider>:<tool>`` off ``config.search_tools`` rather than
     ``config.providers``, so ``search_providers`` has to be passed or a
     deployment with ``search_tools:`` configured loses the rate ``POST
-    /v1/search`` reserves against.
+    /v1/search`` reserves against. A fetch instance is keyed the same way off
+    the fetch instances, the built-in fetcher's ``builtin:builtin_fetch``
+    among them, so ``fetch_providers`` has to be passed too.
 
     NOTE: a provider credentialed from the
     environment alone, with no ``providers:`` entry and no hosted provider, is
@@ -129,7 +143,9 @@ def classify_priced_keys(
             prefix,
             deployment_instances=deployment_instances,
             search_providers=search_providers,
+            fetch_providers=fetch_providers,
             owned_endpoints=owned_endpoints,
+            unlisted_providers=unlisted_providers,
         )
         verdict: Verdict = "removed" if reason is None else "kept"
         verdicts.append(CatalogVerdict(model_key, versions, verdict, reason, canonical))
@@ -155,10 +171,12 @@ def kept_groups(verdicts: Sequence[CatalogVerdict]) -> list[HostedCatalogKeptGro
 __all__ = [
     "CATALOG_SAMPLE",
     "KEEP_DEPLOYMENT_INSTANCE",
+    "KEEP_FETCH_TOOL",
     "KEEP_GATEWAY_TOOL",
     "KEEP_OWNED_ENDPOINT",
     "KEEP_SEARCH_TOOL",
     "KEEP_UNATTRIBUTABLE",
+    "KEEP_UNLISTED",
     "CatalogVerdict",
     "classify_priced_keys",
     "kept_groups",

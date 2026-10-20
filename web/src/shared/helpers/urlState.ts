@@ -1,5 +1,5 @@
-import { useNavigate, useSearch } from "@tanstack/react-router"
-import { useCallback } from "react"
+import { useNavigate, useRouter, useSearch } from "@tanstack/react-router"
+import { useCallback, useMemo } from "react"
 
 import type { DashboardSearch } from "@/shared/helpers/search"
 
@@ -10,10 +10,22 @@ import type { DashboardSearch } from "@/shared/helpers/search"
 // separate calls in one tick would clobber each other rather than compose.
 // `patch` therefore takes all the keys to change at once.
 
+const NONE: readonly never[] = []
+
 // `strict: false` because these hooks are shared by every page rather than bound
 // to one route; the shape is the root route's, which every route inherits.
-function useSearchRecord(): DashboardSearch {
-  return useSearch({ strict: false }) as DashboardSearch
+function useSearchRecord(untracked: readonly string[] = NONE): DashboardSearch {
+  return useSearch({
+    strict: false,
+    select: (search: DashboardSearch) =>
+      untracked.length === 0
+        ? search
+        : Object.fromEntries(
+            Object.entries(search).filter(([key]) => !untracked.includes(key)),
+          ),
+    // A fresh object from `select` would re-render on every navigation.
+    structuralSharing: true,
+  }) as DashboardSearch
 }
 
 // The first value of a key, whether it was written once or repeated. `undefined`
@@ -42,9 +54,31 @@ export interface UrlState<K extends string> {
 
 export function useUrlState<K extends string>(
   defaults: Record<K, string>,
+  {
+    untracked = NONE,
+  }: {
+    /**
+     * Keys whose change alone does not re-render the caller, for state a child
+     * already holds and the URL only mirrors. A read sees the value as of the
+     * caller's last render. Pass a module constant: a new array each render
+     * re-derives every reader each render.
+     */
+    untracked?: readonly NoInfer<K>[]
+  } = {},
 ): UrlState<K> {
-  const search = useSearchRecord()
+  const tracked = useSearchRecord(untracked)
+  const router = useRouter()
   const navigate = useNavigate()
+  const search = useMemo(
+    () =>
+      untracked.length === 0
+        ? tracked
+        : {
+            ...(router.state.location.search as DashboardSearch),
+            ...tracked,
+          },
+    [tracked, untracked, router],
+  )
 
   const get = useCallback(
     (key: K) => first(search[key]) ?? defaults[key],

@@ -25,7 +25,14 @@ from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy.org_provider_key_service import reset_org_provider_cache
 
-from .conftest import build_test_client
+from .conftest import build_test_client, shared_test_config
+
+
+@pytest.fixture(scope="module")
+def test_config(postgres_url: str) -> GatewayConfig:
+    """The shared configuration declaring no provider, so a bare selector reaches the organization's key."""
+    return shared_test_config(postgres_url, {})
+
 
 _MASTER_HEADER = {API_KEY_HEADER: "Bearer test-master-key"}
 _KEYS = f"{API_ROOT}/organizations/me/provider-keys"
@@ -170,6 +177,7 @@ def test_a_bare_alias_sharing_the_undated_name_does_not_disclose_the_dated_build
 def instance_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
     """A gateway whose ``config.yml`` also declares an ``anthropic`` instance."""
     config = GatewayConfig(
+        import_configured_providers=False,
         database_url=postgres_url,
         master_key="test-master-key",
         auto_migrate=False,

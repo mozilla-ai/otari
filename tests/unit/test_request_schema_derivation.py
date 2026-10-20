@@ -29,7 +29,7 @@ from any_llm.types.completion import CompletionParams
 from any_llm.types.image import ImageGenerationParams
 from any_llm.types.messages import MessagesParams
 from any_llm.types.responses import ResponsesParams
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, ValidationError, create_model
 
 from gateway.api.routes._schema_derive import (
     PARAM_FIELD_RENAMES,
@@ -127,6 +127,63 @@ def test_messages_request_preserves_a_container_object_for_upstream() -> None:
     )
 
     assert request.model_dump(exclude_unset=True)["container"] == container
+
+
+@pytest.mark.parametrize(
+    "output_config",
+    [{"effort": "low"}, {"format": {"type": "json_schema", "schema": {"type": "object"}}, "effort": "high"}],
+)
+def test_messages_request_forwards_output_config_as_output_format(output_config: dict[str, object]) -> None:
+    """Anthropic's ``output_config``, which Claude Code sends, reaches any-llm as ``output_format``."""
+    request = MessagesRequest.model_validate(
+        {
+            "model": "deepseek:deepseek-flash",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "max_tokens": 100,
+            "output_config": output_config,
+        }
+    )
+
+    forwarded = request.model_dump(exclude_unset=True)
+    assert forwarded["output_format"] == output_config
+    assert "output_config" not in forwarded
+    assert "output_config" not in request.model_dump()
+
+
+def test_messages_openapi_request_schema_includes_output_config() -> None:
+    """Typed clients generated from the published contract can send Anthropic's wire name."""
+    spec_path = Path(__file__).resolve().parents[2] / "docs/public/openapi.json"
+    spec = json.loads(spec_path.read_text())
+
+    properties = spec["components"]["schemas"]["MessagesRequest"]["properties"]
+    assert "output_config" in properties
+    assert "output_format" in properties
+
+
+def test_messages_request_still_takes_output_format() -> None:
+    request = MessagesRequest.model_validate(
+        {
+            "model": "anthropic:claude-opus-5-5",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "max_tokens": 100,
+            "output_format": {"effort": "low"},
+        }
+    )
+
+    assert request.model_dump(exclude_unset=True)["output_format"] == {"effort": "low"}
+
+
+def test_messages_request_refuses_output_config_with_output_format() -> None:
+    with pytest.raises(ValidationError, match="not both"):
+        MessagesRequest.model_validate(
+            {
+                "model": "anthropic:claude-opus-5-5",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "max_tokens": 100,
+                "output_config": {"effort": "low"},
+                "output_format": {"effort": "high"},
+            }
+        )
 
 
 def test_messages_openapi_request_schema_includes_container() -> None:

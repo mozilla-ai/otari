@@ -12,9 +12,10 @@ from urllib.parse import parse_qsl, urlsplit
 
 from any_llm import LLMProvider
 
-from gateway.core.config import PROVIDER_TYPE_ALIASES
+from gateway.core.config import PROVIDER_TYPE_ALIASES, hosted_provider_name_problem
 from gateway.exceptions.providers_exceptions import (
     HostedProviderApiBaseMaskedError,
+    HostedProviderInvalidNameError,
     HostedProviderUnknownProviderError,
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
@@ -37,15 +38,17 @@ STORED = "hosted provider credentials"
 class ResolvedHostedProvider:
     """A decrypted, usable upstream connection.
 
-    ``api_key`` is None only for a keyless backend declared in configuration;
-    a stored row always holds a key.
+    ``api_key`` is None for a keyless backend, or a custom endpoint called
+    with the placeholder key.
     """
 
     api_key: str | None = field(repr=False)
     api_base: str | None
     client_args: dict[str, Any] | None
-    provider: str | None = None
-    """The stored provider name, an accepted alias folded, for a credential read back from a row."""
+    name: str | None = None
+    """The hosted provider's name, an accepted alias folded, for a credential read back from a source."""
+    implementation: str | None = None
+    """The any-llm implementation serving it, for a credential read back from a source."""
 
 
 def last4(api_key: str) -> str | None:
@@ -129,6 +132,20 @@ def lookup_name(provider: str) -> str:
     return PROVIDER_TYPE_ALIASES.get(candidate, candidate)
 
 
+def normalize_name(name: str | None, implementation: str) -> str:
+    """The name a hosted provider is stored under: ``name`` when given, else its implementation.
+
+    Raises:
+        HostedProviderInvalidNameError: the name cannot prefix a selector, is
+            reserved, or is another implementation's.
+    """
+    if name is None:
+        return implementation
+    if (problem := hosted_provider_name_problem(name, implementation)) is not None:
+        raise HostedProviderInvalidNameError(name, problem)
+    return name
+
+
 def normalize_provider(provider: str) -> str:
     """Resolve a provider name to the any-llm implementation that serves it.
 
@@ -145,12 +162,14 @@ def normalize_provider(provider: str) -> str:
     return implementation
 
 
-def encrypt_key(api_key: str) -> str:
-    """Encrypt a key for storage.
+def encrypt_key(api_key: str | None) -> str | None:
+    """Encrypt a key for storage; None for a provider stored without one.
 
     Raises:
         SecretBoxUnavailableTenancyError: no usable ``OTARI_SECRET_KEY``.
     """
+    if api_key is None:
+        return None
     try:
         return encrypt_secret(api_key)
     except SecretBoxUnavailableError:
@@ -185,19 +204,33 @@ def credential_of(row: HostedProvider, *, quiet: bool = False) -> ResolvedHosted
     degrades one provider silently otherwise.
     """
     try:
-        api_key = decrypt_secret(row.encrypted_api_key)
+        api_key = None if row.encrypted_api_key is None else decrypt_secret(row.encrypted_api_key)
         client_args = _decrypt_client_args(row.encrypted_client_args)
     except (SecretDecryptionError, SecretBoxUnavailableError):
         if not quiet:
             logger.error(
                 "Hosted provider %r could not be decrypted; treating it as unserved. "
                 "Was OTARI_SECRET_KEY rotated? The credential must be re-entered.",
-                row.provider,
+                row.name,
             )
         return None
     return ResolvedHostedProvider(
-        api_key=api_key, api_base=row.api_base, client_args=client_args, provider=row.provider
+        api_key=api_key,
+        api_base=row.api_base,
+        client_args=client_args,
+        name=row.name,
+        implementation=row.provider,
     )
+
+
+def reencrypted(ciphertext: str | None) -> str | None:
+    """``ciphertext`` decrypted and encrypted again under the primary key, or None for None.
+
+    Raises:
+        SecretDecryptionError: no configured key reads it.
+        SecretBoxUnavailableError: no usable ``OTARI_SECRET_KEY``.
+    """
+    return None if ciphertext is None else encrypt_secret(decrypt_secret(ciphertext))
 
 
 def client_args_of(row: HostedProvider) -> dict[str, Any] | None:

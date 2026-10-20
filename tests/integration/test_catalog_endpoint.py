@@ -19,9 +19,9 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.pricing import OrganizationModelPricing
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
+from gateway.ports.model_provider_port import NO_ORGANIZATION
 from gateway.services import model_catalog_service as mcs
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
-from gateway.services.merged_catalog_service import NO_ORGANIZATION
 
 from .conftest import build_test_client
 from .hosted_port_helpers import HostedModelProvider, bind_model_provider

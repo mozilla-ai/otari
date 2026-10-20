@@ -10,6 +10,7 @@ to a JSON file. It can be run in two modes:
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -21,7 +22,9 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from gateway.core.config import GatewayConfig
+from gateway.core.settings.api_keys import FederationIssuer
 from gateway.main import create_app
+from gateway.services.secret_box import generate_secret_key
 
 
 def generate_openapi_spec() -> dict[str, object]:
@@ -36,17 +39,26 @@ def generate_openapi_spec() -> dict[str, object]:
         config = GatewayConfig(
             database_url=database_url,
             bootstrap_api_key=False,
-            # Placeholders, so the conditionally mounted web-search backend route
-            # is in the published contract. It is mounted only where a provider
-            # and a backend token are both configured, and the spec has to
-            # describe every route this app can serve, not only the ones a bare
-            # default config happens to reach. Nothing is called during
+            # Placeholders, so the conditionally mounted routes are in the
+            # published contract: the web-search backend route, mounted only where
+            # a provider and a backend token are both configured, and the token
+            # exchange, mounted only where a federation issuer is trusted. The spec
+            # has to describe every route this app can serve, not only the ones a
+            # bare default config happens to reach. Nothing is called during
             # generation; these values are never used to authenticate anything.
             web_search_provider="tavily",
             web_search_provider_api_key="openapi-generation-placeholder",
             web_search_backend_token="openapi-generation-placeholder",
+            federation_issuers=[FederationIssuer(issuer="https://openapi-generation-placeholder.invalid")],
         )
-        app = create_app(config)
+        # The token exchange needs a secret to start; a throwaway one, for this process only.
+        previous = os.environ.get("OTARI_SECRET_KEY")
+        os.environ["OTARI_SECRET_KEY"] = previous or generate_secret_key()
+        try:
+            app = create_app(config)
+        finally:
+            if previous is None:
+                del os.environ["OTARI_SECRET_KEY"]
         return cast(dict[str, object], app.openapi())
 
 

@@ -1,10 +1,17 @@
+import type { DeploymentBootstrap } from "@/client"
+
+/** Where the dashboard's Documentation links go when `docs_url` is unset. */
+export const OTARI_DOCS_URL = "https://docs.otari.ai/"
+
+export function documentationHref({
+  docs_url,
+}: Pick<DeploymentBootstrap, "docs_url">): string {
+  return docs_url ?? OTARI_DOCS_URL
+}
+
 /**
- * Where a repository document is actually rendered.
- *
- * Only `docs/dashboard.md` is bundled into the dashboard, so its own relative
- * links cannot resolve inside the SPA and neither can a link to a sibling
- * document. GitHub is where both go. Pointing a "Docs" link at `/#/docs`
- * instead would land on a guide that has no section by that name.
+ * Where a repository document is rendered, for a link to one section of it.
+ * GitHub serves every document at `main`, under the same filename.
  */
 export const DOCS_SOURCE_BASE =
   "https://github.com/mozilla-ai/otari/blob/main/docs/"

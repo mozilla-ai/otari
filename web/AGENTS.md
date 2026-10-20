@@ -177,8 +177,9 @@ and publishes it to Pages from `main`. `STORYBOOK_BASE_PATH` is what makes the
 published build resolve its assets under `/<repo>/`, since the merged
 `vite.config.ts` carries the app's own `base: "/"`.
 
-The bundled dashboard guide imports `docs/dashboard.md`. It remains available
-at `/#/docs` even when `docs_url` points the visible links elsewhere.
+The dashboard bundles no documentation. Its Documentation links open `docs_url`
+where a deployment sets one and `https://docs.otari.ai/` otherwise
+(`web/src/shared/helpers/docs.ts`).
 
 The PWA manifest is generated at build time by `web/pwaManifest.ts`, which
 prefixes `id`, `start_url`, `scope`, and each icon path with Vite's resolved

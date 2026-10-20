@@ -96,9 +96,10 @@ General (`DELETE /api/v1/organizations/me`) while it has no usage: the gateway
 refuses an organization whose workspaces still hold usage, API keys, aliases or
 routing policies, so a deletion never takes spend history with it. The
 deployment's default organization and the only organization the caller belongs
-to cannot be deleted either. Its workspaces, memberships and organization-level
-settings go with it, and everyone whose active organization it was moves to
-another organization they belong to.
+to cannot be deleted either. Its workspaces, memberships, pending invitations
+and organization-level settings go with it. Everyone whose active organization
+it was moves to the oldest other organization they belong to; someone who
+belongs to no other organization is left with none until they join one.
 
 ## Users and identities
 
@@ -125,7 +126,8 @@ may also define:
 - budget exemption
 - a budget of its own: a spend ceiling on the key, which its owner's budget does
   not replace (both apply)
-- whether mismatched client `user` fields are accepted
+- whether mismatched client `user` fields are accepted (see
+  [Mismatched `user` fields](#mismatched-user-fields))
 - whether content-free agent telemetry is captured
 - whether it is a service key, which may name end users
 - application metadata
@@ -133,19 +135,63 @@ may also define:
 The plaintext key is returned only when it is created or rotated. Store it then.
 Rotation preserves the key record and invalidates the previous secret.
 A key can also be declared in config.yml with a secret you choose, in which
-case config.yml owns it and writes it back at every start; see
+case config.yml owns it and writes it back whenever its entry changes; see
 [Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
-Rotating a declared key through the API lasts only until the next start, which
-restores the secret config.yml declares.
+Rotating a declared key through the API lasts until config.yml changes the
+key's entry or its secret, which restores the secret config.yml declares.
 
 A budget-exempt key is also exempt from `require_pricing`. Reserve such keys for
 usage import or other intentional observability-only traffic.
+
+A backend on Google Cloud, or behind another OpenID Connect issuer, can
+authenticate as a key with its platform identity token instead of the key's
+secret, once the operator trusts the issuer and gives the key a federation
+rule; see [Workload identity](workload-identity.md).
 
 `/api/v1/keys` manages every key in the caller's organization and requires the
 deployment operator's standing. A signed-in member without it manages their own
 keys at `/api/v1/organizations/me/keys`, which derives the owner rather than
 accepting one, mints only into a workspace the caller may see, and never issues
 a budget-exempt key.
+
+### Mismatched `user` fields
+
+A request can name a user: `user` on Chat Completions, Responses and the
+pass-through routes, `metadata.user_id` on Messages. On an ordinary key that
+value may only be the key's own user; anything else is refused with `403`. A
+key's `reject_user_mismatch` changes that for the key alone:
+
+| Value | Dashboard choice | A request naming another user |
+| --- | --- | --- |
+| `null` (default) | Use the deployment setting | Follows the deployment-wide `reject_user_mismatch`, which rejects unless changed |
+| `true` | Always reject (403) | Rejected, even where the deployment accepts |
+| `false` | Always accept | Accepted, and billed to the key's user |
+
+Spend binds to the key's own user whichever value applies, so accepting a
+mismatch never lets a key charge someone else.
+
+Accept mismatches on a key whose client puts something other than an Otari
+user ID in that field. Claude Code sends a telemetry value there (see
+[Use with Claude Code](use-with-claude-code.md)). So does an application that
+sends every request on one key and passes its own end user's ID. That
+application has two choices:
+
+- Accept mismatches, and every request bills the key's user: one budget for
+  the whole application.
+- Make the key a [service key](#service-keys-and-end-users), and each ID
+  becomes an end user with spend and a budget of its own.
+
+Set the value in the dashboard's key form (under **Advanced** when creating a
+key, and on the edit form), as `reject_user_mismatch` on `POST` or `PATCH`
+`/api/v1/keys` and `/api/v1/organizations/me/keys`, or on a key declared in
+config.yml. The deployment-wide default is a runtime setting, changed on the
+Settings page or with `PATCH /api/v1/settings`.
+
+The check is a standalone one. A hybrid gateway, such as otari.ai's, does not
+compare the field with the key's owner, so a key there needs no setting: the
+value only feeds the
+[end-user identifier](hybrid-mode-protocol.md#end-user-identifier) sent to the
+provider.
 
 ## Service keys and end users
 
@@ -259,8 +305,9 @@ api_keys:
 `ceiling` is the key's own ceiling, the scoped budget on the API key that pools
 every end user. The service reads the same `MLPA_SERVICE_KEY` and presents it as
 its API key, so nothing has to hand a freshly minted secret from one to the
-other, and a restart or a second replica does not change it. Every start writes
-the declared settings back over changes made through the API; see
+other, and a restart or a second replica does not change it. A start writes
+the declared settings back over changes made through the API only when the
+key's entry in config.yml changed; see
 [What config.yml owns](configuration.md#what-configyml-owns).
 
 ### Managing end users
@@ -274,6 +321,8 @@ by the id it names it by. It needs neither the master key nor its key's id:
 | `GET /api/v1/end-users?external_id=...` | Reads the end user: its budget, counters and whether it is blocked, as a list of one, or none when no end user goes by the id |
 | `PUT /api/v1/end-users?external_id=...` `{"budget_id": ...}` | Puts the end user on a budget, creating it first if it has not made a request yet (201) |
 | `PATCH /api/v1/end-users?external_id=...` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
+| `DELETE /api/v1/end-users?external_id=...` | Deletes the end user, answering `{"deleted": 1}`, or 404 |
+| `DELETE /api/v1/end-users?created_before=...` | Deletes up to `limit` (default 100, at most 1000) of the oldest end users created before that time, answering `{"deleted": n}`; repeat until `n` is 0 |
 | `GET /api/v1/end-user-budgets` | Lists the budgets on the key's list, with how many end users are on each |
 
 ```http
@@ -286,8 +335,8 @@ Authorization: Bearer <service key>
 The query parameter names any end user, so use it for an id that may contain
 `/`, and URL-encode the id as any query value is (`/` as `%2F`, `+` as `%2B`).
 The id can also go in the path, `/api/v1/end-users/{external_id}`, for `GET`,
-`PUT` and `PATCH`, which answer as their query forms do (the `GET` with the
-end user itself, or 404). That form suits an id without `/`: a
+`PUT`, `PATCH` and `DELETE`, which answer as their query forms do (the `GET`
+with the end user itself, or 404, and the `DELETE` with 204, or 404). That form suits an id without `/`: a
 proxy can merge the `//` of an id like `ab//cd`, and an HTTP client collapses
 `.` and `..` segments, so in a path such an id can reach another end user. An
 id with a `.` or `..` segment is refused there with 400.
@@ -302,6 +351,15 @@ routes still reach them.
 every match in the `Otari-Total-Count` header. Its list and the counts on
 `/api/v1/end-user-budgets` leave out deleted end users, and the counts include
 blocked ones, which `blocked_end_user_count` also gives on its own.
+
+Deleting an end user erases its telemetry and agent traces, as deleting any
+user does, and stops it being listed or counted. Its row stays, with what it
+has spent and used: a request that names the same id again revives it with
+those counters, on the budget it was on, so deleting an end user cannot reset
+its budget. Its usage history stays too. A service whose end users are
+short-lived, such as one id per guest session, can delete the expired ones by
+age with `created_before` (`2026-10-10T00:00:00Z`), a page per call. When
+erasure fails the call answers 5xx and deletes nothing, so it can be repeated.
 
 A budget set this way must be on the key's list: any other is refused with 403
 and `end_user_budget_not_allowed`, so a key cannot put an end user on a budget

@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -6,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig
 from gateway.models.users import User
 from gateway.services.budgets._periods import seconds_until
 
@@ -356,6 +357,8 @@ def test_user_exceeded_budget_blocked_on_paid_model(
     )
     assert response.status_code == 403
     assert "budget" in response.json()["detail"].lower()
+    assert response.headers["Otari-Error-Code"] == "budget_exceeded"
+    uuid.UUID(response.headers[REQUEST_ID_HEADER])
 
 
 def _too_large_setup(

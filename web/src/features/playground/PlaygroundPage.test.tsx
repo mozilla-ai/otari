@@ -28,10 +28,13 @@ import {
   SelectedWorkspaceProvider,
   useSelectedWorkspace,
 } from "@/shared/hooks/SelectedWorkspace"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
+  bootstrap,
   catalogModelSummary,
   catalogResponse,
   organizationContext,
+  STANDALONE_SURFACES,
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
@@ -353,17 +356,19 @@ function mockStream(frames: string[]) {
 const delta = (content: string) =>
   JSON.stringify({ choices: [{ delta: { content } }] })
 
-function renderPage() {
+function renderPage({ surfaces = [...STANDALONE_SURFACES] } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <QueryClientProvider client={client}>
-      <SelectedWorkspaceProvider>
-        <WorkspacePicker />
-        <PlaygroundPage />
-      </SelectedWorkspaceProvider>
-    </QueryClientProvider>,
+    <DeploymentProvider value={bootstrap({ surfaces })}>
+      <QueryClientProvider client={client}>
+        <SelectedWorkspaceProvider>
+          <WorkspacePicker />
+          <PlaygroundPage />
+        </SelectedWorkspaceProvider>
+      </QueryClientProvider>
+    </DeploymentProvider>,
     { wrapper: withRouter({ url: "/playground" }) },
   )
 }
@@ -447,6 +452,34 @@ describe("the Playground before the first question", () => {
     expect(
       await screen.findByText("No models to chat with"),
     ).toBeInTheDocument()
+    expect(
+      await screen.findByRole("link", { name: "Hosted providers" }),
+    ).toHaveAttribute("href", "/admin/hosted-providers")
+  })
+
+  it("points an operator at the organization's providers where Hosted providers is not published", async () => {
+    mockApi({ catalog: { ...CATALOG, models: [] } })
+    renderPage({
+      surfaces: STANDALONE_SURFACES.filter(
+        (surface) => surface !== "hosted_providers",
+      ),
+    })
+
+    expect(
+      await screen.findByRole("link", { name: "Providers" }),
+    ).toHaveAttribute("href", "/organization/provider-keys")
+  })
+
+  it("points a caller who does not operate the deployment at the organization's providers", async () => {
+    mockApi({
+      catalog: { ...CATALOG, models: [] },
+      context: { ...context(), deployment_operator: false },
+    })
+    renderPage()
+
+    expect(
+      await screen.findByRole("link", { name: "Providers" }),
+    ).toHaveAttribute("href", "/organization/provider-keys")
   })
 })
 

@@ -3,11 +3,9 @@
 Decided at otari-ai#1748: the platform's ``ProviderKey`` shape
 (organization scope, archival, one default per organization+provider,
 per-workspace pin/disable overrides, per-workspace model allow-lists) ports
-into otari as new, additive tables. ``provider_credentials`` and its
-config.yml-merge overlay (``services/provider_store_service.py``) are
-unchanged: they stay the mechanism for config.yml-defined and legacy
-deployment-global stored credentials, addressed by instance name exactly as
-before. These two mechanisms are disjoint by construction (see
+into otari as new, additive tables. ``config.providers`` stays the
+mechanism for config.yml-defined credentials, addressed by instance name
+exactly as before. These two mechanisms are disjoint by construction (see
 ``services/provider_kwargs.py``): an ``instance:model`` selector that matches
 an existing ``config.providers`` entry never consults these tables, and a
 bare ``provider:model`` selector never consults ``config.providers`` for a

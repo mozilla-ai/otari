@@ -37,7 +37,11 @@ from any_llm.types.model import Model
 from gateway.core.config import GatewayConfig
 from gateway.core.database import describe_database_error
 from gateway.log_config import logger
-from gateway.services.provider_kwargs import get_provider_kwargs, keyless_placeholder_api_key
+from gateway.services.provider_kwargs import (
+    credential_ladder_exhausted,
+    get_provider_kwargs,
+    keyless_placeholder_api_key,
+)
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
@@ -537,6 +541,7 @@ async def test_provider_credentials(
     api_key: str | None = None,
     api_base: str | None = None,
     client_args: dict[str, object] | None = None,
+    declared: bool,
     timeout: float = _ADHOC_DISCOVERY_TIMEOUT_SECONDS,
 ) -> ProviderDiscovery:
     """List models for ad-hoc credentials without storing them.
@@ -547,6 +552,8 @@ async def test_provider_credentials(
     capped provider errors, which may include the api_base but never the key).
     ``timeout`` defaults to the module bound; the route passes
     ``model_discovery_timeout_seconds`` so the saved and unsaved paths agree.
+    ``declared`` is whether the credentials will back a ``providers:`` entry, which
+    a keyless or ambient-credential provider needs in place of a key.
     """
     if not _supports_list_models(impl_name):
         return ProviderDiscovery(
@@ -576,7 +583,9 @@ async def test_provider_credentials(
     # A keyless custom endpoint (api_base set, no key) would otherwise be rejected
     # by any-llm before the connection is even attempted; supply the same
     # placeholder the saved path uses so "Test connection" honors the optional key.
-    api_key = api_key or keyless_placeholder_api_key(provider_enum, api_base, api_key)
+    api_key = api_key or keyless_placeholder_api_key(api_base, api_key)
+    if not api_key and credential_ladder_exhausted(provider_enum, {}, declared=declared):
+        return ProviderDiscovery(provider=impl_name, models=[], error=f"Provider '{impl_name}' needs an API key.")
     try:
         # Bounded like the stored-provider path so a black-holed endpoint cannot
         # hang the test button for the SDK's ~600s default.

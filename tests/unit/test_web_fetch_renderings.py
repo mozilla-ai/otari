@@ -6,39 +6,36 @@ from typing import Any
 
 import pytest
 
+from any_fetch import FetchedPage
 from gateway.services.tools import (
     SERVER_TOOL_USE_ID_PREFIX,
     WEB_FETCH_TOOL_NAME,
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     Dialect,
     NativeCall,
+    WebToolFailure,
     native_rendering,
 )
-from gateway.services.web_fetch_service import WebFetchResult
-from gateway.services.web_retrieval_policy import canonicalize_web_url
 
 
-def _page(text: str = "page text", url: str = "https://example.com/a?token=secret#frag") -> WebFetchResult:
-    canonical = canonicalize_web_url(url)
-    return WebFetchResult(
-        text=text,
-        content_type="text/html",
-        content_kind="html",
-        requested_url=canonical,
-        final_url=canonical,
-        redirect_count=0,
-    )
+def _page(text: str = "page text", url: str = "https://example.com/a?token=secret#frag") -> FetchedPage:
+    return FetchedPage(url=url, final_url=url, text=text, content_type="text/html", cost_source="none", raw={})
 
 
 class _FetchBackendLike:
     """The gateway's own retrieval backend, as a rendering reads it."""
 
-    def __init__(self, page: WebFetchResult | None = None) -> None:
+    def __init__(self, page: FetchedPage | None = None, failure: WebToolFailure | None = None) -> None:
         self._page = page
+        self._failure = failure
 
-    def take_last_fetch(self) -> WebFetchResult | None:
+    def take_last_fetch(self) -> FetchedPage | None:
         page, self._page = self._page, None
         return page
+
+    def take_last_failure(self) -> WebToolFailure | None:
+        failure, self._failure = self._failure, None
+        return failure
 
 
 class _McpPoolLike:
@@ -146,8 +143,19 @@ def test_a_chat_fetch_entry_never_carries_the_page() -> None:
     assert "page text" not in str(ended)
 
 
-def test_a_failed_chat_fetch_on_the_old_backend_has_no_error() -> None:
-    [ended] = _chat_rendering().ran(_call(failed=True), _FetchBackendLike())
+def test_a_failed_chat_fetch_carries_the_failure_the_backend_kept() -> None:
+    failure = WebToolFailure.of("builtin", 503, "http_status")
+    backend = _FetchBackendLike(failure=failure)
+
+    [ended] = _chat_rendering().ran(_call(failed=True), backend)
+
+    assert ended["status"] == "failed"
+    assert ended["error"] == {"provider": "builtin", "status": 503, "tag": "http_status", "retryable": True}
+    assert backend.take_last_failure() is None, "the rendering takes the failure, so no later call shows it"
+
+
+def test_a_failed_chat_fetch_on_a_pool_that_keeps_no_failure_has_no_error() -> None:
+    [ended] = _chat_rendering().ran(_call(failed=True), _McpPoolLike())
 
     assert ended["status"] == "failed"
     assert "error" not in ended

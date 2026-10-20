@@ -1,7 +1,6 @@
 """Unit tests for reasoning-token capture in the usage carrier, parse sites and stream merge."""
 
-from any_llm.types.completion import ChatCompletionChunk, CompletionUsage
-from openai.types.completion_usage import CompletionTokensDetails
+from any_llm.types.completion import ChatCompletionChunk, CompletionTokensDetails, CompletionUsage
 
 from gateway.api.routes.chat import _ChatAdapter
 from gateway.api.routes.messages import _messages_stream_usage, _MessagesAdapter

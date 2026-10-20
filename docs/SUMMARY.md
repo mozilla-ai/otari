@@ -13,10 +13,13 @@
 * [Configuration](configuration.md)
 * [Admin dashboard](dashboard.md)
 * [Access control](access-control.md)
+* [Workload identity](workload-identity.md)
 * [Models](models.md)
 * [Provider endpoints](provider-endpoints.md)
 * [Routing policies](routing.md)
+* [Health checks](health-checks.md)
 * [OpenAI provider guide](providers/openai.md)
+* [Gemini provider guide](providers/gemini.md)
 
 ## For integrators
 

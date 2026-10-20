@@ -69,6 +69,10 @@ class ProviderMetadata(BaseModel):
     tier: Literal["production", "test"]
     max_urls_per_call: int
     renders_javascript: bool
+    # Whether ``FetchedPage.final_url`` is where the page was found after redirects. When false it is
+    # the URL as asked, since the provider follows redirects without saying where they led, so a
+    # caller cannot check a redirect it followed.
+    reports_final_url: bool
     formats: list[str]
     options: list[OptionSpec]
 

@@ -47,7 +47,14 @@ from gateway.core.config import (
     RESPONSE_DURATION_HEADER,
     GatewayConfig,
 )
-from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_ERROR
+from gateway.core.error_codes import (
+    ERROR_CODE_HEADER,
+    ERROR_PROVIDER_HEADER,
+    ERROR_RETRYABLE_HEADER,
+    ERROR_STATUS_HEADER,
+    ERROR_TAG_HEADER,
+    PROVIDER_ERROR,
+)
 from gateway.models.routing import RoutingConfig
 from gateway.services import catalog as selectors
 
@@ -394,15 +401,20 @@ def test_an_empty_completion_fails_over_to_the_next_candidate(client: TestClient
     assert [r["model"] for r in rows if r["status"] == "success"] == ["claude-haiku-4-5"]
 
 
-def test_all_candidates_failing_is_a_generic_502(client: TestClient) -> None:
+@pytest.mark.parametrize("stream", [False, True], ids=["unstreamed", "streamed"])
+def test_all_candidates_failing_is_a_generic_502(client: TestClient, stream: bool) -> None:
     """A multi-candidate fallthrough must not attribute one provider's status to
-    the whole plan.
+    the whole plan, though its headers name the last candidate's own failure.
     """
     _create_user(client)
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=_http_error(503))):
-        resp = _chat(client, "fast")
+        resp = _chat(client, "fast", stream=stream)
 
     assert resp.status_code == 502
+    assert resp.headers[ERROR_PROVIDER_HEADER] == "anthropic"
+    assert resp.headers[ERROR_STATUS_HEADER] == "503"
+    assert resp.headers[ERROR_TAG_HEADER] == "http_error"
+    assert resp.headers[ERROR_RETRYABLE_HEADER] == "true"
 
 
 def test_a_provider_400_burns_the_chain(client: TestClient) -> None:
@@ -422,6 +434,8 @@ def test_a_provider_400_burns_the_chain(client: TestClient) -> None:
 
     assert resp.status_code == 400
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+    # A provider's 4xx keeps its fixed answer.
+    assert ERROR_PROVIDER_HEADER not in resp.headers
 
 
 def test_an_auth_failure_burns_the_chain(client: TestClient) -> None:

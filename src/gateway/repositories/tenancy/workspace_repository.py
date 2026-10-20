@@ -8,6 +8,7 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import (
     User,
     Workspace,
@@ -28,7 +29,7 @@ def ids_in_organization(organization_id: uuid.UUID) -> Select[tuple[uuid.UUID]]:
 class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUpdate]):
     """Repository for workspace rows."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession | UnitOfWork):
         super().__init__(db, Workspace)
 
     async def lock(self, workspace_id: uuid.UUID) -> None:

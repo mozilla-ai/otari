@@ -25,7 +25,7 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work_if_needed,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
+from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
@@ -52,8 +52,8 @@ from gateway.api.routes._pipeline import (
     stream_error_code,
     stream_error_message,
 )
-from gateway.api.routes._platform import ResolvedAttempt, SettledCost, with_retry_hint
-from gateway.api.routes._request_tags import RequestMetadata, request_tags
+from gateway.api.routes._platform import ResolvedAttempt
+from gateway.api.routes._request_tags import RequestMetadata, RequestTagsHeader, resolved_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
@@ -66,11 +66,13 @@ from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.provider_fields import surface_provider_fields
+from gateway.schemas.inference import SettledCost
 from gateway.services.files import FileService, StagedFile
 from gateway.services.inference import (
     bind_upstream_user,
     chat_user_fields,
     is_chat_stream_cost_carrier,
+    provider_failure,
     require_choices,
     with_upstream_user,
 )
@@ -259,8 +261,14 @@ class _ChatAdapter:
     def stream_completion(self) -> Callable[[Any], bool] | None:
         return _every_choice_finishes()
 
-    def stream_error_payload(self, exc: BaseException) -> str:
-        return openai_error_event(self.stream_format, stream_error_code(exc), stream_error_message(exc))
+    def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
+        failure = provider_failure(exc, provider)
+        return openai_error_event(
+            self.stream_format,
+            stream_error_code(exc),
+            stream_error_message(exc),
+            failure.as_dict() if failure is not None else None,
+        )
 
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
         return f"data: {surface_provider_fields(chunk).model_dump_json()}\n\n"
@@ -470,6 +478,7 @@ async def chat_completions(
     billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
+    tags_header: RequestTagsHeader,
 ) -> ChatCompletion | Response:
     """OpenAI-compatible chat completions endpoint.
 
@@ -495,6 +504,7 @@ async def chat_completions(
         billing=billing,
         tool_ports=tool_ports,
         idempotency=idempotency,
+        tags_header=tags_header,
     )
 
 
@@ -514,6 +524,7 @@ async def run_chat_completion(
     tool_ports: ToolPorts,
     session_principal: SessionPrincipal | None = None,
     idempotency: IdempotencyGuard | None = None,
+    tags_header: str | None = None,
 ) -> ChatCompletion | Response:
     """Serve one chat completion, from the resolved preamble to the response.
 
@@ -600,7 +611,7 @@ async def run_chat_completion(
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
-            tags=request_tags(request.metadata),
+            tags=resolved_tags(tags_header, request.metadata),
             turn=read_turn("chat", request.messages),
             session_label=request.session_label,
         )

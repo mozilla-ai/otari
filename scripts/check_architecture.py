@@ -447,7 +447,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/pricing_init_service.py",
     "gateway/services/pricing_refresh_service.py",
     "gateway/services/pricing_service.py",
-    "gateway/services/provider_store_service.py",
     "gateway/services/routing/knn.py",
     "gateway/services/runtime_settings_service.py",
     "gateway/services/search_tool_store_service.py",
@@ -509,7 +508,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/otlp.py",
     "gateway/api/routes/playground.py",
     "gateway/api/routes/pricing.py",
-    "gateway/api/routes/providers.py",
     "gateway/api/routes/rerank.py",
     "gateway/api/routes/responses.py",
     "gateway/api/routes/routing.py",
@@ -613,7 +611,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/api/routes/organization_keys.py",
     "gateway/api/routes/organization_pricing.py",
     "gateway/api/routes/pricing.py",
-    "gateway/api/routes/providers.py",
     "gateway/api/routes/routing.py",
     "gateway/api/routes/routing_memory.py",
     "gateway/api/routes/scoped_budgets.py",
@@ -765,7 +762,7 @@ MODE_READS = ("configured_mode", "effective_mode", "is_hosted_mode", "is_hybrid_
 MODE_FUNCTION = "deployment_for"
 # The services that still read the deployment's mode.
 # An entry that stops reading it fails the check until it is removed, so the list only shrinks.
-SERVICE_MODE_READ_BASELINE = ("gateway/services/provider_kwargs.py",)
+SERVICE_MODE_READ_BASELINE: tuple[str, ...] = ()
 
 
 def _mode_reads(tree: ast.Module) -> list[tuple[int, str]]:
@@ -1043,7 +1040,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/provider_health_service.py",
     "gateway/services/provider_kwargs.py",
     "gateway/services/provider_metadata_service.py",
-    "gateway/services/provider_store_service.py",
     "gateway/services/runtime_settings_service.py",
     "gateway/services/sandbox_backend.py",
     "gateway/services/search_backend.py",
@@ -1432,6 +1428,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/services/workspace_scope.py",
         ),
     },
+    "gateway.models.api_keys.APIKeyFederationRule": {
+        "repository": "gateway/repositories/api_keys/federation_rule_repository.py",
+        "baseline": (),
+    },
     "gateway.models.budgets.Budget": {
         "repository": "gateway/repositories/budgets/budget_repository.py",
         "baseline": (
@@ -1592,6 +1592,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/tenancy/org_provider_key_repository.py",
         "baseline": ("gateway/services/tenancy/org_provider_key_service.py",),
     },
+    "gateway.models.providers.ConfiguredProviderImport": {
+        "repository": "gateway/repositories/providers/hosted_provider_repository.py",
+        "baseline": (),
+    },
     "gateway.models.providers.HostedProvider": {
         "repository": "gateway/repositories/providers/hosted_provider_repository.py",
         "baseline": (),
@@ -1609,8 +1613,24 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         ),
     },
     "gateway.models.providers.ProviderCredential": {
-        "repository": None,
-        "baseline": ("gateway/services/provider_store_service.py",),
+        "repository": "gateway/repositories/providers/hosted_provider_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.health_checks.HealthCheckRecovery": {
+        "repository": "gateway/repositories/health_checks/health_check_recovery_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.health_checks.HealthCheckResult": {
+        "repository": "gateway/repositories/health_checks/health_check_result_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.health_checks.HealthCheckRun": {
+        "repository": "gateway/repositories/health_checks/health_check_run_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.health_checks.HealthCheckSettings": {
+        "repository": "gateway/repositories/health_checks/health_check_settings_repository.py",
+        "baseline": (),
     },
     "gateway.models.providers.ProviderEndpoint": {
         "repository": "gateway/repositories/providers/provider_endpoint_repository.py",

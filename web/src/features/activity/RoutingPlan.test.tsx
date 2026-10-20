@@ -73,6 +73,18 @@ describe("RoutingPlan", () => {
     expect(within(rows[1]).queryByText("this row")).not.toBeInTheDocument()
   })
 
+  it("cuts a long target short, with the whole of it in the title", async () => {
+    const target =
+      "ft:gpt-4o-mini-2024-07-18:northwind-industries:customer-support-v12:9f8e7d6c"
+    mockApi({ groupRows: [{ ...served, model: target }, failed] })
+    renderPage(<RoutingPlan entry={failed} />)
+    await flushRouter()
+
+    await screen.findByText(`Served by attempt 2 of 2: openai:${target}`)
+    const cell = within(planTable()).getByTitle(`openai:${target}`)
+    expect(cell).toHaveClass("truncate")
+  })
+
   it("says the request ended in an error when no candidate served", async () => {
     const terminal = entry({
       ...served,

@@ -41,6 +41,8 @@ class BuiltinProvider(AnyFetch):
         tier="production",
         max_urls_per_call=1,
         renders_javascript=False,
+        # The host's fetcher follows redirects itself, one hop at a time.
+        reports_final_url=True,
         # otari's fetcher extracts the readable part of a page as Markdown.
         formats=["markdown"],
         options=[],

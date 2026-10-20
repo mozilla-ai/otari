@@ -28,6 +28,7 @@ from gateway.models.tools import (
 from gateway.services.pricing_service import gateway_tool_pricing_key
 from gateway.services.tools import ResolvedFetch, ResolvedSearch, resolve_fetch, resolve_search
 from gateway.services.tools._web_search import _resolve
+from gateway.types.tool_charges import ORGANIZATION_KEY_LABEL_PREFIX
 
 _ORG = WebToolCredentialSource.ORG
 _HYBRID = WebToolCredentialSource.HYBRID
@@ -317,6 +318,16 @@ def test_the_search_order(case: _SearchCase) -> None:
     assert {key: getattr(resolved, key) for key in case.expected} == case.expected
     if case.options is not None:
         assert dict(resolved.options) == case.options
+
+
+def test_an_organization_keys_label_carries_the_prefix_pricing_reads() -> None:
+    """Pricing keeps the organization's own overrides for an ``org:<provider>`` call, so the label must say so."""
+    policy = _policy(credential=WebSearchCredential(provider="exa", source=_ORG, api_key="exa-org-key"))
+    resolved = resolve_search(GatewayConfig(search_tools={"test": _FAKE}), policy, requested=None, request_options=None)
+
+    assert resolved is not None
+    assert resolved.label is not None
+    assert resolved.label.startswith(ORGANIZATION_KEY_LABEL_PREFIX)
 
 
 def test_the_fallback_rate_keys_are_the_pricing_services_keys_for_the_tools() -> None:

@@ -51,6 +51,11 @@ def _load_keys() -> list[str]:
     return [key for key in re.split(r"[\s,]+", raw.strip()) if key]
 
 
+def configured_secret_keys() -> list[str]:
+    """The configured ``OTARI_SECRET_KEY`` keys, the one new material is made with first. Empty when unset."""
+    return _load_keys()
+
+
 def shares_secret_key(value: str) -> bool:
     """Whether ``value`` is one of the configured ``OTARI_SECRET_KEY`` keys."""
     return value in _load_keys()

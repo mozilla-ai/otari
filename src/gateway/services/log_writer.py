@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Protocol
 
 from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, create_log_session
+from gateway.core.metered_pricing import billable_usage
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter, Gauge, Histogram
 from gateway.models.money import to_usd_or_none
@@ -297,6 +298,13 @@ class TracingLogWriter:
 
 
 def _llm_call(log: UsageLog) -> LlmCall:
+    tokens = billable_usage(
+        input_tokens=log.prompt_tokens or 0,
+        output_tokens=log.completion_tokens or 0,
+        cache_read_tokens=log.cache_read_tokens or 0,
+        cache_write_tokens=log.cache_write_tokens or 0,
+        cache_tokens_included=bool(log.cache_tokens_in_prompt),
+    )
     return LlmCall(
         attempt_id=log.id,
         ended=log.timestamp,
@@ -305,9 +313,13 @@ def _llm_call(log: UsageLog) -> LlmCall:
         status_code=log.status_code,
         model=log.model,
         provider=log.provider,
-        input_tokens=log.prompt_tokens,
+        # The whole prompt, cached tokens included, whichever way the provider counted them.
+        input_tokens=None if log.prompt_tokens is None else tokens.total_input_tokens,
         output_tokens=log.completion_tokens,
         cost=log.cost if isinstance(log.cost, Decimal) else None,
+        cache_read_tokens=None if log.cache_read_tokens is None else tokens.cache_read_tokens,
+        cache_write_tokens=None if log.cache_write_tokens is None else tokens.cache_write_tokens,
+        reasoning_tokens=log.reasoning_tokens,
         policy_name=log.policy_name,
         selection_reason=log.selection_reason,
         attempt_position=log.attempt_position,

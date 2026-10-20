@@ -80,9 +80,9 @@ export function HostedProviderModelsPanel({
 }) {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0])
-  const models = useHostedModels(provider.provider, page, pageSize)
-  const update = useUpdateHostedModel(provider.provider)
-  const refresh = useRefreshHostedModels(provider.provider)
+  const models = useHostedModels(provider.name, page, pageSize)
+  const update = useUpdateHostedModel(provider.name)
+  const refresh = useRefreshHostedModels(provider.name)
 
   const [isAdding, setIsAdding] = useState(false)
   const [addOpenCount, setAddOpenCount] = useState(0)
@@ -178,7 +178,7 @@ export function HostedProviderModelsPanel({
     <div className="flex flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 flex-col">
-          <h3 className="text-title">Models on {provider.provider}</h3>
+          <h3 className="text-title">Models on {provider.name}</h3>
           {provider.source === "config" ? (
             <p className="text-caption">
               This provider is defined in config.yml: change its key, endpoint
@@ -233,7 +233,7 @@ export function HostedProviderModelsPanel({
         <>
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
-              ariaLabel={`Models on ${provider.provider}`}
+              ariaLabel={`Models on ${provider.name}`}
               columns={columns}
               rows={rows}
               getRowKey={(row) => row.id}
@@ -251,7 +251,7 @@ export function HostedProviderModelsPanel({
               setPage(0)
             }}
             isFetching={models.isFetching}
-            label={`models on ${provider.provider}`}
+            label={`models on ${provider.name}`}
           />
         </>
       )}

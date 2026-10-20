@@ -235,8 +235,6 @@ the hook evaluates in process and never calls this route.
 
 Usage rows, the usage log writer, OTLP ingest and coding-agent telemetry.
 
-It also owns the route helper `api/routes/_billing_schemas.py`.
-
 ### traces
 
 Agent traces: one agent session, its turns, and the spans inside them (each
@@ -281,6 +279,19 @@ stored rules in `config.rate_limits`, and the request path reads that list on
 every request, so this domain holds no enforcement. Counting stays in
 `gateway/rate_limit.py`, over the rate-limit store port. A config.yml rule is
 listed and never edited here.
+
+Built in the target shape from the start.
+
+### health-checks
+
+The scheduled checks an operator turns on from the Health page: every model the
+deployment's hosted providers serve is sent one small completion, and what
+each answered is kept for 48 hours and folded into one line per provider. A
+probe is a side call on the hosted provider's own credential, so it writes no
+usage row and holds no budget. The models come from the providers domain's
+serveable roster, never from the price list, and switching failing models off
+goes through the providers domain too. An outage that ends is kept for 90 days. Every replica
+polls, and the conditional update on the settings row decides which one runs.
 
 Built in the target shape from the start.
 

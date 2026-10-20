@@ -33,7 +33,14 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
-from .conftest import build_test_client
+from .conftest import build_test_client, shared_test_config
+
+
+@pytest.fixture(scope="module")
+def test_config(postgres_url: str) -> GatewayConfig:
+    """The shared configuration declaring no provider, so nothing configured shadows a hosted one."""
+    return shared_test_config(postgres_url, {})
+
 
 HOSTED_KEY = "sk-live-hosted-1234"
 MODEL = "openai:gpt-4o"

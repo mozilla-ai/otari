@@ -13,11 +13,10 @@ import {
   toStoredRate,
   unitRateLabel,
 } from "@/features/models/pricingUnit"
-import { formatNumber } from "@/shared/helpers/format"
 
-// Per-1M rates entered by an operator to reprice imported usage rows. Input and
-// output are required; the cache rates are optional (blank folds those tokens
-// into the fresh-input charge, matching how unset cache pricing behaves).
+// Per-1M rates an operator enters to price a model. Input and output are
+// required; the cache rates are optional (blank folds those tokens into the
+// fresh-input charge, matching how unset cache pricing behaves).
 // `unit` is set only by a dialog that offers the choice, and a rate for
 // requests or images arrives already converted to its per-million value.
 export interface ManualRates {
@@ -66,8 +65,6 @@ function parseRate(value: string): number | null {
 export interface SetPriceDialogProps {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
-  /** How many rows the price will be applied to, for the dialog copy. */
-  targetCount?: number
   /**
    * Saves the rates. Awaited, and a rejection is reported inside this dialog:
    * the pending and error state live here, below the caller's key, so a refused
@@ -82,8 +79,8 @@ export interface SetPriceDialogProps {
    * (actions.md). Defaults to "Set price".
    */
   submitLabel?: string
-  /** Body copy explaining what the rates apply to; a sensible usage default is used when omitted. */
-  description?: (count: number) => string
+  /** Body copy explaining what the rates apply to. */
+  description?: string
   /**
    * Also collect the model key the rates apply to, for pricing a model that is
    * not in the catalog (a provider without model discovery). The trimmed key
@@ -96,29 +93,19 @@ export interface SetPriceDialogProps {
    * `collectModelKey`.
    */
   initialModelKey?: string
-  /**
-   * Offer the unit the price is per (tokens, requests, images). Only for a
-   * model's own price: repricing imported rows recomputes from each row's token
-   * counts, so a unit there would mean nothing.
-   */
+  /** Offer the unit the price is per (tokens, requests, images). */
   chooseUnit?: boolean
   /** The unit selected when the dialog opens. Only read with `chooseUnit`. */
   initialUnit?: PricingUnit
 }
 
-const defaultDescription = (count: number): string =>
-  `Recompute cost for ${formatNumber(count)} imported ${
-    count === 1 ? "row" : "rows"
-  } from each row's own token counts at these per-1M rates. Enforced gateway rows are never affected.`
-
 export function SetPriceDialog({
   isOpen,
   onOpenChange,
-  targetCount = 0,
   onSubmit,
   submitLabel = "Set price",
   title = "Set price",
-  description = defaultDescription,
+  description,
   collectModelKey = false,
   initialModelKey = "",
   chooseUnit = false,
@@ -214,7 +201,7 @@ export function SetPriceDialog({
       onOpenChange={onOpenChange}
       size="lg"
       title={title}
-      description={description(targetCount)}
+      description={description}
       submitLabel={submitLabel}
       onSubmit={submit}
       isPending={isSaving}

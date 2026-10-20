@@ -26,7 +26,7 @@ from openai.types.responses import ResponseCompletedEvent, ResponseUsage
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 from gateway.api.routes import chat, messages, responses
-from gateway.api.routes._platform import SettledCost
+from gateway.schemas.inference import SettledCost
 
 _SETTLEMENT = SettledCost(cost_usd="0.012345", pricing_source="managed")
 
