@@ -16,7 +16,7 @@ utility.
 **Three animations run indefinitely, as two exceptions.** The first is two
 animations on the same surface: the arc sweeping the first-run sheet's own
 border (`Dialog`'s `isScanning`) and the orb in the listening panel pinned above
-its footer. They are the shape of the exception rather than licence to add
+its footer. They are the shape of the exception rather than license to add
 more, and what makes them one exception rather than two is that neither
 outlives the wait. Both run
 only while the product is watching for a request that has not arrived, both stop
@@ -113,7 +113,7 @@ Two ways a small visual keeps a large target:
   (`before:-inset-y-2.5`), absolutely positioned so the row does not move.
 
 **One control is knowingly under the floor**, and it is the shape of the exception
-rather than a licence to add more. `DismissChip`'s remove button is 24px, because
+rather than a license to add more. `DismissChip`'s remove button is 24px, because
 neither device above reaches it: its row wraps at an 8px gap, so a `before:` bleed
 would overlap the row above and a press near the seam would dismiss the neighboring
 filter, and a real 44px target grows the filter area on three pages. #947 carries

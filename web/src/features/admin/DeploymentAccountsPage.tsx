@@ -154,7 +154,7 @@ export function DeploymentAccountsPage() {
         cell: (account) => (
           <span className="flex items-center gap-2 text-mono-caption text-muted">
             <Dot
-              pulse
+              pulse={account.is_active}
               className={account.is_active ? "bg-success" : "bg-danger"}
             />
             {account.is_active ? "ACTIVE" : "DEACTIVATED"}

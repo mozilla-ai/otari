@@ -406,7 +406,7 @@ export function OrganizationProvidersPage() {
           ) : null}
           {row.archived_at ? (
             <span className="flex items-center gap-2 text-mono-caption text-subtle">
-              <Dot pulse className="bg-text-subtle" />
+              <Dot className="bg-text-subtle" />
               ARCHIVED
             </span>
           ) : null}

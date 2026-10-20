@@ -34,7 +34,7 @@ function* walk(dir: string): Generator<string> {
 /**
  * `isDanger` on a row action marks the ARMED state and nothing else.
  *
- * Six sites had it at rest on the first pass, which is what a colour with one
+ * Six sites had it at rest on the first pass, which is what a color with one
  * job looks like when it is used as a category instead: Remove was red before
  * anybody touched it, so by the time the ink meant "this click commits" the
  * reader had stopped seeing it. An action whose confirmation is a dialog stays
@@ -85,10 +85,10 @@ describe("row actions", () => {
 
 describe("status dots", () => {
   it("never take a surface-ramp value", () => {
-    // A dot's colour is in its class, which the formatter wraps onto its own
-    // line once the element carries `pulse`, and it is sometimes assembled a
-    // few lines above as a `dot:` field. So both are searched: the whole
-    // element up to its `/>`, and the property that feeds it.
+    // A dot's color is in its class, which can sit on any line of a wrapped
+    // element, and it is sometimes assembled a few lines above as a `dot:`
+    // field. So both are searched: the whole element up to its `/>`, and the
+    // property that feeds it.
     const offenders: string[] = []
     for (const file of walk(SRC)) {
       const source = readFileSync(file, "utf8")

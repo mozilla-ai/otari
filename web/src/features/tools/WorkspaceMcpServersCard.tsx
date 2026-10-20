@@ -211,7 +211,7 @@ export function WorkspaceMcpServersCard({
       cell: (row) => (
         <span className="flex items-center gap-2 text-mono-caption text-muted">
           <Dot
-            pulse
+            pulse={row.enabled}
             className={row.enabled ? "bg-success" : "bg-text-subtle"}
           />
           {row.enabled ? "ENABLED" : "DISABLED"}
