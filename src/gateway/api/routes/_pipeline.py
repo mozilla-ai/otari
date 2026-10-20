@@ -360,8 +360,6 @@ from gateway.services.tools import (
     tools_to_price,
     unpriced_tool_detail,
     validate_web_declarations,
-    web_search_configured,
-    web_search_intercept_enabled,
 )
 from gateway.services.traces import RequestTrace, SessionRef, TurnFacts, harness_of, is_subagent, resolve_session
 from gateway.services.upstream_redaction import redact_upstream_message
@@ -3458,43 +3456,6 @@ class ToolContext:
         )
 
     @property
-    def max_web_search_uses(self) -> int | None:
-        """The web-search use cap, when the caller supplied one.
-
-        Not gated on :meth:`native_tools`: the cap bounds what the request is billed
-        for, so it is honored on every declaration shape and in every wire format.
-        Only the *refusal* is format-specific, an Anthropic
-        ``max_uses_exceeded`` result block where the caller can read one and a plain
-        tool error everywhere else.
-
-        ``0`` is a cap of zero searches, not the absence of one. Reading it as
-        "uncapped" would answer a spend limit with unlimited spend, which is the one
-        direction this must not fail; a caller who meant "do not search" is better
-        served by every search being refused than by a bill.
-
-        Invalid values are rejected rather than treated as uncapped, so a malformed
-        spend control cannot fail open. Rejection belongs to ``prepare_gateway_tools``,
-        which is the one place that builds a ``ToolContext`` and the only one holding
-        the ``adapter`` that knows the caller's error envelope. This property is a
-        plain read of a value already validated there; the ``ValueError`` it would
-        raise on an unvalidated entry is a programming error, not a request one.
-        """
-        return read_web_search_max_uses(self.web_search_tool_entry)
-
-    @property
-    def intercepts_web_search(self) -> bool:
-        """Whether this deployment claims the provider-named web-search keywords.
-
-        The same two conditions :func:`prepare_gateway_tools` applies before it
-        extracts one: the opt-in, *and* a backend to intercept to. Both matter to a
-        caller of this property, because it is also the precondition for a
-        gateway-minted server-tool block existing at all: with the toggle on but no
-        backend, the keyword was forwarded and any block in the transcript came from
-        the provider that ran the search (see ``routes/messages.py``).
-        """
-        return web_search_intercept_enabled(self.config) and web_search_configured(self.config)
-
-    @property
     def use_web_search(self) -> bool:
         return self.web.search_tool_entry is not None
 
@@ -3571,7 +3532,11 @@ class SharedToolUse:
 
 
 def _tool_use_caps(search_entry: dict[str, Any] | None, fetch_entry: dict[str, Any] | None) -> dict[str, int]:
-    """The ``max_uses`` caps the caller's declarations set, by tool name."""
+    """The ``max_uses`` caps the caller's declarations set, by tool name.
+
+    A cap of ``0`` refuses every call; reading it as uncapped would answer a spend
+    limit with unlimited spend.
+    """
     caps = (
         (WEB_SEARCH_TOOL_NAME, read_web_search_max_uses(search_entry)),
         (WEB_FETCH_TOOL_NAME, read_web_fetch_max_uses(fetch_entry)),
