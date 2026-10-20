@@ -8,7 +8,7 @@ from gateway.services.health_checks._alerts import (
     diff_alerts,
     render_health_alert,
 )
-from gateway.services.health_checks._probe import ProbeOutcome, ProbeTarget
+from gateway.services.health_checks._probe import HealthCheckOffering, ProbeOutcome
 from gateway.services.health_checks._summary import FailureStreak
 
 _AT = datetime(2026, 10, 16, 9, 1, tzinfo=UTC)
@@ -19,7 +19,7 @@ def _outcome(
 ) -> ProbeOutcome:
     provider = selector.partition(":")[0]
     return ProbeOutcome(
-        ProbeTarget(selector, provider, False, True, provider, selector.partition(":")[2]),
+        HealthCheckOffering(selector, provider, False, True, provider, selector.partition(":")[2]),
         status,
         status_code,
         error,

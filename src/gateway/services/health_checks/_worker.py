@@ -7,7 +7,8 @@ from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.services.health_checks._offerings import list_hosted_offerings
-from gateway.services.health_checks._service import HealthCheckOffering, HealthCheckService
+from gateway.services.health_checks._probe import HealthCheckOffering
+from gateway.services.health_checks._service import HealthCheckService
 from gateway.services.providers import HostedProviderService
 
 POLL_SECONDS = 60.0
