@@ -4,7 +4,7 @@
 ``config.yml`` instance does; a model the roster switches off is still refused.
 
 Revision ID: d1f3a5c7e9b2
-Revises: c4e6a8b0d2f4
+Revises: a8c2e4f6b0d1
 Create Date: 2026-10-20
 """
 
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "d1f3a5c7e9b2"
-down_revision: str | Sequence[str] | None = "c4e6a8b0d2f4"
+down_revision: str | Sequence[str] | None = "a8c2e4f6b0d1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
