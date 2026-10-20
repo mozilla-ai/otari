@@ -339,14 +339,19 @@ def test_missing_pricing_rejection_row_carries_the_request_tags(strict_pricing_c
 # --------------------------------------------------------------------------- #
 
 # The fixture's one search instance is the in-loop default, so an in-loop search
-# runs on it and settles under its own row first, then ``otari:web_search``.
-_SEARCH_INSTANCE_ROW = "fake:fake-search"
+# runs on it and settles under its own search price first, then ``otari:web_search``.
+_SEARCH_INSTANCE = "fake-search"
 
 
-def _price(client: TestClient, model_key: str) -> None:
+def _price(client: TestClient, model_key: str, *, kind: str = "model") -> None:
     resp = client.post(
         f"{API_ROOT}/pricing",
-        json={"model_key": model_key, "input_price_per_million": 10_000.0, "output_price_per_million": 0.0},
+        json={
+            "kind": kind,
+            "model_key": model_key,
+            "input_price_per_million": 10_000.0,
+            "output_price_per_million": 0.0,
+        },
         headers=_MASTER_HEADER,
     )
     assert resp.status_code in {200, 201}, resp.text
@@ -383,14 +388,14 @@ def _in_loop(client: TestClient, tool: str, provider: AsyncMock) -> Any:
 
 
 @pytest.mark.parametrize(
-    ("tool", "row"),
-    [("otari_web_search", _SEARCH_INSTANCE_ROW), ("otari_web_fetch", "builtin:builtin_fetch")],
+    ("tool", "instance", "kind"),
+    [("otari_web_search", _SEARCH_INSTANCE, "search"), ("otari_web_fetch", "builtin_fetch", "fetch")],
 )
 def test_an_in_loop_tool_priced_only_under_its_instances_row_is_served(
-    strict_pricing_client: TestClient, tool: str, row: str
+    strict_pricing_client: TestClient, tool: str, instance: str, kind: str
 ) -> None:
     """The instance's row prices its calls at settlement, so the check at admission lets them through."""
-    _price(strict_pricing_client, row)
+    _price(strict_pricing_client, instance, kind=kind)
     provider = AsyncMock(side_effect=RuntimeError("provider down"))
 
     resp = _in_loop(strict_pricing_client, tool, provider)

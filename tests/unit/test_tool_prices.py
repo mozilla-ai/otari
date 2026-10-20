@@ -19,12 +19,17 @@ from gateway.services.tools import (
     unpriced_tool_detail,
 )
 from gateway.services.web_retrieval_policy import DomainPolicy
+from gateway.types.tool_charges import instance_rate_key
 
 _INSTANCE = "fake-search"
 _FAKE_SEARCH = GatewayConfig(search_tools={_INSTANCE: {"provider": "fake"}})
-_SEARCH_ROWS = (f"fake:{_INSTANCE}", "otari:web_search")
+_SEARCH_ROWS = (instance_rate_key("search", _INSTANCE, "fake"), "otari:web_search")
 _SEARCH_ON_ITS_OWN_ROW = PricedTool(WEB_SEARCH_TOOL_NAME, None, ("otari:web_search",))
-_BUILTIN_FETCH = PricedTool(WEB_FETCH_TOOL_NAME, "builtin:builtin_fetch", ("builtin:builtin_fetch", "otari:web_fetch"))
+_BUILTIN_FETCH = PricedTool(
+    WEB_FETCH_TOOL_NAME,
+    "builtin:builtin_fetch",
+    (instance_rate_key("fetch", "builtin_fetch", "builtin"), "otari:web_fetch"),
+)
 _CODE = PricedTool("code_execution", None, ("otari:code_execution",))
 
 
@@ -96,7 +101,7 @@ def test_the_deployments_search_and_fetch_are_checked_as_a_call_with_no_workspac
         PricedTool(WEB_SEARCH_TOOL_NAME, f"fake:{_INSTANCE}", _SEARCH_ROWS),
         PricedTool(WEB_FETCH_TOOL_NAME, fetch.label, fetch.rate_keys),
     ]
-    assert fetch.rate_keys == ("fake:fake-fetch", "otari:web_fetch")
+    assert fetch.rate_keys == (instance_rate_key("fetch", "fake-fetch", "fake"), "otari:web_fetch")
 
 
 def test_a_search_on_the_legacy_settings_is_checked_on_its_tools_own_row() -> None:

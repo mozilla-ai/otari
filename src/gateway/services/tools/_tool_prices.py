@@ -17,7 +17,7 @@ from gateway.services.tools._registry import BUILTIN_TOOLS
 from gateway.services.tools._web_admission import AdmittedWebTools
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 from gateway.services.tools._web_search import InLoopSearch, resolve_fetch, resolve_in_loop_search
-from gateway.types.tool_charges import gateway_tool_pricing_key
+from gateway.types.tool_charges import RateKey, gateway_tool_pricing_key
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,7 @@ class PricedTool:
 
     name: str
     label: str | None
-    rate_keys: tuple[str, ...]
+    rate_keys: tuple[RateKey, ...]
 
 
 def _on_its_own_row(name: str) -> PricedTool:
