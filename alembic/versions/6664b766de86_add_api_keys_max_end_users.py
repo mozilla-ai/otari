@@ -5,7 +5,7 @@ request that would create one more is refused. NULL, every existing key, is no
 cap.
 
 Revision ID: 6664b766de86
-Revises: d8b4e2f6a1c3
+Revises: e3a5c7f9b1d4
 Create Date: 2026-10-17 00:00:00.000000
 
 """
@@ -17,7 +17,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "6664b766de86"
-down_revision: str | Sequence[str] | None = "d8b4e2f6a1c3"
+down_revision: str | Sequence[str] | None = "e3a5c7f9b1d4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
