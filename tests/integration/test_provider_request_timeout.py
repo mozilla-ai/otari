@@ -143,16 +143,8 @@ def test_streaming_call_is_left_to_the_provider_default(
 
 
 @pytest.fixture
-def client_with_short_timeout(postgres_url: str) -> Generator[TestClient]:
-    yield from build_test_client(
-        GatewayConfig(
-            database_url=postgres_url,
-            master_key="test-master-key",
-            auto_migrate=False,
-            require_pricing=False,
-            provider_request_timeout_seconds=42,
-        )
-    )
+def client_with_short_timeout(test_config: GatewayConfig) -> Generator[TestClient]:
+    yield from build_test_client(test_config.model_copy(update={"provider_request_timeout_seconds": 42}))
 
 
 def test_configured_timeout_is_honored(client_with_short_timeout: TestClient) -> None:
