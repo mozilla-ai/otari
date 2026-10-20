@@ -171,14 +171,19 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 
 ## Docs
 `docs/` is the published documentation, and [docs/index.md](docs/index.md) is its map,
-grouped by reader: start here, operators, integrators, platform builders, contributors.
+grouped by the [Diátaxis](https://diataxis.fr) kind of each page: getting started (the
+tutorial), how-to guides, integrations (how-to guides for one client or framework),
+reference, and learn (explanation). Write a page as one kind, and put a section of another
+kind on the page of that kind rather than beside it.
 Read the page covering the area you are changing before you change it, and update that
 page in the same PR when behavior moves. Nothing fails when a docs page goes stale,
 unlike the artifacts above, so a reader finds the drift rather than CI.
 
 The GitBook site publishes the pages [docs/SUMMARY.md](docs/SUMMARY.md) lists, on each
 release (`otari-docs.yml`, see [RELEASE.md](RELEASE.md)). A new page under `docs/` therefore owes
-a `SUMMARY.md` entry, and `tests/unit/test_gitbook_site.py` fails until it has one. A page for
+a `SUMMARY.md` entry, and `tests/unit/test_gitbook_site.py` fails until it has one. GitBook builds a
+page's URL from its `SUMMARY.md` group and file name, so moving a page to another group or
+renaming its file changes its URL: add the old path to `redirects:` in `.gitbook.yaml`. A page for
 contributors rather than users belongs outside `docs/`, as `ARCHITECTURE.md` and `DOMAINS.md` do.
 
 Some pages bind code rather than describe it:
