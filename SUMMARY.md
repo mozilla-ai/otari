@@ -17,7 +17,9 @@
 * [Models](models.md)
 * [Provider endpoints](provider-endpoints.md)
 * [Routing policies](routing.md)
+* [Health checks](health-checks.md)
 * [OpenAI provider guide](providers/openai.md)
+* [Gemini provider guide](providers/gemini.md)
 
 ## For integrators
 
@@ -38,6 +40,7 @@
   * [Feedback](api-endpoints/feedback.md)
   * [Files](api-endpoints/files.md)
   * [Health](api-endpoints/health.md)
+  * [Health checks](api-endpoints/health-checks.md)
   * [Hooks](api-endpoints/hooks.md)
   * [Hosted providers](api-endpoints/hosted-providers.md)
   * [Images](api-endpoints/images.md)

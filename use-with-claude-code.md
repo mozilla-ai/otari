@@ -83,6 +83,36 @@ key can split its cost by agent, run or requester. Percent-encode a `,` or `=`
 inside a value. Tags are recorded in standalone mode only. See
 [Request tags](api-reference.md#request-tags) for the format and limits.
 
+A headless run that should read as one session of its own sends a run id too,
+which the dashboard's Sessions list then shows and searches by:
+
+```bash
+export ANTHROPIC_CUSTOM_HEADERS=$'Otari-Conversation-Id: bug-fix-1234\nOtari-Tags: agent=bug-fix,run=1234'
+```
+
+It takes the place of Claude Code's own session id for grouping. See
+[Sessions from your own agent](traces.md#sessions-from-your-own-agent).
+
+## Budgets
+
+A request a budget refuses answers `403` with `Otari-Error-Code: budget_exceeded`.
+Claude Code prefixes every 403 with "Failed to authenticate", so a spent budget
+reads:
+
+```text
+Failed to authenticate. API Error: 403 User 'alice' has exceeded budget limit
+```
+
+The text after the prefix is the reason; the key itself is fine. Claude Code
+does not retry it, and a `Retry-After` header says when the budget's window
+resets, where it does.
+
+Otari holds a request's worst case against the budget before it runs, so a call
+can be refused while some budget is left. Claude Code asks for up to 32,000
+output tokens on a model id it does not know, which is a large hold on an
+expensive model; set `CLAUDE_CODE_MAX_OUTPUT_TOKENS` lower when budgets are
+small.
+
 ## Choosing a model
 
 Otari can translate Messages requests to non-Anthropic providers. Set Claude
@@ -197,7 +227,7 @@ travels in a header, and it must point at a standalone gateway: a hybrid one
 does not serve the route, so every spawn would fall back. The plugin is
 active from then on, in that session and
 every one after. The
-[plugin's README](https://github.com/mozilla-ai/otari/blob/v0.29.0/plugins/otari-router/README.md) has the options, the
+[plugin's README](https://github.com/mozilla-ai/otari/blob/v0.30.0/plugins/otari-router/README.md) has the options, the
 scopes, how to update, and how to run the checkout's copy while developing.
 
 The plugin hooks `agent.spawn`, sends the request above, and passes the
