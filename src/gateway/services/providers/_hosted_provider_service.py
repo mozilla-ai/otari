@@ -392,7 +392,7 @@ class HostedProviderService:
             await self._provider_or_raise(provider)
             if priced:
                 try:
-                    [model] = await self.models.create_many(provider, [name], enabled={name: True})
+                    [model] = await self.models.create_many(provider, [name])
                 except HostedModelConflict as conflict:
                     raise HostedModelAlreadyOfferedError(provider, conflict.model) from conflict
                 await self.offers.write_rate(provider, name, request)
@@ -408,6 +408,9 @@ class HostedProviderService:
     ) -> HostedModelPublic:
         """Reprice one offered model, toggle whether it is served, or both.
 
+        A rate given for a model held off for want of one serves it, unless
+        the same request switches it off.
+
         Raises:
             HostedProviderNotFoundError: no such provider.
             HostedModelNotFoundError: no such model on that provider.
@@ -419,8 +422,10 @@ class HostedProviderService:
             priced = request.input_price_per_million is not None and request.output_price_per_million is not None
             if priced:
                 await self.offers.write_rate(provider, model.model, request)
+                self.offers.serve_once_priced(model)
             if request.enabled is not None:
-                model.enabled = request.enabled
+                await self.offers.switch_by_operator(provider, model, request.enabled)
+            if priced or request.enabled is not None:
                 await self.models.save(model)
         rates = await self.offers.current_rates(provider, [model], implementation=source.implementation)
         return HostedModelPublic.from_row(model, rates=rates.get(model.model))
@@ -432,7 +437,9 @@ class HostedProviderService:
         over. Returns how many models were switched off.
         """
         async with self.uow:
-            return sum([await self.models.switch_off(provider, names) for provider, names in models.items()])
+            return sum(
+                [await self.offers.switch_off_by_operator(provider, names) for provider, names in models.items()]
+            )
 
     async def remove_model(self, provider: str, model_id: uuid.UUID) -> None:
         """Stop offering a model. Its pricing history stays.
