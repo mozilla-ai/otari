@@ -1,73 +1,20 @@
 # Access control
 
 Otari separates deployment administration, human identity, workload credentials,
-and spend limits. This page explains how those pieces relate. The generated
-[OpenAPI specification](public/openapi.json) is the source of truth for endpoint
-schemas.
+and spend limits. This page explains how those pieces relate:
 
-## Deployment-wide account administration
+| Concept | What it is | Where it is managed |
+| --- | --- | --- |
+| [Organization](#organizations-and-workspaces) | The tenant boundary | Organization pages, `/api/v1/organizations` |
+| [Workspace](#organizations-and-workspaces) | A team's or application's resources inside an organization | Workspaces page |
+| [User](#users-and-identities) | Who a request's spend is attributed to | `/api/v1/users` |
+| [Identity](#dashboard-sessions-and-identity) | Who signs in to the dashboard | Sign-in, Account settings |
+| [API key](#api-keys) | A workload credential bound to one user and workspace | API keys page, `/api/v1/keys` |
+| [Budget](#budgets) | A spend, token or request limit over a period | Spend and budgets, `/api/v1/budgets` |
+| [Master key and operators](#deployment-wide-account-administration) | Authority over the deployment as a whole | Configuration, Accounts page |
 
-The master key controls the deployment. A dashboard session can perform
-deployment-wide operations only when its identity has operator authority.
-Organization roles do not implicitly grant access to process-wide settings or
-credentials.
-
-Use the master key through `Authorization: Bearer <master-key>` or
-`Otari-Key: <master-key>`. Applications should use scoped API keys instead.
-
-An operator manages every account on the deployment from the dashboard's
-Accounts page (`/api/v1/admin/users`): deactivate or reactivate one, grant or
-remove operator access, and send a password link. The page lists accounts one
-page at a time and searches them by name or email (`search` on the route,
-matched case-insensitively). Deactivating an account ends
-its sessions and voids its pending verification and reset links, so
-reactivating it does not bring an old link back.
-
-A password link is how an operator helps somebody who cannot sign in, and the
-only way back for a forgotten password on a deployment that sends no mail.
-Where mail is configured, the link is emailed to the account's address, as
-"Forgot your password?" does. Otherwise, or when the send fails, the operator
-is given the link to pass on. It works once, expires after
-`password_reset_expiry_hours`, and replaces any earlier reset link. Because the
-mailbox never saw a link that was passed on, a password chosen through one
-records the address as vouched for rather than proven, the same as a password
-chosen through an [invitation](#invitations) link. A link is refused for a
-deactivated account, one with no address, one that has no password and signs in
-with a provider or a passkey (its owner adds a password from Account settings
-once signed in), and, where `open_signup` is disabled, an unverified address no
-organization still has as a member or invitee. Where `open_signup` is enabled
-such an address gets a link, and choosing a password through it gives the
-account an organization and workspace of its own, as [signup](#signup) does.
-
-`PUT /api/v1/auth/password` with the master key acts on the operator's own
-account, never another one: an address sent with it is the operator's sign-in
-address, and on an unclaimed deployment it claims the deployment. It refuses an
-address another account holds, and that refusal points to the password link.
-
-## Hosted providers
-
-A hosted provider is a provider key the deployment itself owns and pays for,
-with the roster of models it offers on that key and the rate it charges for
-each. Only a deployment operator manages them: the master key, the bootstrap
-operator's session, or the session of an account granted operator access. That
-covers every route under `/api/v1/hosted-providers`, reads included. Any other
-signed-in account, whatever its role in whichever organization, gets the same
-`404` that `/api/v1/admin` gives, and an API key gets `401`. Organization owners
-and admins manage their own organization's provider keys, never these.
-
-A hosted provider is the last rung of the credential ladder: a request is
-served on it only when no provider instance the deployment configures and no
-provider key of the caller's organization covers the model.
-
-Adding a provider offers every model its key lists. A model the deployment
-price list already prices is switched on at that rate. Otherwise, where
-`default_pricing` is on, the model is seeded with its models.dev rate and
-switched on; where it is off, or models.dev does not price the model, the model
-is offered switched off until the operator prices it. Refreshing a provider's
-models moves a seeded rate nobody has changed to the current default, and
-leaves a rate the operator set alone. The API never returns a hosted provider's
-key, only its last four characters, and it masks credentials in `client_args`
-and in the base URL.
+The generated [OpenAPI specification](public/openapi.json) is the source of
+truth for endpoint schemas.
 
 ## Organizations and workspaces
 
@@ -195,203 +142,19 @@ provider.
 
 ## Service keys and end users
 
-A service key lets one application track spend per end user without sharing
-the master key or minting a key per end user. Mark a key with `is_service_key`
-on `POST` or `PATCH /api/v1/keys`; only a deployment operator can.
+A service key lets one application attribute spend to the people it serves
+without sharing the master key or minting a key per person. Requests on it name
+an **end user**, the way any client names a user, and Otari bills the request
+to that end user: a user record owned by the key's own user, created on first
+use, with a budget copied onto it from the key's settings. The key's own
+ceiling pools every end user behind it, and the key's user's rate limit and
+model allow-list still apply to all of them. Because end users belong to the
+key's user, a key can never reach another user's end users. Only a deployment
+operator can mark a key as a service key, and hybrid mode does not support
+them.
 
-A request on a service key names its end user the way any client names a user:
-the `user` field on `/v1/chat/completions`, `/v1/responses` and `/v1/search`,
-and `metadata.user_id` on `/v1/messages`. Otari then:
-
-- Bills the request to that end user, creating it on first use. An end user is
-  a user record owned by the key's user, so a key can only bill end users of
-  its own user: two services that both name `alice` get two separate end users,
-  and naming another key's user creates an end user of your own rather than
-  reaching theirs.
-- Caps each end user at a budget copied onto it when it is created: the one
-  the request names in the `Otari-End-User-Budget` header, or else the key's
-  `end_user_budget_id`. Each end user gets the full limit and its own reset
-  period. Changing the key's setting affects end users created afterwards. See
-  [Several budgets on one key](#several-budgets-on-one-key) and
-  [Managing end users](#managing-end-users).
-- Applies the per-minute limits of the end user's budget (`rpm_limit`,
-  `tpm_limit`), and any `per: user` rate limit rule, each counting every end
-  user on its own. Since the limits live on the budget, two service keys with
-  different end-user budgets give their end users different limits, and moving
-  an end user to another budget moves its limits too.
-- Checks the key's own ceiling as well, so a scoped budget on the API key pools
-  every end user behind it. The key's user's per-user budget is not checked for
-  an end user's request; use the key's ceiling as the pool.
-- Keeps the key's user's rate limit and model allow-list, and any member
-  ceiling of the key's user, in force for every end user. The rate limit is
-  shared by all of them and is checked before an end user is created.
-
-A request that names nobody, or the key's own user, bills the key's user as it
-would on any other key. Blocking the key's user stops its end users too.
-
-Each distinct `user` value creates an end user, whether or not the request is
-then admitted, and nothing else caps how many a key can create. Set a rate
-limit on a deployment that issues service keys, and send a stable id per end
-user rather than a per-session or per-request value. An id is at most 256
-characters and may otherwise be any string, `/` included, such as a base64 key
-id. The routes below name every end user with the `external_id` query
-parameter, which carries any id intact.
-
-### Several budgets on one key
-
-One key can start its end users on different budgets, for a service whose
-features each carry their own per-user limits. List the budgets the key may
-assign in `end_user_budget_ids`, and keep `end_user_budget_id` as the default
-for a request that names none:
-
-```http
-POST /api/v1/keys
-{"user_id": "mlpa", "is_service_key": true,
- "end_user_budget_ids": ["end-user-budget-ai", "end-user-budget-memories"],
- "end_user_budget_id": "end-user-budget-ai"}
-```
-
-A key with a default and no list may assign the default alone, which is how
-every key behaves until it is given a list. When both are set, the default must
-be on the list. Each entry must be a deployment budget, not an organization's.
-Deleting a budget takes it off every list, but a budget that is some key's
-default cannot be deleted until that key's default changes: without one, the
-key's new end users would start uncapped.
-
-A request then names the budget for a new end user in a header:
-
-```http
-POST /v1/chat/completions
-Otari-End-User-Budget: end-user-budget-memories
-
-{"model": "...", "user": "fxa123:memories", "messages": [...]}
-```
-
-The header applies only when the request creates the end user. An existing end
-user keeps its budget, whatever a later request names, so a request cannot undo
-a move an operator made. A budget that is not on the key's list is refused with
-403 and the code `end_user_budget_not_allowed`, even for an end user that
-already exists. The response carries `Otari-End-User-Budget` with the budget
-the end user is on, so a caller can see when it differs from the one it named.
-
-Give budgets ids of your own with `PUT /api/v1/budgets/{budget_id}`, which
-creates the budget under that id or replaces it, so the same request can run
-at every deploy. An id is up to 128 letters, digits, `.`, `_` and `-`, and
-starts with a letter or digit.
-`POST /api/v1/budgets` still generates an id, and `GET /api/v1/budgets`
-reports how many users are on each budget in `user_count`.
-
-### Declaring a service key in config
-
-A service whose keys and budgets should not depend on a provisioning script can
-declare them in config.yml instead. The two requests above become:
-
-```yaml
-budgets:
-  end-user-budget-ai: {max_budget: 0.1, reset_alignment: calendar_day, rpm_limit: 40, tpm_limit: 2000}
-  end-user-budget-memories: {max_budget: 0.05, reset_alignment: calendar_day}
-  mlpa-global: {max_budget: 100, reset_alignment: calendar_day}
-
-api_keys:
-  mlpa:
-    secret: ${MLPA_SERVICE_KEY}
-    user_id: mlpa
-    is_service_key: true
-    end_user_budget_ids: [end-user-budget-ai, end-user-budget-memories]
-    end_user_budget_id: end-user-budget-ai
-    ceiling: mlpa-global
-```
-
-`ceiling` is the key's own ceiling, the scoped budget on the API key that pools
-every end user. The service reads the same `MLPA_SERVICE_KEY` and presents it as
-its API key, so nothing has to hand a freshly minted secret from one to the
-other, and a restart or a second replica does not change it. A start writes
-the declared settings back over changes made through the API only when the
-key's entry in config.yml changed; see
-[What config.yml owns](configuration.md#what-configyml-owns).
-
-### Managing end users
-
-A service manages its own end users with its service key, addressing each one
-by the id it names it by. It needs neither the master key nor its key's id:
-
-| Request | Does |
-|---|---|
-| `GET /api/v1/end-users` | Lists the end users, oldest first |
-| `GET /api/v1/end-users?external_id=...` | Reads the end user: its budget, counters and whether it is blocked, as a list of one, or none when no end user goes by the id |
-| `PUT /api/v1/end-users?external_id=...` `{"budget_id": ...}` | Puts the end user on a budget, creating it first if it has not made a request yet (201) |
-| `PATCH /api/v1/end-users?external_id=...` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
-| `DELETE /api/v1/end-users?external_id=...` | Deletes the end user, answering `{"deleted": 1}`, or 404 |
-| `DELETE /api/v1/end-users?created_before=...` | Deletes up to `limit` (default 100, at most 1000) of the oldest end users created before that time, answering `{"deleted": n}`; repeat until `n` is 0 |
-| `GET /api/v1/end-user-budgets` | Lists the budgets on the key's list, with how many end users are on each |
-
-```http
-PATCH /api/v1/end-users?external_id=fxa123:memories
-Authorization: Bearer <service key>
-
-{"budget_id": "end-user-budget-ai"}
-```
-
-The query parameter names any end user, so use it for an id that may contain
-`/`, and URL-encode the id as any query value is (`/` as `%2F`, `+` as `%2B`).
-The id can also go in the path, `/api/v1/end-users/{external_id}`, for `GET`,
-`PUT`, `PATCH` and `DELETE`, which answer as their query forms do (the `GET`
-with the end user itself, or 404, and the `DELETE` with 204, or 404). That form suits an id without `/`: a
-proxy can merge the `//` of an id like `ab//cd`, and an HTTP client collapses
-`.` and `..` segments, so in a path such an id can reach another end user. An
-id with a `.` or `..` segment is refused there with 400.
-
-These routes take only a service key: another API key is refused with 403,
-and the master key and a dashboard session do not authenticate them. A service
-key whose own user is blocked or deleted is refused with 403 as well, since its
-end users cannot spend either; the operator's `/api/v1/keys/{key_id}/end-users`
-routes still reach them.
-`GET /api/v1/end-users` takes `skip` and `limit` (up to 1000), narrows on
-`budget_id`, `blocked` and `external_id`, and with `include_total=true` counts
-every match in the `Otari-Total-Count` header. Its list and the counts on
-`/api/v1/end-user-budgets` leave out deleted end users, and the counts include
-blocked ones, which `blocked_end_user_count` also gives on its own.
-
-Deleting an end user erases its telemetry and agent traces, as deleting any
-user does, and stops it being listed or counted. Its row stays, with what it
-has spent and used: a request that names the same id again revives it with
-those counters, on the budget it was on, so deleting an end user cannot reset
-its budget. Its usage history stays too. A service whose end users are
-short-lived, such as one id per guest session, can delete the expired ones by
-age with `created_before` (`2026-10-10T00:00:00Z`), a page per call. When
-erasure fails the call answers 5xx and deletes nothing, so it can be repeated.
-
-A budget set this way must be on the key's list: any other is refused with 403
-and `end_user_budget_not_allowed`, so a key cannot put an end user on a budget
-it was not given. Moving an end user restarts its period on the new budget and
-applies that budget's per-minute limits, but keeps its spend, tokens and
-requests so far, as moving a user through `/api/v1/users` does: an end user
-that used up one budget can be over the next one's limits until that period
-resets.
-
-End users belong to the key's user, so every service key of one user reaches
-the same end users, and a key of another user reaches none of them: an id it
-does not own answers 404, as one that does not exist does. Give each service
-its own user to keep their end users apart.
-
-A deployment operator reaches any service key's end users through the same
-routes under the key, with the master key:
-`GET`, `PUT` and `PATCH /api/v1/keys/{key_id}/end-users?external_id=...`, with
-`GET` taking the list's other parameters too, and the path form
-`/api/v1/keys/{key_id}/end-users/{external_id}`. A budget set there must be on
-that key's list too. The users API lists end users across
-keys, where each one carries `parent_user_id` (the key's user) and
-`external_id`: `GET /api/v1/users?parent_user_id=...&external_id=...` filters on
-them, and it can put an end user on any deployment budget, not only one on a
-key's list.
-
-### Where end users apply
-
-End users are supported on the endpoints above. The other endpoints
-(embeddings, files, batches and the other pass-through
-routes) treat a service key as an ordinary key, so a `user` naming someone else
-is handled by the `reject_user_mismatch` setting there. Hybrid mode resolves
-users on the platform and does not support service keys.
+For the steps, the rules and the end-user routes, see
+[Track spend per end user](end-users.md).
 
 ## Budgets
 
@@ -407,9 +170,17 @@ Two budget forms exist:
 A routing fallback to another provider must also pass that provider's budgets, as [Routing](routing.md#what-is-billed-and-what-the-caller-sees) describes.
 
 A budget caps up to three things over its period, each set independently and
-each unlimited when left unset: spend in USD (`max_budget`), total tokens
-(`token_limit`), and requests (`request_limit`). A request must have room on
-every axis the budget caps. Spend and tokens are held at an upper bound before
+each unlimited when left unset, and can also limit each user on it per minute:
+
+| Field | Limits | Over |
+| --- | --- | --- |
+| `max_budget` | Spend in USD | The budget's period |
+| `token_limit` | Total tokens | The budget's period |
+| `request_limit` | Requests | The budget's period |
+| `rpm_limit` | Requests, per user | One minute |
+| `tpm_limit` | Tokens, per user | One minute |
+
+A request must have room on every axis the budget caps. Spend and tokens are held at an upper bound before
 dispatch and reconciled to the measured figures afterwards; only the unused part
 of an over-estimate is released, and what the request measurably used stays
 charged. A request counts as one request when it is admitted. A model priced at
@@ -428,8 +199,7 @@ pass-through routes) are refused once a token cap is exhausted rather than
 reserving headroom for themselves, so a token cap can be passed by the requests
 already in flight when it runs out.
 
-A budget can also limit each user on it per minute: `rpm_limit` requests and
-`tpm_limit` tokens. These are counted in `rate_limit_store`, so with Redis they
+The per-minute limits, `rpm_limit` and `tpm_limit`, are counted in `rate_limit_store`, so with Redis they
 hold across replicas, and tokens are counted on what each request used, as
 LiteLLM counts them: a request is admitted while the user's minute is under the
 limit. They apply to a user's own budget on chat completions, messages,
@@ -498,6 +268,53 @@ Routing fallback and built-in tools can create several internal attempts, but a
 successful request remains one caller-visible request. The activity log records
 the attempt group and the model that served it.
 
+## Deployment-wide account administration
+
+The master key controls the deployment. A dashboard session can perform
+deployment-wide operations only when its identity has operator authority.
+Organization roles do not implicitly grant access to process-wide settings or
+credentials.
+
+Use the master key through `Authorization: Bearer <master-key>` or
+`Otari-Key: <master-key>`. Applications should use scoped API keys instead.
+
+An operator manages every account on the deployment from the dashboard's
+Accounts page (`/api/v1/admin/users`): deactivate or reactivate one, grant or
+remove operator access, and send a password link. The page lists accounts one
+page at a time and searches them by name or email (`search` on the route,
+matched case-insensitively). Deactivating an account ends
+its sessions and voids its pending verification and reset links, so
+reactivating it does not bring an old link back.
+
+A password link is how an operator helps somebody who cannot sign in, and the
+only way back for a forgotten password on a deployment that sends no mail.
+Where mail is configured, the link is emailed to the account's address, as
+"Forgot your password?" does. Otherwise, or when the send fails, the operator
+is given the link to pass on. It works once, expires after
+`password_reset_expiry_hours`, and replaces any earlier reset link. Because the
+mailbox never saw a link that was passed on, a password chosen through one
+records the address as vouched for rather than proven, the same as a password
+chosen through an [invitation](#invitations) link. A link is refused for a
+deactivated account, one with no address, one that has no password and signs in
+with a provider or a passkey (its owner adds a password from Account settings
+once signed in), and, where `open_signup` is disabled, an unverified address no
+organization still has as a member or invitee. Where `open_signup` is enabled
+such an address gets a link, and choosing a password through it gives the
+account an organization and workspace of its own, as [signup](#signup) does.
+
+`PUT /api/v1/auth/password` with the master key acts on the operator's own
+account, never another one: an address sent with it is the operator's sign-in
+address, and on an unclaimed deployment it claims the deployment. It refuses an
+address another account holds, and that refusal points to the password link.
+
+## Hosted providers
+
+Hosted providers, the provider keys the deployment itself owns and pays for,
+are managed only by a deployment operator, on every route under
+`/api/v1/hosted-providers`, reads included; organization owners and admins
+manage their own organization's provider keys instead. See
+[Hosted providers and BYO credentials](hosted-providers.md#who-manages-hosted-providers).
+
 ## Dashboard sessions and identity
 
 The first operator signs in with the master key. Otari exchanges it for an
@@ -533,41 +350,50 @@ customer's integration.
 
 ### Passkeys
 
-Passkeys are optional and additive to password sign-in. Set
-`public_base_url` to establish the origin and relying-party ID. Use
-`webauthn_rp_id` only when passkeys must be bound to a parent domain.
+Passkeys are optional and additive to password sign-in; a passkey never creates
+an account. A passkey is bound to a relying-party ID, a domain, which Otari takes
+from `public_base_url` unless `webauthn_rp_id` names one. Changing the
+relying-party ID makes existing passkeys unusable. The dashboard continues
+listing unusable credentials so the owner can remove them.
 
-Where an edge serves the dashboard on a different host to the gateway, set
-`webauthn_rp_id` to a domain that is a parent of both and list the dashboard
-origin in `webauthn_allowed_origins`. The ID is not derived from `ui_base_url`,
-so without this the ceremony fails in the browser and nothing is logged here
-([#1134](https://github.com/mozilla-ai/otari/issues/1134)).
+`passkeys_enabled` (`OTARI_PASSKEYS_ENABLED`) defaults to `true`. With it
+`false`, none of the passkey routes are mounted (they answer 404, not 503), no
+`passkey` sign-in method is published, the dashboard hides its passkeys page,
+and the `webauthn_*` settings are not checked at startup, so values left over
+from before are inert. Setting it is the only way to switch passkeys off while
+keeping `public_base_url`, which OAuth redirects and mail links need. Passkeys
+already registered stay in the database, and work again if the setting is
+turned back on.
 
-Changing the relying-party ID makes existing passkeys unusable. The dashboard
-continues listing unusable credentials so the owner can remove them.
+#### How to set up passkeys
 
-To turn passkeys off for a deployment, set `passkeys_enabled` to `false`
-(`OTARI_PASSKEYS_ENABLED=false`). It defaults to `true`, so a self-hosted
-gateway is unchanged. With it off, none of the passkey routes are mounted (they
-answer 404, not 503), no `passkey` sign-in method is published, the dashboard
-hides its passkeys page, and the `webauthn_*` settings are not checked at
-startup, so values left over from before are inert. Setting it is the only way
-to switch passkeys off while keeping `public_base_url`, which OAuth redirects
-and mail links need. Passkeys already registered stay in the database, and work
-again if the setting is turned back on.
+1. Set `public_base_url`, which establishes the origin and relying-party ID.
+2. Only when passkeys must be bound to a parent domain, set `webauthn_rp_id`.
+3. Where an edge serves the dashboard on a different host to the gateway, set
+   `webauthn_rp_id` to a domain that is a parent of both, and list the dashboard
+   origin in `webauthn_allowed_origins`. The ID is not derived from
+   `ui_base_url`, so without this the ceremony fails in the browser and nothing
+   is logged here ([#1134](https://github.com/mozilla-ai/otari/issues/1134)).
 
 ### OAuth sign-in (Google and GitHub)
 
-OAuth sign-in requires `public_base_url` and the provider's client ID and
-secret. Register this redirect URI with the provider:
+#### How to set up OAuth sign-in
 
-```text
-{public_base_url}/auth/{provider}/callback
-```
+1. Set `public_base_url`.
+2. Register this redirect URI with the provider:
 
-The gateway answers that path itself and redirects the browser into the
-dashboard to finish. Where an edge serves the dashboard elsewhere, set
-`ui_base_url` too; see [Configuration](configuration.md#the-interface-address).
+   ```text
+   {public_base_url}/auth/{provider}/callback
+   ```
+
+   The gateway answers that path itself and redirects the browser into the
+   dashboard to finish.
+3. Set the provider's client ID and secret (`google_client_id` and
+   `google_client_secret`, or `github_client_id` and `github_client_secret`).
+4. Where an edge serves the dashboard elsewhere, set `ui_base_url` too; see
+   [The interface address](configuration.md#the-interface-address).
+
+#### How provider accounts are linked
 
 Otari links each provider account to one Otari account by the provider's own ID for that person, not by the address. An Otari account holds at most one link for each provider, so it can link both a Google and a GitHub account. A sign-in through a link still works after the address changes at the provider. A second account at the same provider is refused, even with the same address. Otari has no way to remove a link yet, so a person whose provider account was replaced signs in with a password or a passkey instead.
 
@@ -677,20 +503,20 @@ when it is invited.
 Invitation email is limited, because it carries text an organization chose (its
 name, the inviter's name) from the deployment's own sender, and on a deployment
 where anyone can create an organization that would otherwise make it an open
-relay. In any 24 hours an organization sends at most
-`invitation_mail_limit_per_organization` invitation emails (250 by default), and
-an address receives at most `invitation_mail_limit_per_address` (5 by default)
-from every organization together, so revoking and inviting again cannot flood it.
-An invitation over a limit is still created, and its link is returned to share by
-hand, as when mail is off: the link costs the deployment nothing, and refusing
-would stop a legitimate admin partway through a bulk invite. The counts are kept
-in `rate_limit_store`, so with Redis they hold across replicas.
+relay. Over any 24 hours an organization can send only so many invitation
+emails, and an address can receive only so many from every organization
+together, so revoking and inviting again cannot flood it; the settings and their
+defaults are under [Mail](configuration.md#mail). An invitation over a limit is
+still created, and its link is returned to share by hand, as when mail is off:
+the link costs the deployment nothing, and refusing would stop a legitimate
+admin partway through a bulk invite. The counts are kept in `rate_limit_store`,
+so with Redis they hold across replicas.
 
 A link that was lost can be reissued. Reissuing gives a pending or expired
 invitation a new link, emailed or returned as above, and the old link stops
 working. Inviting an address whose invitation is still pending is refused and says
-to reissue it instead. On Members, an invited row says when its invitation has
-expired, and offers Reissue and Revoke either way.
+to reissue it instead. Members offers Reissue and Revoke on an invited row; see
+[Organization](dashboard.md#organization).
 
 The API can also add a member directly (`POST /api/v1/organizations/me/members`),
 active at once with no invitation to accept and no email. A new address added
@@ -783,13 +609,8 @@ organization without being invited one at a time. It is the second way somebody
 becomes a member, and unlike an invitation nobody decides about the individual,
 so it is fenced accordingly.
 
-A claim grants nothing on its own. Otari mints a verification token, the admin
-publishes it as a TXT record at the claimed domain's apex, and only a claim whose
-record Otari has found admits anyone:
-
-```text
-otari-domain-verification=<token>
-```
+A claim grants nothing on its own: only a claim whose verification record
+Otari has found admits anyone.
 
 Claiming is not exclusive; proving is. Several organizations may hold an unproven
 claim on one domain and the first to publish the record takes it, which is what
@@ -814,8 +635,26 @@ proof passes the deployment's TTL, and an admin renews it by verifying again fro
 the Email domains page. Nothing re-reads DNS between verifications, so that TTL is
 the window in which a transferred domain still admits people.
 
+### How to claim an email domain
+
+1. On the Email domains page, claim the domain and choose the role it grants
+   (`member` or `viewer`). Otari mints a verification token.
+2. Publish the token as a TXT record at the claimed domain's apex:
+
+   ```text
+   otari-domain-verification=<token>
+   ```
+
+3. Verify the claim from the Email domains page. Once Otari finds the record,
+   the domain is proven and starts admitting verified addresses.
+4. Verify again before the proof's TTL passes to keep the claim admitting
+   people.
+
+
 ## Related documentation
 
+- [Track spend per end user](end-users.md)
+- [Hosted providers and BYO credentials](hosted-providers.md)
 - [Admin dashboard](dashboard.md)
 - [Configuration](configuration.md)
 - [API reference](api-reference.md)

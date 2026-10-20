@@ -6,15 +6,9 @@ server rather than duplicated in the frontend.
 
 ## Deployment modes
 
-- **Standalone** shows the local management UI and serves inference from the same
-  process.
-- **Hosted** shows the multi-tenant control plane. Inference snippets point to
-  `data_plane_url`; the hosted process does not serve inference.
-- **Hybrid** shows gateway health and a link to the otari.ai control plane. It has
-  no local management UI.
-
-The dashboard reads `GET /api/v1/bootstrap` before rendering. That response controls
-the available sign-in methods and navigation surfaces, so a page that is not
+What the dashboard offers depends on the [deployment mode](modes.md#comparison).
+It reads `GET /api/v1/bootstrap` before rendering. That response controls the
+available sign-in methods and navigation surfaces, so a page that is not
 available in the current mode is not offered.
 
 ## Sign-in and secrets
@@ -48,10 +42,9 @@ member who forgot theirs, send them a password link from Accounts, which emails
 it where mail is configured and otherwise gives you the link to share (see
 [Access control](access-control.md#deployment-wide-account-administration)).
 
-The sign-in page offers the email and password form as soon as any identity holds
-a password, which can be before the operator claims the deployment: a member
-added to the roster and signed up signs in there. While both credentials still
-work, the page offers the master-key box beside the form.
+When the sign-in page offers the password form, and when it offers the
+master-key box beside it, is described in
+[Dashboard sessions and identity](access-control.md#dashboard-sessions-and-identity).
 
 Account settings also carries the name you are known by, which is not a
 credential: it is what the account menu, the organization roster and the user
@@ -87,114 +80,122 @@ created. Set `activation_guide: false` to disable the flow for the deployment.
 
 ## Navigation
 
+Exact page names and availability can change with deployment mode and installed
+extensions. The running dashboard is the source of truth.
+
 The workspace view contains day-to-day gateway operations:
 
-- Overview, Activity, and Usage
-- Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers. Routing lists each policy with its main model, its backups in order, and who it applies to. On a standalone gateway, Automatic fallback lists the models your organization used in the last 30 days with the providers their catalog ID tries in order, how many requests a backup served, and which ones have no backup. The Models guide explains the order. Create policy first asks what the policy is for (a fallback, a traffic split, a smart router, spill-over at rate limits, or a budget tier-down) and then shows only that kind's fields; the empty list offers a fallback directly. Models are chosen by model and then by provider. Each policy has its own page, opened from Edit in the list, where its main selection, fallback chain, budget tier-down and guardrails are combined, each section with its own Save. Policies from `config.yml` open there read-only. A hybrid or hosted deployment says that its policies are not where a request's attempt plan comes from.
-- Tools
-- API keys and workspace members
+| Page | What it is | Rules |
+| --- | --- | --- |
+| Overview | Your spend, traffic and recent requests, and the [setup guide](#the-setup-guide) | |
+| Activity | The per-request log | [Observability](#observability) |
+| Sessions | Recorded agent sessions | [Agent traces](traces.md) |
+| Usage | Aggregates and time series | [Observability](#observability) |
+| Playground | In-product chat and comparisons | [Playground](#playground) |
+| Models | The catalog grouped by model | [Models and Routing](#models-and-routing), [Models](models.md#the-catalog-grouped-by-model) |
+| Routing | Routing policies, aliases and Automatic fallback | [Models and Routing](#models-and-routing), [Routing](routing.md) |
+| Tools | Built-in tools, MCP servers and guardrails for the workspace | [Built-in tools](tools.md) |
+| API keys | Workspace API keys | [API keys](access-control.md#api-keys) |
+| Members | Workspace members | [Access control](access-control.md#organizations-and-workspaces) |
 
 The organization view contains tenant-wide administration:
 
-- Organization-wide usage
-- Workspaces and organization members
-- Email domains, for joining colleagues automatically
-- Spend and budgets
-- General: Providers, followed by Guardrails and Org settings.
-  Providers is the organization's own upstream credentials, the models each one
-  reaches, and what this organization pays for them: adding a key offers every
-  model the provider lists on it, each carrying a switch that decides whether
-  the runtime serves it. Each is priced by the first rung that answers, which is
-  the order a request is metered by: this organization's own rate, then the
-  deployment price list, then the community defaults. A model nothing prices is
-  offered and left unserved. Each key's row counts how many of its offered
-  models are serving, and a key serving none of them is marked, because every
-  request through it is refused until a switch is on. The star on a key makes
-  it the organization's default for its provider, and clicking a filled star
-  removes that. For a provider the deployment has no credential of its own
-  for, a workspace uses the key it set to "Always use this key", otherwise the
-  organization's default, otherwise the oldest key; a key it set to "Never use
-  this key" is passed over at every step. The deployment's own provider
-  credentials, served to every organization, are managed on Hosted providers
-  in the deployment view, or in `config.yml`.
+| Page | What it is | Rules |
+| --- | --- | --- |
+| Usage | Organization-wide usage | [Workspace-scoped spend](access-control.md#workspace-scoped-spend) |
+| Workspaces, Members | Workspaces and organization members, with invitations | [Organization](#organization) |
+| Email domains | Domains whose colleagues join automatically | [Email-domain auto-join](access-control.md#email-domain-auto-join) |
+| Spend and budgets | Budgets and the spend ceilings holding them | [Budgets](access-control.md#budgets) |
+| Providers (under General) | The organization's own provider keys, the models each one offers, and what the organization pays for them | [Organization provider keys](hosted-providers.md#organization-provider-keys), [Who is shown which models](models.md#who-is-shown-which-models) |
+| Guardrails, Org settings (under General) | Organization guardrail policy and settings | [Guardrails](guardrails.md) |
 
 The deployment view, opened from the account menu, holds what belongs to the
 gateway process rather than to any organization on it:
 
-- Settings, the running configuration.
-- Accounts, every account on the deployment.
-- Hosted providers, the keys the deployment serves inference on for a request
-  that brings no credential of its own. A request is served on one only after
-  the organization's own keys and the configured providers have not answered.
-  Adding a provider offers every model it lists on the key; each model carries a
-  serving switch and a price, set per million tokens or per 1,000 requests or
-  images, and a model nothing prices arrives switched off. Refresh models asks
-  one provider again, and Refresh and purge asks every provider and then removes
-  priced models nothing on the deployment serves, along with the model lists of
-  providers nothing configures any more, listing them before anything is
-  removed. A provider kept to one organization shows which; that restriction
-  is set through `/api/v1/hosted-providers`. A provider defined in the
-  `hosted_providers:` block of `config.yml` carries a `config.yml` badge and
-  cannot be edited, switched or removed here, while its models can; adding a
-  provider of the same name overrides it, which the form warns about.
-  A provider takes an optional name, which defaults to its implementation; a
-  name of its own (`openai-eu`) serves a second endpoint of one implementation,
-  reached as `openai-eu:<model>`. The key is optional for a provider that needs
-  none and for one pointed at an endpoint of its own. Test connection, in the
-  add and edit dialogs, asks the provider what it lists on the dialog's values
-  without saving them, the stored key standing in for a blank key box; Test on
-  a provider's row asks the same of what it stores. Serve models not on its
-  list, in both dialogs, makes a provider serve any model a request names, as
-  a `config.yml` provider does, priced or not, while a model switched off on
-  its list is still refused. It is off by default; a provider moved from the
-  retired Deployment providers page starts with it off and every model it lists
-  switched on, priced or not.
-  A provider's name opens Models filtered to it, and above the table a summary
-  counts the providers reachable, with Re-check all to ask them again. With no
-  provider yet, the page walks through adding the first one, and offers to
-  enable default pricing when pricing is required and nothing sets it. Adding
-  a provider is disabled, with a banner saying why, while the server has no
-  `OTARI_SECRET_KEY` to encrypt its key with. The
-  table also lists the `providers:` instances of `config.yml`, marked
-  config.yml and read-only, with their reachability. Providers stored on the
-  retired Deployment providers page are moved here under the same names
-  automatically at startup. Any that could not be moved are listed in a banner
-  with the reason: once the cause is fixed, move it from there, or Discard it,
-  since a row left behind serves nothing.
+| Page | What it is | Rules |
+| --- | --- | --- |
+| Settings | The running configuration, and the Rate limit rules card | [Settings](#settings) |
+| Accounts | Every account on the deployment | [Deployment-wide account administration](access-control.md#deployment-wide-account-administration) |
+| Hosted providers | The provider keys the deployment serves inference on | [The Hosted providers page](hosted-providers.md#the-hosted-providers-page) |
 
 Accounts and Hosted providers are listed only for a deployment operator, and
-answer anyone else that they are not available to them.
+answer anyone else that they are not available to them. Providers answers to the
+organization role rather than to deployment authority: its owners and admins
+manage the keys, the models each key offers, and the rate each model is billed
+at. Which rate applies is in [Pricing](hosted-providers.md#pricing).
+
+### What a page shows depends on who is signed in
+
+What a page shows can depend on who is signed in, not only on the deployment:
+
+- **Spend and budgets.** An organization owner or admin manages their own
+  organization's budgets and the spend ceilings holding them, while a deployment
+  operator gets the deployment's own budgets, their active organization's, and
+  the gateway users assigned to them.
+- **API keys.** An operator manages every key in the organization and chooses
+  each key's owner, while a member sees the same page scoped to their own keys,
+  always billed to themselves and never budget-exempt. An operator, or an
+  organization owner or admin, can also cap a key's own spend: the key's create
+  and edit forms take an existing budget or a custom amount and reset, and a
+  Budget column shows each key's spend this period against its limit.
+- **Overview.** Everyone lands on their own spend, traffic and recent requests.
+  An organization owner or admin also gets a budget-health figure, read from the
+  spend ceilings holding their organization, while a deployment operator gets
+  provider health and the deployment's own budgets instead. A member who belongs
+  to no workspace yet is told so beside the activity table, rather than shown
+  workspace counts.
+- **Usage, Activity, Sessions, Routing** and the overview's key count show an
+  operator their active organization, not every organization on the deployment.
+
+## Models and Routing
+
+Models is the catalog grouped by model: one card per model, with a rail of
+filters beside it, and a page per model with its facts and every offering
+compared in a table, each with its own limits and the price your organization
+is charged. Each row shows the provider's own model ID under the provider, which
+tells apart two offerings on one provider, such as Bedrock's regional inference
+profiles. "Use this model" opens a drawer beside the table with the request to
+copy, sent to the gateway's pick or to a provider pinned by its selector. The
+page is read-only; an organization's own rate is set on Providers, which an
+offering on one of that organization's keys links to. An offering the
+deployment supplies the credential for says so instead, because its rate is the
+deployment price list's rather than a tenant's. A metered rate that differs from
+the provider's list price is marked with the list price. What the page requests
+is in [Browsing the grouped catalog](models.md#browsing-the-grouped-catalog).
+
+Routing lists each policy with its main model, its backups in order, and who it
+applies to; the empty list offers a fallback directly. In the policy forms,
+models are chosen by model and then by provider. How to create and edit a policy
+there is in [Failover](routing.md#failover). A hybrid or hosted deployment says
+that its policies are not where a request's attempt plan comes from.
+
+On a standalone gateway, Routing's **Automatic fallback** section, read from
+`GET /api/v1/organizations/me/automatic-fallbacks`, lists every model your
+organization sent requests to in the last 30 days, most requested first, with
+its offerings in the order a request sent by catalog id tries them for your
+organization (see [Catalog spellings](models.md#catalog-spellings)). Beside each
+it counts the requests (an absorbed attempt is not one), the successful ones a
+later offering served, and the ones that named one offering or a policy rather
+than the catalog id and so had no automatic fallback. Under each offering it
+says who runs the built-in tools: the provider's own where it runs them itself,
+Otari's where it does not. That assumes a caller who declares the tools in the
+provider's own words and sends no `Otari-*` executor header, so the
+deployment's code execution executor and web search interception decide; a
+workspace's code execution pin is not reflected. The order is the catalog's,
+before a key's allow-list or a missing credential leaves an offering out of a
+request's plan. An owner or admin reads every workspace in the organization,
+anyone else the workspaces they belong to.
+
+## Settings
 
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the
-settings response.
-Its Rate limit rules card adds, edits and removes limits on requests per minute,
-tokens per minute and requests in flight; rules from config.yml are listed there
-read-only.
+settings response. Its Rate limit rules card adds, edits and removes limits on
+requests per minute, tokens per minute and requests in flight; rules from
+config.yml are listed there read-only (see
+[Rate limit rules](configuration.md#rate-limit-rules)).
 
-What a page shows can also depend on who is signed in, not only on the
-deployment. Spend and budgets is the clearest case: an organization owner or
-admin manages their own organization's budgets and the spend ceilings holding
-them, while a deployment operator gets the deployment's own budgets, their
-active organization's, and the gateway users assigned to them. Usage, activity,
-traces, routing and the overview's key count likewise show an operator their
-active organization, not every organization on the deployment.
-
-Providers answers to the organization role rather than to deployment authority.
-Its owners and admins manage the keys, the models each key offers, and the rate
-each model is billed at. An organization may set its own rate for a model it
-supplies the provider key for. A model reached through one of the deployment's
-own provider instances is not one of those: the deployment holds that credential
-and settles its upstream bill, so its rate is the deployment price list's, which
-is `/api/v1/pricing` and has no page of its own. The same holds for a model the
-deployment serves on one of its hosted providers: a request served there is
-priced only from a rate the deployment operator set, either the price list or a
-rate the operator set for this organization, never from one the organization
-wrote itself, even one written while its own key still covered the model. A rate
-the operator set for an organization is listed beside the organization's own,
-and only the operator may change or remove it. The models.dev defaults are
-likewise kept current through `/api/v1/pricing/refresh` rather than from the
-dashboard.
+### Entering a rate
 
 A rate is per million tokens, per request, or per image, and the rate form asks
 which. A request or image rate is entered per 1,000, the way providers publish
@@ -204,28 +205,8 @@ such a rate by its unit, for example "$0.002 per request". The same choice is on
 Activity's "Price this model", offered on a served request that carried no cost
 (a failed attempt billed nothing, so its error is the guide instead), which
 opens per request for a rerank, audio or moderation request and per image for
-an image generation. The unit decides what
-a rate bills. A token rate on an audio or moderation request is still read per
-request for now and logs a warning; a later release reads it strictly, as
-tokens, which those requests do not report, so price them per request.
-
-Exact page names and availability can change with deployment mode and installed
-extensions. The running dashboard is the source of truth.
-
-What a page shows can also depend on who is signed in. On API keys, an operator
-manages every key in the organization and chooses each key's owner, while a
-member sees the same page scoped to their own keys, always billed to themselves
-and never budget-exempt. An operator, or an organization owner or admin, can also
-cap a key's own spend: the key's create and edit forms take an existing budget
-or a custom amount and reset, and a Budget column shows each key's spend this
-period against its limit.
-
-Overview splits the same way. Everyone lands on their own spend, traffic and
-recent requests. An organization owner or admin also gets a budget-health
-figure, read from the spend ceilings holding their organization, while a
-deployment operator gets provider health and the deployment's own budgets
-instead. A member who belongs to no workspace yet is told so beside the
-activity table, rather than shown workspace counts.
+an image generation. What each unit bills is in
+[Per-request pricing](configuration.md#per-request-pricing-audio-moderations-rerank-and-completion-models).
 
 ## Playground
 
@@ -337,26 +318,34 @@ lost link is recovered.
 
 ## Authentication options
 
-Password sign-in works for an existing account. Optional passkeys, Google OAuth and GitHub OAuth add more ways to sign in. Set `passkeys_enabled: false` (`OTARI_PASSKEYS_ENABLED`) to switch passkeys off entirely. When the deployment sets `open_signup: true`, a new address can also create an account with its own organization, through the signup form or a Google or GitHub sign-in. Where the deployment publishes terms (`terms_url`), the signup page asks for them before any of those, and the invitation page asks before "Accept and sign in with a provider instead". A provider sign-in from the sign-in screen that would set up an account without them stops on the page the provider returns to, which asks for the terms and starts the sign-in again. A passkey never creates an account. OAuth requires `public_base_url` plus the provider's client ID and secret. Passkeys can instead use `public_base_url`, or an explicit `webauthn_rp_id` and `webauthn_allowed_origins` pair.
+Password sign-in works for an existing account. Optional passkeys, Google OAuth
+and GitHub OAuth add more ways to sign in, and where the deployment sets
+`open_signup: true` a new address can also create an account with its own
+organization, through the signup form or a Google or GitHub sign-in. Setup and
+the rules for each are in
+[Dashboard sessions and identity](access-control.md#dashboard-sessions-and-identity).
 
-A link to a dashboard page opened while signed out shows the sign-in screen first, then that page once you have signed in, whichever of these methods you use.
+Where the deployment publishes terms (`terms_url`), the signup page asks for
+them before any of those, and the invitation page asks before "Accept and sign
+in with a provider instead". A provider sign-in from the sign-in screen that
+would set up an account without them stops on the page the provider returns to,
+which asks for the terms and starts the sign-in again.
 
-Signing in *can* add a membership in one case. If an organization has claimed and
-proven the email domain that the identity's verified address belongs to, the
-sign-in joins them to that organization at the role the claim names, whichever of
-the three credentials they used. It is the only path that grants membership
-without somebody deciding about the person, and it is fenced accordingly: see
+A link to a dashboard page opened while signed out shows the sign-in screen
+first, then that page once you have signed in, whichever method you use.
+
+Signing in can also add a membership, where an organization has proven the
+email domain of the identity's verified address; see
 [Email-domain auto-join](access-control.md#email-domain-auto-join).
 
-Mail is optional. When an invitation email does not go out (no mail, a failed send, or the
-daily invitation mail limit), you get the accept link to share,
-and an invitee new to the deployment chooses a password on the page it opens,
-so a deployment without SMTP can still bring people in. See [Configuration](configuration.md#mail).
+Mail is optional: when an invitation email does not go out, you get the accept
+link to share. See [Invitations](access-control.md#invitations) and
+[Mail](configuration.md#mail).
 
 ## Custom documentation
 
-The dashboard's Documentation link opens [docs.otari.ai](https://docs.otari.ai/).
-Set `docs_url` to make it open a different site.
+The dashboard's Documentation link opens docs.otari.ai unless `docs_url` names
+another site; see [Documentation links](configuration.md#documentation-links).
 
 ## Legal pages
 

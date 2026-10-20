@@ -55,7 +55,7 @@ point clients to the correct gateway.
 The dashboard keeps the organization-scoped provider keys that a standalone
 deployment also has, and the Hosted providers page, where an
 operator configures the credentials the deployment pays for (see
-[Hosted providers and BYO credentials](#hosted-providers-and-byo-credentials)).
+[Hosted providers and BYO credentials](hosted-providers.md)).
 It also hides the Playground, whose whole purpose is to dispatch a completion.
 Deployment-wide APIs still require operator authority; organization-scoped APIs
 apply membership and role checks.
@@ -99,57 +99,15 @@ plane.
 
 ## Hosted providers and BYO credentials
 
-A request is served on the first credential the ladder finds. A provider
-instance configured on the deployment, in `config.yml` or through the Providers
-page, serves every request that names it, including a bare `provider:model`
-request whose provider spells that instance's name. Where no instance answers,
-the organization's own provider key serves the request. Where that is missing
-too, one of the deployment's **hosted providers** does.
-
-A hosted provider is a credential the deployment's operator configures for the
-deployment to serve requests on, under a name that defaults to its provider
-(a name of its own, such as `openai-eu`, lets two endpoints of one provider
-be served side by side), with a roster of the models offered on it and the rate
-each is charged at on the deployment price list. A hosted provider named after its
-provider is reached by a bare `provider:model` request once neither a
-`providers:` instance nor the organization's own key answers. One with a name
-of its own is reached only by that name (`openai-eu:gpt-4o`): an organization's
-key for the provider never serves it, because that key belongs to another
-endpoint. A request whose workspace belongs to no organization is served only
-on a hosted provider restricted to no organization.
-Only a model switched on in that roster is served on the hosted credential: a
-model switched off, or one the roster does not list, is refused with `424`. The
-deployment settles the upstream bill for a hosted model, which is why its rate
-belongs to the deployment and not to any one organization. A hosted provider
-can be restricted to one organization, and every other organization is then
-served as if it did not exist. Any standalone or hosted deployment configures
-them on the Hosted providers page, through `/api/v1/hosted-providers`, or in the
-`hosted_providers:` block of `config.yml` (see
-[Configuration](configuration.md#hosted-providers-in-configyml)), where a stored
-provider of the same name wins over the configured one.
-
-What a hosted provider contributes to the catalog is its roster: the models
-switched on under it, answered for the caller's organization. It also takes part
-in the operator's views of the deployment's credentials, beside the configured
-instances. `GET /api/v1/models/discoverable` lists what each hosted provider's
-stored key can reach, and `GET /api/v1/providers/health` reports whether it
-answers, each under the provider's name. Both are the deployment's view, so a
-provider restricted to one organization is included, a provider defined in
-`config.yml` is too, and a provider switched off is not. A hosted provider whose
-stored key cannot be decrypted with the configured `OTARI_SECRET_KEY` is
-reported unhealthy with that reason rather than dialed. A configured instance
-named like a hosted provider shadows it here as it does at dispatch, so only the
-instance is listed.
-
-Being in those views means a hosted provider's model listing is dialed upstream
-on the deployment's stored key, at its `api_base` when one is set. The
-background discovery refresher does so as the gateway starts and then on every
-tick, every `model_cache_ttl_seconds` (sooner, every
-`model_discovery_negative_ttl_seconds`, after a round with a failure), for as
-long as `model_discovery` is on and that TTL is above 0. A `refresh=true` read
-of either view dials at once, and changing or deleting a hosted provider drops
-its cached listing so the next read dials the credential as it now stands. A
-provider switched off and one whose key cannot be decrypted are never dialed.
+A request is served on the first credential that answers for its model: a
+`providers:` instance the deployment configures, then the organization's own
+provider key (bring your own key, BYO), then one of the deployment's **hosted
+providers**, credentials the deployment owns and pays for. The upstream bill
+follows the credential: a BYO key bills the organization's own provider account,
+while the deployment settles a hosted provider's bill, which is why a hosted
+model's rate belongs to the deployment price list rather than to any one
+organization. The full rules are in
+[Hosted providers and BYO credentials](hosted-providers.md).
 
 otari.ai is one deployment of this feature: its hosted control plane holds the
 hosted providers that serve its managed models. Hybrid mode can therefore
@@ -164,30 +122,9 @@ Managed model identifiers use the catalog values the control plane publishes.
 otari.ai refuses a hosted credential to a self-hosted gateway, so platform-owned
 secrets never leave mozilla.ai's infrastructure.
 
-## Deployment-paid credentials in standalone
-
-A deployment can serve a model on a credential it owns, once an organization's
-own key and `config.yml` have both missed: the core serves it
-on one of the deployment's hosted providers, and a build may rebind
-`ModelProviderPort` through `OTARI_BOOTSTRAP` to decide differently. The deployment pays that
-upstream bill, so the request also goes through `BillingPort`. Before the
-provider call, the organization is granted any credit it is owed and refused
-with `402` (`insufficient_funds`) when it has no funds paid in. When the
-request settles, its cost, including the cost an abandoned or failed request
-still owes, is charged to the organization. No funds are held while the
-request runs, so concurrent requests can take an organization below zero. A
-request on any other credential never reaches either port. The core's billing
-adapter does nothing, so with no overlay a hosted-provider request is served
-and recorded as deployment-paid on its usage row, and no organization is
-charged.
-
-This covers every path that calls a provider: Chat Completions, Messages,
-Responses and the Playground, each candidate of a routing policy with fallbacks,
-the pass-through endpoints (embeddings, images, audio, rerank, moderations) and
-batches. A routing policy asks for each candidate as it reaches it, so the one
-that serves is the one that settles, and one the organization cannot fund is
-skipped. A batch is admitted when it is created and charged when its results
-are accounted.
+A standalone or hosted deployment that serves a model on its own hosted
+provider can charge the organization for it through `BillingPort`; see
+[Deployment-paid credentials in standalone](hosted-providers.md#deployment-paid-credentials-in-standalone).
 
 ## Internal protocol
 
