@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -21,7 +20,6 @@ from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.exceptions.control_plane_exceptions import ControlPlaneUnavailableError
 from gateway.models.api_keys import APIKey
-from gateway.models.pricing import ModelPricing
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.catalog import apply_model_limits, load_catalog_metadata
@@ -58,6 +56,7 @@ from gateway.services.model_discovery_service import (
     discover_models_with_status,
     get_model_cache,
 )
+from gateway.services.pricing_service import latest_price_version
 from gateway.services.provider_kwargs import normalize_pricing_key
 
 if TYPE_CHECKING:
@@ -361,13 +360,7 @@ async def _find_model(
         ), aliases
 
     # Check the pricing table first.
-    stmt = (
-        select(ModelPricing)
-        .where(ModelPricing.model_key == model_id)
-        .order_by(ModelPricing.effective_at.desc())
-        .limit(1)
-    )
-    pricing = (await db.execute(stmt)).scalar_one_or_none()
+    pricing = await latest_price_version(db, model_id)
 
     # Check the discovery cache for this model. Parse provider from model_id
     # ("provider:model_name") for a targeted lookup instead of scanning all

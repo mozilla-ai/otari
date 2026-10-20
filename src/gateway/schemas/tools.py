@@ -175,6 +175,13 @@ class SearchProviderSchema(SQLModel):
         default=None, description="Fetch: true when the provider runs a page's JavaScript before reading it."
     )
     formats: list[str] | None = Field(default=None, description="Fetch: the formats the page text comes back in.")
+    reports_final_url: bool | None = Field(
+        default=None,
+        description=(
+            "Fetch: true when the provider reports where a page was found after redirects. When false it "
+            "answers with the URL as asked, so a redirect it follows is not checked against the domain policy."
+        ),
+    )
 
 
 # /search-tools management: stored and configured instances, writes and connection tests.

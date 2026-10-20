@@ -1,0 +1,11 @@
+{{HEADLINE}}
+
+{{INTRO}}
+
+{{CHANGES}}
+
+Open the Health page:
+{{HEALTH_LINK}}
+
+You get this because your address is on the alert list of the Health page.
+An operator can remove it there.

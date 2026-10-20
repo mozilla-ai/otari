@@ -18,10 +18,11 @@ from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.tenancy import Workspace
+from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.services.guardrails import GuardrailsNotReachableError, InProcessGuardrail, run_input_guardrails
 from gateway.services.inference import is_retry_futile
 from gateway.services.routing import RoutingSignal
-from gateway.services.traces import RequestTrace
+from gateway.services.traces import RequestTrace, TraceService, TraceWriter
 from gateway.services.url_safety import UnsafeURLError
 from gateway.services.workspace_scope import default_workspace_id
 
@@ -459,3 +460,49 @@ def with_retry_hint(exc: BaseException, status_code: int, headers: dict[str, str
     if status_code < status.HTTP_500_INTERNAL_SERVER_ERROR or not is_retry_futile(exc):
         return headers
     return {**(headers or {}), SHOULD_RETRY_HEADER: "false"}
+
+
+async def erase_user_records(
+    request: Request, storage: TelemetryStoragePort, traces: TraceService, user_id: str
+) -> None:
+    """Erase a user's telemetry and agent traces, ahead of soft-deleting the user.
+
+    Raises a 500 when either erasure fails, before anything else is written, so
+    the caller deletes nothing and the request can be retried.
+    """
+    # First, and outside the soft-delete's transaction. Telemetry storage settles
+    # its own writes and a deployment can be storing them out of process, where
+    # no transaction of ours reaches, so the two cannot be made atomic and the
+    # order is a choice about which way to fail. This way a failed erasure
+    # commits nothing else and answers 5xx, leaving the user active and the whole
+    # request retryable. The other order strands it: the repeat request would
+    # find the user already deleted and answer 404, so nothing would ever erase
+    # what was left behind. The cost is the narrow window where a
+    # later failure leaves an active user whose telemetry is gone, which is
+    # analytics lost rather than an erasure silently not performed, and the
+    # operator asked for that user's deletion either way.
+    #
+    # Broad on purpose: what this raises depends on the store this build bound,
+    # so an out-of-process adapter's transport error must not escape as a 500
+    # with a stack trace.
+    try:
+        await storage.purge_user(user_id=user_id)
+    except Exception:
+        logger.exception("Telemetry erasure failed for user %s; user was not deleted", user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not erase this user's telemetry; the user was not deleted",
+        ) from None
+    # Agent traces follow the same rule, for the same reason. The trace writer
+    # stops writing the user's traces first, or it would write some after the purge.
+    trace_writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
+    if trace_writer is not None:
+        await trace_writer.erase_user(user_id)
+    try:
+        await traces.purge_user(user_id)
+    except Exception:
+        logger.exception("Trace erasure failed for user %s; user was not deleted", user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not erase this user's agent traces; the user was not deleted",
+        ) from None

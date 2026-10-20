@@ -151,6 +151,9 @@ def test_hosted_mode_still_serves_the_management_plane(hosted_client: TestClient
         # The policy table beside the /routing/recommend stub, which must not
         # reach it.
         f"{API_ROOT}/routing/policies",
+        # The operator's Health page, whose checks go straight to each provider
+        # rather than through a data plane.
+        f"{API_ROOT}/health-checks",
     ):
         response = hosted_client.get(path)
 

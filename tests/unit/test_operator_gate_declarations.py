@@ -40,6 +40,7 @@ from gateway.api.routes import (
     budgets,
     catalog,
     end_users,
+    health_checks,
     hooks,
     hosted_providers,
     keys,
@@ -65,6 +66,7 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
     ("agent_telemetry", agent_telemetry.router),
     ("aliases", aliases.router),
     ("budgets", budgets.router),
+    ("health_checks", health_checks.router),
     ("keys", keys.router),
     ("mail", mail.router),
     ("maintenance_mode", maintenance_mode.router),
@@ -148,6 +150,7 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "web_search_backend.router": "its own X-Gateway-Token, checked in the handler",
     "hosted_mode.router": "mode stub: a 404 naming why the prefix is absent on this deployment",
     "hybrid_mode.router": "mode stub, as above",
+    "retired_root.router": "a 404 naming the API root that replaced /v1; serves nothing",
 }
 
 

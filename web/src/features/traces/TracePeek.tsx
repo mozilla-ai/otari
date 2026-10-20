@@ -17,7 +17,7 @@ import { Kbd } from "@/design-system/indicators/Kbd"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
-import { formatCost, formatNumber } from "@/shared/helpers/format"
+import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
 
 import {
   formatDuration,
@@ -143,15 +143,17 @@ function ResizeHandle({
   )
 }
 
-function Breakdown({ rows }: { rows: [string, string][] }) {
+function Breakdown({ rows }: { rows: [string, string | undefined][] }) {
   return (
     <dl className="grid grid-cols-[auto_auto] gap-x-4 gap-y-0.5 text-mono-caption">
-      {rows.map(([key, value]) => (
-        <div key={key} className="contents">
-          <dt>{key}</dt>
-          <dd className="text-right">{value}</dd>
-        </div>
-      ))}
+      {rows
+        .filter(([, value]) => value)
+        .map(([key, value]) => (
+          <div key={key} className="contents">
+            <dt>{key}</dt>
+            <dd className="text-right">{value}</dd>
+          </div>
+        ))}
     </dl>
   )
 }
@@ -221,13 +223,28 @@ function Attributes({
     [
       "Prompt tokens",
       observation.promptTokens != null
-        ? formatNumber(observation.promptTokens)
+        ? formatNumber(observation.promptTokens) +
+          (observation.cachedTokens
+            ? ` (${formatNumber(observation.cachedTokens)} cached)`
+            : "")
+        : undefined,
+    ],
+    [
+      "Cache write tokens",
+      observation.cacheWriteTokens
+        ? formatNumber(observation.cacheWriteTokens)
         : undefined,
     ],
     [
       "Completion tokens",
       observation.completionTokens != null
         ? formatNumber(observation.completionTokens)
+        : undefined,
+    ],
+    [
+      "Reasoning tokens",
+      observation.reasoningTokens
+        ? formatNumber(observation.reasoningTokens)
         : undefined,
     ],
     [
@@ -358,6 +375,7 @@ export function TracePeek({
         totalCost: observation.cost ?? 0,
         promptTokens: observation.promptTokens ?? 0,
         completionTokens: observation.completionTokens ?? 0,
+        cachedTokens: observation.cachedTokens ?? 0,
         totalTokens:
           (observation.promptTokens ?? 0) + (observation.completionTokens ?? 0),
         model: observation.model,
@@ -370,6 +388,7 @@ export function TracePeek({
         totalCost: summary.totalCost,
         promptTokens: summary.promptTokens,
         completionTokens: summary.completionTokens,
+        cachedTokens: summary.cachedTokens,
         totalTokens: summary.totalTokens,
         model: summary.models[0],
       }
@@ -582,6 +601,12 @@ export function TracePeek({
                 <Breakdown
                   rows={[
                     ["Input", formatNumber(shown.promptTokens)],
+                    [
+                      "Cached",
+                      shown.promptTokens && shown.cachedTokens
+                        ? formatPct(shown.cachedTokens / shown.promptTokens)
+                        : undefined,
+                    ],
                     ["Output", formatNumber(shown.completionTokens)],
                   ]}
                 />

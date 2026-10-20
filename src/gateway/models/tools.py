@@ -132,6 +132,10 @@ class WorkspaceMcpServer(Base):
     purpose_hint: Mapped[str | None] = mapped_column(Text, default=None)
     allowed_tools: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # The last connection check, in the shape ``WorkspaceMcpServerHealth``
+    # publishes; null until one has run, and cleared when the URL, the token or
+    # the allow-list changes, since it described the old ones.
+    health: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     # ``UtcDateTime`` for the same reason ``WorkspaceBudgetDefault``'s are: these
     # go over the wire and a naive SQLite round-trip would drop the offset.
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))

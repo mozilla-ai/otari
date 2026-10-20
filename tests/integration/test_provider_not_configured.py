@@ -22,7 +22,7 @@ from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig, _resolv
 from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_NOT_CONFIGURED
 from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
-from gateway.services.provider_store_service import reset_provider_cache
+from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
 
 from .conftest import build_test_client
@@ -397,17 +397,21 @@ def test_a_declared_entry_naming_no_key_is_refused_although_its_variable_is_set(
         mock.assert_not_awaited()
 
 
-def test_a_stored_provider_instance_serves(
+def test_a_hosted_provider_serves(
     client: TestClient,
     api_key_header: dict[str, str],
     test_user: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
-    reset_provider_cache()
+
+    async def _lists_nothing(impl_name: str, **_: object) -> ProviderDiscovery:
+        return ProviderDiscovery(provider=impl_name, models=[])
+
+    monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _lists_nothing)
     stored = client.post(
-        f"{API_ROOT}/provider-credentials",
-        json={"instance": "anthropic", "api_key": "sk-ant-stored"},
+        f"{API_ROOT}/hosted-providers",
+        json={"provider": "anthropic", "api_key": "sk-ant-stored", "serves_unlisted_models": True},
         headers=_MASTER,
     )
     assert stored.status_code == 201, stored.text
@@ -422,7 +426,6 @@ def test_a_stored_provider_instance_serves(
     assert response.status_code == 200, response.text
     assert mock.await_args is not None
     assert mock.await_args.kwargs["api_key"] == "sk-ant-stored"
-    reset_provider_cache()
 
 
 @pytest.fixture

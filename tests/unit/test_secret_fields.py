@@ -6,8 +6,7 @@ standalone Bedrock keeps its ``aws_secret_access_key`` in ``client_args``,
 because any-llm's BedrockProvider never forwards ``api_key`` into the boto3
 client it builds. ``OrgProviderKey`` has masked its own since it shipped;
 otari-ai#1880 is the other two, where ``ProviderCredential.client_args``
-returned a live AWS secret to anyone who could reach
-``GET /api/v1/provider-credentials``. The fourth is
+returned a live AWS secret over the API. The fourth is
 ``organization_guardrails.validate_kwargs``, which a guardrail class can take
 its vendor key in (otari-ai#2118).
 

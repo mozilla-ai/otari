@@ -52,7 +52,7 @@ test.describe("hybrid deployment", () => {
       data_plane_url: null,
       // Deployment-wide rather than standalone-only, and unset here: a hybrid
       // gateway may carry a hosted documentation link, and this one configures
-      // none, so the bundled guide stays the target.
+      // none, so the links open docs.otari.ai.
       docs_url: null,
       // Deployment-wide like docs_url, and unset here too.
       terms_url: null,
@@ -146,7 +146,7 @@ test.describe("hybrid deployment", () => {
     // route, which is the one URL a standalone deployment serves ahead of its
     // own auth gate and which a hybrid gateway holds no membership state to
     // honor.
-    for (const route of ["#/providers", "#/accept-invitation?token=whatever"]) {
+    for (const route of ["#/settings", "#/accept-invitation?token=whatever"]) {
       await page.goto(`/${route}`)
       await expect(
         page.getByRole("heading", { name: "Otari gateway" }),

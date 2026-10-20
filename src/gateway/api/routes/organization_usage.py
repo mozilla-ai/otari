@@ -107,8 +107,9 @@ router = APIRouter(
     dependencies=[Depends(verify_master_key)],
 )
 
-# Hosted only: on standalone the organization is the deployment, so ``usage`` already shows it.
-SURFACE = Surface("organization_usage", standalone=False)
+# Published by both: the ``usage`` page reads one workspace at a time, and a
+# standalone deployment can serve several organizations as a hosted one does.
+SURFACE = Surface("organization_usage")
 
 
 async def _scope_condition(

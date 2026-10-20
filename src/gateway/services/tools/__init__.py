@@ -16,9 +16,17 @@ and ``apply_web_access_policy`` narrows its web access to what its workspace per
 ``check_tool_entry``, ``check_tool_write``, ``check_kind_unchanged``, ``check_tool_name_is_free`` and
 ``default_to_pin`` hold a write through ``/api/v1/search-tools`` to the instance rules, and
 ``run_connection_test`` tests an instance with one search or fetch.
-``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with.
+``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with,
+``resolve_in_loop_search`` which ``InLoopSearch`` a request's searches run on through the libraries,
+and ``builtin_fetch_resolved`` answers ``builtin_fetch``'s without a config. ``WebFetchBackend`` runs the fetch
+tool on the instance ``resolve_fetch`` chose, ``build_web_fetch_backend`` builds one for a request, and
+``register_builtin_fetcher`` makes otari's own fetcher
+any-fetch's ``builtin`` provider, once, at startup. ``WebSearchBackend`` runs the search tool on an
+``InLoopSearch``, ``build_web_search_backends`` builds it and the fetch tool's beside it for a request, and
+``WebToolCallCap`` is the search and fetch calls one request may make between them.
 ``pick_direct_search_instance``, ``resolve_direct_search`` and ``run_direct_search`` hold the direct
-search endpoint's rules and run its call, and ``SearchQuery`` with the helpers beside it map LiteLLM's
+search endpoint's rules and run its call, ``refuse_unpriced_direct_search`` refuses one ``require_pricing``
+cannot bill, and ``SearchQuery`` with the helpers beside it map LiteLLM's
 search fields onto a provider. ``build_web_provider_client`` builds the client the web tools' providers
 are called through, one per app, and ``WebToolFailure`` is what a failed web tool call may show its caller.
 ``OTARI_TOOL_CALLS_FIELD`` is where a Chat Completions response reports the gateway's web tool calls, and
@@ -95,16 +103,20 @@ from gateway.services.tools._web_admission import (
     read_web_search_max_uses,
     validate_web_declarations,
 )
+from gateway.services.tools._web_build import build_web_fetch_backend, build_web_search_backends
+from gateway.services.tools._web_call_cap import WebToolCallCap
 from gateway.services.tools._web_declarations import (
     WEB_FETCH_HEADER,
     WEB_SEARCH_HEADER,
     web_search_declaration_forms,
     web_search_intercept_enabled,
 )
+from gateway.services.tools._web_fetch import WebFetchBackend, register_builtin_fetcher
 from gateway.services.tools._web_names import (
     WEB_FETCH_TOOL_NAME,
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     WEB_SEARCH_NATIVE_TYPE_PREFIX,
+    WEB_SEARCH_PURPOSE_HINT,
     WEB_SEARCH_TOOL_NAME,
     web_fetch_tool_definition,
     web_search_tool_definition,
@@ -116,14 +128,19 @@ from gateway.services.tools._web_search import (
     DIRECT_DEFAULT_MAX_RESULTS,
     DirectSearch,
     DirectSearchResult,
+    InLoopSearch,
     ResolvedFetch,
     ResolvedSearch,
     SearchQuery,
+    WebSearchBackend,
+    builtin_fetch_resolved,
     filter_hits_by_domain,
     page_budget_chars,
     pick_direct_search_instance,
+    refuse_unpriced_direct_search,
     resolve_direct_search,
     resolve_fetch,
+    resolve_in_loop_search,
     resolve_search,
     run_direct_search,
 )
@@ -209,12 +226,22 @@ __all__ = [
     "WEB_FETCH_TOOL_NAME",
     "WEB_RETRIEVAL_RESULT_MAX_BYTES",
     "WEB_SEARCH_NATIVE_TYPE_PREFIX",
+    "WEB_SEARCH_PURPOSE_HINT",
     "WEB_SEARCH_TOOL_NAME",
     "web_fetch_tool_definition",
     "web_search_tool_definition",
+    "InLoopSearch",
     "ResolvedFetch",
     "ResolvedSearch",
+    "WebFetchBackend",
+    "WebSearchBackend",
+    "WebToolCallCap",
+    "build_web_fetch_backend",
+    "build_web_search_backends",
+    "builtin_fetch_resolved",
+    "register_builtin_fetcher",
     "resolve_fetch",
+    "resolve_in_loop_search",
     "resolve_search",
     "CHARS_PER_TOKEN",
     "DEFAULT_MAX_TOKENS_PER_PAGE",
@@ -229,6 +256,7 @@ __all__ = [
     "owning_backend",
     "page_budget_chars",
     "pick_direct_search_instance",
+    "refuse_unpriced_direct_search",
     "resolve_direct_search",
     "run_direct_search",
 ]

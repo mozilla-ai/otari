@@ -98,6 +98,11 @@ jobs:
       # The PR head as git objects only: readable with `git show` and
       # `git diff`, never written to disk. The repo is public, so this needs
       # no credentials.
+      #
+      # NOTE: CodeQL flags this fetch whichever ref form it names. A pinned SHA
+      # matches actions/untrusted-checkout and a mutable ref matches its TOCTOU
+      # variant, so swapping the ref form only trades one alert for the other.
+      # The write-access gate in `authorize` is what makes the risk acceptable.
       - name: Fetch PR head
         env:
           HEAD_SHA: ${{ needs.authorize.outputs.head_sha }}

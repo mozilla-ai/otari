@@ -18,11 +18,18 @@ export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
+Claude Code puts a telemetry value in `metadata.user_id`. An otari.ai key
+needs no setting for it, because a hybrid gateway does not check that field
+against the key's owner.
+
 ### Standalone
 
-Claude Code sends a telemetry value in the request's `user` field. It is not an
+Claude Code sends a telemetry value in `metadata.user_id`. It is not an
 Otari user ID, so create or update its API key with
-`reject_user_mismatch: false`. Spend still binds to the key's user.
+`reject_user_mismatch: false`, or pick **Always accept** for "Mismatched `user`
+field" under the dashboard key form's **Advanced** section. Spend still binds
+to the key's user; see
+[Mismatched `user` fields](access-control.md#mismatched-user-fields).
 
 ```bash
 curl "$OTARI_URL/api/v1/keys" \
@@ -75,6 +82,36 @@ endpoints filter and group by them (`GET /api/v1/usage?tag=run:1234`), so one
 key can split its cost by agent, run or requester. Percent-encode a `,` or `=`
 inside a value. Tags are recorded in standalone mode only. See
 [Request tags](api-reference.md#request-tags) for the format and limits.
+
+A headless run that should read as one session of its own sends a run id too,
+which the dashboard's Sessions list then shows and searches by:
+
+```bash
+export ANTHROPIC_CUSTOM_HEADERS=$'Otari-Conversation-Id: bug-fix-1234\nOtari-Tags: agent=bug-fix,run=1234'
+```
+
+It takes the place of Claude Code's own session id for grouping. See
+[Sessions from your own agent](traces.md#sessions-from-your-own-agent).
+
+## Budgets
+
+A request a budget refuses answers `403` with `Otari-Error-Code: budget_exceeded`.
+Claude Code prefixes every 403 with "Failed to authenticate", so a spent budget
+reads:
+
+```text
+Failed to authenticate. API Error: 403 User 'alice' has exceeded budget limit
+```
+
+The text after the prefix is the reason; the key itself is fine. Claude Code
+does not retry it, and a `Retry-After` header says when the budget's window
+resets, where it does.
+
+Otari holds a request's worst case against the budget before it runs, so a call
+can be refused while some budget is left. Claude Code asks for up to 32,000
+output tokens on a model id it does not know, which is a large hold on an
+expensive model; set `CLAUDE_CODE_MAX_OUTPUT_TOKENS` lower when budgets are
+small.
 
 ## Choosing a model
 

@@ -304,6 +304,9 @@ def shared_test_config(postgres_url: str, providers: dict[str, dict[str, Any]]) 
         # that build their own config (see test_require_pricing.py).
         require_pricing=False,
         providers=providers,
+        # The suite exercises providers: entries as config.yml serves them;
+        # test_configured_provider_import.py turns the copy on.
+        import_configured_providers=False,
     )
 
 

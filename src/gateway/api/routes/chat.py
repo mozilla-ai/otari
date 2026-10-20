@@ -72,6 +72,7 @@ from gateway.services.inference import (
     bind_upstream_user,
     chat_user_fields,
     is_chat_stream_cost_carrier,
+    provider_failure,
     require_choices,
     with_upstream_user,
 )
@@ -260,8 +261,14 @@ class _ChatAdapter:
     def stream_completion(self) -> Callable[[Any], bool] | None:
         return _every_choice_finishes()
 
-    def stream_error_payload(self, exc: BaseException) -> str:
-        return openai_error_event(self.stream_format, stream_error_code(exc), stream_error_message(exc))
+    def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
+        failure = provider_failure(exc, provider)
+        return openai_error_event(
+            self.stream_format,
+            stream_error_code(exc),
+            stream_error_message(exc),
+            failure.as_dict() if failure is not None else None,
+        )
 
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
         return f"data: {surface_provider_fields(chunk).model_dump_json()}\n\n"

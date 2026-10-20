@@ -32,6 +32,7 @@ from gateway.api.deps import reset_config
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
+from gateway.models.providers import ProviderCredential
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.model_discovery_service import ProviderDiscovery
@@ -277,8 +278,19 @@ def _state(session_factory: Callable[[], Session]) -> dict[str, list[str]]:
         session.close()
 
 
+# A deployment provider the move cannot take (named after another provider), so
+# the discard route has a target after the move route has run.
+LEFTOVER = "groq"
+
+
+def _seed_leftover(session_factory: Callable[[], Session]) -> None:
+    with session_factory() as db:
+        db.add(ProviderCredential(instance=LEFTOVER, provider_type="openai", client_args={}))
+        db.commit()
+
+
 def _concrete(template: str, model_id: uuid.UUID) -> str:
-    return template.replace("{provider}", PROVIDER).replace("{model_id}", str(model_id))
+    return template.replace("{provider}", PROVIDER).replace("{model_id}", str(model_id)).replace("{instance}", LEFTOVER)
 
 
 def _request(client: TestClient, world: _World, principal: str, method: str, path: str, body: Any) -> Any:
@@ -341,6 +353,7 @@ def test_an_operator_reaches_every_route(
     client = mode_client
     world = _build_world(client, test_config.master_key or "", db_session_factory)
     model_id = _seed(client, world.headers["master_key"])
+    _seed_leftover(db_session_factory)
     routes = sorted(
         _hosted_routes(client),
         key=lambda route: (route[0] == "DELETE", -len(route[1]) if route[0] == "DELETE" else 0),

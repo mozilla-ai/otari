@@ -72,6 +72,7 @@ import {
   useUpdateWorkspaceMemberRole,
   useWorkspaces,
 } from "@/shared/api/workspaces"
+import { parseAddresses } from "@/shared/helpers/addresses"
 import { absoluteDashboardLink } from "@/shared/helpers/dashboardLink"
 import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
@@ -179,18 +180,6 @@ function invitationExpired(member: OrganizationMember): boolean {
     Boolean(member.invitation_expires_at) &&
     new Date(member.invitation_expires_at ?? "").getTime() <= Date.now()
   )
-}
-
-// Addresses pasted as a list, separated by commas, semicolons or whitespace,
-// deduplicated without regard to case.
-export function parseAddresses(text: string): string[] {
-  const seen = new Set<string>()
-  return text.split(/[\s,;]+/).filter((address) => {
-    const key = address.toLowerCase()
-    if (address === "" || seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
 }
 
 // After an invite or a reissue: whether it was emailed, and the link to share

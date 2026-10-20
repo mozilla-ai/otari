@@ -41,6 +41,7 @@ from gateway.services.policy_store import (
     refresh_policy_cache,
     resolve_effective_policy,
 )
+from gateway.services.providers import hosted_implementation
 from gateway.services.routing import (
     BudgetState,
     NoEligibleCandidatesError,
@@ -268,7 +269,7 @@ def _validate_write(config: GatewayConfig, name: str, spec: PolicySpec, user_id:
     indirections = all_policy_names(config) | all_alias_names(config) | {name}
     for selector in spec.static_selectors():
         try:
-            config.validate_alias(name, selector, alias_names=indirections)
+            config.validate_alias(name, selector, alias_names=indirections, hosted_implementation=hosted_implementation)
         except ValueError as exc:
             # `validate_alias` phrases both its target errors and its *name* errors
             # in alias terms, so both are rewritten; otherwise a policy named "a:b"

@@ -117,6 +117,7 @@ def _no_background_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("gateway.main.run_discovery_refresher", _noop)
     monkeypatch.setattr("gateway.main.run_catalog_refresher", _noop)
+    monkeypatch.setattr("gateway.api.routes.health_checks.run_health_check_worker", _noop)
 
 
 @pytest.fixture(autouse=True)
@@ -200,6 +201,20 @@ def install_models_dev() -> Callable[[dict[str, Any] | None], "ModelsDevPriceInd
         return index
 
     return install
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _builtin_fetcher_registered() -> None:
+    """Register otari's fetcher as any-fetch's ``builtin`` provider, once per worker.
+
+    ``create_app`` registers it at startup. A test that runs ``builtin`` without an
+    app, such as one that constructs the old web backend with its fetch half on,
+    must not depend on an earlier test having built one, which a sharded or
+    parallel run does not guarantee.
+    """
+    from gateway.services.tools import register_builtin_fetcher
+
+    register_builtin_fetcher()
 
 
 @pytest.fixture(scope="session")

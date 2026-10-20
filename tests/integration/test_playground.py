@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
+import httpx
 import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi import status
@@ -50,6 +51,7 @@ from gateway.services.file_extractors import ExtractionResult
 from gateway.services.inference import upstream_user_identifier
 
 from .conftest import MODEL_NAME, build_test_client
+from .test_web_fetch_instances import scripted_model, serve_fetch_on_tabstack
 
 _PREFIX = f"{API_ROOT}/playground"
 
@@ -1172,3 +1174,33 @@ def test_files_switched_off_answer_404_and_report_why(
     assert code == status.HTTP_404_NOT_FOUND
     code, _ = _request(files_off_client, built, "member", "GET", f"{_PREFIX}/files", params=_ws(built))
     assert code == status.HTTP_404_NOT_FOUND
+
+
+def test_a_playground_message_fetches_through_the_instance_on_the_apps_client(
+    client: TestClient, world: _World, monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig
+) -> None:
+    """The Playground runs the same completion pipeline, so its tools get the app's web provider client too."""
+    requests: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"content": "The notes.", "url": "https://example.com/notes"})
+
+    serve_fetch_on_tabstack(client, monkeypatch, test_config, answer)
+    with scripted_model():
+        code, body = _request(
+            client,
+            world,
+            "member",
+            "POST",
+            f"{_PREFIX}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "read it"}],
+                "tools": [{"type": "otari_web_fetch"}],
+            },
+            params=_ws(world),
+        )
+
+    assert code == status.HTTP_200_OK, body
+    assert [str(request.url) for request in requests] == ["https://api.tabstack.ai/v1/extract/markdown"]

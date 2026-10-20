@@ -475,15 +475,13 @@ export async function deleteSession(): Promise<void> {
 const REQUEST_TIMEOUT_MS = 30_000
 const TIMEOUT_MESSAGE = `The gateway did not respond within ${REQUEST_TIMEOUT_MS / 1000}s.`
 
-// For the handful of calls whose work scales with the data rather than with one
-// upstream hop: the bulk usage delete and reprice, and the pricing-snapshot
-// refresh. `DELETE /v1/usage` with `by_filter` issues one unbounded DELETE and
-// the reprice loops over every matched row, so on a large imported-usage table
-// either can outrun the 30s bound above. Aborting them is worse than waiting: the
-// server transaction commits regardless of whether the browser is still
-// listening, so the operator would be told the delete failed when it succeeded,
-// and the obvious next move is to run it again. Still bounded, because a socket
-// held forever is what the deadline exists to prevent.
+// For the calls whose work scales with the data rather than with one upstream
+// hop, such as the pricing-snapshot refresh, which can outrun the 30s bound
+// above. Aborting one is worse than waiting: the server transaction commits
+// whether or not the browser is still listening, so the operator would be told
+// it failed when it succeeded, and the obvious next move is to run it again.
+// Still bounded, because a socket held forever is what the deadline exists to
+// prevent.
 export const LONG_REQUEST_TIMEOUT_MS = 5 * 60_000
 
 /** Signal for a request whose duration scales with the data, not with one hop. */

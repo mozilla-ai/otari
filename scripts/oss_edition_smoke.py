@@ -23,11 +23,11 @@ self-hoster walks on day one:
    time in front of the budget gate on every request, which SQLite reads back
    without an offset; a gate that compared it to an aware clock refused every
    request with a 500.
-5. Register a BYO provider credential at runtime, which is stored encrypted.
+5. Add a hosted provider at runtime, whose key is stored encrypted.
 6. Create a routing policy whose default candidate fails and whose ``on_failure``
-   candidate is that BYO provider.
+   candidate is that hosted provider.
 7. Send one chat completion at the policy. It can only succeed by failing over to
-   the BYO candidate and presenting the stored key to the provider, so a 200 with
+   the hosted candidate and presenting the stored key to the provider, so a 200 with
    the expected body proves credential storage, routing, fallback, and dispatch
    all work in the OSS edition.
 8. The usage row for that request is readable back through ``/api/v1/usage``.
@@ -693,20 +693,22 @@ def create_key(base_url: str, admin: dict[str, str], names: Names) -> str:
 
 
 def register_byo_provider(base_url: str, admin: dict[str, str], names: Names, *, mock_base_url: str) -> None:
-    """Store a BYO provider credential at runtime, the way an operator would."""
+    """Add a hosted provider at runtime, the way an operator would."""
     status, body = _request(
         "POST",
-        f"{base_url}{API_ROOT}/provider-credentials",
+        f"{base_url}{API_ROOT}/hosted-providers",
         headers=admin,
         payload={
-            "instance": names.byo_instance,
-            "provider_type": "openai-compatible",
+            "provider": "openai-compatible",
+            "name": names.byo_instance,
             "api_base": f"{mock_base_url}{WORKING_PREFIX}/v1",
             "api_key": names.byo_key,
+            # The mock lists no models, and the policy names one anyway.
+            "serves_unlisted_models": True,
         },
     )
-    _expect(status, 201, f"POST {API_ROOT}/provider-credentials", body)
-    log("Stored a BYO provider credential")
+    _expect(status, 201, f"POST {API_ROOT}/hosted-providers", body)
+    log("Added a hosted provider")
 
 
 def create_fallback_policy(base_url: str, admin: dict[str, str], names: Names) -> None:
