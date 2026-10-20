@@ -86,9 +86,10 @@ The page body must never be what scrolls horizontally. Put the overflow on the t
 wrapper so the header, filters, and pagination stay put.
 
 On a desk a long table also bounds itself vertically, from `md` up: it scrolls inside
-itself past ten rows and pages what does not fit, with its controls outside the scroll. The
-practice is "Building a table" in [web/design/data.md](../../../web/design/data.md). Phones
-are out of it for now, and the phone answer above still holds below `md`.
+itself once it is taller than the screen can hold, and pages what does not fit, with its
+controls outside the scroll. The practice is "Building a table" in
+[web/design/data.md](../../../web/design/data.md). Phones are out of it for now, and the
+phone answer above still holds below `md`.
 
 ## Anti-patterns
 

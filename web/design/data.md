@@ -81,23 +81,25 @@ Never zebra striping, never vertical rules between cells, never a bolder header.
 Every table follows the same practice, and most of it arrives with `DataTable`
 rather than being written at the call site.
 
-**Past ten rows a table scrolls inside itself, under a pinned header.**
-`DataTable` measures the header and the first `TABLE_VISIBLE_ROWS` rows as
-rendered and marks its scroller; `design-system.css` turns the mark into a
-`max-height`. Measured, not computed from a row height, because rows differ
-from table to table: a two-line model row caps taller than a one-line key row,
-at the same ten rows. The cap never exceeds `--table-max-height`, the viewport
-less the top bar, a toolbar and a pager, so a table with very thick rows shows
-fewer than ten and the pager stays in reach. A table of ten rows or fewer is its
-own height. The header turns opaque only while capped, on the page's fill or,
-inside a HeroUI `Card`, the card's; a table on any other surface sets
-`--table-fill` on its section. A focused row scrolls clear of the header. The rows hand the wheel
-back to the page at either end, and the cut is left where it falls, the same as
-the horizontal clip. From `md` up, and never on paper: phones get their own
-strategy.
+**A table taller than the screen can hold scrolls inside itself, under a pinned
+header.** The cap is `--table-max-height` in `design-system.css`: the viewport
+less the top bar, a toolbar and a pager, so all three fit at once whatever the
+rows' height. It is floored at 18rem, so a window too short for that still shows a
+few rows and the page scrolls to reach the pager. A table
+shorter than that is its own height. A thick-rowed table reaches the cap with
+fewer rows, which is the same rule rather than an exception. The header is
+opaque from `md` up, on the page's fill or, inside a HeroUI `Card`, the card's;
+a table on any other surface sets `--table-fill` on its section, and a pinned
+first column reads it too. A focused row scrolls clear of the header. The rows
+hand the wheel back to the page at either end, and the cut is left where it
+falls, the same as the horizontal clip. From `md` up, and never on paper:
+phones get their own strategy.
 
 Never write a `max-height` or an `overflow-y` on a table, its frame, or HeroUI's
-scroller. The cap is one rule, and a second one beside it decides nothing.
+scroller. The cap is one rule, and a second one beside it decides nothing. The
+one list that takes the same ceiling is the model catalog's card view, which is
+not a table: its `<ul>` reads `--table-max-height` through utilities, on trial,
+so its pager stays in reach the way a table's does.
 
 **More rows than a page pages, in one of two ways:**
 
@@ -106,14 +108,14 @@ scroller. The cap is one rule, and a second one beside it decides nothing.
 | Pages itself (`skip`/`limit` and a count) | `TablePagination` driving the query | Activity, Sessions, Members |
 | Returns every row at once | `useClientPagination(rows, resetKey)` into `TablePagination` | Usage breakdowns, health checks |
 
-`useClientPagination`'s `resetKey` returns to the first page when it changes;
-pass something that moves with the filters, never the rows, which a refetch
-replaces. Either way, pass the page as `scrollResetKey` so a new page opens at
+`useClientPagination`'s `resetKey` returns to the first page when it changes.
+It is compared with `Object.is`, so pass a primitive that changes only with the
+filters (Usage serializes them), never the rows, which a refetch replaces. Either way, pass the page as `scrollResetKey` so a new page opens at
 its first row. A hand-written `slice()` with a "Show all" button is the thing
 this replaces: it grows the page by the whole remainder in one press.
 
 A table that shows every row, because nothing pages it, is still bounded by the
-ten-row cap.
+screen-height cap.
 
 **The controls stay outside the scroll.** Filters, tabs and view toggles sit
 directly above the table and the pager directly below it, each a sibling of
@@ -124,8 +126,7 @@ the table goes inside it, where it would scroll away with the rows.
 a page of its own (Models, a drill-in to Activity), a modal or side panel
 (Sessions), or inline under the row through `detailKey`/`renderDetail`
 (Activity, Routing). An inline panel opening below the visible rows is scrolled
-into view inside the table, never by moving the page, and it does not count
-toward the ten rows.
+into view inside the table, never by moving the page.
 
 ## The base decides; a per-table class carries only its own lanes
 
