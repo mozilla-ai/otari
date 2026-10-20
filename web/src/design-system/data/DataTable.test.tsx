@@ -911,7 +911,7 @@ describe('DataTable on a phone with mobileLayout="cards"', () => {
   })
 })
 
-describe("DataTable row cap", () => {
+describe("DataTable inner scroll", () => {
   // The setup stub reports once, on observe; these tests fire the observer by
   // hand after react-aria has committed its rows, as a browser would on resize.
   const observers: ResizeObserverCallback[] = []
@@ -941,7 +941,7 @@ describe("DataTable row cap", () => {
         disconnect() {}
       },
     )
-    // jsdom lays nothing out; every row and the header measure 40px.
+    // jsdom lays nothing out; the header measures 40px.
     vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(40)
   })
   afterEach(() => {
@@ -949,35 +949,21 @@ describe("DataTable row cap", () => {
     vi.restoreAllMocks()
   })
 
-  it("caps at the header and the first ten rows once there are more", async () => {
+  it("gives the scroller the header's height as its scroll padding", async () => {
+    // What keeps a row reached by keyboard clear of the pinned header.
     const { container } = render(
       <DataTable
         ariaLabel="Rows"
         columns={COLUMNS}
-        rows={many(11)}
+        rows={many(3)}
         getRowKey={getRowKey}
       />,
     )
-    await screen.findByText("Row 11")
+    await screen.findByText("Row 3")
     fireResize()
-    expect(scroller(container).dataset.capped).toBe("")
     expect(
-      scroller(container).style.getPropertyValue("--table-rows-height"),
-    ).toBe("440px")
-  })
-
-  it("leaves a table of ten rows at its own height", async () => {
-    const { container } = render(
-      <DataTable
-        ariaLabel="Rows"
-        columns={COLUMNS}
-        rows={many(10)}
-        getRowKey={getRowKey}
-      />,
-    )
-    await screen.findByText("Row 10")
-    fireResize()
-    expect(scroller(container).dataset.capped).toBeUndefined()
+      scroller(container).style.getPropertyValue("--table-header-height"),
+    ).toBe("40px")
   })
 
   it("scrolls a panel opening below the visible rows into view, inside the table only", async () => {
@@ -996,7 +982,8 @@ describe("DataTable row cap", () => {
     await screen.findByText("Row 20")
     fireResize()
     // The scroller shows 0 to 440; row 11 starts at 400 and its panel ends at
-    // 600, so 160 of it is hidden, with room for that above the row.
+    // 600, so 160 of it is hidden, with room for that above the row below the
+    // 40px header.
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
       function (this: Element) {
         const box = (top: number, bottom: number) =>

@@ -234,16 +234,17 @@ const MANY_ROWS: KeyRow[] = Array.from({ length: 40 }, (_, index) => ({
 }))
 
 /**
- * Past ten rows the table scrolls inside itself under a pinned header, so the
- * controls above it and whatever sits below stay in reach. Desk width only.
+ * Taller than the screen can hold, the table scrolls inside itself under a
+ * pinned header, so the controls above it and whatever sits below stay in
+ * reach. Desk width only.
  */
 export const LongTable: Story = {
   args: { rows: MANY_ROWS },
 }
 
 /**
- * Thick rows reach `--table-max-height` before the tenth row, so fewer show:
- * the same cap, bounded by the viewport.
+ * Thick rows reach `--table-max-height` sooner, so fewer show at once: the
+ * same cap, whatever the row height.
  */
 export const ThickRows: Story = {
   args: {

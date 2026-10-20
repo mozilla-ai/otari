@@ -122,19 +122,11 @@ export interface DataTableProps<Row> {
   mobileLayout?: "table" | "cards"
 }
 
-/**
- * Past this many rows a table scrolls inside itself under a pinned header, so
- * the controls above it and the pager below it stay in reach. The cap is the
- * height of these rows as rendered, because row heights differ from table to
- * table, and never more than `--table-max-height` allows.
- */
-export const TABLE_VISIBLE_ROWS = 10
-
 // HeroUI's two containers; `isResizable` picks the second.
 const SCROLLER = ".table__scroll-container, .table__resizable-container"
 
 /**
- * Scrolls a capped table just far enough to show an inline detail panel that
+ * Scrolls a table just far enough to show an inline detail panel that
  * opened below its visible rows, never so far that the row it belongs to goes
  * under the header. Only the table scrolls: `scrollIntoView` would move the
  * page as well.
@@ -458,41 +450,16 @@ function DataTableGrid<Row extends object>({
     return () => observer.disconnect()
   }, [])
 
-  // Measures the first TABLE_VISIBLE_ROWS rows and marks the scroller once
-  // there are more; design-system.css turns the mark into the cap. The inline
-  // detail row is not a `.table__row`, so opening one never moves the cap.
+  // The pinned header's height, which design-system.css gives the scroller as
+  // its scroll padding, so a row reached by keyboard never lands under it.
+  // Watched through the scroller, since react-aria may commit the header after
+  // this first runs and a narrower table can wrap it taller.
   useLayoutEffect(() => {
     const scroller = rootRef.current?.querySelector<HTMLElement>(SCROLLER)
     if (!scroller || typeof ResizeObserver === "undefined") return
-    // The table is what grows with its rows, and react-aria may commit it
-    // after this first runs, so the scroller is watched only until it does.
-    // Not after: the cap resizes the scroller from inside this callback, and
-    // a watched scroller would report that back as a resize loop.
-    let table: Element | null = null
     const measure = () => {
-      const current = scroller.querySelector("table")
-      if (current && current !== table) {
-        if (table) observer.unobserve(table)
-        else observer.unobserve(scroller)
-        table = current
-        observer.observe(table)
-      }
-      const body = scroller.querySelectorAll<HTMLElement>(
-        "tbody > tr.table__row",
-      )
-      if (body.length <= TABLE_VISIBLE_ROWS) {
-        delete scroller.dataset.capped
-        return
-      }
       const header = scroller.querySelector("thead")?.offsetHeight ?? 0
-      let height = header
-      for (let i = 0; i < TABLE_VISIBLE_ROWS; i++)
-        height += body[i].offsetHeight
-      scroller.style.setProperty("--table-rows-height", `${height}px`)
-      // What a focused row scrolls clear of, so it never lands under the
-      // pinned header.
       scroller.style.setProperty("--table-header-height", `${header}px`)
-      scroller.dataset.capped = ""
     }
     const observer = new ResizeObserver(measure)
     observer.observe(scroller)
@@ -622,8 +589,8 @@ function DataTableGrid<Row extends object>({
   // re-render remount the panel.
   useEffect(() => () => hostRef.current?.row.remove(), [])
 
-  // A panel opening below a capped table's visible rows is scrolled into view
-  // inside the table. After the portal has committed, since an empty host has
+  // A panel opening below a table's visible rows is scrolled into view inside
+  // the table, which does nothing until the table is tall enough to scroll. After the portal has committed, since an empty host has
   // nothing to measure: once now, which is the whole panel under reduced
   // motion, and again when the reveal animation has grown it.
   // biome-ignore lint/correctness/useExhaustiveDependencies: detailKey is the trigger; the host node is stable across rows
@@ -631,8 +598,7 @@ function DataTableGrid<Row extends object>({
     const host = hostRef.current?.row
     const target = host?.previousElementSibling
     const scroller = rootRef.current?.querySelector<HTMLElement>(SCROLLER)
-    if (!detailHost || !host || !target || scroller?.dataset.capped == null)
-      return
+    if (!detailHost || !host || !target || !scroller) return
     const reveal = () => revealWithin(scroller, target, host)
     reveal()
     const done = new AbortController()
