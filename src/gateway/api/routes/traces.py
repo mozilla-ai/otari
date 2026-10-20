@@ -37,7 +37,7 @@ from gateway.schemas.traces import (
     summary_public,
 )
 from gateway.services.traces import run_trace_retention
-from gateway.types.traces import TraceFilter, TraceScope
+from gateway.types.traces import TraceFilter, TraceScope, TraceSort, TraceSortKey
 
 MAX_PAGE_SIZE = 100
 # Traces expire on the scale of days, so an hourly pass is soon enough.
@@ -94,9 +94,18 @@ def build_trace_router(router: APIRouter, scope_dependency: Callable[..., Any]) 
         filters: FiltersDep,
         skip: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 50,
+        sort: Annotated[
+            TraceSortKey,
+            Query(description="What to order by. Latency runs from a session's start to its last activity."),
+        ] = "last_activity",
+        order: Annotated[Literal["asc", "desc"], Query(description="The direction of `sort`.")] = "desc",
     ) -> TraceListPublic:
-        """List agent sessions, most recently active first."""
-        return list_public(await traces.search(scope, filters, limit=limit, offset=skip))
+        """List agent sessions, most recently active first unless ``sort`` says otherwise."""
+        return list_public(
+            await traces.search(
+                scope, filters, limit=limit, offset=skip, sort=TraceSort(key=sort, descending=order == "desc")
+            )
+        )
 
     @router.get("/count", response_model=TraceCountPublic)
     async def count_traces(traces: TraceServiceDep, scope: ScopeDep, filters: FiltersDep) -> TraceCountPublic:

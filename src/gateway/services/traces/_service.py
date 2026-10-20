@@ -23,6 +23,7 @@ from gateway.types.traces import (
     TraceFilter,
     TracePage,
     TraceScope,
+    TraceSort,
     TraceSummary,
     TraceWrite,
     WriteResult,
@@ -93,10 +94,12 @@ class TraceService:
             await self._traces.add_totals([_growth(key, spans, written_at) for key, spans in grown.items()])
         return WriteResult(accepted=accepted, duplicate=duplicate, rejected=rejected)
 
-    async def search(self, scope: TraceScope, filters: TraceFilter, *, limit: int, offset: int) -> TracePage:
-        """Return one page of the scope's traces, newest activity first."""
+    async def search(
+        self, scope: TraceScope, filters: TraceFilter, *, limit: int, offset: int, sort: TraceSort = TraceSort()
+    ) -> TracePage:
+        """Return one page of the scope's traces in ``sort`` order, newest activity first by default."""
         async with self._uow:
-            rows = await self._traces.page(_workspace_ids(scope), filters, limit=limit + 1, offset=offset)
+            rows = await self._traces.page(_workspace_ids(scope), filters, limit=limit + 1, offset=offset, sort=sort)
             return TracePage(items=tuple(_summary(row) for row in rows[:limit]), has_more=len(rows) > limit)
 
     async def count(self, scope: TraceScope, filters: TraceFilter) -> int:

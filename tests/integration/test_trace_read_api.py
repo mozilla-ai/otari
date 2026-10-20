@@ -293,6 +293,69 @@ def test_a_workspace_filter_narrows_the_scope_and_never_widens_it(
     assert read(f"{admin}/series", "Theirs", world["member"])["points"] == []
 
 
+@pytest.mark.parametrize(
+    ("sort", "descending"),
+    [
+        ("last_activity", ["s-short", "s-long", "s-costly"]),
+        ("latency", ["s-long", "s-costly", "s-short"]),
+        ("tokens", ["s-short", "s-costly", "s-long"]),
+        ("cost", ["s-costly", "s-short", "s-long"]),
+        ("errors", ["s-long", "s-short", "s-costly"]),
+    ],
+)
+def test_the_list_sorts_by_the_column_asked_for_across_pages(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    sort: str,
+    descending: list[str],
+) -> None:
+    with db_session_factory() as session:
+        workspace = session.scalars(select(Workspace).where(col(Workspace.name) == "One")).one()
+        for trace_id, started, last, tokens, cost, errors in (
+            ("s-short", 60, 61, (900, 100), "0.05", 1),
+            ("s-long", 0, 50, (10, 10), "0.01", 3),
+            ("s-costly", 10, 40, (300, 200), "0.90", 0),
+        ):
+            session.add(
+                Trace(
+                    workspace_id=workspace.id,
+                    trace_id=trace_id,
+                    session_source="client",
+                    started_at=_T0 + timedelta(days=1, minutes=started),
+                    last_activity_at=_T0 + timedelta(days=1, minutes=last),
+                    input_tokens=tokens[0],
+                    output_tokens=tokens[1],
+                    cost_snapshot=Decimal(cost),
+                    error_count=errors,
+                )
+            )
+        session.commit()
+        workspace_id = str(workspace.id)
+
+    def listed(order: str) -> list[str]:
+        # Two pages of two, so the order holds across an offset.
+        pages = [
+            _operator_get(
+                client,
+                world,
+                "/traces",
+                {"workspace_id": workspace_id, "sort": sort, "order": order, "limit": "2", "skip": str(skip)},
+            )
+            for skip in (0, 2)
+        ]
+        assert all(page.status_code == status.HTTP_200_OK for page in pages), pages[0].text
+        return [item["trace_id"] for page in pages for item in page.json()["items"] if item["trace_id"] != "s-one"]
+
+    assert listed("desc") == descending
+    assert listed("asc") == descending[::-1]
+
+
+def test_the_list_refuses_a_sort_it_does_not_offer(client: TestClient, world: dict[str, str]) -> None:
+    for params in ({"sort": "name"}, {"order": "up"}):
+        assert _operator_get(client, world, "/traces", params).status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
 def test_the_detail_reads_the_workspace_it_names(
     client: TestClient,
     world: dict[str, str],

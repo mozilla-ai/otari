@@ -406,6 +406,55 @@ describe("SessionsPage", () => {
     )
   })
 
+  it("sorts by a column from the first page, largest first, and flips on a second press", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?page=2")
+    await vi.waitFor(() =>
+      expect(listReads(calls)[0]?.get("sort")).toBe("last_activity"),
+    )
+    const cost = await screen.findByRole("columnheader", { name: /Total cost/ })
+    await user.click(cost)
+
+    await vi.waitFor(() =>
+      expect(listReads(calls).at(-1)?.toString()).toMatch(
+        /skip=0.*sort=cost&order=desc/,
+      ),
+    )
+    expect(cost).toHaveAttribute("aria-sort", "descending")
+
+    await user.click(cost)
+
+    await vi.waitFor(() =>
+      expect(listReads(calls).at(-1)?.get("order")).toBe("asc"),
+    )
+    expect(cost).toHaveAttribute("aria-sort", "ascending")
+  })
+
+  it("reads the sort a link names", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?sort=errors&order=asc")
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    expect(listReads(calls)[0].toString()).toMatch(/sort=errors&order=asc/)
+    expect(
+      await screen.findByRole("columnheader", { name: /Levels/ }),
+    ).toHaveAttribute("aria-sort", "ascending")
+  })
+
+  it("asks for the default order when a link names a sort it does not offer", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?sort=name&order=sideways")
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    expect(listReads(calls)[0].toString()).toMatch(
+      /sort=last_activity&order=desc/,
+    )
+  })
+
   it("moves between sessions with J and K and closes on Escape", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {

@@ -36423,7 +36423,7 @@
     },
     "/api/v1/organizations/me/traces": {
       "get": {
-        "description": "List agent sessions, most recently active first.",
+        "description": "List agent sessions, most recently active first unless ``sort`` says otherwise.",
         "operationId": "organization-traces-list_traces",
         "parameters": [
           {
@@ -36447,6 +36447,41 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "What to order by. Latency runs from a session's start to its last activity.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "last_activity",
+              "description": "What to order by. Latency runs from a session's start to its last activity.",
+              "enum": [
+                "last_activity",
+                "latency",
+                "tokens",
+                "cost",
+                "errors"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The direction of `sort`.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "description": "The direction of `sort`.",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Order",
+              "type": "string"
             }
           },
           {
@@ -43492,7 +43527,7 @@
     },
     "/api/v1/traces": {
       "get": {
-        "description": "List agent sessions, most recently active first.",
+        "description": "List agent sessions, most recently active first unless ``sort`` says otherwise.",
         "operationId": "traces-list_traces",
         "parameters": [
           {
@@ -43516,6 +43551,41 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "What to order by. Latency runs from a session's start to its last activity.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "last_activity",
+              "description": "What to order by. Latency runs from a session's start to its last activity.",
+              "enum": [
+                "last_activity",
+                "latency",
+                "tokens",
+                "cost",
+                "errors"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The direction of `sort`.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "description": "The direction of `sort`.",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Order",
+              "type": "string"
             }
           },
           {

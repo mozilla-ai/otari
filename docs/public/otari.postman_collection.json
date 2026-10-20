@@ -7327,7 +7327,7 @@
         {
           "name": "List Traces",
           "request": {
-            "description": "List agent sessions, most recently active first.",
+            "description": "List agent sessions, most recently active first unless ``sort`` says otherwise.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7352,6 +7352,18 @@
                   "description": "",
                   "disabled": true,
                   "key": "limit",
+                  "value": ""
+                },
+                {
+                  "description": "What to order by. Latency runs from a session's start to its last activity.",
+                  "disabled": true,
+                  "key": "sort",
+                  "value": ""
+                },
+                {
+                  "description": "The direction of `sort`.",
+                  "disabled": true,
+                  "key": "order",
                   "value": ""
                 },
                 {
@@ -7409,7 +7421,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/traces?skip=&limit=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces?skip=&limit=&sort=&order=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -10803,7 +10815,7 @@
         {
           "name": "List Traces",
           "request": {
-            "description": "List agent sessions, most recently active first.",
+            "description": "List agent sessions, most recently active first unless ``sort`` says otherwise.",
             "header": [],
             "method": "GET",
             "url": {
@@ -10826,6 +10838,18 @@
                   "description": "",
                   "disabled": true,
                   "key": "limit",
+                  "value": ""
+                },
+                {
+                  "description": "What to order by. Latency runs from a session's start to its last activity.",
+                  "disabled": true,
+                  "key": "sort",
+                  "value": ""
+                },
+                {
+                  "description": "The direction of `sort`.",
+                  "disabled": true,
+                  "key": "order",
                   "value": ""
                 },
                 {
@@ -10883,7 +10907,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/traces?skip=&limit=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/traces?skip=&limit=&sort=&order=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
             }
           }
         },

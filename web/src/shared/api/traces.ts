@@ -50,23 +50,46 @@ export function traceParams(filters: TraceFilters): URLSearchParams {
   return params
 }
 
-// One page of sessions, most recently active first. `keepPreviousData` keeps the
-// current page on screen while the next loads, so paging does not flash empty.
-// Like the request log, the list is a snapshot an operator reads rather than a
-// feed, so it refetches when asked (a mount, a filter, a page) and not on its own.
+// What the session list is ordered by. The server sorts, so the order holds
+// across pages rather than within the one on screen.
+export type TraceSortKey =
+  | "last_activity"
+  | "latency"
+  | "tokens"
+  | "cost"
+  | "errors"
+
+export interface TraceSort {
+  key: TraceSortKey
+  direction: "asc" | "desc"
+}
+
+export const DEFAULT_TRACE_SORT: TraceSort = {
+  key: "last_activity",
+  direction: "desc",
+}
+
+// One page of sessions, most recently active first unless `sort` says otherwise.
+// `keepPreviousData` keeps the current page on screen while the next loads, so
+// paging does not flash empty. Like the request log, the list is a snapshot an
+// operator reads rather than a feed, so it refetches when asked (a mount, a
+// filter, a page) and not on its own.
 export function useTraces(
   filters: TraceFilters,
   page: number,
   pageSize: number,
+  sort: TraceSort = DEFAULT_TRACE_SORT,
 ) {
   const scope = useTraceScope()
   return useQuery({
-    queryKey: [TRACES, "list", scope.base, filters, page, pageSize],
+    queryKey: [TRACES, "list", scope.base, filters, page, pageSize, sort],
     meta: workspaceMeta(filters.workspaceId),
     queryFn: () => {
       const params = traceParams(filters)
       params.set("skip", String(page * pageSize))
       params.set("limit", String(pageSize))
+      params.set("sort", sort.key)
+      params.set("order", sort.direction)
       return apiFetch<TraceList>(`${scope.base}?${params.toString()}`)
     },
     enabled: scope.isReady,

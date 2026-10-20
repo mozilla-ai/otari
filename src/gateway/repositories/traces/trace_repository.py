@@ -30,12 +30,13 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.orm import InstrumentedAttribute
 
 from gateway.core.sql import bucket_expr, canonical_bucket, dialect_name, utc_bound
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import Trace
 from gateway.repositories.base_repository import BaseRepository
-from gateway.types.traces import TraceFilter
+from gateway.types.traces import TraceFilter, TraceSort
 
 # A trace's key: its workspace and its id.
 TraceKey = tuple[uuid.UUID, str]
@@ -182,17 +183,49 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
         await self.db.flush()
 
     async def page(
-        self, workspace_ids: Collection[uuid.UUID] | None, query: TraceFilter, *, limit: int, offset: int
+        self,
+        workspace_ids: Collection[uuid.UUID] | None,
+        query: TraceFilter,
+        *,
+        limit: int,
+        offset: int,
+        sort: TraceSort = TraceSort(),
     ) -> Sequence[Trace]:
-        """Return up to ``limit`` matching traces after ``offset``, newest activity first."""
+        """Return up to ``limit`` matching traces after ``offset``, in ``sort`` order.
+
+        Ties fall back to newest activity, then the trace's key, so an offset page
+        never repeats or skips a trace whose sort value it shares with another.
+        """
+        key = self._sort_expression(sort)
         result = await self.db.execute(
             select(Trace)
             .where(*_scoped(workspace_ids, _conditions(query)))
-            .order_by(Trace.last_activity_at.desc(), Trace.trace_id)
+            .order_by(
+                key.desc() if sort.descending else key.asc(),
+                Trace.last_activity_at.desc(),
+                Trace.trace_id,
+                Trace.workspace_id,
+            )
             .offset(offset)
             .limit(limit)
         )
         return result.scalars().all()
+
+    def _sort_expression(self, sort: TraceSort) -> ColumnElement[Any] | InstrumentedAttribute[Any]:
+        match sort.key:
+            case "last_activity":
+                return Trace.last_activity_at
+            case "latency":
+                # SQLite stores timestamps as text, so the span is taken in days.
+                if dialect_name(self.db) == "sqlite":
+                    return func.julianday(Trace.last_activity_at) - func.julianday(Trace.started_at)
+                return Trace.last_activity_at - Trace.started_at
+            case "tokens":
+                return Trace.input_tokens + Trace.output_tokens
+            case "cost":
+                return Trace.cost_snapshot
+            case "errors":
+                return Trace.error_count
 
     async def count_matching(self, workspace_ids: Collection[uuid.UUID] | None, query: TraceFilter) -> int:
         """Count the matching traces without loading them."""

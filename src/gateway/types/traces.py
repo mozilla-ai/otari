@@ -308,6 +308,19 @@ class TraceFilter:
     search: str | None = None
 
 
+# What the session list can be ordered by. Latency is a session's span from its
+# start to its last activity, and tokens are input and output together.
+TraceSortKey = Literal["last_activity", "latency", "tokens", "cost", "errors"]
+
+
+@dataclass(frozen=True)
+class TraceSort:
+    """The order a page of traces is read in. Ties fall back to newest activity first."""
+
+    key: TraceSortKey = "last_activity"
+    descending: bool = True
+
+
 @dataclass(frozen=True)
 class TraceSummary:
     """A trace's totals, as the session list shows them."""
@@ -345,7 +358,7 @@ class TraceBucket:
 
 @dataclass(frozen=True)
 class TracePage:
-    """One page of traces, newest activity first."""
+    """One page of traces, in the order the read asked for."""
 
     items: tuple[TraceSummary, ...]
     has_more: bool

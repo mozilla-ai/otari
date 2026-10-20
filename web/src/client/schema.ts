@@ -3915,7 +3915,7 @@ export interface paths {
         };
         /**
          * List Traces
-         * @description List agent sessions, most recently active first.
+         * @description List agent sessions, most recently active first unless ``sort`` says otherwise.
          */
         get: operations["organization-traces-list_traces"];
         put?: never;
@@ -5921,7 +5921,7 @@ export interface paths {
         };
         /**
          * List Traces
-         * @description List agent sessions, most recently active first.
+         * @description List agent sessions, most recently active first unless ``sort`` says otherwise.
          */
         get: operations["traces-list_traces"];
         put?: never;
@@ -24906,6 +24906,10 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description What to order by. Latency runs from a session's start to its last activity. */
+                sort?: "last_activity" | "latency" | "tokens" | "cost" | "errors";
+                /** @description The direction of `sort`. */
+                order?: "asc" | "desc";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
                 /** @description Last activity at or after this instant (ISO 8601). */
@@ -28052,6 +28056,10 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description What to order by. Latency runs from a session's start to its last activity. */
+                sort?: "last_activity" | "latency" | "tokens" | "cost" | "errors";
+                /** @description The direction of `sort`. */
+                order?: "asc" | "desc";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
                 /** @description Last activity at or after this instant (ISO 8601). */

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import type { SortDescriptor } from "react-aria-components"
 
 import type { TraceSummary } from "@/client"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
@@ -17,7 +18,9 @@ import { FilterChips } from "@/design-system/navigation/FilterChips"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { ActivityTimeline } from "@/features/activity/ActivityTimeline"
 import {
+  DEFAULT_TRACE_SORT,
   type TraceFilters,
+  type TraceSortKey,
   useTrace,
   useTraceCount,
   useTraceSeries,
@@ -60,10 +63,20 @@ const URL_DEFAULTS = {
   peek: "",
   peek_workspace: "",
   span: "",
+  sort: DEFAULT_TRACE_SORT.key,
+  order: DEFAULT_TRACE_SORT.direction,
 } as const
 // The panel holds the picked span itself, so picking one need not re-render
 // the list, its chart and its pager.
 const UNTRACKED = ["span"] as const
+// The columns the server can order by, keyed by column id.
+const SORT_KEYS: Partial<Record<string, TraceSortKey>> = {
+  last_activity: "last_activity",
+  levels: "errors",
+  latency: "latency",
+  tokens: "tokens",
+  cost: "cost",
+}
 const LEVEL_OPTIONS = [
   { value: "", label: "All levels" },
   { value: "failed", label: "Errors" },
@@ -80,6 +93,7 @@ function columns(peekId: string): DataTableColumn<TraceSummary>[] {
   return [
     {
       id: "last_activity",
+      allowsSorting: true,
       header: "Last activity",
       cell: (session) => (
         <span className="text-mono-caption whitespace-nowrap text-muted">
@@ -117,6 +131,7 @@ function columns(peekId: string): DataTableColumn<TraceSummary>[] {
     },
     {
       id: "levels",
+      allowsSorting: true,
       header: "Levels",
       cell: (session) =>
         session.error_count ? (
@@ -127,6 +142,7 @@ function columns(peekId: string): DataTableColumn<TraceSummary>[] {
     },
     {
       id: "latency",
+      allowsSorting: true,
       header: "Latency",
       align: "end",
       cell: (session) => (
@@ -137,6 +153,7 @@ function columns(peekId: string): DataTableColumn<TraceSummary>[] {
     },
     {
       id: "tokens",
+      allowsSorting: true,
       header: "Tokens",
       align: "end",
       cell: (session) =>
@@ -152,6 +169,7 @@ function columns(peekId: string): DataTableColumn<TraceSummary>[] {
     },
     {
       id: "cost",
+      allowsSorting: true,
       header: "Total cost",
       align: "end",
       cell: (session) =>
@@ -226,7 +244,37 @@ export function SessionsPage() {
     ? { ...base, start: iso(custom.start), end: iso(custom.end) }
     : seriesFilters
 
-  const traces = useTraces(filters, page, pageSize)
+  // A hand-edited URL naming a column the server cannot sort falls back to
+  // the default rather than reaching the API as a value it refuses.
+  const sortColumn =
+    Object.entries(SORT_KEYS).find(([, key]) => key === url.get("sort"))?.[0] ??
+    "last_activity"
+  const sortKey = SORT_KEYS[sortColumn] ?? DEFAULT_TRACE_SORT.key
+  const sortDirection = url.get("order") === "asc" ? "asc" : "desc"
+  const sort = useMemo(
+    () => ({ key: sortKey, direction: sortDirection }) as const,
+    [sortKey, sortDirection],
+  )
+  const sortDescriptor: SortDescriptor = {
+    column: sortColumn,
+    direction: sortDirection === "asc" ? "ascending" : "descending",
+  }
+  // Every sortable column is a time or an amount, so a column's first press
+  // puts the largest first; pressing it again flips it.
+  const onSortChange = (descriptor: SortDescriptor) => {
+    const key = SORT_KEYS[String(descriptor.column)]
+    if (!key) return
+    url.patch({
+      sort: key,
+      order:
+        key === sortKey && descriptor.direction === "ascending"
+          ? "asc"
+          : "desc",
+      page: 0,
+    })
+  }
+
+  const traces = useTraces(filters, page, pageSize, sort)
   const count = useTraceCount(filters)
   const seriesQuery = useTraceSeries(seriesFilters, bucket)
   const peekId = url.get("peek")
@@ -366,6 +414,8 @@ export function SessionsPage() {
               columns={tableColumns}
               rows={rows}
               getRowKey={(session) => session.trace_id}
+              sortDescriptor={sortDescriptor}
+              onSortChange={onSortChange}
               isLoading={traces.isPending && !traces.data}
               emptyContent="No sessions in this window. A request joins a session when its client names one; otherwise it is a session of its own."
               mobileLayout="cards"
