@@ -19,7 +19,7 @@ from sqlalchemy import Engine, create_engine, text
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _REVISION = "ae8d42792fd8"
-_BEFORE = "c0e83c6fe801"
+_BEFORE = "6664b766de86"
 _OFFERED = datetime(2026, 10, 1, tzinfo=UTC)
 
 
