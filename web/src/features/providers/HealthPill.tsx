@@ -43,7 +43,7 @@ export function HealthPill({ health }: { health: ProviderHealth | undefined }) {
       title={title}
       className={`flex items-center gap-2 text-mono-caption ${styles}`}
     >
-      <Dot className={dot} />
+      <Dot pulse className={dot} />
       {
         HEALTH_LABELS[
           health.ok ? "ok" : isDegraded ? "degraded" : "unreachable"

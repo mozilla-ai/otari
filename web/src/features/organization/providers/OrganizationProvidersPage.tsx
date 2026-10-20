@@ -406,7 +406,7 @@ export function OrganizationProvidersPage() {
           ) : null}
           {row.archived_at ? (
             <span className="flex items-center gap-2 text-mono-caption text-subtle">
-              <Dot className="bg-text-subtle" />
+              <Dot pulse className="bg-text-subtle" />
               ARCHIVED
             </span>
           ) : null}
@@ -417,7 +417,7 @@ export function OrganizationProvidersPage() {
               indistinguishable from a working one. */}
           {row.usable ? null : (
             <span className="flex items-center gap-2 text-mono-caption text-danger">
-              <Dot className="bg-danger" />
+              <Dot pulse className="bg-danger" />
               UNREADABLE
             </span>
           )}
@@ -444,7 +444,7 @@ export function OrganizationProvidersPage() {
           <span className="text-subtle">all models</span>
         ) : row.serving_count === 0 && !row.archived_at ? (
           <span className="flex items-center gap-2 text-danger">
-            <Dot className="bg-danger" />
+            <Dot pulse className="bg-danger" />
             {`0 of ${row.offered_count} serving`}
           </span>
         ) : (

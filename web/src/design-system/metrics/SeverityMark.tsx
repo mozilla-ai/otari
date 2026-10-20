@@ -19,7 +19,7 @@ export function SeverityMark({ severity }: { severity: Severity }) {
             : "text-subtle"
       }`}
     >
-      <Dot className={status === "ok" ? "bg-success" : "bg-danger"} />
+      <Dot pulse className={status === "ok" ? "bg-success" : "bg-danger"} />
       {word.toUpperCase()}
     </span>
   )

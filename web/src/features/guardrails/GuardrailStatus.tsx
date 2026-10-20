@@ -21,7 +21,10 @@ function Mark({
     <span
       className={`flex items-center gap-2 text-xs ${tone === "danger" ? "text-danger" : "text-subtle"}`}
     >
-      <Dot className={tone === "danger" ? "bg-danger" : "bg-text-subtle"} />
+      <Dot
+        pulse
+        className={tone === "danger" ? "bg-danger" : "bg-text-subtle"}
+      />
       {children}
     </span>
   )

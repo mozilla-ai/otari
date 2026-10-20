@@ -92,7 +92,10 @@ export function ToolStatusRow({
       trailing={
         showsAvailability ? (
           <span className="flex items-center gap-2.5 text-mono-overline text-subtle">
-            <Dot className={tool.available ? "bg-success" : "bg-text-subtle"} />
+            <Dot
+              pulse
+              className={tool.available ? "bg-success" : "bg-text-subtle"}
+            />
             {tool.available ? "Available" : unavailableSummary}
           </span>
         ) : null

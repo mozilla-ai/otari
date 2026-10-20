@@ -167,7 +167,7 @@ function StatusMark({ status }: { status: string }) {
               }
   return (
     <span className={`flex items-center gap-2 text-mono-caption ${ink}`}>
-      <Dot className={dot} />
+      <Dot pulse className={dot} />
       {word.toUpperCase()}
     </span>
   )

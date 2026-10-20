@@ -42,7 +42,7 @@ function Warmth({
           isWarm ? "text-foreground" : "text-subtle"
         }`}
       >
-        <Dot className={isWarm ? "bg-accent" : "bg-text-subtle"} />
+        <Dot pulse className={isWarm ? "bg-accent" : "bg-text-subtle"} />
         {isWarm ? "ROUTING" : "WARMING UP"}
       </span>
     </div>

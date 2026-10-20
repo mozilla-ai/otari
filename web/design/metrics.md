@@ -91,11 +91,15 @@ the chip picks its own hue.
 SpendMeter: { spent, allocated, ariaLabel, nearLimitAt = 0.8, className? }
 Meter: { fraction, ariaLabel }
 SeverityMark: { severity: { status: "ok" | "warn" | "alert", word: string } }
-Dot: { className }
+Dot: { className, pulse? }
 ```
 
 `SeverityMark` is the status mark **with its word**, and it is what a status belongs
 in: `Dot` is the 6px square alone, for a cell that supplies its own word beside it.
+`pulse` is for a dot stating a record's live status (`Active`, `Error`,
+`Disabled`): a ring of its own color sweeps out every few seconds, like a radar
+check. A dot used as a bullet, a tag (`DEFAULT`, `STORED`), a role, or a chart
+legend stays still. `SeverityMark` pulses already.
 Never hand-roll `<span className="text-success">Active</span>`; that is a status
 whose only channel is hue.
 

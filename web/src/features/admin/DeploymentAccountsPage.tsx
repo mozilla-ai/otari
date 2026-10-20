@@ -153,7 +153,10 @@ export function DeploymentAccountsPage() {
         // and it is also a state an operator chose rather than a fault.
         cell: (account) => (
           <span className="flex items-center gap-2 text-mono-caption text-muted">
-            <Dot className={account.is_active ? "bg-success" : "bg-danger"} />
+            <Dot
+              pulse
+              className={account.is_active ? "bg-success" : "bg-danger"}
+            />
             {account.is_active ? "ACTIVE" : "DEACTIVATED"}
           </span>
         ),

@@ -665,6 +665,35 @@
   }
 }
 
+/* Dot's radar check (`pulse`): a copy of the square in the dot's own color
+   leaves it and fades, then rests until the next sweep. Transform and opacity
+   only, so a page of sixty rows costs the compositor and never layout. Dot
+   starts every ring on the document's clock, so dots that mount at different
+   moments still sweep in step, which reads as one check rather than a field
+   of flicker. */
+.otari-dot-pulse {
+  position: relative;
+}
+.otari-dot-pulse::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: inherit;
+  animation: otari-dot-ping 2.4s ease-out infinite;
+}
+@keyframes otari-dot-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  40%,
+  100% {
+    transform: scale(3);
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .otari-detail-reveal {
     animation: none;
@@ -677,6 +706,11 @@
      still reads as the one thing on the sheet that is watching. */
   .otari-scan-border::after {
     animation: none;
+  }
+  /* The ping goes and the dot stays: the status is in the dot and its word,
+     never in the motion. */
+  .otari-dot-pulse::after {
+    display: none;
   }
 }
 

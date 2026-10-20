@@ -22,7 +22,7 @@ export function StatusMark({ status }: { status: string }) {
   const label = describeStatus(status)
   return (
     <span className="flex min-w-0 items-center gap-2" title={label}>
-      <Dot className={dot} />
+      <Dot pulse className={dot} />
       <span className={`truncate text-mono-caption ${ink}`}>{label}</span>
     </span>
   )
