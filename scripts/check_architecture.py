@@ -1547,7 +1547,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.pricing.ModelPricing": {
         "repository": "gateway/repositories/pricing/model_pricing_repository.py",
         "baseline": (
-            "gateway/api/routes/models.py",
             "gateway/api/routes/pricing.py",
             "gateway/repositories/pricing/organization_model_pricing_repository.py",
             "gateway/services/external_usage_service.py",
