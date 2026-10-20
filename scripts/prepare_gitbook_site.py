@@ -1,8 +1,12 @@
 """Build the GitBook site for the documentation into site/.
 
 The site holds the pages that docs/SUMMARY.md lists, and every page under docs/ must be on that menu.
-A relative link to any other file in the repository becomes a GitHub link at the published ref.
-The pages keep their paths under docs/, so links between published pages need no rewriting.
+Each `#` heading of the menu is one entry of the site's top bar and one GitBook space: the space is
+written to the directory docs/gitbook-docs.yaml gives it, with the entries under the heading as its own
+SUMMARY.md, and its first page as its landing page. A page keeps its path under docs/ inside its space,
+so a link between pages of one space needs no rewriting and a link to another space gets the relative
+path between the two directories. A relative link to any other file in the repository becomes a GitHub
+link at the published ref.
 The site also carries the OpenAPI specification and a generated endpoint page per tag under the API reference.
 GitBook renders each operation on those pages from the specification registered in it under SPEC_NAME.
 
@@ -16,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import posixpath
 import re
 import shutil
 import sys
@@ -28,6 +33,7 @@ DOCS_DIR = REPO_ROOT / "docs"
 REPO = "mozilla-ai/otari"
 REPO_URL = f"https://github.com/{REPO}"
 SUMMARY = "SUMMARY.md"
+SITE_CONFIG = "gitbook-docs.yaml"
 SPEC = "public/openapi.json"
 SPEC_NAME = "otari-openapi-spec"
 SPEC_SITE_PATH = "api/openapi.json"
@@ -38,10 +44,11 @@ ENDPOINTS_PARENT = "api-reference.md"
 # Repository-root files copied to the root of the site, keyed by their name in the repository.
 BRANCH_FILES = {
     ".gitbook-branch-readme.md": "README.md",
-    ".gitbook.yaml": ".gitbook.yaml",
 }
 
 _SUMMARY_ENTRY = re.compile(r"^\s*[*-]\s+\[[^\]]*\]\(([^)\s]+)\)")
+_SPACE_HEADING = re.compile(r"^# (.+?)\s*$")
+_SPACE_DIRECTORY = re.compile(r"^\s*directory:\s*\./(\S+?)/?\s*$", re.M)
 # NOTE: A code span and a link are one alternation, so a code span inside a link label stays part of the link.
 _CODE_OR_LINK = re.compile(r"(?P<code>`+[^`]*`+)|(?P<label>\[[^\]]*\])\((?P<target>[^)\s]+)(?P<title>\s+\"[^\"]*\")?\)")
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
@@ -57,6 +64,38 @@ _NOT_A_SLUG = re.compile(r"[^a-z0-9]+")
 def summary_pages(summary: str) -> list[str]:
     """Return the page paths a GitBook SUMMARY.md lists, in menu order."""
     return [match.group(1) for line in summary.splitlines() if (match := _SUMMARY_ENTRY.match(line))]
+
+
+@dataclass(frozen=True)
+class Space:
+    """One `#` heading of the menu: a top-bar entry, its directory, and the menu lines under it."""
+
+    title: str
+    directory: str
+    menu: str
+
+    @property
+    def pages(self) -> list[str]:
+        return summary_pages(self.menu)
+
+
+def summary_spaces(summary: str) -> list[Space]:
+    """Return the spaces a menu declares, one per `#` heading, in menu order."""
+    spaces: list[tuple[str, list[str]]] = []
+    for line in summary.splitlines():
+        if heading := _SPACE_HEADING.match(line):
+            spaces.append((heading.group(1), []))
+        elif spaces:
+            spaces[-1][1].append(line)
+        elif line.strip():
+            raise ValueError(f"{SUMMARY} lists {line.strip()!r} before its first `#` heading")
+    result = []
+    for title, lines in spaces:
+        space = Space(title, _NOT_A_SLUG.sub("-", title.lower()).strip("-"), "\n".join(lines).strip("\n") + "\n")
+        if not space.pages:
+            raise ValueError(f"{SUMMARY} heading {title!r} lists no page")
+        result.append(space)
+    return result
 
 
 def pages_off_the_menu(docs_dir: Path, published: frozenset[str]) -> list[str]:
@@ -120,17 +159,28 @@ def nest_endpoint_pages(summary: str, pages: list[str]) -> str:
 
 @dataclass(frozen=True)
 class Site:
-    """The pages of one GitBook site build and the ref its outbound links point at."""
+    """The spaces of one GitBook site build and the ref its outbound links point at."""
 
     docs_dir: Path
-    published: frozenset[str]
+    spaces: tuple[Space, ...]
     ref: str
 
     @classmethod
     def from_summary(cls, docs_dir: Path, ref: str) -> Site:
-        """Read the published pages from the SUMMARY.md in docs_dir."""
-        pages = summary_pages((docs_dir / SUMMARY).read_text(encoding="utf-8"))
-        return cls(docs_dir=docs_dir, published=frozenset(pages), ref=ref)
+        """Read the spaces from the SUMMARY.md in docs_dir."""
+        spaces = summary_spaces((docs_dir / SUMMARY).read_text(encoding="utf-8"))
+        return cls(docs_dir=docs_dir, spaces=tuple(spaces), ref=ref)
+
+    @property
+    def published(self) -> frozenset[str]:
+        return frozenset(page for space in self.spaces for page in space.pages)
+
+    def site_path(self, page: str) -> str:
+        """Return where a published page is written in the site."""
+        for space in self.spaces:
+            if page in space.pages:
+                return f"{space.directory}/{page}"
+        raise KeyError(page)
 
     def rewrite_links(self, text: str, page: str) -> str:
         """Return text with each link to an unpublished file replaced by its GitHub URL.
@@ -165,8 +215,13 @@ class Site:
         if not resolved.exists():
             raise ValueError(f"{page}: link {target!r} names no file")
         if resolved.is_relative_to(self.docs_dir.resolve()):
-            if resolved.relative_to(self.docs_dir.resolve()).as_posix() in self.published:
-                return match.group(0)
+            linked = resolved.relative_to(self.docs_dir.resolve()).as_posix()
+            if linked in self.published:
+                here, there = self.site_path(page), self.site_path(linked)
+                if here.split("/", 1)[0] == there.split("/", 1)[0]:
+                    return match.group(0)
+                relative = posixpath.relpath(there, posixpath.dirname(here))
+                return f"{label}({relative}{'#' + anchor if anchor else ''}{title})"
         kind = "tree" if resolved.is_dir() else "blob"
         url = f"{REPO_URL}/{kind}/{self.ref}/{PurePosixPath(resolved.relative_to(repo_root))}"
         if anchor:
@@ -175,15 +230,28 @@ class Site:
 
     def build(self, out_dir: Path) -> None:
         """Write the site to out_dir, replacing anything already there."""
+        config = (self.docs_dir / SITE_CONFIG).read_text(encoding="utf-8")
+        configured = _SPACE_DIRECTORY.findall(config)
+        declared = [space.directory for space in self.spaces]
+        if sorted(configured) != sorted(declared):
+            raise ValueError(
+                f"{SITE_CONFIG} maps the directories {configured}, but the `#` headings of {SUMMARY} are {declared}"
+            )
         if out_dir.exists():
             shutil.rmtree(out_dir)
-        for page in sorted(self.published | {SUMMARY}):
-            source = self.docs_dir / page
-            if not source.is_file():
-                raise ValueError(f"{SUMMARY} lists {page!r}, which is not a file under docs/")
-            dest = out_dir / page
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(self.rewrite_links(source.read_text(encoding="utf-8"), page), encoding="utf-8")
+        for space in self.spaces:
+            for page in space.pages:
+                source = self.docs_dir / page
+                if not source.is_file():
+                    raise ValueError(f"{SUMMARY} lists {page!r}, which is not a file under docs/")
+                dest = out_dir / space.directory / page
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(self.rewrite_links(source.read_text(encoding="utf-8"), page), encoding="utf-8")
+            (out_dir / space.directory / SUMMARY).write_text(f"# Summary\n\n{space.menu}", encoding="utf-8")
+            (out_dir / space.directory / ".gitbook.yaml").write_text(
+                f"root: ./\n\nstructure:\n  readme: {space.pages[0]}\n  summary: {SUMMARY}\n", encoding="utf-8"
+            )
+        (out_dir / SITE_CONFIG).write_text(config, encoding="utf-8")
         for name, dest_name in BRANCH_FILES.items():
             shutil.copyfile(self.docs_dir.parent / name, out_dir / dest_name)
         self._build_endpoint_reference(out_dir)
@@ -197,12 +265,15 @@ class Site:
         spec_dest = out_dir / SPEC_SITE_PATH
         spec_dest.parent.mkdir(parents=True, exist_ok=True)
         spec_dest.write_text(json.dumps(spec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        if (out_dir / ENDPOINTS_DIR).exists():
+        if ENDPOINTS_PARENT not in self.published:
+            raise ValueError(f"{SUMMARY} lists no {ENDPOINTS_PARENT!r} to nest the endpoint pages under")
+        space_dir = out_dir / self.site_path(ENDPOINTS_PARENT).split("/", 1)[0]
+        if (space_dir / ENDPOINTS_DIR).exists():
             raise ValueError(f"docs/{ENDPOINTS_DIR}/ is reserved for the generated endpoint pages")
-        (out_dir / ENDPOINTS_DIR).mkdir()
+        (space_dir / ENDPOINTS_DIR).mkdir()
         for page, operations in by_page.items():
-            (out_dir / ENDPOINTS_DIR / f"{page}.md").write_text(endpoint_page(page, operations), encoding="utf-8")
-        summary = out_dir / SUMMARY
+            (space_dir / ENDPOINTS_DIR / f"{page}.md").write_text(endpoint_page(page, operations), encoding="utf-8")
+        summary = space_dir / SUMMARY
         summary.write_text(nest_endpoint_pages(summary.read_text(encoding="utf-8"), list(by_page)), encoding="utf-8")
 
 

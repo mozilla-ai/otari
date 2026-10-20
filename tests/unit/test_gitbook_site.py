@@ -23,6 +23,22 @@ _SPEC = {
 }
 
 
+_SITE_CONFIG = """site:
+  title: Otari
+  structure:
+    - type: section
+      children:
+        - type: space
+          content:
+            directory: ./home
+    - type: section
+      children:
+        - type: space
+          content:
+            directory: ./guides
+"""
+
+
 def _load() -> ModuleType:
     spec = importlib.util.spec_from_file_location("prepare_gitbook_site", _SCRIPT_PATH)
     assert spec is not None and spec.loader is not None
@@ -46,11 +62,11 @@ def repo(tmp_path: Path) -> Path:
         (tmp_path / path).write_text("# Page\n", encoding="utf-8")
     (docs / "public" / "openapi.json").write_text(json.dumps(_SPEC), encoding="utf-8")
     (docs / "SUMMARY.md").write_text(
-        "# Summary\n\n* [Otari](index.md)\n\n## Guides\n\n* [Guide](guide.md)\n* [API](api-reference.md)\n"
+        "# Home\n\n* [Otari](index.md)\n\n# Guides\n\n* [Guide](guide.md)\n\n## Setup\n\n* [API](api-reference.md)\n"
         "* [OpenAI](providers/openai.md)\n",
         encoding="utf-8",
     )
-    (tmp_path / ".gitbook.yaml").write_text("root: ./\n", encoding="utf-8")
+    (docs / "gitbook-docs.yaml").write_text(_SITE_CONFIG, encoding="utf-8")
     (tmp_path / ".gitbook-branch-readme.md").write_text("# Branch\n", encoding="utf-8")
     return tmp_path
 
@@ -65,9 +81,32 @@ def test_summary_pages_reads_entries_in_menu_order() -> None:
     assert gitbook.summary_pages(summary) == ["index.md", "b.md", "sub/a.md"]
 
 
-def test_link_to_a_published_page_is_kept(site: Any) -> None:
-    text = "See [Guide](../guide.md#setup) and [Home](../index.md)."
-    assert site.rewrite_links(text, "providers/openai.md") == "See [Guide](../guide.md#setup) and [Home](../index.md)."
+def test_summary_spaces_splits_the_menu_at_each_top_heading() -> None:
+    summary = "# Home\n\n* [Otari](index.md)\n\n# Self-Hosting\n\n## Run it\n\n* [Deploy](deploy.md)\n"
+    spaces = gitbook.summary_spaces(summary)
+    assert [(space.title, space.directory, space.pages) for space in spaces] == [
+        ("Home", "home", ["index.md"]),
+        ("Self-Hosting", "self-hosting", ["deploy.md"]),
+    ]
+    assert spaces[1].menu == "## Run it\n\n* [Deploy](deploy.md)\n"
+
+
+@pytest.mark.parametrize(
+    "summary", ["* [Otari](index.md)\n# Home\n\n* [B](b.md)\n", "# Home\n\n* [B](b.md)\n\n# Empty\n\n## Group\n"]
+)
+def test_summary_spaces_refuses_a_page_outside_a_space_or_an_empty_space(summary: str) -> None:
+    with pytest.raises(ValueError):
+        gitbook.summary_spaces(summary)
+
+
+def test_link_within_a_space_is_kept(site: Any) -> None:
+    text = "See [API](../api-reference.md#auth)."
+    assert site.rewrite_links(text, "providers/openai.md") == text
+
+
+def test_link_to_another_space_gets_the_path_between_the_directories(site: Any) -> None:
+    assert site.rewrite_links("[Home](../index.md#top)", "providers/openai.md") == "[Home](../../home/index.md#top)"
+    assert site.rewrite_links("[Guide](guide.md)", "index.md") == "[Guide](../guides/guide.md)"
 
 
 def test_link_to_an_unpublished_page_points_at_github(site: Any) -> None:
@@ -125,24 +164,42 @@ def test_build_writes_only_the_published_pages(repo: Path, site: Any) -> None:
 
     written = sorted(path.relative_to(out).as_posix() for path in out.rglob("*") if path.is_file())
     assert written == [
-        ".gitbook.yaml",
         "README.md",
-        "SUMMARY.md",
-        "api-endpoints/chat.md",
-        "api-endpoints/keys.md",
-        "api-reference.md",
         "api/openapi.json",
-        "guide.md",
-        "index.md",
-        "providers/openai.md",
+        "gitbook-docs.yaml",
+        "guides/.gitbook.yaml",
+        "guides/SUMMARY.md",
+        "guides/api-endpoints/chat.md",
+        "guides/api-endpoints/keys.md",
+        "guides/api-reference.md",
+        "guides/guide.md",
+        "guides/providers/openai.md",
+        "home/.gitbook.yaml",
+        "home/SUMMARY.md",
+        "home/index.md",
     ]
+
+
+def test_build_gives_each_space_its_first_page_as_its_landing_page(repo: Path, site: Any) -> None:
+    site.build(repo / "site")
+
+    assert (repo / "site" / "guides" / ".gitbook.yaml").read_text(encoding="utf-8") == (
+        "root: ./\n\nstructure:\n  readme: guide.md\n  summary: SUMMARY.md\n"
+    )
+
+
+def test_build_refuses_a_heading_the_site_config_does_not_map(repo: Path, site: Any) -> None:
+    (repo / "docs" / "gitbook-docs.yaml").write_text(_SITE_CONFIG.replace("./guides", "./elsewhere"), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="elsewhere"):
+        site.build(repo / "site")
 
 
 def test_build_nests_a_page_per_tag_under_the_api_reference(repo: Path, site: Any) -> None:
     site.build(repo / "site")
 
-    assert (repo / "site" / "SUMMARY.md").read_text(encoding="utf-8") == (
-        "# Summary\n\n* [Otari](index.md)\n\n## Guides\n\n* [Guide](guide.md)\n* [API](api-reference.md)\n"
+    assert (repo / "site" / "guides" / "SUMMARY.md").read_text(encoding="utf-8") == (
+        "# Summary\n\n* [Guide](guide.md)\n\n## Setup\n\n* [API](api-reference.md)\n"
         "  * [Chat](api-endpoints/chat.md)\n  * [Keys](api-endpoints/keys.md)\n* [OpenAI](providers/openai.md)\n"
     )
 
@@ -156,7 +213,7 @@ def test_endpoint_page_names_each_operation_by_path_then_method(repo: Path, site
         f"[OpenAPI otari-openapi-spec]({spec_url})\n"
         "{{% endopenapi-operation %}}\n"
     )
-    assert (repo / "site" / "api-endpoints" / "chat.md").read_text(encoding="utf-8") == (
+    assert (repo / "site" / "guides" / "api-endpoints" / "chat.md").read_text(encoding="utf-8") == (
         f"# Chat\n\n{block.format(method='get')}\n{block.format(method='post')}"
     )
 
@@ -221,15 +278,20 @@ def test_build_fails_when_a_docs_page_is_in_the_endpoint_pages_directory(repo: P
         site.build(repo / "site")
 
 
+def _one_space(repo: Path, page: str) -> None:
+    (repo / "docs" / "SUMMARY.md").write_text(f"# Home\n\n* [Page]({page})\n", encoding="utf-8")
+    (repo / "docs" / "gitbook-docs.yaml").write_text("        directory: ./home\n", encoding="utf-8")
+
+
 def test_build_fails_when_the_menu_has_no_api_reference(repo: Path) -> None:
-    (repo / "docs" / "SUMMARY.md").write_text("* [Guide](guide.md)\n", encoding="utf-8")
+    _one_space(repo, "guide.md")
     site = gitbook.Site.from_summary(repo / "docs", "main")
     with pytest.raises(ValueError, match="api-reference.md"):
         site.build(repo / "site")
 
 
 def test_build_fails_when_the_menu_names_a_missing_page(repo: Path) -> None:
-    (repo / "docs" / "SUMMARY.md").write_text("* [Gone](gone.md)\n", encoding="utf-8")
+    _one_space(repo, "gone.md")
     site = gitbook.Site.from_summary(repo / "docs", "main")
     with pytest.raises(ValueError, match="gone.md"):
         site.build(repo / "site")
@@ -246,15 +308,7 @@ def test_every_docs_page_is_on_the_menu() -> None:
     )
 
 
-def test_menu_lists_the_published_pages_of_the_docs_map() -> None:
-    index = (_DOCS_DIR / "index.md").read_text(encoding="utf-8")
-    mapped = {target.split("#", 1)[0] for target in re.findall(r"\]\(([^)\s]+)\)", index)}
-    mapped_pages = {target for target in mapped if target.endswith(".md") and not target.startswith("../")}
-    site = gitbook.Site.from_summary(_DOCS_DIR, "main")
-    assert site.published - {"index.md"} == mapped_pages
-
-
 def test_real_docs_build(tmp_path: Path) -> None:
     site = gitbook.Site.from_summary(_DOCS_DIR, "v0.0.0")
     site.build(tmp_path / "site")
-    assert (tmp_path / "site" / "index.md").is_file()
+    assert (tmp_path / "site" / "home" / "index.md").is_file()

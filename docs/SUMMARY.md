@@ -1,25 +1,15 @@
-# Summary
+# Home
 
-* [Otari](index.md)
-
-## Getting started
-
+* [What is Otari?](index.md)
 * [Quickstart](quickstart.md)
 
-## How-to guides
+# Guides
 
-* [Deployment](deployment.md)
-* [Connect OpenAI](providers/openai.md)
-* [Connect Gemini](providers/gemini.md)
-* [Use with a ChatGPT subscription](chatgpt-subscription.md)
+* [Access control](access-control.md)
 * [Track spend per end user](end-users.md)
-* [Workload identity](workload-identity.md)
-* [Inference Guardrails](guardrails.md)
-* [Agent Guardrails](agent-guardrails.md)
-* [Importing external usage](external-usage.md)
-* [Move config.yml providers to hosted providers](migrate-providers.md)
+* [Admin dashboard](dashboard.md)
 
-## Integrations
+## Agents and frameworks
 
 * [Use with Claude Code](use-with-claude-code.md)
 * [Use with Codex](use-with-codex.md)
@@ -28,26 +18,54 @@
 * [Use with LangChain](use-with-langchain.md)
 * [Use with LangGraph](use-with-langgraph.md)
 
-## Reference
+## Guardrails
+
+* [Inference Guardrails](guardrails.md)
+* [Agent Guardrails](agent-guardrails.md)
+
+## Observability
+
+* [Agent traces](traces.md)
+* [Importing external usage](external-usage.md)
+
+# Self-Hosting
+
+* [Deployment](deployment.md)
+* [Runtime modes](modes.md)
+
+## Providers
+
+* [Connect OpenAI](providers/openai.md)
+* [Connect Gemini](providers/gemini.md)
+* [Use with a ChatGPT subscription](chatgpt-subscription.md)
+* [Hosted providers and BYO credentials](hosted-providers.md)
+* [Provider endpoints](provider-endpoints.md)
+* [Move config.yml providers to hosted providers](migrate-providers.md)
+
+## Operations
+
+* [Workload identity](workload-identity.md)
+* [Health checks](health-checks.md)
+
+# Reference
 
 * [API reference](api-reference.md)
 * [Configuration](configuration.md)
-* [Admin dashboard](dashboard.md)
+
+## Gateway
+
 * [Models](models.md)
-* [Hosted providers and BYO credentials](hosted-providers.md)
-* [Provider endpoints](provider-endpoints.md)
 * [Routing policies](routing.md)
 * [Built-in tools](tools.md)
 * [MCP](mcp.md)
 * [Files](files.md)
-* [Health checks](health-checks.md)
+
+## Agent Guardrails
+
 * [Agent Guardrails reference](agent-guardrails-reference.md)
+
+## Protocols and SDKs
+
 * [SDK compatibility](sdk-compatibility.md)
 * [Hybrid-mode protocol](hybrid-mode-protocol.md)
 * [Code-execution protocol](code-execution-protocol.md)
-
-## Learn
-
-* [Runtime modes](modes.md)
-* [Access control](access-control.md)
-* [Agent traces](traces.md)
