@@ -6,6 +6,7 @@ import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import {
   PAGE_SIZE_OPTIONS,
+  snapPageSize,
   TablePagination,
 } from "@/design-system/data/TablePagination"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -206,11 +207,7 @@ export function SessionsPage() {
   // Snapped to an offered size, as Activity does, so a hand-edited URL cannot
   // reach the API as a limit it refuses.
   const rawPageSize = url.getNumber("size")
-  const pageSize = PAGE_SIZE_OPTIONS.reduce((best, option) =>
-    Math.abs(option - rawPageSize) < Math.abs(best - rawPageSize)
-      ? option
-      : best,
-  )
+  const pageSize = snapPageSize(rawPageSize)
   const startParam = url.get("start_date")
   const endParam = url.get("end_date")
   const custom: TimeWindow | undefined =
