@@ -459,6 +459,36 @@
   background-color: transparent;
   border-bottom: 1px solid var(--color-border);
 }
+
+/* Past TABLE_VISIBLE_ROWS rows a table scrolls inside itself. DataTable
+   measures those rows and marks the scroller `data-capped`; the cap is the
+   smaller of that height and `--table-max-height`, which is the viewport less
+   the top bar, a toolbar above and a pager below, so all three fit at once and
+   thick rows reach it first and show fewer. Desk only: phones get their own
+   strategy. Never on paper, where a clipped table is lost rows. */
+:root {
+  --table-max-height: calc(100dvh - 12rem);
+}
+/* A card is a surface, so a table inside one pins its header on that fill. */
+.card {
+  --table-fill: var(--color-surface);
+}
+@media screen and (min-width: 768px) {
+  .otari-table [data-capped] {
+    max-height: min(var(--table-rows-height), var(--table-max-height));
+    scroll-padding-top: var(--table-header-height);
+  }
+  /* Pinned so the labels survive the scroll, and opaque so the rows pass under
+     it rather than through it. `--table-fill` is for a table sitting on a
+     surface other than the page. Only while capped: an uncapped header stays
+     clear. */
+  .otari-table [data-capped] .table__header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background-color: var(--table-fill, var(--color-background));
+  }
+}
 .otari-table .table__column,
 .otari-table
   [role="row"]

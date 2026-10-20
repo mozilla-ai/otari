@@ -122,6 +122,36 @@ export interface DataTableProps<Row> {
   mobileLayout?: "table" | "cards"
 }
 
+/**
+ * Past this many rows a table scrolls inside itself under a pinned header, so
+ * the controls above it and the pager below it stay in reach. The cap is the
+ * height of these rows as rendered, because row heights differ from table to
+ * table, and never more than `--table-max-height` allows.
+ */
+export const TABLE_VISIBLE_ROWS = 10
+
+// HeroUI's two containers; `isResizable` picks the second.
+const SCROLLER = ".table__scroll-container, .table__resizable-container"
+
+/**
+ * Scrolls a capped table just far enough to show an inline detail panel that
+ * opened below its visible rows, never so far that the row it belongs to goes
+ * under the header. Only the table scrolls: `scrollIntoView` would move the
+ * page as well.
+ */
+function revealWithin(
+  scroller: HTMLElement,
+  row: Element,
+  detail: HTMLElement,
+) {
+  const view = scroller.getBoundingClientRect()
+  const hidden = detail.getBoundingClientRect().bottom - view.bottom
+  if (hidden <= 0) return
+  const header = scroller.querySelector("thead")?.offsetHeight ?? 0
+  const room = row.getBoundingClientRect().top - (view.top + header)
+  scroller.scrollTop += Math.min(hidden, Math.max(0, room))
+}
+
 const SELECTION_COLUMN_WIDTH = 44
 
 // How long the optimistic row highlight survives with no panel. Long enough to
@@ -427,6 +457,49 @@ function DataTableGrid<Row extends object>({
     observer.observe(root)
     return () => observer.disconnect()
   }, [])
+
+  // Measures the first TABLE_VISIBLE_ROWS rows and marks the scroller once
+  // there are more; design-system.css turns the mark into the cap. The inline
+  // detail row is not a `.table__row`, so opening one never moves the cap.
+  useLayoutEffect(() => {
+    const scroller = rootRef.current?.querySelector<HTMLElement>(SCROLLER)
+    if (!scroller || typeof ResizeObserver === "undefined") return
+    // The table is what grows with its rows, and react-aria may commit it
+    // after this first runs, so the scroller is watched only until it does.
+    // Not after: the cap resizes the scroller from inside this callback, and
+    // a watched scroller would report that back as a resize loop.
+    let table: Element | null = null
+    const measure = () => {
+      const current = scroller.querySelector("table")
+      if (current && current !== table) {
+        if (table) observer.unobserve(table)
+        else observer.unobserve(scroller)
+        table = current
+        observer.observe(table)
+      }
+      const body = scroller.querySelectorAll<HTMLElement>(
+        "tbody > tr.table__row",
+      )
+      if (body.length <= TABLE_VISIBLE_ROWS) {
+        delete scroller.dataset.capped
+        return
+      }
+      const header = scroller.querySelector("thead")?.offsetHeight ?? 0
+      let height = header
+      for (let i = 0; i < TABLE_VISIBLE_ROWS; i++)
+        height += body[i].offsetHeight
+      scroller.style.setProperty("--table-rows-height", `${height}px`)
+      // What a focused row scrolls clear of, so it never lands under the
+      // pinned header.
+      scroller.style.setProperty("--table-header-height", `${header}px`)
+      scroller.dataset.capped = ""
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(scroller)
+    measure()
+    return () => observer.disconnect()
+  }, [])
+
   const [detailHost, setDetailHost] = useState<HTMLTableCellElement | null>(
     null,
   )
@@ -548,6 +621,24 @@ function DataTableGrid<Row extends object>({
   // runs on every dependency change: removing the host there is what made a
   // re-render remount the panel.
   useEffect(() => () => hostRef.current?.row.remove(), [])
+
+  // A panel opening below a capped table's visible rows is scrolled into view
+  // inside the table. After the portal has committed, since an empty host has
+  // nothing to measure: once now, which is the whole panel under reduced
+  // motion, and again when the reveal animation has grown it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: detailKey is the trigger; the host node is stable across rows
+  useLayoutEffect(() => {
+    const host = hostRef.current?.row
+    const target = host?.previousElementSibling
+    const scroller = rootRef.current?.querySelector<HTMLElement>(SCROLLER)
+    if (!detailHost || !host || !target || scroller?.dataset.capped == null)
+      return
+    const reveal = () => revealWithin(scroller, target, host)
+    reveal()
+    const done = new AbortController()
+    host.addEventListener("animationend", reveal, { signal: done.signal })
+    return () => done.abort()
+  }, [detailHost, detailKey])
 
   // Row activation with instant acknowledgment: the detail panel can only land
   // after react-aria's O(rows) interaction render (~1.6 ms/row), so the clicked

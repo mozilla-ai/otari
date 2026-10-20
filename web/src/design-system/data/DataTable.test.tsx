@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -8,7 +9,7 @@ import {
 import userEvent from "@testing-library/user-event"
 import { useEffect, useState } from "react"
 import type { Selection, SortDescriptor } from "react-aria-components"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { DataTable, type DataTableColumn } from "./DataTable"
 
@@ -907,5 +908,114 @@ describe('DataTable on a phone with mobileLayout="cards"', () => {
       "sticky",
       "w-[var(--table-viewport-width,100%)]",
     )
+  })
+})
+
+describe("DataTable row cap", () => {
+  // The setup stub reports once, on observe; these tests fire the observer by
+  // hand after react-aria has committed its rows, as a browser would on resize.
+  const observers: ResizeObserverCallback[] = []
+  const fireResize = () =>
+    act(() => {
+      for (const callback of observers) callback([], {} as ResizeObserver)
+    })
+  const many = (count: number): Row[] =>
+    Array.from({ length: count }, (_, i) => ({
+      id: `r${i}`,
+      name: `Row ${i + 1}`,
+      cost: i,
+    }))
+  const scroller = (container: HTMLElement) =>
+    container.querySelector(".table__scroll-container") as HTMLElement
+
+  beforeEach(() => {
+    observers.length = 0
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          observers.push(callback)
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+    // jsdom lays nothing out; every row and the header measure 40px.
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(40)
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it("caps at the header and the first ten rows once there are more", async () => {
+    const { container } = render(
+      <DataTable
+        ariaLabel="Rows"
+        columns={COLUMNS}
+        rows={many(11)}
+        getRowKey={getRowKey}
+      />,
+    )
+    await screen.findByText("Row 11")
+    fireResize()
+    expect(scroller(container).dataset.capped).toBe("")
+    expect(
+      scroller(container).style.getPropertyValue("--table-rows-height"),
+    ).toBe("440px")
+  })
+
+  it("leaves a table of ten rows at its own height", async () => {
+    const { container } = render(
+      <DataTable
+        ariaLabel="Rows"
+        columns={COLUMNS}
+        rows={many(10)}
+        getRowKey={getRowKey}
+      />,
+    )
+    await screen.findByText("Row 10")
+    fireResize()
+    expect(scroller(container).dataset.capped).toBeUndefined()
+  })
+
+  it("scrolls a panel opening below the visible rows into view, inside the table only", async () => {
+    const view = (detailKey: string | null) => (
+      <DataTable
+        ariaLabel="Rows"
+        columns={COLUMNS}
+        rows={many(20)}
+        getRowKey={getRowKey}
+        onRowAction={() => {}}
+        detailKey={detailKey}
+        renderDetail={(row) => <p>Detail for {row.name}</p>}
+      />
+    )
+    const { container, rerender } = render(view(null))
+    await screen.findByText("Row 20")
+    fireResize()
+    // The scroller shows 0 to 440; row 11 starts at 400 and its panel ends at
+    // 600, so 160 of it is hidden, with room for that above the row.
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: Element) {
+        const box = (top: number, bottom: number) =>
+          ({
+            top,
+            bottom,
+            left: 0,
+            right: 0,
+            width: 0,
+            height: bottom - top,
+          }) as DOMRect
+        if (this.matches(".table__scroll-container")) return box(0, 440)
+        if (this.matches(".otari-detail-row")) return box(440, 600)
+        if (this.matches('tr[data-key="r10"]')) return box(400, 440)
+        return box(0, 0)
+      },
+    )
+    rerender(view("r10"))
+    await screen.findByText("Detail for Row 11")
+    expect(scroller(container).scrollTop).toBe(160)
   })
 })
