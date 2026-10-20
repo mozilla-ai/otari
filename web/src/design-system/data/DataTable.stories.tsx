@@ -239,7 +239,9 @@ const MANY_ROWS: KeyRow[] = Array.from({ length: 40 }, (_, index) => ({
  * reach. Desk width only.
  */
 export const LongTable: Story = {
-  args: { rows: MANY_ROWS },
+  // `scrollResetKey` takes a paginated table's page, so each page opens at
+  // its first row.
+  args: { rows: MANY_ROWS, scrollResetKey: 0 },
 }
 
 /**

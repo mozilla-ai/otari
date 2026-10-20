@@ -312,6 +312,7 @@ export function DeploymentAccountsPage() {
           mobileLayout="cards"
           ariaLabel="Deployment accounts"
           columns={columns}
+          scrollResetKey={page}
           rows={rows}
           getRowKey={(account) => account.id}
           isLoading={accounts.isLoading}

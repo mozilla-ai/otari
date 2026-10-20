@@ -399,6 +399,7 @@ export function SessionsPage() {
 
           <TableScrollFrame className="otari-sessions-table">
             <DataTable
+              scrollResetKey={page}
               ariaLabel="Sessions"
               columns={tableColumns}
               rows={rows}
