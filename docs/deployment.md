@@ -10,19 +10,16 @@ A durable standalone deployment should:
 
 - use PostgreSQL and back it up
 - set a strong master key in a secret store
-- set and back up `OTARI_SECRET_KEY` when storing provider credentials
+- set and back up `OTARI_SECRET_KEY`, which encrypts the provider credentials it stores
 - set `OTARI_PROVIDER_ACCOUNT_PEPPER` to its own random value while provider copies are on
 - configure explicit pricing or deliberately enable default pricing
 - terminate TLS in front of the gateway
 - restrict database and management access
-- monitor `/api/v1/health/readiness` and, when enabled, `/metrics`
+- monitor `/api/v1/health/readiness` and, with `enable_metrics` (see
+  [Common settings](configuration.md#common-settings)), `/metrics`
 - pin an image version and test migrations before upgrading
 
 The default SQLite database is intended for evaluation and single-node local use.
-
-A `/metrics` scrape needs the `metrics` extra (`pip install gateway[metrics]`),
-which the Docker image installs. A source install that sets `enable_metrics`
-without it refuses to start rather than serving an empty scrape.
 
 ### Behind a reverse proxy
 
@@ -42,8 +39,9 @@ only `127.0.0.1` is trusted.
 ### Watch the connection pool
 
 On PostgreSQL the gateway serves requests from a fixed pool of database
-connections, and running out of them makes every request fail at once. `/metrics`
-reports the pool directly, labeled by `pool` (`request` for request traffic,
+connections, and running out of them makes every request fail at once. Alert
+when checked-out connections stay close to capacity for a sustained period,
+from these `/metrics` series, labeled by `pool` (`request` for request traffic,
 `log` for the usage-log writer):
 
 | Metric | Meaning |
@@ -51,26 +49,16 @@ reports the pool directly, labeled by `pool` (`request` for request traffic,
 | `gateway_db_pool_connections_checked_out` | Connections in use right now |
 | `gateway_db_pool_connections_idle` | Connections available to hand out |
 | `gateway_db_pool_overflow_connections` | Connections open beyond the pool's base size |
-| `gateway_db_pool_capacity` | Ceiling on connections the pool hands out at once |
+| `gateway_db_pool_capacity` | Ceiling on connections the pool hands out at once: `db_pool_size` plus `db_max_overflow` for `request`, `db_log_pool_size` for `log`, which has no overflow |
 
-The `request` pool is sized by `db_pool_size` and may open `db_max_overflow`
-connections beyond it, so its capacity is the two added together. The `log`
-pool is sized by `db_log_pool_size` and has no overflow, so its capacity is
-that value.
-
-Alert on checked-out connections approaching capacity for a sustained period.
-These metrics do not appear on SQLite, which opens a connection per use and
-keeps no pool.
+SQLite keeps no pool, so these series do not appear there. The pool settings
+are in [Database connections](configuration.md#database-connections).
 
 ## Docker Compose
 
-The repository Compose stack runs Otari and PostgreSQL:
-
-```bash
-cp config.example.yml config.yml
-docker compose pull
-docker compose up -d
-```
+The repository Compose stack runs Otari and PostgreSQL. The
+[Quickstart](quickstart.md) walks through its first start, including the
+`.env` secrets it needs.
 
 Use `docker-compose.build.yml` when testing source changes:
 
@@ -87,31 +75,20 @@ maintenance instructions.
 
 ## Connect a gateway to otari.ai
 
-Create a gateway in otari.ai and copy its gateway token, then start Otari in
-hybrid mode. Put the token in a private environment file:
+Create a gateway in otari.ai and copy its gateway token. Put the token in a
+private environment file:
 
 ```dotenv
 OTARI_AI_TOKEN=gw_your_gateway_token
 ```
 
+Start the container with it, pinning the image version you deploy:
+
 ```bash
 docker run --rm -p 8000:8000 \
   --env-file .env \
-  mzdotai/otari:0.4.0 \
+  mzdotai/otari:<version> \
   otari serve
-```
-
-Hybrid mode does not initialize a local management database or use local
-provider credentials. Clients send an otari.ai user token to the gateway:
-
-```bash
-curl http://localhost:8000/api/v1/chat/completions \
-  -H "Authorization: Bearer tk_your_user_token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "openai/gpt-4o",
-    "messages": [{"role": "user", "content": "Say hello."}]
-  }'
 ```
 
 Verify both liveness and control-plane reachability:
@@ -121,7 +98,9 @@ curl http://localhost:8000/api/v1/health
 curl http://localhost:8000/api/v1/health/readiness
 ```
 
-See [Runtime modes](modes.md) for the trust and credential model.
+Clients then call the gateway with an otari.ai user token. What a hybrid
+gateway serves and which credentials it uses are in
+[Hybrid, connected to otari.ai](modes.md#hybrid-connected-to-otariai).
 
 ## Optional services
 

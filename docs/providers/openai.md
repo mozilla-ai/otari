@@ -1,55 +1,51 @@
-# OpenAI
+# Connect OpenAI
 
-Route requests to OpenAI models (GPT-4o, GPT-4.1, the o-series, and others) through Otari. See any-llm's [supported providers](https://docs.mozilla.ai/any-llm/providers/) for the current provider list and [Models](../models.md) for Otari's model-name format.
+Serve OpenAI models (GPT-4o, GPT-4.1, the o-series, and others) through Otari
+with your OpenAI API key. See any-llm's
+[supported providers](https://docs.mozilla.ai/any-llm/providers/) for the
+current provider list and [Models](../models.md) for Otari's model-name format.
 
-## What you'll set up
+## Before you start
 
-An OpenAI provider entry in your `config.yml` that reads your key from `OPENAI_API_KEY` (or the key stored on the dashboard's Providers page), then a first request that Otari routes to OpenAI.
+- A running Otari with `OTARI_SECRET_KEY` set, and its master key. The
+  [Quickstart](../quickstart.md) sets up both.
+- An OpenAI API key from <https://platform.openai.com/api-keys>.
 
-## Prerequisites
+## Add the key
 
-- Otari running locally (see the [Quickstart](../quickstart.md))
-- An OpenAI account and an API key from <https://platform.openai.com/api-keys>
-
-## Configure
-
-Add OpenAI under `providers:` in your `config.yml`:
-
-```yaml
-providers:
-  openai:
-    api_key: "sk-..."                        # your OpenAI API key
-    # api_base: "https://api.openai.com/v1"  # optional; override for a proxy or compatible endpoint
-```
-
-To keep your provider key out of the file with environment interpolation:
-
-```yaml
-providers:
-  openai:
-    api_key: ${OPENAI_API_KEY}
-```
-
-...then export it before starting Otari:
+Add OpenAI as a hosted provider, on **Hosted providers** in the dashboard's
+deployment view or through the API:
 
 ```bash
-export OPENAI_API_KEY=sk-...
+curl -X POST http://localhost:8000/api/v1/hosted-providers \
+  -H "Authorization: Bearer $OTARI_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"provider": "openai", "api_key": "sk-..."}'
 ```
 
-> `OPENAI_API_KEY` alone is not enough, and neither is a bare `openai:` entry: Otari reads the variable only where an entry names it, as the `api_key: ${OPENAI_API_KEY}` line above does. The dashboard's Providers page and an organization's own key work too. Otari logs a warning at startup when the variable is set and no entry reads it.
+Otari stores the key encrypted and offers every model OpenAI lists on it; each
+model with a price is switched on, and one nothing prices arrives switched off.
+To keep the provider in configuration instead, declare it under
+`hosted_providers:` in `config.yml` (see
+[Hosted providers in config.yml](../configuration.md#hosted-providers-in-configyml)).
+Otari does not read `OPENAI_API_KEY` from its environment unless a declaration
+names it; see [Configuring a provider](../models.md#configuring-a-provider).
 
 ### Optional settings
 
-`client_args` are passed through to the underlying `any-llm` provider client, for options such as custom headers or timeouts:
+The same body takes `api_base`, for a proxy or another OpenAI-compatible
+endpoint, and `client_args`, passed through to the underlying `any-llm`
+provider client for options such as custom headers or timeouts:
 
-```yaml
-providers:
-  openai:
-    api_key: ${OPENAI_API_KEY}
-    client_args:
-      timeout: 60
-      custom_headers:
-        OpenAI-Organization: "org-..."
+```json
+{
+  "provider": "openai",
+  "api_key": "sk-...",
+  "client_args": {
+    "timeout": 60,
+    "custom_headers": {"OpenAI-Organization": "org-..."}
+  }
+}
 ```
 
 ## Choose a model
@@ -62,14 +58,13 @@ openai:gpt-4o-mini
 openai:o4-mini
 ```
 
-Everything after the colon is passed straight to OpenAI, so any model your key can access works.
+Everything after the colon is passed to OpenAI. A model is served once it is
+switched on under the provider on the Hosted providers page.
 
 ## Verify
 
-If you have not already started Otari and created a client key, follow the [Quickstart](../quickstart.md) through [Send a request](../quickstart.md#send-a-request) first.
-
-Then make a request with the Otari Python SDK (`pip install otari`; any
-OpenAI-compatible client also works), using an `openai:<model>` selector:
+Make a request with your Otari API key (`tk-...`) through the Otari Python SDK
+(`pip install otari`; any OpenAI-compatible client also works):
 
 ```python
 from otari import OtariClient
@@ -92,16 +87,18 @@ Hello, nice to meet you!
 
 | Symptom | Likely cause |
 |---------|--------------|
-| HTTP 424 `The provider rejected the gateway's credentials` (code `provider_credential_rejected`) | The `api_key` Otari sent to OpenAI is invalid or lacks access. Check the `api_key` (or `OPENAI_API_KEY`) configured on the gateway. |
-| HTTP 404 (OpenAI's own "model not found" text) | The name after `openai:` is not a model your key can access, or the model name is misspelled. A rejection of your request carries OpenAI's own message, so the detail says which model it could not find. `The requested model was not found on the provider` appears instead when OpenAI sent no message at all. |
-| HTTP 502 `The upstream provider account is out of credit or over its billing limit.` | The provider rejected the call because the account Otari billed has no credit left or has hit its billing limit (for example OpenAI's "billing hard limit reached", or Anthropic's "credit balance is too low", which arrives as a 400). Top up the provider account, or point the model at a provider that has credit. The usage log keeps the status the provider actually returned, so these stay countable. |
-| HTTP 502 `The provider failed the request with HTTP 5xx`, `The provider closed the connection before answering`, or `The gateway could not connect to the provider` | OpenAI failed on its side or the connection to it broke. These are retryable. `LLM provider error` is the same answer for a failure Otari could not place. |
-| HTTP 402 `No pricing configured for model ...` | Otari could not resolve pricing for that model and `require_pricing` rejected the request. Add a `pricing:` entry, enable `default_pricing: true` for bundled fallback pricing, or use a model that already has pricing coverage. |
-| HTTP 401 `Invalid master key` on `/api/v1/keys` | You passed a client (`tk-...`) key, or the wrong master key, instead of the configured master key. |
+| HTTP 401 `Invalid master key` when adding the provider | You sent an API key (`tk-...`) or the wrong master key. `/api/v1/hosted-providers` takes the master key. |
+| HTTP 424 (code `provider_not_configured`) | Nothing serves the model: no OpenAI provider is configured, it is switched off, or the model is not switched on under it. Switch the model on under OpenAI on the Hosted providers page. |
+| HTTP 424 `The provider rejected the gateway's credentials` (code `provider_credential_rejected`) | OpenAI rejected the key Otari sent as invalid or lacking access. Replace the key on the Hosted providers page. |
+| HTTP 404 with OpenAI's own "model not found" text | The name after `openai:` is misspelled or not a model your key can access; the detail carries OpenAI's message. `The requested model was not found on the provider` appears instead when OpenAI sent no message. |
+| HTTP 502 `The upstream provider account is out of credit or over its billing limit.` | The OpenAI account has no credit left or hit its billing hard limit. Top it up, or point the model at a provider that has credit. The usage log keeps the status OpenAI returned. |
+| HTTP 502 `The provider failed the request with HTTP 5xx`, `The provider closed the connection before answering`, or `The gateway could not connect to the provider` | OpenAI failed on its side or the connection broke. These are retryable. `LLM provider error` is the same answer for a failure Otari could not place. |
+| HTTP 402 `No pricing configured for model ...` | The model has no price and `require_pricing` rejected the request. Set a price for it (below), or enable `default_pricing: true`. |
 
 ## Pricing (optional)
 
-To track cost for a model, add a `pricing:` entry in `config.yml`:
+Set a model's price on the Hosted providers page, or add a `pricing:` entry in
+`config.yml`:
 
 ```yaml
 pricing:
