@@ -406,6 +406,20 @@ describe("AppShell responsive layout", () => {
     expect(container.querySelector(".fixed.inset-0")).toBeNull()
   })
 
+  it("ends the page with room for a control fixed to the corner", async () => {
+    const { container } = await renderShell()
+
+    // A superset sets `--shell-corner-clearance` while it pins something to the
+    // bottom-right corner, so the end of a page can scroll out from under it.
+    const content = container.querySelector("#main-content > div")!
+    expect(content.className).toContain(
+      "pb-[calc(1.25rem+var(--shell-corner-clearance))]",
+    )
+    expect(content.className).toContain(
+      "md:pb-[calc(1.5rem+var(--shell-corner-clearance))]",
+    )
+  })
+
   it("marks the drawer inert while closed so its links leave the tab order", async () => {
     mockMatchMedia(true)
     const { container } = await renderShell()
