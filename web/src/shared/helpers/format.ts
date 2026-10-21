@@ -205,8 +205,8 @@ export function formatUsd(value: number): string {
 }
 
 // A session's spend and its parts, read at a glance: cents, as a tile shows them,
-// unless the whole amount is under a cent, where cents would round a real cost
-// down to "$0.00".
+// unless the amount is under a cent, where it keeps `formatCost`'s four places
+// rather than rounding a real cost down to "$0.00".
 export function formatSpend(value: number): string {
   return Math.abs(value) >= 0.01 ? formatUsd(value) : formatCost(value)
 }

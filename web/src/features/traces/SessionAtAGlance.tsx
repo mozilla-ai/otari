@@ -60,7 +60,7 @@ function Line({
 }) {
   return (
     <>
-      <span className={swatch ? `size-2 rounded-[0.125rem] ${swatch}` : ""} />
+      <span className={swatch ? `size-2 ${swatch}` : ""} />
       {name}
       <span className={`text-mono-caption ${isLead ? "" : "text-muted"}`}>
         {value}
@@ -74,18 +74,24 @@ function Name({
   label,
   hint,
   isLead = false,
+  isHintLong = false,
 }: {
   label: string
   hint?: string
   isLead?: boolean
+  /** The hint, not the label, is the one that can run long, so it gives way first. */
+  isHintLong?: boolean
 }) {
+  const [labelFit, hintFit] = isHintLong
+    ? ["shrink-0", "min-w-0 truncate"]
+    : ["truncate", "shrink-0"]
   return (
     <span className="flex min-w-0 items-baseline gap-1.5">
-      <span className={`truncate text-body ${isLead ? "" : "text-muted"}`}>
+      <span className={`${labelFit} text-body ${isLead ? "" : "text-muted"}`}>
         {label}
       </span>
       {hint ? (
-        <span className="shrink-0 text-caption text-subtle">{hint}</span>
+        <span className={`${hintFit} text-caption text-subtle`}>{hint}</span>
       ) : null}
     </span>
   )
@@ -119,7 +125,7 @@ function Bar({
   const drawn = parts.filter((part) => part.drawn > 0)
   return (
     <div aria-hidden className="flex flex-col gap-0.5">
-      <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-[0.1875rem]">
+      <div className="flex h-2.5 gap-0.5 overflow-hidden">
         {drawn.map((part, rank) => (
           <Segment
             key={part.key}
@@ -219,7 +225,7 @@ function ToolsRow({
         aria-expanded={isOpen}
         aria-controls={panelId}
         onClick={onToggle}
-        className={`${LANES} -mx-2 min-h-11 w-[calc(100%+1rem)] rounded-sm px-2 text-left transition-colors duration-150 ease-out hover:bg-surface-alt focus-visible:otari-focus-ring motion-reduce:transition-none md:min-h-8`}
+        className={`${LANES} group -mx-2 min-h-11 w-[calc(100%+1rem)] px-2 text-left transition-colors duration-150 ease-out hover:bg-surface-alt focus-visible:otari-focus-ring motion-reduce:transition-none md:min-h-8`}
       >
         <Line
           swatch={swatchOf(part, 0)}
@@ -227,7 +233,7 @@ function ToolsRow({
           name={
             <span className="flex min-w-0 items-center gap-2">
               <Name label={part.label} isLead={isLead} />
-              <span className="flex shrink-0 items-center gap-0.5 rounded-sm bg-surface-alt py-0.5 pr-1.5 pl-1 text-caption text-subtle">
+              <span className="flex shrink-0 items-center gap-0.5 bg-surface-alt py-0.5 pr-1.5 pl-1 text-caption text-subtle transition-colors duration-150 ease-out group-hover:bg-surface-subtle motion-reduce:transition-none">
                 <FiChevronRight
                   aria-hidden
                   className={`size-3 transition-transform duration-150 ease-out motion-reduce:transition-none ${isOpen ? "rotate-90" : ""}`}
@@ -303,7 +309,7 @@ function Time({ stats, time }: { stats: SessionStats; time: TimeBreakdown }) {
         {time.idleShortened && idle ? (
           <p className="text-caption text-subtle">
             Idle is {formatShare(idle.share)} of it, so the bar draws it
-            shorter, marked {"//"}. The numbers stay true.
+            shorter, marked {"//"}.
           </p>
         ) : null}
       </div>
@@ -334,6 +340,7 @@ function Time({ stats, time }: { stats: SessionStats; time: TimeBreakdown }) {
                         ? `${onlyTool.tool}, ${plural(onlyTool.calls, "call")}`
                         : part.hint
                     }
+                    isHintLong={part.key === "tools"}
                     isLead={i === 0}
                   />
                 }

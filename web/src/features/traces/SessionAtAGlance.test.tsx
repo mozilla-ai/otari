@@ -97,6 +97,11 @@ describe("SessionAtAGlance", () => {
     expect(
       within(row("Running tools")).getByText("Read, 4 calls"),
     ).toBeInTheDocument()
+    // Layout jsdom cannot compute: a long tool name gives way before the
+    // figures beside it, which only the class can show here.
+    expect(within(row("Running tools")).getByText("Read, 4 calls")).toHaveClass(
+      "truncate",
+    )
   })
 
   it("folds the tools past the slowest five into one row", async () => {

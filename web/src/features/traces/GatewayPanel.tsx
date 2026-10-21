@@ -36,8 +36,8 @@ function Spend({
         ? "This key has no spend ceiling of its own."
         : null,
   ].filter((sentence) => sentence !== null)
-  // The ceiling is a sentence to come while it loads, held as one line so the
-  // sections below do not move when it lands.
+  // The ceiling's sentence is held as a line while it loads, so the section
+  // does not appear only once the read lands.
   if (sentences.length === 0 && !ceiling.isLoading) return null
   return (
     <section className="flex flex-col gap-1.5">
