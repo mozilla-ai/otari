@@ -915,6 +915,7 @@ describe("DataTable inner scroll", () => {
   // The setup stub reports once, on observe; these tests fire the observer by
   // hand after react-aria has committed its rows, as a browser would on resize.
   const observers: ResizeObserverCallback[] = []
+  const observed: Element[] = []
   const fireResize = () =>
     act(() => {
       for (const callback of observers) callback([], {} as ResizeObserver)
@@ -930,13 +931,16 @@ describe("DataTable inner scroll", () => {
 
   beforeEach(() => {
     observers.length = 0
+    observed.length = 0
     vi.stubGlobal(
       "ResizeObserver",
       class {
         constructor(callback: ResizeObserverCallback) {
           observers.push(callback)
         }
-        observe() {}
+        observe(target: Element) {
+          observed.push(target)
+        }
         unobserve() {}
         disconnect() {}
       },
@@ -966,6 +970,28 @@ describe("DataTable inner scroll", () => {
     ).toBe("40px")
   })
 
+  it("watches the header itself, which can wrap taller while the scroller keeps its size", async () => {
+    const { container } = render(
+      <DataTable
+        ariaLabel="Rows"
+        columns={COLUMNS}
+        rows={many(3)}
+        getRowKey={getRowKey}
+      />,
+    )
+    await screen.findByText("Row 3")
+    fireResize()
+    const header = container.querySelector("thead")
+    expect(observed.filter((target) => target === header)).toHaveLength(1)
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(56)
+    fireResize()
+    expect(
+      scroller(container).style.getPropertyValue("--table-header-height"),
+    ).toBe("56px")
+    // Observed once, not again on every report.
+    expect(observed.filter((target) => target === header)).toHaveLength(1)
+  })
+
   it("scrolls a panel opening below the visible rows into view, inside the table only", async () => {
     const view = (detailKey: string | null) => (
       <DataTable
@@ -984,6 +1010,7 @@ describe("DataTable inner scroll", () => {
     // The scroller shows 0 to 440; row 11 starts at 400 and its panel ends at
     // 600, so 160 of it is hidden, with room for that above the row below the
     // 40px header.
+    let detailBottom = 600
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
       function (this: Element) {
         const box = (top: number, bottom: number) =>
@@ -996,13 +1023,24 @@ describe("DataTable inner scroll", () => {
             height: bottom - top,
           }) as DOMRect
         if (this.matches(".table__scroll-container")) return box(0, 440)
-        if (this.matches(".otari-detail-row")) return box(440, 600)
-        if (this.matches('tr[data-key="r10"]')) return box(400, 440)
+        // Rows move up as the table scrolls; the scroller itself does not.
+        const shift = scroller(container).scrollTop
+        if (this.matches(".otari-detail-row"))
+          return box(440 - shift, detailBottom - shift)
+        if (this.matches('tr[data-key="r10"]'))
+          return box(400 - shift, 440 - shift)
         return box(0, 0)
       },
     )
     rerender(view("r10"))
     await screen.findByText("Detail for Row 11")
     expect(scroller(container).scrollTop).toBe(160)
+    // A panel that grows after opening, as one does when its content loads, is
+    // revealed again: 40 more of it now lies below the view.
+    const detail = container.querySelector(".otari-detail-row")
+    expect(observed).toContain(detail)
+    detailBottom = 640
+    fireResize()
+    expect(scroller(container).scrollTop).toBe(200)
   })
 })

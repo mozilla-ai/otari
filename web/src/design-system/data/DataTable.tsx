@@ -453,13 +453,23 @@ function DataTableGrid<Row extends object>({
   // The pinned header's height, which design-system.css gives the scroller as
   // its scroll padding, so a row reached by keyboard never lands under it.
   // Watched through the scroller, since react-aria may commit the header after
-  // this first runs and a narrower table can wrap it taller.
+  // this first runs, and through the header itself once it exists, since a
+  // scroller already at its max height keeps its size while a label wraps.
   useLayoutEffect(() => {
     const scroller = rootRef.current?.querySelector<HTMLElement>(SCROLLER)
     if (!scroller || typeof ResizeObserver === "undefined") return
+    let watched: Element | null = null
     const measure = () => {
-      const header = scroller.querySelector("thead")?.offsetHeight ?? 0
-      scroller.style.setProperty("--table-header-height", `${header}px`)
+      const header = scroller.querySelector("thead")
+      // Observing an element again re-reports it, which would loop through here.
+      if (header && header !== watched) {
+        watched = header
+        observer.observe(header)
+      }
+      scroller.style.setProperty(
+        "--table-header-height",
+        `${header?.offsetHeight ?? 0}px`,
+      )
     }
     const observer = new ResizeObserver(measure)
     observer.observe(scroller)
@@ -590,9 +600,10 @@ function DataTableGrid<Row extends object>({
   useEffect(() => () => hostRef.current?.row.remove(), [])
 
   // A panel opening below a table's visible rows is scrolled into view inside
-  // the table, which does nothing until the table is tall enough to scroll. After the portal has committed, since an empty host has
-  // nothing to measure: once now, which is the whole panel under reduced
-  // motion, and again when the reveal animation has grown it.
+  // the table, which does nothing until the table is tall enough to scroll.
+  // After the portal has committed, since an empty host has nothing to measure:
+  // once now, which is the whole panel under reduced motion, and again whenever
+  // it grows, through the reveal animation or content that loads after opening.
   // biome-ignore lint/correctness/useExhaustiveDependencies: detailKey is the trigger; the host node is stable across rows
   useLayoutEffect(() => {
     const host = hostRef.current?.row
@@ -601,9 +612,10 @@ function DataTableGrid<Row extends object>({
     if (!detailHost || !host || !target || !scroller) return
     const reveal = () => revealWithin(scroller, target, host)
     reveal()
-    const done = new AbortController()
-    host.addEventListener("animationend", reveal, { signal: done.signal })
-    return () => done.abort()
+    if (typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(reveal)
+    observer.observe(host)
+    return () => observer.disconnect()
   }, [detailHost, detailKey])
 
   // Row activation with instant acknowledgment: the detail panel can only land
