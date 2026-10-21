@@ -202,7 +202,6 @@ async def streaming_generator(
     on_incomplete: Callable[[], Awaitable[None]] | None = None,
     display_model: str | None = None,
     keepalive_interval_seconds: float = 0.0,
-    settle_before_done: bool = False,
     is_cost_carrier: Callable[[Any], bool] | None = None,
     attach_settlement: Callable[[Any, S], bool] | None = None,
     on_first_chunk: Callable[[], None] | None = None,
@@ -235,10 +234,8 @@ async def streaming_generator(
         keepalive_interval_seconds: Emit ``fmt.keepalive`` whenever the upstream has
             produced nothing for this long, including while terminal settlement is
             pending. 0 disables.
-        settle_before_done: Buffer the designated terminal suffix and settle usage
-            before emitting it. Left false, settlement runs after the done marker.
-        is_cost_carrier: Identifies a provider object that can carry cost. The last
-            match in the stream wins, so a predicate that also matches a non-terminal
+        is_cost_carrier: Identifies a provider object that can carry cost. It is
+            held, with what follows it, until usage settles. The last match in the stream wins, so a predicate that also matches a non-terminal
             object costs no buffering beyond the chunks between that match and the
             next one.
         attach_settlement: Mutates that carrier with the opaque settlement value.
@@ -303,7 +300,7 @@ async def streaming_generator(
                     usage = merge_stream_usage(usage, chunk_usage)
                     has_usage = True
 
-                if settle_before_done and is_cost_carrier is not None and is_cost_carrier(chunk):
+                if is_cost_carrier is not None and is_cost_carrier(chunk):
                     # A later carrier supersedes an earlier one: flushing here keeps
                     # the stream flowing instead of holding it behind a carrier that
                     # is not the last, and leaves cost on the chunk that really ends
@@ -343,61 +340,45 @@ async def streaming_generator(
         if not completed:
             raise IncompleteStreamError(chunks_received)
 
-        # Once the upstream is exhausted, a caller that settles inline does so
-        # before the buffered terminal suffix; otherwise the order is chunks,
-        # done marker, then settlement. A settlement a client disconnect cut off
-        # would never run again, as the stream already counts as settled, so
-        # each one is shielded from the response's canceled scope.
-        if settle_before_done:
-            settled = True
-            settlement: S | None = None
+        # Once the upstream is exhausted, usage settles before the buffered terminal
+        # suffix and the done marker. A settlement a client disconnect cut off
+        # would never run again, as the stream already counts as settled, so it
+        # is shielded from the response's canceled scope.
+        settled = True
+        settlement: S | None = None
+        try:
+            if has_usage:
+                if keepalive_interval > 0:
+
+                    async def _settle() -> S | None:
+                        return await on_complete(usage)
+
+                    settlement_task = asyncio.create_task(_settle())
+                    while not settlement_task.done():
+                        done, _ = await asyncio.wait(
+                            (settlement_task,),
+                            timeout=keepalive_interval,
+                        )
+                        if not done:
+                            yield fmt.keepalive
+                    settlement = settlement_task.result()
+                else:
+                    settlement = await _shielded(on_complete, usage)
+            elif on_no_usage is not None:
+                await _shielded(on_no_usage)
+        except Exception as log_err:
+            # codeql[py/clear-text-logging-sensitive-data]
+            logger.error("Failed to log streaming usage for %s: %s", label, _describe_settlement_error(log_err))
+        if settlement is not None and attach_settlement is not None:
             try:
-                if has_usage:
-                    if keepalive_interval > 0:
-
-                        async def _settle() -> S | None:
-                            return await on_complete(usage)
-
-                        settlement_task = asyncio.create_task(_settle())
-                        while not settlement_task.done():
-                            done, _ = await asyncio.wait(
-                                (settlement_task,),
-                                timeout=keepalive_interval,
-                            )
-                            if not done:
-                                yield fmt.keepalive
-                        settlement = settlement_task.result()
-                    else:
-                        settlement = await _shielded(on_complete, usage)
-                elif on_no_usage is not None:
-                    await _shielded(on_no_usage)
-            except Exception as log_err:
+                attach_settlement(cost_carrier, settlement)
+            except Exception as attach_err:
                 # codeql[py/clear-text-logging-sensitive-data]
-                logger.error("Failed to log streaming usage for %s: %s", label, _describe_settlement_error(log_err))
-            if settlement is not None and attach_settlement is not None:
-                try:
-                    attach_settlement(cost_carrier, settlement)
-                except Exception as attach_err:
-                    # codeql[py/clear-text-logging-sensitive-data]
-                    logger.error("Failed to attach streaming settlement for %s: %s", label, attach_err)
-            for buffered_chunk in terminal_buffer:
-                yield _format_and_mark_first(buffered_chunk)
-            terminal_buffer.clear()
-            yield fmt.done_marker
-        else:
-            yield fmt.done_marker
-
-            # Settle on normal completion. Guard the callbacks so a logging failure
-            # can't be mistaken for an incomplete (disconnected) stream.
-            settled = True
-            try:
-                if has_usage:
-                    await _shielded(on_complete, usage)
-                elif on_no_usage is not None:
-                    await _shielded(on_no_usage)
-            except Exception as log_err:
-                # codeql[py/clear-text-logging-sensitive-data]
-                logger.error("Failed to log streaming usage for %s: %s", label, _describe_settlement_error(log_err))
+                logger.error("Failed to attach streaming settlement for %s: %s", label, attach_err)
+        for buffered_chunk in terminal_buffer:
+            yield _format_and_mark_first(buffered_chunk)
+        terminal_buffer.clear()
+        yield fmt.done_marker
     except Exception as e:
         # A carrier may have been buffered just before the upstream failed. It
         # remains an ordinary provider event and must precede the safe error.

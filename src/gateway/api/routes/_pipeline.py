@@ -5572,8 +5572,6 @@ def build_streaming_response(
             on_incomplete=_on_incomplete,
             display_model=display_model,
             keepalive_interval_seconds=config.streaming_keepalive_interval_ms / 1000,
-            # Settled before the terminal suffix so its usage object can carry the cost.
-            settle_before_done=True,
             is_cost_carrier=adapter.is_stream_cost_carrier,
             attach_settlement=_attach_inline_cost,
             on_first_chunk=_on_first_chunk,
