@@ -18,6 +18,7 @@
 * [Provider endpoints](provider-endpoints.md)
 * [Routing policies](routing.md)
 * [Health checks](health-checks.md)
+* [Update check](update-check.md)
 * [OpenAI provider guide](providers/openai.md)
 * [Gemini provider guide](providers/gemini.md)
 

@@ -28,6 +28,7 @@ import type {
   PendingOrganizationInvitation,
   PricingResponse,
   ScopedBudget,
+  UpdateCheckStatus,
   UsageSeriesPoint,
   UsageTotals,
   User,
@@ -163,6 +164,7 @@ export const SURFACES = [
   "routing",
   "settings",
   "tools",
+  "update_check",
   "usage",
   "users",
   "workspaces",
@@ -872,6 +874,27 @@ export function workspaceMcpServerHealth(
     tool_count: 2,
     missing_allowed_tools: [],
     tools: ["list_issues", "get_issue"],
+    ...overrides,
+  }
+}
+
+/** The update check as a new install reports it: nobody has answered yet. */
+export function updateCheckStatus(
+  overrides: Partial<UpdateCheckStatus> = {},
+): UpdateCheckStatus {
+  return {
+    enabled: null,
+    answered_by: null,
+    current_version: "v0.30.1",
+    checkable: true,
+    install_id: "2f1c7e0e-8a43-4f53-9a6e-2c1d4f1e9b70",
+    endpoint: "https://api.otari.ai/api/v1/update-checks",
+    last_checked_at: null,
+    next_check_at: null,
+    latest_version: null,
+    release_url: null,
+    update_available: false,
+    advisories: [],
     ...overrides,
   }
 }

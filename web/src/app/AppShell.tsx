@@ -58,6 +58,8 @@ import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
 import { canManage } from "@/features/organization/roles"
+import { UpdateCheckPrompt } from "@/features/updateCheck/UpdateCheckPrompt"
+import { UpdateNotice } from "@/features/updateCheck/UpdateNotice"
 import {
   isNoOrganizationError,
   useOrganizationContext,
@@ -815,6 +817,8 @@ function AppShellChrome() {
       <ConnectionStatus />
       <PricingWarning />
       <UnpricedUsageWarning />
+      <UpdateNotice />
+      <UpdateCheckPrompt />
       {/* `relative` so the mobile drawer can be offset from *this row* rather
           than from the viewport. The row's top edge is the header's top edge,
           and the pricing alarm above it is a band in flow, so a

@@ -22,6 +22,7 @@ Running and managing a gateway.
 
 - [Deployment](deployment.md): Docker, Railway, and optional services.
 - [Configuration](configuration.md): configuration sources, precedence, and common settings.
+- [Update check](update-check.md): a daily check for new releases and security fixes, what it sends, and how to turn it off.
 - [Admin dashboard](dashboard.md): sign-in, setup, and management surfaces.
 - [Access control](access-control.md): identities, organizations, workspaces, keys, and budgets.
 - [Workload identity](workload-identity.md): a backend on Google Cloud authenticates with its platform identity token instead of a key's secret.
