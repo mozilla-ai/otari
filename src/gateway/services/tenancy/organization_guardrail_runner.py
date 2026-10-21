@@ -44,9 +44,16 @@ all of them twice a minute per worker would do real I/O for nothing. Each entry
 carries the row's ``updated_at``, which the column sets on every write, so a tick
 builds only what moved or is missing and drops what is gone or disabled.
 
-**There is no lazy build.** A definition this worker does not hold is disabled,
-absent, or one that failed to build, and a request cannot tell those apart. A
-build while a request waits is the thing the cache exists to prevent.
+**There is no lazy build in standalone.** A definition this worker does not hold
+is disabled, absent, or one that failed to build, and a request cannot tell
+those apart. A build while a request waits is the thing the cache exists to
+prevent.
+
+**A hybrid worker builds on first use, because it has no database to load from.**
+The control plane sends each mandated definition with the resolve answer
+(`docs/hybrid-mode-protocol.md`), and :func:`platform_handle` builds a version the
+first time it is named and keeps it, in a cache of its own, until the version
+changes.
 
 **A vendor exception's message never reaches a log line.** A vendor SDK
 constructor raises whatever it likes and may echo the arguments it was handed,
@@ -114,10 +121,21 @@ _T = TypeVar("_T")
 # caught up yet says `pending` rather than borrowing this one's answer.
 BuildState = Literal["built", "failed", "pending"]
 
+# How many definitions a hybrid worker keeps built. A default gateway serves
+# every organization, and a deleted definition is never named again, so the
+# least recently used one goes first.
+_PLATFORM_HELD_LIMIT = 512
+
 # (organization_id, definition_id) -> what this worker holds for it.
 _held: dict[tuple[uuid.UUID, uuid.UUID], "_Held"] = {}
 _loaded_at: float | None = None
 _threads: ThreadPoolExecutor | None = None
+
+# definition_id -> what a hybrid worker built from the control plane's answer,
+# in least recently used order.
+_platform_held: dict[uuid.UUID, "_PlatformHeld"] = {}
+# (definition_id, version) -> the build requests for that version are waiting on.
+_platform_builds: dict[tuple[uuid.UUID, str], asyncio.Task["_PlatformHeld | None"]] = {}
 
 
 @dataclass(frozen=True)
@@ -148,6 +166,20 @@ class _Held:
     """
 
     fingerprint: datetime
+    guardrail_name: str
+    guardrail: Guardrail | None
+
+
+@dataclass(frozen=True)
+class _PlatformHeld:
+    """One version of a definition a hybrid worker built from a resolve answer.
+
+    ``version`` is the control plane's opaque stamp for the definition. A failed
+    build is held like :class:`_Held` holds one, so a definition that cannot
+    build is not retried on every request until its version moves.
+    """
+
+    version: str
     guardrail_name: str
     guardrail: Guardrail | None
 
@@ -216,6 +248,65 @@ def handle(organization_id: uuid.UUID, definition_id: uuid.UUID) -> Organization
     return OrganizationGuardrailHandle(definition_id, GuardrailName(entry.guardrail_name), entry.guardrail)
 
 
+async def platform_handle(
+    definition_id: uuid.UUID, guardrail_name: str, version: str, arguments: dict[str, Any] | None
+) -> OrganizationGuardrailHandle | None:
+    """The built guardrail for a definition the control plane sent, or None when it cannot run.
+
+    Hybrid mode's counterpart to :func:`handle`. A hybrid worker has no database
+    to load definitions from ahead of time, so it builds one the first time a
+    resolve answer names it and keeps it until the version changes. That first
+    request waits for the build, and every request for the same version waiting
+    with it shares the one build.
+
+    ``arguments`` is None when the control plane could not read the definition's
+    secrets. Nothing is built or held for it, so the next answer that carries
+    them is built at once.
+    """
+    if arguments is None:
+        return None
+    entry = _platform_held.pop(definition_id, None)
+    if entry is not None and entry.version == version:
+        _platform_held[definition_id] = entry
+    else:
+        entry = await _platform_build(definition_id, guardrail_name, version, arguments)
+    if entry is None or entry.guardrail is None:
+        return None
+    return OrganizationGuardrailHandle(definition_id, GuardrailName(entry.guardrail_name), entry.guardrail)
+
+
+async def _platform_build(
+    definition_id: uuid.UUID, guardrail_name: str, version: str, arguments: dict[str, Any]
+) -> _PlatformHeld | None:
+    """Build one version once, however many requests are waiting for it.
+
+    Shielded, because the build is shared: one caller disconnecting must not
+    cancel it for the others.
+    """
+    key = (definition_id, version)
+    task = _platform_builds.get(key)
+    if task is None:
+        task = asyncio.create_task(_platform_build_and_hold(definition_id, guardrail_name, version, arguments))
+        _platform_builds[key] = task
+        task.add_done_callback(lambda _: _platform_builds.pop(key, None))
+    return await asyncio.shield(task)
+
+
+async def _platform_build_and_hold(
+    definition_id: uuid.UUID, guardrail_name: str, version: str, arguments: dict[str, Any]
+) -> _PlatformHeld | None:
+    try:
+        guardrail = await _construct(guardrail_name, definition_id, lambda: arguments)
+    except TimeoutError:
+        return None
+    entry = _PlatformHeld(version=version, guardrail_name=guardrail_name, guardrail=guardrail)
+    _platform_held.pop(definition_id, None)
+    _platform_held[definition_id] = entry
+    while len(_platform_held) > _PLATFORM_HELD_LIMIT:
+        del _platform_held[next(iter(_platform_held))]
+    return entry
+
+
 def build_state(organization_id: uuid.UUID, definition_id: uuid.UUID, updated_at: datetime) -> BuildState:
     """What this worker holds for the version of the definition stamped ``updated_at``.
 
@@ -256,6 +347,10 @@ def reset_guardrail_runner() -> None:
     global _loaded_at, _threads  # noqa: PLW0603
 
     _held.clear()
+    _platform_held.clear()
+    for task in _platform_builds.values():
+        task.cancel()
+    _platform_builds.clear()
     _loaded_at = None
     if _threads is not None:
         _threads.shutdown(wait=False, cancel_futures=True)
@@ -411,27 +506,43 @@ async def _build(definition: OrganizationGuardrailDefinition, *, seconds: float 
     ``seconds`` overrides the deadline for a caller somebody is waiting on.
     """
     try:
-        arguments = build_arguments(definition)
-        guardrail = await _in_a_thread(
-            lambda: AnyGuardrail.create(GuardrailName(definition.guardrail_name), **arguments),
+        guardrail = await _construct(
+            definition.guardrail_name, definition.id, lambda: build_arguments(definition), seconds=seconds
+        )
+    except TimeoutError:
+        return None
+    return _Held(fingerprint=definition.updated_at, guardrail_name=definition.guardrail_name, guardrail=guardrail)
+
+
+async def _construct(
+    guardrail_name: str,
+    definition_id: uuid.UUID,
+    arguments: Callable[[], dict[str, Any]],
+    *,
+    seconds: float | None = None,
+) -> Guardrail | None:
+    """Build one guardrail in a thread: the guardrail, None when it failed, or `TimeoutError`."""
+    try:
+        built_arguments = arguments()
+        return await _in_a_thread(
+            lambda: AnyGuardrail.create(GuardrailName(guardrail_name), **built_arguments),
             seconds=seconds if seconds is not None else _BUILD_TIMEOUT_SECONDS,
         )
     except TimeoutError:
         logger.warning(
             "Guardrail %s for definition %s did not build within its deadline; will retry",
-            definition.guardrail_name,
-            definition.id,
+            guardrail_name,
+            definition_id,
         )
-        return None
+        raise
     except Exception as exc:  # noqa: BLE001 - see the module docstring: the message is never logged
         logger.warning(
             "Could not build guardrail %s for definition %s: %s",
-            definition.guardrail_name,
-            definition.id,
+            guardrail_name,
+            definition_id,
             _safe_reason(exc),
         )
-        return _Held(fingerprint=definition.updated_at, guardrail_name=definition.guardrail_name, guardrail=None)
-    return _Held(fingerprint=definition.updated_at, guardrail_name=definition.guardrail_name, guardrail=guardrail)
+        return None
 
 
 def _safe_reason(exc: BaseException) -> str:
@@ -514,6 +625,7 @@ __all__ = [
     "build_state",
     "handle",
     "load_guardrail_runner_at_startup",
+    "platform_handle",
     "rebuild_definition",
     "refresh_guardrail_runner",
     "reset_guardrail_runner",

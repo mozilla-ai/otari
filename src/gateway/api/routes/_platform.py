@@ -12,6 +12,7 @@ lock-in semantics, and the terminal all-failed status mapping uniformly.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypeVar
@@ -20,7 +21,7 @@ import httpx
 from any_llm import LLMProvider
 from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException, status
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, model_validator
 
 from gateway.api.routes._attempt_metrics import record_abandoned_attempt
 from gateway.api.routes._helpers import with_retry_hint
@@ -42,7 +43,7 @@ from gateway.exceptions.control_plane_exceptions import ControlPlaneError, Contr
 from gateway.log_config import logger
 from gateway.schemas.inference import PRICING_SOURCE_PATTERN, SETTLED_COST_PATTERN, SettledCost
 from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
-from gateway.services.control_plane import ResolveEndpoint, resolve, transport
+from gateway.services.control_plane import UNAVAILABLE_DETAIL, ResolveEndpoint, resolve, transport
 from gateway.services.inference import (
     is_empty_completion,
     is_provider_billing_error,
@@ -111,6 +112,44 @@ class ResolvedAttempt(BaseModel):
     ``default_attempt_kwargs``, which merges these in non-overridably."""
 
 
+class ResolvedGuardrailDefinition(BaseModel):
+    """A guardrail the gateway builds and runs itself, as the platform sent it."""
+
+    id: uuid.UUID
+    guardrail_name: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    """Opaque. A change is what makes the gateway build the definition again."""
+    arguments: dict[str, Any] | None = Field(default=None, repr=False)
+    """The constructor arguments, secrets included. None when the platform
+    could not read them, which leaves the guardrail unevaluable."""
+
+
+class ResolvedGuardrail(BaseModel):
+    """One guardrail the caller's organization mandates for its workspace.
+
+    The same row standalone reads from its own database: either a
+    ``definition`` to run in process, or a guardrails service at ``url`` (the
+    deployment's own when absent) called with ``credential``. Never both.
+    """
+
+    profile: str = Field(min_length=1, max_length=128)
+    mode: Literal["block", "monitor"]
+    on_unavailable: Literal["block", "monitor"]
+    validate_kwargs: dict[str, Any] = Field(default_factory=dict)
+    url: str | None = Field(default=None, min_length=1)
+    credential: str | None = Field(default=None, repr=False)
+    definition: ResolvedGuardrailDefinition | None = None
+
+    @model_validator(mode="after")
+    def _one_backend(self) -> ResolvedGuardrail:
+        if self.definition is not None and (self.url is not None or self.credential is not None):
+            raise ValueError("a guardrail with a definition carries no url or credential")
+        return self
+
+
+_GUARDRAILS = TypeAdapter(list[ResolvedGuardrail])
+
+
 class _UsagePricing(BaseModel):
     source: str | None = Field(pattern=PRICING_SOURCE_PATTERN)
 
@@ -149,6 +188,10 @@ class ResolvedRoute(BaseModel):
     # into some other tenant's.
     workspace_id: str | None = None
     organization_id: str | None = None
+    # What the caller's organization mandates for this workspace. Empty for a
+    # peer that mandates nothing, which is also what a peer that predates the
+    # field means.
+    guardrails: list[ResolvedGuardrail] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -647,6 +690,23 @@ def _tenant_ids(payload: dict[str, Any]) -> tuple[str | None, str | None]:
     )
 
 
+def _guardrails(payload: dict[str, Any]) -> list[ResolvedGuardrail]:
+    """Read the optional ``guardrails`` list off a resolve payload.
+
+    Absent means none. A list Otari cannot read refuses the request, because
+    serving it would skip a mandate. The validation error is not logged: it
+    quotes the entry, and the entry carries the organization's secrets.
+    """
+    raw = payload.get("guardrails")
+    if raw is None:
+        return []
+    try:
+        return _GUARDRAILS.validate_python(raw)
+    except ValidationError:
+        logger.error("Platform resolve answered a guardrails list this gateway cannot read")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=UNAVAILABLE_DETAIL) from None
+
+
 def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
     """Build a ResolvedRoute from either the new attempts-list shape or the
     legacy single-attempt shape.
@@ -681,12 +741,13 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
             user_id=str(raw_user_id) if raw_user_id is not None else None,
             workspace_id=workspace_id,
             organization_id=organization_id,
+            guardrails=_guardrails(payload),
         )
 
     # Legacy single-attempt shape predates user_id entirely, same treatment as
     # extra_params (see the class docstring above): no legacy mirror to read.
-    # The tenant ids are the exception: they sit at the top level in both
-    # shapes, so a flat-answering peer that knows its tenant still gets read.
+    # The tenant ids and guardrails are the exception: they sit at the top
+    # level in both shapes.
     correlation_id = str(payload["correlation_id"])
     workspace_id, organization_id = _tenant_ids(payload)
     return ResolvedRoute(
@@ -694,6 +755,7 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
         fallback_enabled=False,
         workspace_id=workspace_id,
         organization_id=organization_id,
+        guardrails=_guardrails(payload),
         attempts=[
             ResolvedAttempt(
                 attempt_id=correlation_id,

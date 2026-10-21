@@ -13,6 +13,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+from fastapi import HTTPException
+
 from gateway.api.routes._platform import ResolvedAttempt, _parse_resolve_payload, default_attempt_kwargs
 
 
@@ -196,3 +199,93 @@ def test_tenant_ids_do_not_reach_the_provider_call() -> None:
     assert "organization_id" not in flattened
     assert "ws-42" not in str(kwargs)
     assert "org-7" not in str(kwargs)
+
+
+_ATTEMPT = {
+    "attempt_id": "a0",
+    "position": 0,
+    "provider": "openai",
+    "model": "gpt-4o",
+    "api_key": "sk-...",
+    "managed": False,
+}
+_GUARDRAIL_SECRET = "azure-key-nobody-should-see"
+_DEFINITION_ID = "0b6f1f43-8c8e-4d6e-9d55-7a1c0d1e2f3a"
+
+
+def _guardrail(**overrides: Any) -> dict[str, Any]:
+    return {
+        "profile": "azure-safety",
+        "mode": "block",
+        "on_unavailable": "block",
+        "validate_kwargs": {},
+        "url": None,
+        "credential": None,
+        "definition": {
+            "id": _DEFINITION_ID,
+            "guardrail_name": "azure_content_safety",
+            "version": "2026-10-19T08:00:00+00:00",
+            "arguments": {"endpoint": "https://example.cognitiveservices.azure.com", "api_key": _GUARDRAIL_SECRET},
+        },
+        **overrides,
+    }
+
+
+def test_parse_resolve_payload_reads_no_guardrails_from_a_peer_that_sends_none() -> None:
+    route = _parse_resolve_payload({"request_id": "req", "fallback_enabled": False, "attempts": [_ATTEMPT]})
+
+    assert route.guardrails == []
+
+
+def test_parse_resolve_payload_reads_the_organizations_guardrails() -> None:
+    route = _parse_resolve_payload(
+        {"request_id": "req", "fallback_enabled": False, "attempts": [_ATTEMPT], "guardrails": [_guardrail()]}
+    )
+
+    [guardrail] = route.guardrails
+    assert guardrail.profile == "azure-safety"
+    assert guardrail.mode == "block"
+    assert guardrail.definition is not None
+    assert str(guardrail.definition.id) == _DEFINITION_ID
+    assert guardrail.definition.arguments is not None
+    assert guardrail.definition.arguments["api_key"] == _GUARDRAIL_SECRET
+
+
+def test_parse_resolve_payload_reads_guardrails_from_the_legacy_shape_too() -> None:
+    route = _parse_resolve_payload(
+        {
+            "provider": "openai",
+            "model": "gpt-4o",
+            "api_key": "sk-...",
+            "correlation_id": "c1",
+            "guardrails": [_guardrail(definition=None, url="https://93.184.216.34/g", credential="tok")],
+        }
+    )
+
+    [guardrail] = route.guardrails
+    assert guardrail.url == "https://93.184.216.34/g"
+    assert guardrail.credential == "tok"
+
+
+@pytest.mark.parametrize(
+    "guardrails",
+    [
+        "not a list",
+        [_guardrail(mode="sometimes")],
+        [{key: value for key, value in _guardrail().items() if key != "on_unavailable"}],
+        [_guardrail(url="https://93.184.216.34/g")],
+    ],
+    ids=["not-a-list", "unknown-mode", "missing-on-unavailable", "definition-and-url"],
+)
+def test_parse_resolve_payload_refuses_guardrails_it_cannot_read(
+    guardrails: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Serving the request would skip a mandate, and the log must not quote the secret."""
+    with pytest.raises(HTTPException) as refused:
+        _parse_resolve_payload(
+            {"request_id": "req", "fallback_enabled": False, "attempts": [_ATTEMPT], "guardrails": guardrails}
+        )
+
+    assert refused.value.status_code == 502
+    assert _GUARDRAIL_SECRET not in caplog.text
+    assert _GUARDRAIL_SECRET not in str(refused.value.detail)

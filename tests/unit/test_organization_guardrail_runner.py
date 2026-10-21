@@ -13,6 +13,7 @@ would be testing the vendor.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -535,3 +536,122 @@ def test_the_lifespan_registry_knows_how_to_stop_it() -> None:
     resets = [worker.reset for worker in _LIFESPAN_WORKERS if worker.name == "organization guardrail"]
 
     assert resets == [runner.reset_guardrail_runner]
+
+
+# --------------------------------------------------------------------------- #
+# A definition the control plane sent (hybrid mode)
+# --------------------------------------------------------------------------- #
+
+_PLATFORM_ARGUMENTS = {"endpoint": "https://93.184.216.34/v2", "api_key": VENDOR_KEY}
+
+
+@pytest.mark.asyncio
+async def test_a_platform_definition_is_built_on_first_use_and_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _stub_any_guardrail(monkeypatch)
+    definition_id = uuid.uuid4()
+
+    first = await runner.platform_handle(definition_id, "lakera_guard", "v1", _PLATFORM_ARGUMENTS)
+    second = await runner.platform_handle(definition_id, "lakera_guard", "v1", _PLATFORM_ARGUMENTS)
+
+    assert first is not None
+    assert second is not None
+    assert calls == [{"guardrail_name": GuardrailName("lakera_guard"), **_PLATFORM_ARGUMENTS}]
+
+
+@pytest.mark.asyncio
+async def test_a_new_version_of_a_platform_definition_is_built_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _stub_any_guardrail(monkeypatch)
+    definition_id = uuid.uuid4()
+
+    await runner.platform_handle(definition_id, "lakera_guard", "v1", _PLATFORM_ARGUMENTS)
+    await runner.platform_handle(definition_id, "lakera_guard", "v2", {**_PLATFORM_ARGUMENTS, "api_key": "rotated"})
+
+    assert [call["api_key"] for call in calls] == [VENDOR_KEY, "rotated"]
+
+
+@pytest.mark.asyncio
+async def test_requests_waiting_on_one_version_share_its_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _slow(_name: GuardrailName, **_kwargs: Any) -> Any:
+        time.sleep(0.1)
+        return _Verdict()
+
+    calls = _stub_any_guardrail(monkeypatch, create=_slow)
+    definition_id = uuid.uuid4()
+
+    handles = await asyncio.gather(
+        *(runner.platform_handle(definition_id, "lakera_guard", "v1", _PLATFORM_ARGUMENTS) for _ in range(5))
+    )
+
+    assert all(handle is not None for handle in handles)
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_platform_definition_that_failed_to_build_is_not_retried_until_it_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _refuse(_name: GuardrailName, **_kwargs: Any) -> Any:
+        raise ValueError(VENDOR_KEY)
+
+    calls = _stub_any_guardrail(monkeypatch, create=_refuse)
+    definition_id = uuid.uuid4()
+
+    assert await runner.platform_handle(definition_id, "lakera_guard", "v1", _PLATFORM_ARGUMENTS) is None
+    assert await runner.platform_handle(definition_id, "lakera_guard", "v1", _PLATFORM_ARGUMENTS) is None
+    assert len(calls) == 1
+
+    assert await runner.platform_handle(definition_id, "lakera_guard", "v2", _PLATFORM_ARGUMENTS) is None
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_platform_definition_without_its_arguments_cannot_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The control plane could not read its secrets, so there is nothing to build or to hold."""
+    calls = _stub_any_guardrail(monkeypatch)
+
+    assert await runner.platform_handle(uuid.uuid4(), "lakera_guard", "v1", None) is None
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_platform_build_that_outran_its_deadline_is_tried_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner, "_BUILD_TIMEOUT_SECONDS", 0.05)
+    slow = True
+
+    def _maybe_slow(_name: GuardrailName, **_kwargs: Any) -> Any:
+        if slow:
+            time.sleep(1.0)
+        return _Verdict()
+
+    calls = _stub_any_guardrail(monkeypatch, create=_maybe_slow)
+    definition_id = uuid.uuid4()
+
+    assert await runner.platform_handle(definition_id, "lakera_guard", "v1", _PLATFORM_ARGUMENTS) is None
+    slow = False
+    assert await runner.platform_handle(definition_id, "lakera_guard", "v1", _PLATFORM_ARGUMENTS) is not None
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_the_least_recently_used_platform_definition_goes_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner, "_PLATFORM_HELD_LIMIT", 2)
+    calls = _stub_any_guardrail(monkeypatch)
+    oldest, used, newest = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+    await runner.platform_handle(oldest, "lakera_guard", "v1", _PLATFORM_ARGUMENTS)
+    await runner.platform_handle(used, "lakera_guard", "v1", _PLATFORM_ARGUMENTS)
+    await runner.platform_handle(oldest, "lakera_guard", "v1", _PLATFORM_ARGUMENTS)
+    await runner.platform_handle(newest, "lakera_guard", "v1", _PLATFORM_ARGUMENTS)
+
+    assert list(runner._platform_held) == [oldest, newest]
+    assert len(calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_reset_drops_what_the_control_plane_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_any_guardrail(monkeypatch)
+    await runner.platform_handle(uuid.uuid4(), "lakera_guard", "v1", _PLATFORM_ARGUMENTS)
+
+    runner.reset_guardrail_runner()
+
+    assert runner._platform_held == {}
