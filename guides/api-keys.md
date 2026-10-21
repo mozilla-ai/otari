@@ -6,7 +6,7 @@ What a key can carry, and who may manage which keys, is in
 [Access control](access-control.md#api-keys).
 
 Send the key as a bearer token (`Authorization: Bearer <key>`); the other
-accepted headers are in [Authentication](../reference/api-reference.md#authentication). On
+accepted headers are in [Authentication](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference#authentication). On
 otari.ai the OpenAI-compatible base URL is `https://api.otari.ai/api/v1`, or
 `https://eu.api.otari.ai/api/v1` for an account in the European Union; a
 client that speaks the Anthropic API takes the base ending in `/api`. A
@@ -51,6 +51,6 @@ a service key: [Track spend per end user](end-users.md).
 - **Delete** on a key's row removes the key permanently.
 
 A key declared in `config.yml` is owned by that file; see
-[Budgets and API keys in config](../reference/configuration.md#budgets-and-api-keys-in-config).
+[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#budgets-and-api-keys-in-config).
 To authenticate a backend with its platform identity instead of a stored
-secret, see [Workload identity](../self-hosting/workload-identity.md).
+secret, see [Workload identity](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/operations/workload-identity).

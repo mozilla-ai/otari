@@ -53,7 +53,7 @@ caller's key, so it needs the platform's model-listing endpoint (see the
 [Hybrid mode protocol](hybrid-mode-protocol.md#model-listing)).
 
 Hosted mode is a control plane. Its inference paths return a descriptive `404`
-and, when configured, the data-plane URL to use instead. See [Modes](../self-hosting/modes.md).
+and, when configured, the data-plane URL to use instead. See [Modes](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/modes).
 
 ## Core inference APIs
 
@@ -240,7 +240,7 @@ and anything else is refused with a 422. Tags are stored without redaction, so
 never put a secret in one.
 
 A client that can add a header but not a body field, such as Claude Code (see
-[Use with Claude Code](../guides/use-with-claude-code.md#tag-claude-code-traffic)), sends
+[Use with Claude Code](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-claude-code#tag-claude-code-traffic)), sends
 the same tags in an `Otari-Tags` header, on the same three surfaces:
 
 ```
@@ -286,10 +286,10 @@ often fill it with one. In Otari it names the user a request is billed to, so it
 is not free-form. A request made with an API key may name only that key's own
 user: any other value is refused with
 `403 'user' field does not match the authenticated API key's user`. A key's
-`reject_user_mismatch` (see [Mismatched `user` fields](../guides/access-control.md#mismatched-user-fields)), or the
+`reject_user_mismatch` (see [Mismatched `user` fields](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides#mismatched-user-fields)), or the
 deployment-wide setting of the same name, can accept other values instead, in
 which case the value is ignored and spend stays with the key's user. A
-[service key](../guides/access-control.md#service-keys-and-end-users) may name its own end
+[service key](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides#service-keys-and-end-users) may name its own end
 users, and a master-key request must name the user to bill. Chat Completions
 and Responses never send `user` to the provider.
 
@@ -736,7 +736,7 @@ reworded.
 | `all_candidates_rejected` | 400 | Every model a routing policy, a catalog ID or the control plane tried rejected the request as invalid | |
 | `insufficient_funds` | 402 | The model is served on a credential the deployment pays for, and the organization has no funds paid in to cover it. Nothing was sent upstream | |
 | `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price, or a direct search's pricing row is missing (see [Search](#search)). An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
-| `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: add the provider as a [hosted provider](../self-hosting/hosted-providers.md) (switching on the model), add an organization provider key, or declare it in `config.yml` with an `api_key` reading the environment variable the detail names (a keyless or ambient-credential provider needs only the entry). The variable alone serves nothing | |
+| `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: add the provider as a [hosted provider](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers) (switching on the model), add an organization provider key, or declare it in `config.yml` with an `api_key` reading the environment variable the detail names (a keyless or ambient-credential provider needs only the entry). The variable alone serves nothing | |
 | `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401, or a 403 other than one rejecting the request, which is a 400). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 | `terms_not_accepted` | 400 | The deployment publishes terms (`terms_url`), and creating or first claiming the account needs them accepted: send `terms_accepted` with the signup, the invitation's first password, the password reset, or the OAuth callback | |
@@ -749,7 +749,7 @@ budget limit`) from a request whose estimated cost is larger than the budget it
 has left (`... has $X of budget remaining, less than this request's estimated
 cost of $Y`); see [Budgets](access-control.md#budgets). Its `Retry-After` is
 when the budget resets, which may be days away for a monthly budget; see
-[Refusals and `Retry-After`](../guides/access-control.md#refusals-and-retry-after).
+[Refusals and `Retry-After`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides#refusals-and-retry-after).
 
 ### Provider failures
 

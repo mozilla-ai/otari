@@ -35,7 +35,7 @@ A provider-native code-execution type is decided by the request's
 own, so a fallback can run Otari's tool where the first model ran its own.
 Function tools remain the caller's responsibility.
 
-In [hybrid mode](../self-hosting/modes.md) each attempt the platform plans is decided the same
+In [hybrid mode](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/modes) each attempt the platform plans is decided the same
 way, except that none is skipped, because the control plane expects a report for
 every attempt it planned: a request one of whose attempts Otari's tool could
 not serve (the workspace has the tool off, say) is decided as a whole: search and fetch run on Otari for every attempt if any attempt needs

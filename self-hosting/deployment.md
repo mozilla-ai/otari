@@ -16,7 +16,7 @@ A durable standalone deployment should:
 - terminate TLS in front of the gateway
 - restrict database and management access
 - monitor `/api/v1/health/readiness` and, with `enable_metrics` (see
-  [Common settings](../reference/configuration.md#common-settings)), `/metrics`
+  [Common settings](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#common-settings)), `/metrics`
 - pin an image version and test migrations before upgrading
 
 The default SQLite database is intended for evaluation and single-node local use.
@@ -52,7 +52,7 @@ from these `/metrics` series, labeled by `pool` (`request` for request traffic,
 | `gateway_db_pool_capacity` | Ceiling on connections the pool hands out at once: `db_pool_size` plus `db_max_overflow` for `request`, `db_log_pool_size` for `log`, which has no overflow |
 
 SQLite keeps no pool, so these series do not appear there. The pool settings
-are in [Database connections](../reference/configuration.md#database-connections).
+are in [Database connections](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#database-connections).
 
 ## Docker Compose
 
@@ -114,7 +114,7 @@ docker compose --profile object-storage up -d
 ```
 
 The `object-storage` profile runs an S3-compatible store for uploaded files;
-[Object storage with Docker Compose](../reference/files.md#object-storage-with-docker-compose)
+[Object storage with Docker Compose](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/files#object-storage-with-docker-compose)
 has the settings that use it.
 
 Web search needs no container when `web_search_provider` names a licensed API
@@ -122,10 +122,10 @@ Web search needs no container when `web_search_provider` names a licensed API
 services are optional; requests that require an unconfigured backend fail
 without affecting ordinary inference.
 
-See [Built-in tools](../reference/tools.md) and [Guardrails](../guides/guardrails.md).
+See [Built-in tools](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/tools) and [Guardrails](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/guardrails/guardrails).
 
 ## Configuration
 
 Otari accepts a mounted YAML file, scalar environment variables, or a complete
 YAML document in `OTARI_CONFIG_YAML` or `OTARI_CONFIG_B64`. See
-[Configuration](../reference/configuration.md) for precedence and security notes.
+[Configuration](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration) for precedence and security notes.

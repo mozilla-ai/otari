@@ -87,7 +87,7 @@ the corresponding startup value after the database is available.
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
 | `pricing_refresh` | What a scheduled models.dev price check does with an update: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting, unavailable in hybrid mode. See [Product feedback](#product-feedback). |
-| `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting, standalone and hosted only. See [Health checks](../self-hosting/health-checks.md). |
+| `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting, standalone and hosted only. See [Health checks](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/operations/health-checks). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -96,9 +96,9 @@ the corresponding startup value after the database is available.
 | `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key, user or model. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
 | `budgets` | Budgets declared by id and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `api_keys` | API keys, service keys among them, declared with a secret you choose and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
-| `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY`, or the gateway refuses to start. See [Workload identity](../self-hosting/workload-identity.md). |
+| `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY`, or the gateway refuses to start. See [Workload identity](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/operations/workload-identity). |
 | `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
-| `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](../self-hosting/workload-identity.md#claude-code-and-the-anthropic-sdks). |
+| `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/operations/workload-identity#claude-code-and-the-anthropic-sdks). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
 | `provider_user_identifier_enabled` | Send each provider call an opaque, per-end-user identifier, so a provider's policy block lands on one user rather than the whole account. Defaults to `true`. See [End-user identifiers](#end-user-identifiers). |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
@@ -107,7 +107,7 @@ the corresponding startup value after the database is available.
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
-| `mode` | `standalone`, `hosted`, or `hybrid`. See [Modes](../self-hosting/modes.md). |
+| `mode` | `standalone`, `hosted`, or `hybrid`. See [Modes](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/modes). |
 
 For every field, its current default, validation, and description live on
 `GatewayConfig` in `src/gateway/core/config.py`, or in the per-domain module
@@ -281,7 +281,7 @@ api_keys:
 ```
 
 A service key with end-user budgets is declared the same way; see
-[Or declare it in config.yml](../guides/end-users.md#or-declare-it-in-configyml).
+[Or declare it in config.yml](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/organizations-and-access/end-users#or-declare-it-in-configyml).
 
 A budget is keyed by its id and takes the fields `PUT /api/v1/budgets/{budget_id}`
 takes: `name`, `max_budget`, `token_limit`, `request_limit`, `rpm_limit`,
@@ -297,7 +297,7 @@ the next start. It takes:
 | `secret` | Required. The secret requests present, interpolated from the environment. |
 | `key_name` | Display name. Defaults to the key's name in config. |
 | `user_id` | The user the key bills to, created when missing. Unset uses the shared `default` user. |
-| `is_service_key` | Lets requests name end users. See [Track spend per end user](../guides/end-users.md). |
+| `is_service_key` | Lets requests name end users. See [Track spend per end user](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/organizations-and-access/end-users). |
 | `end_user_budget_ids` | Budgets a request may start a new end user on with `Otari-End-User-Budget`. |
 | `end_user_budget_id` | Budget a new end user starts on when the request names none. Must be on `end_user_budget_ids` when both are set. |
 | `ceiling` | Budget that caps the key as a whole, across all of its end users: a scoped budget with `scope_type: api_token` on the key. |
@@ -373,10 +373,10 @@ deployment that declares a key does not mint and print one.
 ## Provider configuration
 
 The `providers:` block is deprecated in favor of
-[hosted providers](../self-hosting/hosted-providers.md). At startup, each entry a hosted
+[hosted providers](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers). At startup, each entry a hosted
 provider can hold is copied onto one and is no longer read; see
-[Copies of `providers:` entries](../self-hosting/hosted-providers.md#copies-of-providers-entries)
-and [Move config.yml providers to hosted providers](../self-hosting/migrate-providers.md).
+[Copies of `providers:` entries](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#copies-of-providers-entries)
+and [Move config.yml providers to hosted providers](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/migrate-providers).
 
 The `providers` map is keyed by provider instance. Only a provider it declares
 (or a hosted provider, or an organization's key) serves requests. A standard
@@ -444,7 +444,7 @@ providers (Bedrock, Mistral, Cohere, Ollama and the rest) keep their SDK's own
 retry behavior, which `client_args` can still configure where the SDK allows
 it. A retry setting in an instance's `client_args` (`max_retries`, or
 `http_options.retry_options` for Google) wins over both values. Neither value
-reaches an [owned provider endpoint](../self-hosting/provider-endpoints.md), which keeps its
+reaches an [owned provider endpoint](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/provider-endpoints), which keeps its
 SDK's default outside a policy that can fall over.
 
 ### Messages through the Responses API
@@ -526,7 +526,7 @@ providers:
 ### Runtime provider management
 
 Operators add provider credentials at runtime as
-[hosted providers](../self-hosting/hosted-providers.md), on the Hosted providers page or through
+[hosted providers](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers), on the Hosted providers page or through
 `/api/v1/hosted-providers`. Config-file entries remain read-only in the
 dashboard.
 
@@ -539,13 +539,13 @@ configured encryption key makes stored credentials unrecoverable.
 
 ### Hosted providers in config.yml
 
-The `hosted_providers:` block declares [hosted providers](../self-hosting/hosted-providers.md),
+The `hosted_providers:` block declares [hosted providers](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers),
 keyed by name, with the fields the `/api/v1/hosted-providers` body takes
 (`provider`, `api_key`, `api_base`, `client_args`, `enabled`,
 `restricted_to_organization_id`, `models`). `OTARI_HOSTED_PROVIDERS` sets the
 whole block as JSON and replaces the file's block whole. The fields, validation
 and how a configured entry behaves beside a stored one are in
-[The `hosted_providers:` block](../self-hosting/hosted-providers.md#the-hosted_providers-block).
+[The `hosted_providers:` block](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#the-hosted_providers-block).
 Standalone and hosted mode only; a hybrid gateway ignores the block.
 
 ### Provider copies
@@ -727,7 +727,7 @@ Two limits of that throttle are worth knowing before a catalog is put on the
 open internet. Behind a reverse proxy every visitor shares the proxy's
 address, and one scraper exhausts the budget for everyone, unless
 `forwarded_allow_ips` trusts that proxy; see
-[Behind a reverse proxy](../self-hosting/deployment.md#behind-a-reverse-proxy). And the counter
+[Behind a reverse proxy](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/deployment#behind-a-reverse-proxy). And the counter
 is per worker, so a deployment running N workers serves up to N times the
 configured number.
 
@@ -1037,7 +1037,7 @@ smtp_password: ${SMTP_PASSWORD}
 
 Invitation email is limited over any 24 hours. Both limits are counted in
 `rate_limit_store`, and `null` turns one off; see
-[Invitations](../guides/access-control.md#invitations) for why and what an invitation over
+[Invitations](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides#invitations) for why and what an invitation over
 a limit does:
 
 | Setting | Limits | Default |
@@ -1056,7 +1056,7 @@ where logs are shared. Test delivery from Settings or
 sign-in do with an address nobody has added or invited. `true` gives each new
 address an organization of its own. The signup form needs [mail](#mail)
 configured either way, because it sends a verification link; a provider sign-in
-does not. See [Signup](../guides/access-control.md#signup).
+does not. See [Signup](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides#signup).
 
 ## Built-in tools and guardrails variables
 
@@ -1075,12 +1075,12 @@ and guardrail configuration. Common startup settings are:
 - `mcp_allow_loopback` and `mcp_allow_private_hosts`
 - `web_search_allow_private_hosts`
 - `provider_allow_private_hosts`
-- `provider_endpoints_enabled` (see [Provider endpoints](../self-hosting/provider-endpoints.md))
+- `provider_endpoints_enabled` (see [Provider endpoints](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/provider-endpoints))
 - `web_search_workspace_default` and `code_execution_workspace_default`
   (below)
 
 See [Built-in tools](tools.md), [MCP](mcp.md), and
-[Guardrails](../guides/guardrails.md) for behavior and security boundaries.
+[Guardrails](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/guardrails/guardrails) for behavior and security boundaries.
 
 ### What a workspace with no tool policy gets
 
@@ -1164,7 +1164,7 @@ refused.
 Left unset on a split deployment, an OAuth callback lands the browser on an
 origin holding none of the sign-in state it started with, and the sign-in fails
 with the authorization code unspent. Passkeys need their own settings there; see
-[Access control](../guides/access-control.md#passkeys).
+[Access control](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides#passkeys).
 
 ## The data-plane address
 
@@ -1184,7 +1184,7 @@ this value without authentication.
 Hybrid mode requires `OTARI_AI_TOKEN`. Optional platform settings control the
 platform API URL, management URL, health-probe path, resolution timeout,
 usage-report timeout and retries, and first-chunk fallback timeout. See
-[Modes](../self-hosting/modes.md) and the normative
+[Modes](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/modes) and the normative
 [hybrid-mode protocol](hybrid-mode-protocol.md).
 
 ## Extending Otari with a bootstrap module
@@ -1237,4 +1237,4 @@ after an unconfirmed delivery can produce a duplicate.
 - **Declared budgets and keys.** The first start of a version that records a
   digest of each declared entry writes every entry once, as if each had changed.
 - **`providers:` entries and the Deployment providers page.** See
-  [Move config.yml providers to hosted providers](../self-hosting/migrate-providers.md).
+  [Move config.yml providers to hosted providers](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/migrate-providers).

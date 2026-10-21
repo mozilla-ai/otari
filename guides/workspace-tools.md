@@ -2,7 +2,7 @@
 
 Each workspace decides which built-in tools its requests can use and which MCP
 servers they can reach. These steps are in the dashboard; the settings they
-change are described in [Built-in tools](../reference/tools.md) and [MCP](../reference/mcp.md).
+change are described in [Built-in tools](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/tools) and [MCP](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/mcp).
 
 A workspace setting can only narrow what the deployment allows: it cannot allow
 web access the deployment blocks, or turn on code execution when the deployment
@@ -22,7 +22,7 @@ has no sandbox.
    **Blocked domains** to keep them away from some.
 
 The policy these steps set is described in
-[Per-workspace web-access policy](../reference/tools.md#per-workspace-web-access-policy).
+[Per-workspace web-access policy](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/tools#per-workspace-web-access-policy).
 
 ## Configure code execution
 
@@ -40,8 +40,8 @@ The policy these steps set is described in
    and choose which code-execution tools the workspace can use.
 
 The policy these steps set is described in
-[Per-workspace code policy](../reference/tools.md#per-workspace-code-policy), and who runs the
-code in [Code-execution executor](../reference/tools.md#code-execution-executor).
+[Per-workspace code policy](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/tools#per-workspace-code-policy), and who runs the
+code in [Code-execution executor](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/tools#code-execution-executor).
 
 ## Add an MCP server
 
@@ -59,4 +59,4 @@ code in [Code-execution executor](../reference/tools.md#code-execution-executor)
 Requests in the workspace can use the server's allowed tools from then on.
 Turning **Enabled** off keeps the server's settings but stops requests from
 using it. How a request reaches these servers, and their limits, are in
-[Workspace-scoped servers](../reference/mcp.md#workspace-scoped-servers).
+[Workspace-scoped servers](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/mcp#workspace-scoped-servers).

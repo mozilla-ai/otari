@@ -24,7 +24,7 @@ On the way through, it:
 You can use the hosted gateway at [otari.ai](https://otari.ai), or run Otari
 yourself with your own database and provider keys. The two differ in who runs
 the gateway and where its data lives, not in the API your applications call.
-[Runtime modes](../self-hosting/modes.md) compares them.
+[Runtime modes](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/modes) compares them.
 
 ## Where to go next
 
@@ -33,15 +33,15 @@ the gateway and where its data lives, not in the API your applications call.
 - **Guides**: how to do one thing with Otari, such as give each end user their
   own budget, add guardrails, or read agent traces.
 - **Self-Hosting**: running your own gateway, starting with the
-  [Self-hosted quickstart](../self-hosting/self-hosted-quickstart.md), and connecting it to providers.
+  [Self-hosted quickstart](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting), and connecting it to providers.
 - **Reference**: every setting, endpoint, error code and limit.
 
 ### Integrations
 
 Point an agent or a framework at Otari:
-[Claude Code](../guides/use-with-claude-code.md), [Codex](../guides/use-with-codex.md),
-[opencode](../guides/use-with-opencode.md), [Pydantic AI](../guides/use-with-pydantic-ai.md),
-[LangChain](../guides/use-with-langchain.md) and [LangGraph](../guides/use-with-langgraph.md).
+[Claude Code](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-claude-code), [Codex](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-codex),
+[opencode](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-opencode), [Pydantic AI](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-pydantic-ai),
+[LangChain](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-langchain) and [LangGraph](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-langgraph).
 
 ### For contributors
 

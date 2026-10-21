@@ -3,7 +3,7 @@
 Serve OpenAI models (GPT-4o, GPT-4.1, the o-series, and others) through Otari
 with your OpenAI API key. See any-llm's
 [supported providers](https://docs.mozilla.ai/any-llm/providers/) for the
-current provider list and [Models](../../reference/models.md) for Otari's model-name format.
+current provider list and [Models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models) for Otari's model-name format.
 
 ## Before you start
 
@@ -27,9 +27,9 @@ Otari stores the key encrypted and offers every model OpenAI lists on it; each
 model with a price is switched on, and one nothing prices arrives switched off.
 To keep the provider in configuration instead, declare it under
 `hosted_providers:` in `config.yml` (see
-[Hosted providers in config.yml](../../reference/configuration.md#hosted-providers-in-configyml)).
+[Hosted providers in config.yml](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#hosted-providers-in-configyml)).
 Otari does not read `OPENAI_API_KEY` from its environment unless a declaration
-names it; see [Configuring a provider](../../reference/models.md#configuring-a-provider).
+names it; see [Configuring a provider](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#configuring-a-provider).
 
 ### Optional settings
 
@@ -107,4 +107,4 @@ pricing:
     output_price_per_million: 0.60
 ```
 
-See [Configuration](../../reference/configuration.md) for all options.
+See [Configuration](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration) for all options.

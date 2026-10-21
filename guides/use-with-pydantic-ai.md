@@ -126,16 +126,16 @@ unchanged on `openai:gpt-4o`, `anthropic:claude-sonnet-4-6` and
 `OtariModel("support-agent")`, and then Otari picks the candidate and falls over
 to the next on failure, so the agent code does not change when the policy does.
 
-[Model format](../reference/models.md#model-format) has every spelling Otari accepts,
-[Listing available models](../reference/models.md#listing-available-models) shows which your
-key can use, and [Routing](../reference/routing.md) covers policies.
+[Model format](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#model-format) has every spelling Otari accepts,
+[Listing available models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#listing-available-models) shows which your
+key can use, and [Routing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing) covers policies.
 
 ## One key per project
 
 Give each project its own Otari key, so its usage and spend are reported apart, a
 budget on the key caps that project alone, and revoking the key stops only that
 project. See [Access control](access-control.md) and
-[Budgets and API keys in config](../reference/configuration.md#budgets-and-api-keys-in-config).
+[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#budgets-and-api-keys-in-config).
 
 ## Without the package
 

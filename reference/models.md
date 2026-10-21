@@ -34,7 +34,7 @@ Declare a provider under `providers` in `config.yml`, or add it on the
 Hosted providers page. Either way it serves requests and its models are
 discovered. The `providers:` block is deprecated, and a start copies what it can
 onto hosted providers; see
-[Move config.yml providers to hosted providers](../self-hosting/migrate-providers.md). Supply the key from the environment with a `${VAR}` reference:
+[Move config.yml providers to hosted providers](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/migrate-providers). Supply the key from the environment with a `${VAR}` reference:
 
 ```yaml
 providers:
@@ -64,9 +64,9 @@ providers:
 ```
 
 The exception is a credential the deployment owns, one of its
-[hosted providers](../self-hosting/hosted-providers.md), asked only after every other source
+[hosted providers](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers), asked only after every other source
 missed; a build can rebind `ModelProviderPort` to decide differently. The order
-of the sources is the [credential ladder](../self-hosting/hosted-providers.md#the-credential-ladder).
+of the sources is the [credential ladder](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#the-credential-ladder).
 The gateway logs a warning at startup
 naming each `<PROVIDER>_API_KEY` variable that is set and that no entry's
 `api_key` reads, and ignores an entry for a keyed provider that names no key.
@@ -102,7 +102,7 @@ the control plane resolves each attempt.
 
 A workspace or a single user can also bring its own server, reached the same
 way (`my-vllm:qwen3`) but visible only to its owner. See
-[Provider endpoints](../self-hosting/provider-endpoints.md).
+[Provider endpoints](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/provider-endpoints).
 
 ## Local providers
 
@@ -129,11 +129,11 @@ does, is read to the last page.
 Discovery is cached and bounded; an unreachable provider does not block the
 catalog indefinitely.
 
-A [hosted provider](../self-hosting/hosted-providers.md) lists its roster, the models switched
+A [hosted provider](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers) lists its roster, the models switched
 on under it, rather than everything its upstream lists. How its listing is
 dialed and refreshed, and what `serves_unlisted_models` changes, are in
-[Catalog and discovery](../self-hosting/hosted-providers.md#catalog-and-discovery) and
-[Roster and serving](../self-hosting/hosted-providers.md#roster-and-serving).
+[Catalog and discovery](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#catalog-and-discovery) and
+[Roster and serving](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#roster-and-serving).
 
 Each listed model carries the rate a request from the caller would be billed at,
 and `pricing_source` says which price list it came from: `organization` for the
@@ -359,7 +359,7 @@ null where the caller has no such spelling for it.
 In standalone mode, a request that names a catalog id with more than one offering falls back across them. When the first offering fails before it sends a response, the next one in the same order serves the request, as a routing policy's `on_failure` list does. A catalog id spelled like the legacy `provider/model` of one of its own offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that offering first and the others after it in the usual order. The colon spelling of an offering (`openai:gpt-4o`) never falls back, so it is the way to pin one provider. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it. In hybrid mode, the control plane decides which offerings a request may try.
 
 The dashboard's Models page and the Routing page's Automatic fallback section
-show this catalog and this order; see [Models and Routing](../guides/dashboard.md#models-and-routing).
+show this catalog and this order; see [Models and Routing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/dashboard/dashboard#models-and-routing).
 
 With `public_catalog: true` (see [Configuration](configuration.md)), the same
 two routes and the same page are served to a visitor with no session, at the

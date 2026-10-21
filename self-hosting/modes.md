@@ -130,5 +130,5 @@ provider can charge the organization for it through `BillingPort`; see
 
 The gateway and control plane exchange provider resolution, MCP configuration,
 web-search policy, and usage reports. Integrators building a compatible control
-plane should use the normative [hybrid-mode protocol](../reference/hybrid-mode-protocol.md)
+plane should use the normative [hybrid-mode protocol](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/protocols-and-sdks/hybrid-mode-protocol)
 rather than this overview.

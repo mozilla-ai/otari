@@ -36,14 +36,14 @@ is the source of truth for custom-provider keys and supported options.
 ## Choosing a model
 
 Codex sends the configured `model` string unchanged, so write it as Otari spells
-it, such as `openai:gpt-5.4` ([Model format](../reference/models.md#model-format)).
-[Listing available models](../reference/models.md#listing-available-models) shows which ones
+it, such as `openai:gpt-5.4` ([Model format](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#model-format)).
+[Listing available models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#listing-available-models) shows which ones
 your key can use.
 
 A provider with its own Responses API is called natively. Any other provider is
 served by translating each request into a chat completion, which refuses a few
 Responses features Codex may use, such as tool types other than `function`; see
-[Responses on providers without a Responses API](../reference/api-reference.md#responses-on-providers-without-a-responses-api).
+[Responses on providers without a Responses API](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference#responses-on-providers-without-a-responses-api).
 Codex works best on a provider with a native Responses API.
 
 ## Model metadata
@@ -94,6 +94,6 @@ both route and export one session, or its cost will appear twice. See
 
 ## Related documentation
 
-- [Models](../reference/models.md)
-- [Use with a ChatGPT subscription](../self-hosting/chatgpt-subscription.md)
-- [API reference](../reference/api-reference.md)
+- [Models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models)
+- [Use with a ChatGPT subscription](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/chatgpt-subscription)
+- [API reference](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference)

@@ -81,7 +81,7 @@ reads the same `MLPA_SERVICE_KEY` and presents it as its API key, so nothing has
 to hand a freshly minted secret from one to the other, and a restart or a
 second replica does not change it. For the fields, the secret's format and what
 a start writes back, see
-[Budgets and API keys in config](../reference/configuration.md#budgets-and-api-keys-in-config).
+[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#budgets-and-api-keys-in-config).
 
 ## 3. Name the end user on each request
 
@@ -101,7 +101,7 @@ Otari-End-User-Budget: end-user-budget-memories
 - Send a stable id per end user, not a per-session or per-request value: each
   distinct id creates an end user, whether or not the request is then admitted,
   and nothing else caps how many a key can create. Set a
-  [rate limit](../reference/configuration.md#rate-limit-rules) on a deployment that issues
+  [rate limit](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#rate-limit-rules) on a deployment that issues
   service keys.
 - An id is at most 256 characters and may otherwise be any string, `/`
   included, such as a base64 key id.

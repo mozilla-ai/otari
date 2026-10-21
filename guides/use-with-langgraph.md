@@ -98,8 +98,8 @@ Each node can use its own model through the same gateway, for example a cheap
 model to route and a stronger one to answer. Otari tracks the spend of both under
 the same key. Give each node's `ChatOtari(model=...)` its own name, written as
 Otari spells it (`provider:model`, or a routing policy or alias name); see
-[Model format](../reference/models.md#model-format) and
-[Routing-policy model names](../reference/models.md#routing-policy-model-names).
+[Model format](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#model-format) and
+[Routing-policy model names](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#routing-policy-model-names).
 
 ## See also
 

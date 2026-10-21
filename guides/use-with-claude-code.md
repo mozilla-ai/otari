@@ -64,7 +64,7 @@ the key altogether: Claude Code's own workload identity
 the issuer. Unset `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` when you switch:
 either one, when set, takes precedence and the federation variables are
 ignored. See
-[Claude Code and the Anthropic SDKs](../self-hosting/workload-identity.md#claude-code-and-the-anthropic-sdks).
+[Claude Code and the Anthropic SDKs](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/operations/workload-identity#claude-code-and-the-anthropic-sdks).
 
 ## Tag Claude Code traffic
 
@@ -81,7 +81,7 @@ Every request the session makes is then recorded with those tags, and the usage
 endpoints filter and group by them (`GET /api/v1/usage?tag=run:1234`), so one
 key can split its cost by agent, run or requester. Percent-encode a `,` or `=`
 inside a value. Tags are recorded in standalone mode only. See
-[Request tags](../reference/api-reference.md#request-tags) for the format and limits.
+[Request tags](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference#request-tags) for the format and limits.
 
 A headless run that should read as one session of its own sends a run id too,
 which the dashboard's Sessions list then shows and searches by:
@@ -143,7 +143,7 @@ providers:
 
 Claude Code then receives the model's reasoning as thinking blocks and sends them
 back on the next turn, which is what lets the reasoning carry over. See
-[Messages through the Responses API](../reference/configuration.md#messages-through-the-responses-api)
+[Messages through the Responses API](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#messages-through-the-responses-api)
 for how fields translate.
 
 ## Let Otari choose a subagent's model
@@ -155,11 +155,11 @@ is where a cheaper model costs nothing in cache misses. The plugin asks Otari at
 that moment, even when Claude Code's own requests go to Anthropic directly, and
 each recommendation is one decision call billed to your key. The request and
 response are in the
-[API reference](../reference/api-reference.md#routing-recommendations), and how Otari
-decides is in [Agent model recommendations](../reference/routing.md#agent-model-recommendations).
+[API reference](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference#routing-recommendations), and how Otari
+decides is in [Agent model recommendations](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing#agent-model-recommendations).
 
 You need a standalone gateway with a
-[decision provider](../reference/configuration.md#decision-providers) that
+[decision provider](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#decision-providers) that
 `agent_recommender_model` resolves to (`typesafe` with an API key by default).
 Without one, the route answers `400` and every subagent starts on the model it
 would have had anyway. On otari.ai a managed recommender answers, with nothing

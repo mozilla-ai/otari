@@ -121,8 +121,8 @@ credential for them, and records every request.
 
 ## Next steps
 
-- [Admin dashboard](../guides/dashboard.md): manage keys, users and providers in the browser.
-- [Access control](../guides/access-control.md): give each application its own key and budget.
-- [Models](../reference/models.md): connect more providers and choose model names.
-- [Routing](../reference/routing.md): fall back to another model when one fails.
+- [Admin dashboard](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/dashboard/dashboard): manage keys, users and providers in the browser.
+- [Access control](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides): give each application its own key and budget.
+- [Models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models): connect more providers and choose model names.
+- [Routing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing): fall back to another model when one fails.
 - [Deployment](deployment.md): run Otari in production.

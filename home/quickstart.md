@@ -10,7 +10,7 @@ and see it in the workspace's usage. It takes about five minutes, and all you
 need is an otari.ai account.
 
 To run Otari on your own machine instead, follow the
-[Self-hosted quickstart](../self-hosting/self-hosted-quickstart.md).
+[Self-hosted quickstart](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting).
 
 ## 1. Open your workspace
 
@@ -68,7 +68,7 @@ they send is recorded against your workspace.
 
 ## Next steps
 
-- [Use with Claude Code](../guides/use-with-claude-code.md): point Claude Code at otari.ai.
-- [Access control](../guides/access-control.md): workspaces, members, keys and budgets.
-- [Routing policies](../reference/routing.md): fall back to another model when one fails.
-- [Inference Guardrails](../guides/guardrails.md): check requests and responses.
+- [Use with Claude Code](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-claude-code): point Claude Code at otari.ai.
+- [Access control](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides): workspaces, members, keys and budgets.
+- [Routing policies](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing): fall back to another model when one fails.
+- [Inference Guardrails](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/guardrails/guardrails): check requests and responses.
