@@ -39,9 +39,8 @@ unreachable rather than merely fixed.
 
 import uuid
 from collections.abc import AsyncIterator
-from typing import Annotated
+from typing import Annotated, Any
 
-from any_llm.types.completion import ChatCompletion
 from fastapi import (
     APIRouter,
     Depends,
@@ -179,7 +178,7 @@ async def playground_chat_completions(
     tool_ports: ToolPortsDep,
     billing: RequestSessionBillingPortDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
-) -> ChatCompletion | Response:
+) -> dict[str, Any] | Response:
     """Run one chat completion for the signed-in caller.
 
     Streaming and non-streaming both, identically to ``POST

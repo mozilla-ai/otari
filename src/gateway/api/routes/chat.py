@@ -1,3 +1,4 @@
+import json
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
@@ -211,6 +212,23 @@ def _every_choice_finishes() -> Callable[[ChatCompletionChunk], bool]:
     return completes
 
 
+def _without_nulls(obj: ChatCompletion | ChatCompletionChunk) -> dict[str, Any]:
+    """Serialize a completion or chunk without its null fields, which strict clients reject.
+
+    The nulls the OpenAI spec requires as keys stay: ``finish_reason`` on every
+    choice, and ``logprobs``, ``message.content`` and ``message.refusal`` on a
+    completion's choices (``content`` is null on a tool-call-only answer).
+    """
+    body = surface_provider_fields(obj).model_dump(mode="json", exclude_none=True)
+    for choice in body["choices"]:
+        choice.setdefault("finish_reason", None)
+        if (message := choice.get("message")) is not None:
+            choice.setdefault("logprobs", None)
+            message.setdefault("content", None)
+            message.setdefault("refusal", None)
+    return body
+
+
 class _ChatAdapter:
     """OpenAI Chat Completions edges of the shared pipeline.
 
@@ -265,7 +283,7 @@ class _ChatAdapter:
         )
 
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
-        return f"data: {surface_provider_fields(chunk).model_dump_json()}\n\n"
+        return f"data: {json.dumps(_without_nulls(chunk), separators=(',', ':'))}\n\n"
 
     def extract_stream_usage(self, chunk: ChatCompletionChunk) -> CompletionUsage | None:
         if not chunk.usage:
@@ -453,7 +471,7 @@ async def chat_completions(
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
     tags_header: RequestTagsHeader,
-) -> ChatCompletion | Response:
+) -> dict[str, Any] | Response:
     """OpenAI-compatible chat completions endpoint.
 
     Supports both streaming and non-streaming responses.
@@ -497,7 +515,7 @@ async def run_chat_completion(
     session_principal: SessionPrincipal | None = None,
     idempotency: IdempotencyGuard | None = None,
     tags_header: str | None = None,
-) -> ChatCompletion | Response:
+) -> dict[str, Any] | Response:
     """Serve one chat completion, from the resolved preamble to the response.
 
     The body of :func:`chat_completions`, as a plain function so a second route
@@ -688,7 +706,7 @@ async def run_chat_completion(
         display_model=resolved.alias,
         base_request_fields=request_fields,
     )
-    surface_provider_fields(result)
+    body = _without_nulls(result)
     if idempotency is not None:
-        await idempotency.complete(result, response)
-    return result
+        await idempotency.complete(body, response)
+    return body
