@@ -126,6 +126,11 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "admin-hosted-providers",
     heading: /hosted providers/i,
   },
+  {
+    route: "/admin/subagent-router",
+    name: "admin-subagent-router",
+    heading: /subagent router/i,
+  },
   // Reached from the account menu rather than the rail, and covered here all
   // the same: what this matrix is for is how a page renders on a phone and in
   // the dark, which does not depend on which control opens it.

@@ -212,6 +212,9 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     # The deployment's own upstream credentials and the models it offers on
     # them. Operator-only, and answered 404 to anyone else like /admin.
     RouterMount(hosted_providers.router, Plane.CONTROL),
+    # The decision models that answer /routing/recommend, with the
+    # deployment's own keys for them. Operator-only like hosted providers.
+    RouterMount(agent_routing.recommenders_router, Plane.CONTROL),
     RouterMount(keys.router, Plane.CONTROL),
     # A service key managing its own end users, rather than the operator gate
     # ``keys.router`` holds over every key's.

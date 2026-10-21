@@ -20,11 +20,23 @@ automatic fallbacks a catalog ID gets with no policy, and the traffic that used 
 
 ``recommend.py`` answers a different question: which model a coding agent's
 subagent should start on. That is put to a decision model, not compiled from
-a policy, and the harness acts on the answer itself.
+a policy, and the harness acts on the answer itself. The decision model is a
+recommender row the operator switched on (``RoutingService`` manages them, and
+the snapshot holds them for the quote), or ``agent_recommender_model`` while
+there is none.
 """
 
 from gateway.exceptions.routing_exceptions import UnreadableRecommendationError
 from gateway.services.routing._local_policies import refuse_local_policy
+from gateway.services.routing._recommender_pricing import RecommenderPrice
+from gateway.services.routing._recommender_snapshot import (
+    AGENT_RECOMMENDERS,
+    RecommenderConfig,
+    RecommenderSnapshot,
+    load_agent_recommenders_at_startup,
+    reset_agent_recommenders,
+    run_agent_recommender_refresher,
+)
 from gateway.services.routing._service import FALLBACK_WINDOW, AutomaticFallback, FallbackOffering, RoutingService
 from gateway.services.routing.backends import (
     KNN_BACKEND,
@@ -58,6 +70,7 @@ from gateway.services.routing.recommend import build_decision_request, candidate
 from gateway.types.budget_state import BudgetState
 
 __all__ = [
+    "AGENT_RECOMMENDERS",
     "FALLBACK_WINDOW",
     "KNN_BACKEND",
     "NOOP_BACKEND",
@@ -70,6 +83,9 @@ __all__ = [
     "FallbackOffering",
     "KnnRoutingMemory",
     "NoEligibleCandidatesError",
+    "RecommenderConfig",
+    "RecommenderPrice",
+    "RecommenderSnapshot",
     "RouterBackend",
     "RouterOrdering",
     "RoutingContext",
@@ -90,9 +106,12 @@ __all__ = [
     "explain_router_ordering",
     "get_router_backend",
     "known_backends",
+    "load_agent_recommenders_at_startup",
     "needs_budget_state",
     "recommendation_from_decision",
     "refuse_local_policy",
+    "reset_agent_recommenders",
+    "run_agent_recommender_refresher",
     "selection_consults_router",
     "unpriced_router_candidates",
 ]

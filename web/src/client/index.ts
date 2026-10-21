@@ -390,6 +390,15 @@ export type DeploymentProviderMigrationRow =
 export type DeploymentProviderMigrationReviewedRow =
   Schemas["DeploymentProviderMigrationReviewedRow"]
 
+// The decision models that recommend a subagent's model, with the deployment's
+// own key for each and its price per million tokens. Operator-only, and at most
+// one is switched on. A stored key is known by its last four characters.
+export type AgentRecommender = Schemas["AgentRecommenderPublic"]
+export type AgentRecommenders = Schemas["AgentRecommendersPublic"]
+export type DecisionProviderOption = Schemas["DecisionProviderOption"]
+export type CreateAgentRecommenderRequest = Schemas["AgentRecommenderCreate"]
+export type UpdateAgentRecommenderRequest = Schemas["AgentRecommenderUpdate"]
+
 // ---------------------------------------------------------------------------
 // Routing
 // ---------------------------------------------------------------------------

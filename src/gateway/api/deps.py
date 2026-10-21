@@ -58,6 +58,7 @@ from gateway.repositories.providers import (
     ProviderEndpointRepository,
 )
 from gateway.repositories.rate_limits import RateLimitRuleRepository
+from gateway.repositories.routing import AgentRecommenderRepository
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
     OrganizationGuardrailDefinitionRepository,
@@ -113,7 +114,7 @@ from gateway.services.providers import (
     refresh_provider_endpoint_cache,
 )
 from gateway.services.rate_limits import RateLimitService
-from gateway.services.routing import RoutingService, clear_router_backend_cache
+from gateway.services.routing import AGENT_RECOMMENDERS, RoutingService, clear_router_backend_cache
 from gateway.services.secret_box import configured_secret_keys
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
@@ -1869,7 +1870,13 @@ async def get_organization_trace_scope(visible: VisibleWorkspacesDep) -> TraceSc
 
 def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> RoutingService:
     """Build the routing service, and the usage service it reads traffic through, on the request's Unit of Work."""
-    return RoutingService(config, UsageService(uow, UsageLogRepository(uow)))
+    return RoutingService(
+        config,
+        UsageService(uow, UsageLogRepository(uow)),
+        uow=uow,
+        recommenders=AgentRecommenderRepository(uow),
+        snapshot=AGENT_RECOMMENDERS,
+    )
 
 
 RoutingServiceDep = Annotated[RoutingService, Depends(get_routing_service)]

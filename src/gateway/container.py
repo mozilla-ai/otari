@@ -68,6 +68,7 @@ from gateway.ports.usage_signal_port import UsageSignalPort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.providers import HostedProviderService
+from gateway.services.routing import AGENT_RECOMMENDERS
 from gateway.services.tenancy import forget_unproven_access
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -454,14 +455,14 @@ def _rate_limit_store_port_factory(config: GatewayConfig | None) -> PortFactory[
 def _agent_model_recommender_factory(config: GatewayConfig | None) -> PortFactory[AgentModelRecommenderPort]:
     """The core ``AgentModelRecommenderPort`` factory, closed over this app's config.
 
-    Config rather than a session, because which decision model answers is a
-    deployment setting (``agent_recommender_model``) and not a per-request fact,
-    and the adapter holds nothing per request, so one serves every request.
+    Config and the recommender snapshot rather than a session, because the quote
+    is asked before anything is held and reads no database. A fresh adapter per
+    resolve, because one keeps the recommender it quoted for the call that follows.
     A container built without config resolves this port only to raise.
     """
     if config is None:
         return _requires_config(AgentModelRecommenderPort)
-    return _shared(DecisionProviderRecommender(config))
+    return lambda _session: DecisionProviderRecommender(config, AGENT_RECOMMENDERS)
 
 
 def _requires_config(port: PortKey[T]) -> PortFactory[T]:
@@ -638,10 +639,10 @@ def build_container(
     # where ``rate_limit_store`` asks for one count shared by every replica.
     container.bind(RateLimitStorePort, _rate_limit_store_port_factory(config))
     # A subagent's model: the base puts one choice question to the decision
-    # model ``agent_recommender_model`` names, which may be a local one. A
-    # hosted overlay binds a recommender of its own behind the same port, at a
-    # price of its own, and changes nothing above it: the call is metered and
-    # recorded here either way.
+    # model the operator switched on, or to the one ``agent_recommender_model``
+    # names. An overlay binds a recommender of its own behind the same port,
+    # such as one wrapping this to set its own price, and changes nothing above
+    # it: the call is metered and recorded here either way.
     container.bind(AgentModelRecommenderPort, _agent_model_recommender_factory(config))
     if config is not None:
         # Asked once, at build, rather than per request: selecting a hosted

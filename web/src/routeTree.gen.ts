@@ -30,6 +30,7 @@ import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
 import { Route as AdminHostedProvidersRouteImport } from './routes/admin.hosted-providers'
+import { Route as AdminSubagentRouterRouteImport } from './routes/admin.subagent-router'
 import { Route as ModelsIndexRouteImport } from './routes/models.index'
 import { Route as ModelsSplatRouteImport } from './routes/models.$'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
@@ -152,6 +153,11 @@ const AdminHostedProvidersRoute = AdminHostedProvidersRouteImport.update({
   path: '/admin/hosted-providers',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminSubagentRouterRoute = AdminSubagentRouterRouteImport.update({
+  id: '/admin/subagent-router',
+  path: '/admin/subagent-router',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ModelsIndexRoute = ModelsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -256,6 +262,7 @@ export interface FileRoutesByFullPath {
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
+  '/admin/subagent-router': typeof AdminSubagentRouterRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -291,6 +298,7 @@ export interface FileRoutesByTo {
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
+  '/admin/subagent-router': typeof AdminSubagentRouterRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -331,6 +339,7 @@ export interface FileRoutesById {
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
+  '/admin/subagent-router': typeof AdminSubagentRouterRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -372,6 +381,7 @@ export interface FileRouteTypes {
     | '/workspaces'
     | '/admin/accounts'
     | '/admin/hosted-providers'
+    | '/admin/subagent-router'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -407,6 +417,7 @@ export interface FileRouteTypes {
     | '/workspaces'
     | '/admin/accounts'
     | '/admin/hosted-providers'
+    | '/admin/subagent-router'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -446,6 +457,7 @@ export interface FileRouteTypes {
     | '/workspaces'
     | '/admin/accounts'
     | '/admin/hosted-providers'
+    | '/admin/subagent-router'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -486,6 +498,7 @@ export interface RootRouteChildren {
   WorkspacesRoute: typeof WorkspacesRoute
   AdminAccountsRoute: typeof AdminAccountsRoute
   AdminHostedProvidersRoute: typeof AdminHostedProvidersRoute
+  AdminSubagentRouterRoute: typeof AdminSubagentRouterRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -635,6 +648,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/hosted-providers'
       fullPath: '/admin/hosted-providers'
       preLoaderRoute: typeof AdminHostedProvidersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/subagent-router': {
+      id: '/admin/subagent-router'
+      path: '/admin/subagent-router'
+      fullPath: '/admin/subagent-router'
+      preLoaderRoute: typeof AdminSubagentRouterRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/models/': {
@@ -842,6 +862,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkspacesRoute: WorkspacesRoute,
   AdminAccountsRoute: AdminAccountsRoute,
   AdminHostedProvidersRoute: AdminHostedProvidersRoute,
+  AdminSubagentRouterRoute: AdminSubagentRouterRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

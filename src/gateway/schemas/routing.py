@@ -1,10 +1,14 @@
 """Request and response models of the routing domain."""
 
-from typing import Annotated, Literal
+import uuid
+from datetime import datetime
+from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from gateway.core.config import MAX_AGENT_MODEL_CANDIDATES
+from gateway.models.money import as_float
+from gateway.models.routing import AgentRecommender
 
 Harness = Literal["claude-code", "pi"]
 """The agent harnesses Otari recommends a subagent's model for."""
@@ -140,3 +144,115 @@ class AutomaticFallbacksResponse(BaseModel):
 
     window_days: int = Field(description="How many days of traffic the counts cover.")
     models: list[AutomaticFallbackPublic] = Field(description="Most requested first.")
+
+
+# A subagent recommender an operator adds. No shape here carries key material: a
+# stored key is known by whether there is one and its last four characters,
+# which a key of four or fewer goes without. Prices are USD per million of the
+# decision model's tokens.
+
+
+class AgentRecommenderCreate(BaseModel):
+    """Add a decision model that recommends a subagent's model, and its price.
+
+    Lands switched off unless ``enabled`` says otherwise, and switching it on
+    switches every other one off.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "provider": "typesafe",
+                "model": "jev-latest",
+                "api_key": "<your TypeSafe API key>",
+                "input_price_per_million": 0.15,
+                "output_price_per_million": 0.6,
+            }
+        },
+    )
+
+    provider: str = Field(
+        min_length=1, max_length=32, description="The decision provider: typesafe, openrouter or llamacpp."
+    )
+    model: str = Field(min_length=1, max_length=255, description="The decision model, as the provider names it.")
+    api_base: str | None = Field(
+        default=None, max_length=1024, description="The provider's root URL. Blank uses the provider's own."
+    )
+    api_key: str | None = Field(default=None, min_length=1, max_length=1024, description="Stored encrypted.")
+    input_price_per_million: float = Field(default=0, ge=0)
+    output_price_per_million: float = Field(default=0, ge=0)
+    enabled: bool = False
+
+
+class AgentRecommenderUpdate(BaseModel):
+    """Change a recommender. An omitted field keeps its stored value.
+
+    Omitting ``api_key`` keeps the stored key while the provider and the API
+    base stay the same, so a price change never re-sends a secret; the key is
+    sent to the API base, so a new address or provider needs it typed again. A
+    blank ``api_base`` goes back to the provider's own. Switching one on
+    switches every other one off.
+    """
+
+    model_config = ConfigDict(extra="forbid", json_schema_extra={"example": {"enabled": True}})
+
+    provider: str | None = Field(default=None, min_length=1, max_length=32)
+    model: str | None = Field(default=None, min_length=1, max_length=255)
+    api_base: str | None = Field(default=None, max_length=1024)
+    api_key: str | None = Field(default=None, min_length=1, max_length=1024)
+    input_price_per_million: float | None = Field(default=None, ge=0)
+    output_price_per_million: float | None = Field(default=None, ge=0)
+    enabled: bool | None = None
+
+
+class AgentRecommenderPublic(BaseModel):
+    """One subagent recommender, known by the tail of its key."""
+
+    id: uuid.UUID
+    provider: str
+    model: str
+    api_base: str | None
+    api_key_last4: str | None
+    has_api_key: bool
+    input_price_per_million: float
+    output_price_per_million: float
+    enabled: bool = Field(description="Whether this one answers. At most one is.")
+    created_at: datetime
+    updated_at: datetime | None
+
+    @classmethod
+    def from_row(cls, row: AgentRecommender) -> Self:
+        """Read a stored row, leaving its ciphertext behind."""
+        return cls(
+            id=row.id,
+            provider=row.provider,
+            model=row.model,
+            api_base=row.api_base,
+            api_key_last4=row.api_key_last4,
+            has_api_key=row.encrypted_api_key is not None,
+            input_price_per_million=as_float(row.input_price_per_million) or 0.0,
+            output_price_per_million=as_float(row.output_price_per_million) or 0.0,
+            enabled=row.enabled,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+
+class DecisionProviderOption(BaseModel):
+    """A decision provider a recommender may be added on."""
+
+    provider: str
+    self_hosted: bool = Field(
+        description="A server the deployment runs itself: it needs an API base, and normally no key."
+    )
+
+
+class AgentRecommendersPublic(BaseModel):
+    """Every subagent recommender added, oldest first, and the providers one may be added on.
+
+    While ``data`` is empty, ``agent_recommender_model`` in the configuration answers.
+    """
+
+    data: list[AgentRecommenderPublic]
+    decision_providers: list[DecisionProviderOption]
