@@ -48,7 +48,7 @@ OTARI_PROVIDER_ACCOUNT_PEPPER=$(openssl rand -base64 32)
 EOF
 ```
 
-The first command also keeps the master key in your shell for step 6. Git
+The first command also keeps the master key in your shell for steps 5 and 6. Git
 ignores both `config.yml` and `.env`.
 
 ## 4. Start Otari
@@ -67,18 +67,7 @@ curl http://localhost:8000/api/v1/health
 The answer includes `"status":"healthy"`. If the connection is refused, wait a
 few more seconds and try again.
 
-## 5. Copy your API key
-
-On its first start, Otari creates an API key and prints it once. Find it in the
-logs:
-
-```bash
-docker compose logs otari | grep 'tk-'
-```
-
-Copy the `tk-...` value. This is the key an application calls Otari with.
-
-## 6. Connect OpenAI
+## 5. Connect OpenAI
 
 Add OpenAI as a provider, replacing `sk-...` with your OpenAI API key:
 
@@ -93,9 +82,22 @@ Otari stores the key encrypted, asks OpenAI which models the key can use, and
 switches on every one it has a price for. The answer describes the new provider
 and shows only the last four characters of your key.
 
+## 6. Create an API key
+
+Create the key an application calls Otari with:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/keys \
+  -H "Authorization: Bearer $OTARI_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"key_name": "quickstart"}'
+```
+
+Copy the `tk-...` value of `key` from the answer. It is shown only this once.
+
 ## 7. Send a request
 
-Replace `tk-...` with the key from step 5:
+Replace `tk-...` with the key from step 6:
 
 ```bash
 curl http://localhost:8000/api/v1/chat/completions \
