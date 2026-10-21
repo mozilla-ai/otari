@@ -40,19 +40,15 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
-from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
-from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
-from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
-from gateway.services.tools import WorkspaceCodeExecutionPolicies, WorkspaceSearchKeys
 
 # The core adapters ignore the session, so a placeholder stands in for one; a
 # unit test of the wiring has no database and needs none.
@@ -108,14 +104,6 @@ def _no_membership_listener(uow: UnitOfWork) -> MembershipListener:
 
 def _no_workspace_listener(uow: UnitOfWork) -> WorkspaceListener:
     return NullWorkspaceListener()
-
-
-def _no_search_keys(session: AsyncSession) -> WorkspaceSearchKeys:
-    return cast(WorkspaceSearchKeys, object())
-
-
-def _no_code_execution_policies(session: AsyncSession) -> WorkspaceCodeExecutionPolicies:
-    return cast(WorkspaceCodeExecutionPolicies, object())
 
 
 def test_core_defaults_are_bound_for_every_port() -> None:
@@ -278,86 +266,6 @@ def test_a_plain_bind_replaces_a_unit_of_work_binding() -> None:
     container.bind(IdentityProviderPort, lambda session: adapter)
 
     assert container.resolve(IdentityProviderPort, A_SESSION, uow=UnitOfWork(A_SESSION)) is adapter
-
-
-def test_mcp_servers_refuse_a_deployment_that_holds_the_rows_and_has_no_session() -> None:
-    """A deployment reading its own rows cannot do so without the request's session.
-
-    The refusal is a wiring fault rather than a failed resolve, so it must not
-    reach a caller as this deployment's MCP resolution error.
-    """
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
-
-    with pytest.raises(ContainerError, match="a session is required"):
-        container.resolve(McpServerPort, NO_SESSION)
-
-
-def test_web_search_policy_refuses_a_deployment_that_holds_the_rows_and_has_no_session() -> None:
-    """A deployment reading its own policy rows cannot do so without the request's session."""
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
-
-    with pytest.raises(ContainerError, match="a session is required"):
-        container.resolve(WebSearchPolicyPort, NO_SESSION)
-
-
-def test_the_stored_web_search_policy_refuses_to_build_without_a_search_key_resolver() -> None:
-    """Built without one, a workspace's own key would be silently skipped and the deployment would pay."""
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
-
-    with pytest.raises(ContainerError, match="a search key resolver is required"):
-        container.resolve(WebSearchPolicyPort, A_SESSION)
-
-
-def test_the_stored_web_search_policy_builds_its_search_key_resolver_on_the_requests_session() -> None:
-    built_on: list[AsyncSession] = []
-
-    def build_search_keys(session: AsyncSession) -> WorkspaceSearchKeys:
-        built_on.append(session)
-        return _no_search_keys(session)
-
-    container = build_container(config=GatewayConfig(), search_keys=build_search_keys, workspace_listener=None)
-
-    container.resolve(WebSearchPolicyPort, A_SESSION)
-
-    assert built_on == [A_SESSION]
-
-
-def test_code_execution_policy_refuses_a_deployment_that_holds_the_rows_and_has_no_session() -> None:
-    """A deployment reading its own policy rows cannot do so without the request's session."""
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
-
-    with pytest.raises(ContainerError, match="a session is required"):
-        container.resolve(CodeExecutionPolicyPort, NO_SESSION)
-
-
-def test_the_stored_code_execution_policy_refuses_to_build_without_a_policy_reader() -> None:
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
-
-    with pytest.raises(ContainerError, match="a code execution policy reader is required"):
-        container.resolve(CodeExecutionPolicyPort, A_SESSION)
-
-
-def test_the_stored_code_execution_policy_builds_its_reader_on_the_requests_session() -> None:
-    built_on: list[AsyncSession] = []
-
-    def build_policies(session: AsyncSession) -> WorkspaceCodeExecutionPolicies:
-        built_on.append(session)
-        return _no_code_execution_policies(session)
-
-    container = build_container(config=GatewayConfig(), workspace_listener=None, code_execution_policies=build_policies)
-
-    container.resolve(CodeExecutionPolicyPort, A_SESSION)
-
-    assert built_on == [A_SESSION]
-
-
-@pytest.mark.parametrize("port", [CodeExecutionPolicyPort, McpServerPort, WebSearchPolicyPort])
-def test_workspace_ports_refuse_a_container_built_without_config(port: type[Any]) -> None:
-    """With no config the adapters cannot be built, so resolving says so."""
-    container = build_container(workspace_listener=None)
-
-    with pytest.raises(ContainerError, match=port.__name__):
-        container.resolve(port, NO_SESSION)
 
 
 def test_resolve_refuses_a_port_nothing_bound() -> None:

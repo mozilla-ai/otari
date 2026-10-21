@@ -46,7 +46,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import Enum, StrEnum, auto
 from functools import reduce
-from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar, assert_never
+from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar
 
 import httpx
 from any_llm import AnyLLM, LLMProvider
@@ -148,20 +148,16 @@ from gateway.exceptions.budget_exceptions import ProviderSpendCeilingExceededErr
 from gateway.exceptions.tools_exceptions import (
     CodeExecutionContainerBusyError,
     CodeExecutionDeclarationError,
-    CodeExecutionPolicyResolutionFailedError,
-    CodeExecutionPolicyResolutionFailure,
     CodeExecutionRefusedError,
     GatewayToolPricingRequiredError,
     McpServerConfigurationError,
     McpServerDeclarationError,
-    McpServerResolutionFailedError,
     SearchToolMisconfiguredError,
     WebAccessRefusedError,
     WebSearchCredentialRefusedError,
     WebSearchInterceptedError,
     WebSearchOptionRefusedError,
     WebSearchPolicyResolutionFailedError,
-    WebSearchPolicyResolutionFailure,
     WebToolDeclarationError,
     WorkspaceMcpServerNotFoundError,
     WorkspaceWebSearchDomainsExcludedError,
@@ -184,11 +180,8 @@ from gateway.models.tools import (
 )
 from gateway.models.usage import UsageLog
 from gateway.ports.billing_port import BillingPort, InsufficientFundsError
-from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort, CodeExecutionPolicyScope
 from gateway.ports.code_execution_port import CodeExecutionPort
-from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
-from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import (
     BudgetMinuteLimits,
     RateLimitGrant,
@@ -319,6 +312,8 @@ from gateway.services.tenancy.organization_guardrail_service import (
     ResolvedOrganizationGuardrail,
     resolve_organization_guardrails,
 )
+from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
+from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
 from gateway.services.tool_usage import (
     MAX_TOOL_NAMES,
     OVERFLOW_TOOL_NAME,
@@ -344,6 +339,7 @@ from gateway.services.tools import (
     WebFetchBackend,
     WebSearchBackend,
     WebToolCallCap,
+    WorkspaceCodeExecutionPolicies,
     admit_mcp_servers,
     admit_web_access,
     build_web_search_backends,
@@ -469,6 +465,8 @@ ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
 ALL_PROVIDERS_TIMED_OUT_DETAIL = "All upstream providers timed out"
 ALL_PROVIDERS_RATE_LIMITED_DETAIL = "All upstream providers rate-limited this request"
 ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not be resolved for this request"
+WEB_SEARCH_POLICY_UNRESOLVABLE_DETAIL = "Web search configuration could not be resolved for this request"
+CODE_EXECUTION_POLICY_UNRESOLVABLE_DETAIL = "Code execution policy could not be resolved for this request"
 ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL = (
     "A configured organization guardrail's credential could not be read"
 )
@@ -2528,7 +2526,7 @@ async def resolve_request_context(
     estimate_max_output_tokens: int | None,
     master_key_user_required_detail: str,
     user_forbidden_detail: str,
-    code_execution_policies: CodeExecutionPolicyPort,
+    code_execution_policies: WorkspaceCodeExecutionPolicies,
     model_provider: ModelProviderPort,
     estimate_cache_write_ttl: Literal["5m", "1h"] | None = None,
     session_principal: SessionPrincipal | None = None,
@@ -2981,9 +2979,7 @@ async def resolve_request_context(
     # already reserved, so a read that fails releases it before propagating.
     if workspace_id is not None and config.sandbox_configured() and declares_code_execution(tools):
         try:
-            code_execution_policy = await code_execution_policies.resolve(
-                CodeExecutionPolicyScope(workspace_id=workspace_id)
-            )
+            code_execution_policy = await code_execution_policies.for_request(workspace_id)
         except Exception:
             await refund_reservation(db, reservation)
             raise
@@ -3659,17 +3655,6 @@ async def _resolve_organization_guardrails(
         raise adapter.error(500, ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL, ErrorKind.API) from exc
 
 
-def _policy_failure_status(reason: WebSearchPolicyResolutionFailure) -> int:
-    """The HTTP status a failed web search policy resolution renders as."""
-    match reason:
-        case WebSearchPolicyResolutionFailure.NO_WORKSPACE:
-            return status.HTTP_500_INTERNAL_SERVER_ERROR
-        case WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID:
-            return status.HTTP_503_SERVICE_UNAVAILABLE
-        case _:
-            assert_never(reason)
-
-
 @dataclass(frozen=True, kw_only=True)
 class DeclaredTools:
     """The tools, servers and guardrails one request declared, in terms every wire format shares."""
@@ -3716,10 +3701,7 @@ async def prepare_gateway_tools(
 
     NOTE: callers must not release the budget reservation after a refusal from here.
     """
-    web_policy = _RequestWebPolicy(
-        backends.ports.web_search_policy,
-        WebSearchPolicyScope(workspace_id=ctx.workspace_id),
-    )
+    web_policy = _RequestWebPolicy(backends.ports.web_search_policy, ctx.workspace_id)
     unpriced_tool: str | None = None
     try:
         web_candidates = _admit_web_declarations(adapter, ctx, declared)
@@ -3946,6 +3928,10 @@ async def _admit_claims(
     return _AdmittedTools(code=admitted, web=web, web_access=web_access)
 
 
+class _WorkspaceUnresolvedError(Exception):
+    """The request named no workspace, so the policy that vetoes its web tools cannot be read."""
+
+
 class _RequestWebPolicy:
     """The workspace's web search policy, read at most once per request.
 
@@ -3954,9 +3940,9 @@ class _RequestWebPolicy:
     often, as one that decides them all alike.
     """
 
-    def __init__(self, port: WebSearchPolicyPort, scope: WebSearchPolicyScope) -> None:
-        self._port = port
-        self._scope = scope
+    def __init__(self, policies: WorkspaceWebSearchPolicies, workspace_id: uuid.UUID | None) -> None:
+        self._policies = policies
+        self._workspace_id = workspace_id
         self._read = False
         self._policy: ResolvedWebSearchConfig | None = None
         self._failure: WebSearchPolicyResolutionFailedError | None = None
@@ -3966,10 +3952,13 @@ class _RequestWebPolicy:
 
         Raises:
             WebSearchPolicyResolutionFailedError: the policy could not be resolved.
+            _WorkspaceUnresolvedError: the request named no workspace.
         """
+        if self._workspace_id is None:
+            raise _WorkspaceUnresolvedError
         if not self._read:
             try:
-                self._policy = await self._port.resolve(self._scope, requested_tools)
+                self._policy = await self._policies.resolve(self._workspace_id, requested_tools)
             except WebSearchPolicyResolutionFailedError as exc:
                 self._failure = exc
             self._read = True
@@ -4000,15 +3989,16 @@ async def _admit_guardrails(
 
 
 async def _admit_mcp_servers(
-    adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools, port: McpServerPort
+    adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools, servers: WorkspaceMcpServers
 ) -> list[McpServerConfig] | None:
     """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
-    scope = McpServerScope(workspace_id=ctx.workspace_id)
     try:
-        return await admit_mcp_servers(declared.mcp_servers, declared.mcp_server_ids, port=port, scope=scope)
+        return await admit_mcp_servers(
+            declared.mcp_servers, declared.mcp_server_ids, servers=servers, workspace_id=ctx.workspace_id
+        )
     except (McpServerDeclarationError, WorkspaceMcpServerNotFoundError) as exc:
         raise domain_error(adapter, exc) from exc
-    except (McpServerResolutionFailedError, McpServerConfigurationError) as exc:
+    except McpServerConfigurationError as exc:
         # Not `domain_error`, which would hide a 5xx's fixed message behind a generic one.
         raise adapter.error(exc.status_code, exc.message, ErrorKind.API) from exc
 
@@ -4092,8 +4082,10 @@ async def _admit_web_access(
         return NO_WEB_TOOLS
     try:
         admitted = admit_web_access(web, policy=await web_policy.read(requested), config=ctx.config)
+    except _WorkspaceUnresolvedError as exc:
+        raise adapter.error(500, WEB_SEARCH_POLICY_UNRESOLVABLE_DETAIL, ErrorKind.API) from exc
     except WebSearchPolicyResolutionFailedError as exc:
-        raise adapter.error(_policy_failure_status(exc.reason), exc.message, ErrorKind.API) from exc
+        raise adapter.error(status.HTTP_503_SERVICE_UNAVAILABLE, exc.message, ErrorKind.API) from exc
     except (WebAccessRefusedError, WorkspaceWebSearchDomainsExcludedError) as exc:
         raise adapter.error(403, exc.message, ErrorKind.PERMISSION) from exc
     except (
@@ -4153,25 +4145,15 @@ def _candidates(ctx: RequestContext) -> list[tuple[str | None, str | None]]:
 async def _resolve_code_execution_policy(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
-    port: CodeExecutionPolicyPort,
+    policies: WorkspaceCodeExecutionPolicies,
 ) -> ResolvedCodeExecutionPolicy | None:
-    """The workspace's code execution policy: the preamble's read where it made one, else the port's answer."""
+    """The workspace's code execution policy: the preamble's read where it made one, else a fresh one."""
     if ctx.code_execution_policy_loaded:
         return ctx.code_execution_policy
-    scope = CodeExecutionPolicyScope(workspace_id=ctx.workspace_id)
-    try:
-        return await port.resolve(scope)
-    except CodeExecutionPolicyResolutionFailedError as exc:
-        raise adapter.error(_code_execution_policy_failure_status(exc.reason), exc.message, ErrorKind.API) from exc
-
-
-def _code_execution_policy_failure_status(reason: CodeExecutionPolicyResolutionFailure) -> int:
-    """The HTTP status a failed code execution policy resolution renders as."""
-    match reason:
-        case CodeExecutionPolicyResolutionFailure.NO_WORKSPACE:
-            return status.HTTP_500_INTERNAL_SERVER_ERROR
-        case _:
-            assert_never(reason)
+    # NOTE: a missing workspace fails closed, because the policy is a veto and no answer must not read as no limit.
+    if ctx.workspace_id is None:
+        raise adapter.error(500, CODE_EXECUTION_POLICY_UNRESOLVABLE_DETAIL, ErrorKind.API)
+    return await policies.for_request(ctx.workspace_id)
 
 
 def _implementation_for(ctx: RequestContext, instance: str) -> LLMProvider | None:

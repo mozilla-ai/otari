@@ -58,7 +58,6 @@ from gateway.api.routes._pipeline import (
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.tools_exceptions import (
-    CodeExecutionPolicyResolutionFailure,
     WebAccessToolNotAuthorizedError,
     WebSearchNotEnabledError,
     WorkspaceMcpServerNotFoundError,
@@ -67,9 +66,6 @@ from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import ResolvedCodeExecutionPolicy, ResolvedWebSearchConfig, WebTool
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
-from gateway.ports.code_execution_policy_port import CodeExecutionPolicyScope
-from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
-from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budgets import ReservationHandle
 from gateway.services.inference import DeploymentCharge
@@ -113,16 +109,16 @@ def _tool_ctx(**overrides: Any) -> ToolContext:
 _ORGANIZATION_ID = uuid.UUID("99999999-9999-9999-9999-999999999999")
 
 
-_ResolveMany = Callable[[McpServerScope, list[uuid.UUID]], Awaitable[list[McpServerConfig]]]
+_ResolveMany = Callable[[uuid.UUID, list[uuid.UUID]], Awaitable[list[McpServerConfig]]]
 
 
-async def _resolves_to_nothing(scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+async def _resolves_to_nothing(workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
     """Resolve to no servers, for a case that is not about stored servers."""
     return []
 
 
-class _Servers(McpServerPort):
-    """A port whose plural resolve does what a case needs.
+class _Servers:
+    """Servers whose plural resolve does what a case needs.
 
     The singular resolve answers that it reaches nothing, which is a real answer
     rather than a refusal to have one.
@@ -131,24 +127,24 @@ class _Servers(McpServerPort):
     def __init__(self, resolve_many: _ResolveMany) -> None:
         self._resolve_many = resolve_many
 
-    async def resolve_many(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
-        return await self._resolve_many(scope, server_ids)
+    async def resolve_many(self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+        return await self._resolve_many(workspace_id, server_ids)
 
-    async def resolve_one(self, scope: McpServerScope, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
         return None
 
 
-class _Policy(WebSearchPolicyPort):
-    """A port that answers every resolve with ``policy``, and records each scope it was asked about."""
+class _Policy:
+    """A policy that answers every resolve with ``policy``, and records each workspace it was asked about."""
 
     def __init__(self, policy: ResolvedWebSearchConfig | None = None) -> None:
         self._policy = policy
-        self.asked: list[WebSearchPolicyScope] = []
+        self.asked: list[uuid.UUID] = []
 
     async def resolve(
-        self, scope: WebSearchPolicyScope, requested_tools: Sequence[WebTool]
+        self, workspace_id: uuid.UUID, requested_tools: Sequence[WebTool]
     ) -> ResolvedWebSearchConfig | None:
-        self.asked.append(scope)
+        self.asked.append(workspace_id)
         return self._policy
 
 
@@ -1358,7 +1354,7 @@ def _chunk_id(part: str) -> str | None:
 class _NoCodeExecutionPolicy:
     """A workspace with no code execution policy, which narrows nothing."""
 
-    async def resolve(self, scope: CodeExecutionPolicyScope) -> ResolvedCodeExecutionPolicy | None:
+    async def for_request(self, workspace_id: uuid.UUID) -> ResolvedCodeExecutionPolicy | None:
         return None
 
 
@@ -1763,7 +1759,7 @@ async def test_unknown_mcp_server_id_releases_reservation(monkeypatch: pytest.Mo
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    async def missing(scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+    async def missing(workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
         raise WorkspaceMcpServerNotFoundError("11111111-1111-1111-1111-111111111111")
 
     ctx = _ctx(
@@ -1811,7 +1807,7 @@ async def test_duplicate_mcp_server_name_against_a_stored_server_releases_reserv
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    async def stored(scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+    async def stored(workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
         return [McpServerConfig(name="tools", url="https://93.184.216.35/mcp")]
 
     ctx = _ctx(
@@ -1909,7 +1905,7 @@ async def test_stored_mcp_servers_sharing_a_name_are_an_operator_error(
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    async def stored(scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+    async def stored(workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
         return [
             McpServerConfig(name="tools", url="https://93.184.216.34/mcp"),
             McpServerConfig(name="tools", url="https://93.184.216.35/mcp"),
@@ -1947,7 +1943,7 @@ async def test_a_database_failure_releases_the_reservation(monkeypatch: pytest.M
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    async def failing(scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+    async def failing(workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
         raise SQLAlchemyError("connection reset")
 
     db = AsyncMock()
@@ -1994,7 +1990,7 @@ async def test_a_release_that_also_fails_reraises_the_original(monkeypatch: pyte
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    async def failing(scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+    async def failing(workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
         raise SQLAlchemyError("connection reset")
 
     async def failing_release(*args: Any, **kwargs: Any) -> None:
@@ -2435,18 +2431,6 @@ async def test_with_the_hold_off_the_stream_is_not_read_before_the_response_is_r
     assert started == []
     chunks = await _drain(response)
     assert any('"code": "provider_error"' in chunk for chunk in chunks)
-
-
-@pytest.mark.parametrize(
-    ("reason", "status_code"),
-    [
-        (CodeExecutionPolicyResolutionFailure.NO_WORKSPACE, 500),
-    ],
-)
-def test_a_code_execution_policy_failure_renders_its_status(
-    reason: CodeExecutionPolicyResolutionFailure, status_code: int
-) -> None:
-    assert pipeline._code_execution_policy_failure_status(reason) == status_code
 
 
 # ---------------------------------------------------------------------------

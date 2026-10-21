@@ -34,44 +34,37 @@ from gateway.adapters.agent_model_recommender_adapter import DecisionProviderRec
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.code_execution_adapter import build_code_execution_port, verify_code_execution_ready
-from gateway.adapters.code_execution_policy_adapter import LocalCodeExecutionPolicy
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.file_storage_adapter import build_file_storage_port
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
-from gateway.adapters.mcp_server_adapter import LocalMcpServers
 from gateway.adapters.model_provider_adapter import HostedProviderModelProviderAdapter
 from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
 from gateway.adapters.rate_limit_store_adapter import build_rate_limit_store
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.adapters.usage_signal_adapter import NullUsageSignalAdapter
-from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
-from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
-from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.usage_signal_port import UsageSignalPort
-from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.providers import HostedProviderService
 from gateway.services.tenancy import forget_unproven_access
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.workspace_listener import WorkspaceListener
-from gateway.services.tools import WorkspaceCodeExecutionPolicies, WorkspaceSearchKeys
 
 T = TypeVar("T")
 
@@ -94,8 +87,6 @@ PortFactory = Callable[[AsyncSession | None], T]
 UnitOfWorkPortFactory = Callable[[AsyncSession | None, UnitOfWork | None], T]
 MembershipListenerBuilder = Callable[[UnitOfWork], MembershipListener]
 WorkspaceListenerBuilder = Callable[[UnitOfWork], WorkspaceListener]
-WorkspaceSearchKeysBuilder = Callable[[AsyncSession], WorkspaceSearchKeys]
-CodeExecutionPoliciesBuilder = Callable[[AsyncSession], WorkspaceCodeExecutionPolicies]
 HostedProviderServiceBuilder = Callable[[UnitOfWork], HostedProviderService]
 Register = Callable[["Container"], None]
 
@@ -478,80 +469,12 @@ def _shared(adapter: T) -> PortFactory[T]:
     return lambda session: adapter
 
 
-def _with_session(port: PortKey[T], adapter: Callable[[AsyncSession], T]) -> PortFactory[T]:
-    """A factory that builds ``adapter`` over each request's own session, which it requires."""
-
-    def factory(session: AsyncSession | None) -> T:
-        if session is None:
-            msg = f"a session is required where this deployment holds the rows behind {_port_name(port)}"
-            raise ContainerError(msg)
-        return adapter(session)
-
-    return factory
-
-
-def _local_web_search_policy(
-    config: GatewayConfig,
-    search_keys: WorkspaceSearchKeysBuilder | None,
-) -> Callable[[AsyncSession], WebSearchPolicyPort]:
-    """Build the stored web search policy, which also reads the workspace's own search key."""
-
-    def build(session: AsyncSession) -> WebSearchPolicyPort:
-        if search_keys is None:
-            msg = f"a search key resolver is required to build {_port_name(WebSearchPolicyPort)}"
-            raise ContainerError(msg)
-        return LocalWebSearchPolicy(
-            session, search_keys=search_keys(session), on_without_policy=config.web_search_on_without_policy()
-        )
-
-    return build
-
-
-def _local_code_execution_policy(
-    config: GatewayConfig,
-    policies: CodeExecutionPoliciesBuilder | None,
-) -> Callable[[AsyncSession], CodeExecutionPolicyPort]:
-    """Build the stored code execution policy."""
-
-    def build(session: AsyncSession) -> CodeExecutionPolicyPort:
-        if policies is None:
-            msg = f"a code execution policy reader is required to build {_port_name(CodeExecutionPolicyPort)}"
-            raise ContainerError(msg)
-        return LocalCodeExecutionPolicy(policies(session), on_without_policy=config.code_execution_on_without_policy())
-
-    return build
-
-
-def _bind_workspace_ports(
-    container: Container,
-    config: GatewayConfig | None,
-    search_keys: WorkspaceSearchKeysBuilder | None,
-    code_execution_policies: CodeExecutionPoliciesBuilder | None,
-) -> None:
-    """Bind each workspace port to this deployment's own rows."""
-    if config is None:
-        container.bind(CodeExecutionPolicyPort, _requires_config(CodeExecutionPolicyPort))
-        container.bind(McpServerPort, _requires_config(McpServerPort))
-        container.bind(WebSearchPolicyPort, _requires_config(WebSearchPolicyPort))
-    else:
-        container.bind(
-            CodeExecutionPolicyPort,
-            _with_session(CodeExecutionPolicyPort, _local_code_execution_policy(config, code_execution_policies)),
-        )
-        container.bind(McpServerPort, _with_session(McpServerPort, LocalMcpServers))
-        container.bind(
-            WebSearchPolicyPort, _with_session(WebSearchPolicyPort, _local_web_search_policy(config, search_keys))
-        )
-
-
 def build_container(
     bootstrap_selector: str | None = None,
     config: GatewayConfig | None = None,
     *,
     membership_listener: MembershipListenerBuilder | None = None,
     workspace_listener: WorkspaceListenerBuilder | None,
-    search_keys: WorkspaceSearchKeysBuilder | None = None,
-    code_execution_policies: CodeExecutionPoliciesBuilder | None = None,
     hosted_provider_service: HostedProviderServiceBuilder | None = None,
 ) -> Container:
     """Build the composition-root container for this deployment.
@@ -563,11 +486,9 @@ def build_container(
     ``membership_listener`` builds the listener the OAuth sign-in adapter's
     organization service notifies. It is a parameter because its builder lives
     in the API layer, which this module cannot import. ``workspace_listener``
-    builds what sets up a workspace that adapter's open signup creates,
-    ``search_keys`` the resolver of a workspace's own web search key,
-    ``code_execution_policies`` the reader of a workspace's code execution
-    policy, and ``hosted_provider_service`` the service the model provider
-    adapter serves hosted inference from, all for the same reason.
+    builds what sets up a workspace that adapter's open signup creates, and
+    ``hosted_provider_service`` the service the model provider adapter serves
+    hosted inference from, both for the same reason.
 
     Raises:
         BootstrapError: If the selector is present but blank, or names a
@@ -619,9 +540,6 @@ def build_container(
     # credential a request dispatches with. An overlay that must not hand a
     # managed credential to this process binds a transfer of its own.
     container.bind(ProviderFilePort, _provider_file_adapter)
-    # A workspace's MCP servers and its web search and code execution policies.
-    # An overlay binds a source of its own and changes nothing above the port.
-    _bind_workspace_ports(container, config, search_keys, code_execution_policies)
     # Rate-limit counts: the base keeps them in this process, or in Redis
     # where ``rate_limit_store`` asks for one count shared by every replica.
     container.bind(RateLimitStorePort, _rate_limit_store_port_factory(config))

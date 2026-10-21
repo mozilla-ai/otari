@@ -446,6 +446,24 @@ async def resolve_workspace_mcp_server(
     )
 
 
+class WorkspaceMcpServers:
+    """The MCP servers a workspace may reach, as a request reads them.
+
+    A caller connects to a returned server directly; nothing here proxies MCP traffic.
+    """
+
+    def __init__(self, db: AsyncSession) -> None:
+        self._db = db
+
+    async def resolve_many(self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+        """See :func:`resolve_workspace_mcp_servers`."""
+        return await resolve_workspace_mcp_servers(self._db, workspace_id=workspace_id, server_ids=server_ids)
+
+    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+        """See :func:`resolve_workspace_mcp_server`."""
+        return await resolve_workspace_mcp_server(self._db, workspace_id=workspace_id, server_id=server_id)
+
+
 class WorkspaceMcpServerService:
     """CRUD for a workspace's MCP servers. Writes are management-gated; the list is not."""
 
@@ -733,6 +751,7 @@ __all__ = [
     "WorkspaceMcpServerPublic",
     "WorkspaceMcpServerService",
     "WorkspaceMcpServerUpdate",
+    "WorkspaceMcpServers",
     "WorkspaceMcpServersPublic",
     "resolve_workspace_mcp_server",
     "resolve_workspace_mcp_servers",

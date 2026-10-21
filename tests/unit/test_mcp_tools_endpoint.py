@@ -21,13 +21,12 @@ from fastapi.testclient import TestClient
 from mcp.types import ListToolsResult, ToolAnnotations
 from mcp.types import Tool as MCPTool
 
-from gateway.api.deps import get_mcp_server_port, reset_config
+from gateway.api.deps import get_workspace_mcp_servers, reset_config
 from gateway.api.routes import mcp as mcp_route
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
 from gateway.models.mcp import ResolvedMcpServer
-from gateway.ports.mcp_server_port import McpServerScope
 from gateway.services import mcp_stateless
 
 SERVER_ID = uuid.UUID("2c948a61-dc96-4cd8-96bb-8e1434bf424e")
@@ -89,18 +88,18 @@ def session(monkeypatch: pytest.MonkeyPatch) -> _FakeSession:
 
 
 class _Servers:
-    """The MCP server port, and a record of what was asked of it."""
+    """The workspace's MCP servers, and a record of what was asked of them."""
 
     def __init__(self) -> None:
         self.server: ResolvedMcpServer | None = _stored()
-        self.asked: list[tuple[McpServerScope, uuid.UUID]] = []
+        self.asked: list[tuple[uuid.UUID, uuid.UUID]] = []
         self.delay_s = 0.0
 
-    async def resolve_many(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> Any:
+    async def resolve_many(self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> Any:
         raise AssertionError("the stateless routes resolve one server")
 
-    async def resolve_one(self, scope: McpServerScope, server_id: uuid.UUID) -> ResolvedMcpServer | None:
-        self.asked.append((scope, server_id))
+    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+        self.asked.append((workspace_id, server_id))
         await asyncio.sleep(self.delay_s)
         return self.server
 
@@ -131,7 +130,7 @@ def client(monkeypatch: pytest.MonkeyPatch, database_url: str, servers: _Servers
     monkeypatch.setattr(mcp_route, "verify_api_key_or_master_key", verify)
     monkeypatch.setattr(mcp_route, "resolve_workspace_id", workspace_of)
     app = create_app(GatewayConfig(database_url=database_url))
-    app.dependency_overrides[get_mcp_server_port] = lambda: servers
+    app.dependency_overrides[get_workspace_mcp_servers] = lambda: servers
     with TestClient(app) as test_client:
         yield test_client
 
@@ -162,7 +161,7 @@ def test_the_live_catalog_is_returned_with_the_stored_server_revision(
         "warnings": [],
     }
     assert response.headers["Otari-Request-ID"]
-    assert servers.asked == [(McpServerScope(workspace_id=WORKSPACE_ID), SERVER_ID)]
+    assert servers.asked == [(WORKSPACE_ID, SERVER_ID)]
 
 
 def test_the_response_discloses_no_url_credential_or_allowlist(

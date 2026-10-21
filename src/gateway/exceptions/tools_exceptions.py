@@ -155,10 +155,6 @@ class WebSearchPolicyResolutionFailure(StrEnum):
 
     message: str
 
-    NO_WORKSPACE = (
-        "the request named no workspace",
-        "Web search configuration could not be resolved for this request",
-    )
     STORED_POLICY_INVALID = (
         "a stored domain rule is invalid",
         "Web search configuration contains an invalid domain rule",
@@ -214,60 +210,6 @@ class SandboxImageNotAllowedError(TenancyValidationError):
     set, which is not a disclosure worth withholding, because that set is
     already reported on the policy itself so the dashboard can offer it.
     """
-
-
-class CodeExecutionPolicyResolutionFailure(StrEnum):
-    """Why a workspace's code execution policy could not be resolved.
-
-    A member carries the message a caller sees.
-    Its value names the cause, which a caller never sees.
-    """
-
-    def __new__(cls, cause: str, message: str) -> "CodeExecutionPolicyResolutionFailure":
-        member = str.__new__(cls, cause)
-        member._value_ = cause
-        member.message = message
-        return member
-
-    message: str
-
-    NO_WORKSPACE = (
-        "the request named no workspace",
-        "Code execution policy could not be resolved for this request",
-    )
-
-
-class CodeExecutionPolicyResolutionFailedError(Exception):
-    """A workspace's code execution policy could not be resolved."""
-
-    def __init__(self, reason: CodeExecutionPolicyResolutionFailure) -> None:
-        super().__init__(reason.message)
-        self.message = reason.message
-        self.reason = reason
-
-
-class McpResolutionFailure(StrEnum):
-    """Why an MCP server could not be resolved.
-
-    The message a caller sees is fixed, so a member is the only thing that tells one cause from another.
-    """
-
-    NO_WORKSPACE = "the request named no workspace"
-
-
-class McpServerResolutionFailedError(TenancyError):
-    """An MCP server could not be resolved.
-
-    The message is fixed because an error boundary may return it.
-    The underlying detail quotes the stored server URL or its credential.
-    The cause travels as ``reason``, which a boundary logs and never returns.
-    """
-
-    status_code = status.HTTP_502_BAD_GATEWAY
-
-    def __init__(self, reason: McpResolutionFailure) -> None:
-        super().__init__("MCP server resolution failed")
-        self.reason = reason
 
 
 class McpSessionsInterruptedError(Exception):
@@ -459,12 +401,8 @@ class WebSearchCredentialRefusedError(TenancyError):
 
 
 __all__ = [
-    "CodeExecutionPolicyResolutionFailedError",
-    "CodeExecutionPolicyResolutionFailure",
     "DirectSearchFailedError",
     "DirectSearchFieldRefusedError",
-    "McpResolutionFailure",
-    "McpServerResolutionFailedError",
     "McpSessionsInterruptedError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",

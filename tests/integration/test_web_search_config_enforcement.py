@@ -734,7 +734,7 @@ def test_a_config_read_that_fails_releases_the_budget_reservation(
         raise SQLAlchemyError("connection lost mid-admission")
 
     monkeypatch.setattr(
-        "gateway.adapters.web_search_policy_adapter.resolve_workspace_web_search_config",
+        "gateway.services.tenancy.workspace_web_search_service.resolve_workspace_web_search_config",
         failing_resolve,
     )
     # The Messages route answers an unexpected failure as Anthropic's 500; what matters

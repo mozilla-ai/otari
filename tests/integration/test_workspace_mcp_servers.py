@@ -24,10 +24,7 @@ from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.adapters.code_execution_policy_adapter import LocalCodeExecutionPolicy
-from gateway.adapters.mcp_server_adapter import LocalMcpServers
-from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy
-from gateway.api.deps import ToolPorts, get_workspace_code_execution_policies, get_workspace_search_keys
+from gateway.api.deps import ToolPorts, get_workspace_search_keys
 from gateway.api.routes import chat, messages
 from gateway.api.routes._pipeline import DeclaredTools, RequestContext, ToolBackends, prepare_gateway_tools
 from gateway.api.routes.chat import ChatCompletionRequest
@@ -51,6 +48,7 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.repositories.tools import WorkspaceCodeExecutionPolicyRepository
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import CheckFailure, McpCapacityUnavailable, ServerCheck
 from gateway.services.secret_box import decrypt_secret, generate_secret_key
@@ -59,11 +57,14 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     MAX_MCP_SERVERS_PER_WORKSPACE,
     WorkspaceMcpServerCheckRequest,
     WorkspaceMcpServerCreate,
+    WorkspaceMcpServers,
     WorkspaceMcpServerService,
     WorkspaceMcpServerUpdate,
     resolve_workspace_mcp_server,
     resolve_workspace_mcp_servers,
 )
+from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
+from gateway.services.tools import WorkspaceCodeExecutionPolicies
 
 pytestmark = pytest.mark.asyncio
 
@@ -75,11 +76,13 @@ OTHER_PUBLIC_URL = "https://93.184.216.35/mcp"
 def _tool_ports(db: AsyncSession) -> ToolPorts:
     return ToolPorts(
         code_execution=None,
-        code_execution_policy=LocalCodeExecutionPolicy(
-            get_workspace_code_execution_policies(db), on_without_policy=True
+        code_execution_policy=WorkspaceCodeExecutionPolicies(
+            WorkspaceCodeExecutionPolicyRepository(db), on_without_policy=True
         ),
-        mcp_server=LocalMcpServers(db),
-        web_search_policy=LocalWebSearchPolicy(db, search_keys=get_workspace_search_keys(db), on_without_policy=True),
+        mcp_server=WorkspaceMcpServers(db),
+        web_search_policy=WorkspaceWebSearchPolicies(
+            db, search_keys=get_workspace_search_keys(db), on_without_policy=True
+        ),
     )
 
 

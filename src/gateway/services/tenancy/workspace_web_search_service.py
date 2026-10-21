@@ -9,27 +9,33 @@ How it narrows one request is the tools domain's rule, in ``services/tools/_web_
 Reading or writing a stored policy requires an owner or admin of the workspace or of its organization.
 Reads are gated as well as writes, because the row is the workspace's posture and not one member's allowance.
 
-:func:`resolve_workspace_web_search_config` reads a stored row.
-It takes no identity, because the workspace comes from the authenticated key.
+:func:`resolve_workspace_web_search_config` reads a stored row, and :class:`WorkspaceWebSearchPolicies`
+is the policy a request runs under.
+Neither takes an identity, because the workspace comes from the authenticated key.
 """
 
 from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError, WebSearchPolicyResolutionFailure
 from gateway.models.tenancy import User, Workspace
-from gateway.models.tools import ResolvedWebSearchConfig, WorkspaceWebSearchConfig
+from gateway.models.tools import ResolvedWebSearchConfig, WebTool, WorkspaceWebSearchConfig
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.web_retrieval_policy import read_domain_list
+
+if TYPE_CHECKING:
+    from gateway.services.tools import WorkspaceSearchKeys
 
 # The largest result ceiling the column holds, a 32-bit integer. Not a ceiling
 # of the gateway's own, which sets none (decision 65): a larger value is refused
@@ -235,6 +241,53 @@ def _stored_domains(value: object) -> tuple[str, ...] | None:
 # Whether a workspace has a usable organization search key, which serves its
 # ``otari_web_search`` declarations where the deployment has no search of its own.
 HasSearchKey = Callable[[uuid.UUID], Awaitable[bool]]
+
+
+# The policy of a workspace that holds no row, carrying only its search key.
+_NO_NARROWING = ResolvedWebSearchConfig(
+    enabled=True,
+    max_results=None,
+    purpose_hint=None,
+    allowed_domains=None,
+    blocked_domains=None,
+    provider_options=None,
+    authorized_tools=None,
+)
+# The policy of a workspace that holds no row where this deployment makes web access opt-in.
+_NOT_TURNED_ON = replace(_NO_NARROWING, enabled=False)
+
+
+class WorkspaceWebSearchPolicies:
+    """The web search policy a workspace's requests run under, with its own keys where it has them."""
+
+    def __init__(self, db: AsyncSession, *, search_keys: WorkspaceSearchKeys, on_without_policy: bool) -> None:
+        self._db = db
+        self._search_keys = search_keys
+        self._on_without_policy = on_without_policy
+
+    async def resolve(
+        self, workspace_id: uuid.UUID, requested_tools: Sequence[WebTool]
+    ) -> ResolvedWebSearchConfig | None:
+        """The policy that governs ``requested_tools``, or ``None`` where the workspace has none.
+
+        Raises:
+            WebSearchPolicyResolutionFailedError: a stored domain rule is invalid.
+        """
+        # A stored row authorizes no tool by name, so the requested tools decide only which keys are read:
+        # the search key for a search, the fetch key for either tool, since it also enriches search hits.
+        try:
+            policy = await resolve_workspace_web_search_config(self._db, workspace_id)
+        except InvalidStoredWebSearchDomainError:
+            raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID) from None
+        if policy is None and not self._on_without_policy:
+            return _NOT_TURNED_ON
+        search = WebTool.SEARCH in requested_tools
+        keys = await self._search_keys.keys_for(
+            workspace_id, search=search, fetch=search or WebTool.FETCH in requested_tools
+        )
+        if keys.search is None and keys.fetch is None:
+            return policy
+        return replace(policy or _NO_NARROWING, credential=keys.search, fetch_credential=keys.fetch)
 
 
 class WorkspaceWebSearchService:

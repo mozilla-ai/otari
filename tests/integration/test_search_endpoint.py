@@ -13,6 +13,7 @@ on the old client until any-search has its adapter, is stubbed at
 import json
 import logging
 import time
+import uuid
 from collections.abc import AsyncIterator, Generator, Sequence
 from decimal import Decimal
 from typing import Any
@@ -24,14 +25,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from gateway.api.deps import get_web_provider_client, get_web_search_policy_port
+from gateway.api.deps import get_web_provider_client, get_workspace_web_search_policies
 from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig, RateLimitRule
 from gateway.core.settings.pricing import PricingConfig
 from gateway.exceptions.tools_exceptions import SearchToolNotFoundError
 from gateway.inflight import InFlightRegistry
 from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, OrganizationModelPricing
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool, WebToolCredentialSource
-from gateway.ports.web_search_policy_port import WebSearchPolicyScope
 from gateway.schemas.tools import SearchResponse
 from gateway.services.search_backend import SearchHit, SearchOutcome, SearchProviderError
 from gateway.services.secret_box import generate_secret_key
@@ -1116,16 +1116,16 @@ def test_a_library_tool_without_its_key_is_refused_before_the_provider(
 
 
 class _StubPolicy:
-    """A web search policy port answering a fixed policy, recording what it was asked."""
+    """A web search policy answering a fixed policy, recording what it was asked."""
 
     def __init__(self, answer: ResolvedWebSearchConfig | None) -> None:
         self.answer = answer
-        self.asked: list[tuple[WebSearchPolicyScope, Sequence[WebTool]]] = []
+        self.asked: list[tuple[uuid.UUID, Sequence[WebTool]]] = []
 
     async def resolve(
-        self, scope: WebSearchPolicyScope, requested_tools: Sequence[WebTool]
+        self, workspace_id: uuid.UUID, requested_tools: Sequence[WebTool]
     ) -> ResolvedWebSearchConfig | None:
-        self.asked.append((scope, tuple(requested_tools)))
+        self.asked.append((workspace_id, tuple(requested_tools)))
         return self.answer
 
 
@@ -1144,23 +1144,23 @@ def _policy(*, enabled: bool = True, max_results: int | None = None, credential:
 
 def _stub_policy(client: TestClient, answer: ResolvedWebSearchConfig | None) -> _StubPolicy:
     stub = _StubPolicy(answer)
-    client.app.dependency_overrides[get_web_search_policy_port] = lambda: stub  # type: ignore[attr-defined]
+    client.app.dependency_overrides[get_workspace_web_search_policies] = lambda: stub  # type: ignore[attr-defined]
     return stub
 
 
-def test_the_route_reads_the_policy_through_the_port(
+def test_the_route_reads_the_workspaces_policy(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """A disabled policy the port answers, with no stored row behind it, is today's 403."""
+    """A disabled policy, with no stored row behind it, is a 403."""
     stub = _stub_policy(client, _policy(enabled=False))
     resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
 
     assert resp.status_code == 403
-    ((scope, requested),) = stub.asked
-    assert scope.workspace_id is not None
+    ((workspace_id, requested),) = stub.asked
+    assert workspace_id is not None
     assert requested == (WebTool.SEARCH,)
     (row,) = _search_rows(client, master_key_header, api_key_obj["user_id"])
     assert (row["model"], row["status_code"]) == ("fake-search", 403)

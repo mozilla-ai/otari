@@ -11,14 +11,15 @@ from typing import TYPE_CHECKING
 from gateway.exceptions.tools_exceptions import McpServerConfigurationError, McpServerDeclarationError
 from gateway.log_config import logger
 from gateway.models.mcp import McpServerConfig
-from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 
 if TYPE_CHECKING:
     from gateway.services._tool_loop import ToolBackend
+    from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
 
 MCP_SERVER_TOKEN_UNREADABLE_DETAIL = "A configured MCP server's authorization token could not be read"
+MCP_SERVERS_UNRESOLVABLE_DETAIL = "MCP servers could not be resolved for this request"
 MCP_SERVER_URL_UNSAFE_DETAIL = "A configured MCP server's URL failed its safety check"
 MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL = (
     "A request-supplied MCP server name collides with one of this workspace's stored servers"
@@ -88,8 +89,8 @@ async def admit_mcp_servers(
     inline_servers: list[McpServerConfig] | None,
     server_ids: list[uuid.UUID] | None,
     *,
-    port: McpServerPort,
-    scope: McpServerScope,
+    servers: WorkspaceMcpServers,
+    workspace_id: uuid.UUID | None,
 ) -> list[McpServerConfig] | None:
     """The MCP servers the request may reach: its own, then the stored ones its IDs name.
 
@@ -98,9 +99,8 @@ async def admit_mcp_servers(
 
     Raises:
         McpServerDeclarationError: the request's own servers cannot be reached as declared.
-        McpServerConfigurationError: the stored servers cannot be used, which is the operator's to fix.
+        McpServerConfigurationError: the stored servers cannot be used, or the request named no workspace.
         WorkspaceMcpServerNotFoundError: an ID names no server this workspace holds.
-        McpServerResolutionFailedError: the peer that holds the servers could not answer.
     """
     mcp_servers = inline_servers
     # Each source is checked on its own, because a stored server's refusal carries a fixed detail.
@@ -114,20 +114,23 @@ async def admit_mcp_servers(
             inline_names.add(server.name)
         await _validate_mcp_server_urls(mcp_servers)
     if server_ids:
+        # NOTE: every request path names a workspace; refuse rather than read no row as no server.
+        if workspace_id is None:
+            raise McpServerConfigurationError(MCP_SERVERS_UNRESOLVABLE_DETAIL)
         try:
-            stored_servers = await port.resolve_many(scope, server_ids)
+            stored_servers = await servers.resolve_many(workspace_id, server_ids)
         except (SecretBoxUnavailableError, SecretDecryptionError) as exc:
             # The operator's problem, not the caller's, and the underlying message
             # names the environment variable, so it stays in the log.
-            logger.error("MCP server token could not be decrypted for workspace %s: %s", scope.workspace_id, exc)
+            logger.error("MCP server token could not be decrypted for workspace %s: %s", workspace_id, exc)
             raise McpServerConfigurationError(MCP_SERVER_TOKEN_UNREADABLE_DETAIL) from exc
-        await _validate_mcp_server_urls(stored_servers, stored=True, workspace_id=scope.workspace_id)
+        await _validate_mcp_server_urls(stored_servers, stored=True, workspace_id=workspace_id)
         stored_name_counts = Counter(server.name for server in stored_servers)
         # Only a peer's answer can repeat a name. The caller cannot fix it, so the names go to the log.
         if len(stored_name_counts) != len(stored_servers):
             logger.error(
                 "Stored MCP servers do not have unique names for workspace %s: %s",
-                scope.workspace_id,
+                workspace_id,
                 sorted(name for name, count in stored_name_counts.items() if count > 1),
             )
             raise McpServerConfigurationError(MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL)

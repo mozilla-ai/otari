@@ -27,14 +27,12 @@ from fastapi.testclient import TestClient
 from mcp.types import CallToolResult, TextContent
 
 from gateway import log_config
-from gateway.api.deps import get_mcp_server_port, reset_config
+from gateway.api.deps import get_workspace_mcp_servers, reset_config
 from gateway.api.routes import mcp as mcp_route
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
-from gateway.exceptions.tools_exceptions import McpResolutionFailure, McpServerResolutionFailedError
 from gateway.main import create_app
 from gateway.models.mcp import ResolvedMcpServer
-from gateway.ports.mcp_server_port import McpServerScope
 from gateway.services import mcp_stateless
 from gateway.services.secret_box import SecretDecryptionError
 
@@ -93,20 +91,20 @@ class _FakeSession:
 
 
 class _Servers:
-    """The MCP server port, and a record of what was asked of it."""
+    """The workspace's MCP servers, and a record of what was asked of them."""
 
     def __init__(self) -> None:
         self.server: ResolvedMcpServer | None = _stored()
         self.raises: Exception | None = None
-        self.asked: list[tuple[McpServerScope, uuid.UUID]] = []
+        self.asked: list[tuple[uuid.UUID, uuid.UUID]] = []
         self.delay_s = 0.0
 
-    async def resolve_many(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> Any:
+    async def resolve_many(self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> Any:
         raise AssertionError("the stateless routes resolve one server")
 
-    async def resolve_one(self, scope: McpServerScope, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
         await asyncio.sleep(self.delay_s)
-        self.asked.append((scope, server_id))
+        self.asked.append((workspace_id, server_id))
         if self.raises is not None:
             raise self.raises
         return self.server
@@ -150,7 +148,7 @@ def client(monkeypatch: pytest.MonkeyPatch, database_url: str, servers: _Servers
     monkeypatch.setattr(mcp_route, "verify_api_key_or_master_key", verify)
     monkeypatch.setattr(mcp_route, "resolve_workspace_id", workspace_of)
     app = create_app(GatewayConfig(database_url=database_url))
-    app.dependency_overrides[get_mcp_server_port] = lambda: servers
+    app.dependency_overrides[get_workspace_mcp_servers] = lambda: servers
     with TestClient(app) as test_client:
         yield test_client
 
@@ -193,7 +191,7 @@ def test_the_exact_authorized_call_runs_and_the_native_result_comes_back(
     }
     assert session.calls == [("create_issue", {"title": "Approved title", "body": "Approved body"})]
     assert session.listed == 0, "authorization comes from the stored allowlist, not live discovery"
-    assert servers.asked == [(McpServerScope(workspace_id=WORKSPACE_ID), SERVER_ID)]
+    assert servers.asked == [(WORKSPACE_ID, SERVER_ID)]
 
 
 def test_the_request_id_is_returned_on_success_without_touching_the_result(
@@ -345,20 +343,6 @@ def test_an_id_naming_no_server_is_not_found(
         "code": "mcp_server_not_found",
         "execution_state": "not_started",
     }
-    assert session.calls == []
-
-
-def test_a_failed_resolution_is_a_resolution_failure(
-    client: TestClient,
-    servers: _Servers,
-    session: _FakeSession,
-) -> None:
-    servers.raises = McpServerResolutionFailedError(McpResolutionFailure.NO_WORKSPACE)
-
-    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
-
-    assert response.status_code == 502, response.text
-    assert _error(response)["code"] == "mcp_resolution_failed"
     assert session.calls == []
 
 

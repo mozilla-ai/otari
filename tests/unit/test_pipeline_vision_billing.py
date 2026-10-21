@@ -22,10 +22,10 @@ from gateway.api.routes import chat
 from gateway.container import build_container
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services import pricing_service
 from gateway.services.budgets import ReservationHandle, estimate_tokens
+from gateway.services.tools import WorkspaceCodeExecutionPolicies
 from gateway.types.normalization_target import NormalizationTarget
 
 _VISION_USAGE = CompletionUsage(prompt_tokens=200, completion_tokens=50, total_tokens=250)
@@ -143,7 +143,7 @@ async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
         estimate_max_output_tokens=None,
         master_key_user_required_detail="user required",
         user_forbidden_detail="forbidden",
-        code_execution_policies=cast(CodeExecutionPolicyPort, object()),
+        code_execution_policies=cast(WorkspaceCodeExecutionPolicies, object()),
         model_provider=cast(ModelProviderPort, object()),
         normalize_messages=_normalize_with_vision,
     )

@@ -25,18 +25,15 @@ from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
 from gateway.ports.billing_port import BillingPort
-from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
-from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
-from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.api_keys import ApiKeyRepositories, ApiKeyRepository, FederationRuleRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.files import FileRepositories
@@ -130,8 +127,9 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
 )
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
+from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
 from gateway.services.tenancy.workspace_service import WorkspaceService
-from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchService
+from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies, WorkspaceWebSearchService
 from gateway.services.tools import (
     WebSearchKeyService,
     WorkspaceCodeExecutionPolicies,
@@ -1066,12 +1064,12 @@ WorkspaceWebSearchServiceDep = Annotated[WorkspaceWebSearchService, Depends(get_
 
 def get_workspace_code_execution_policies(
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> WorkspaceCodeExecutionPolicies:
-    """Build the request path's reader of a workspace's code execution policy, on the request's session.
-
-    Also the builder the container's stored code execution policy takes, which is why it takes a bare session.
-    """
-    return WorkspaceCodeExecutionPolicies(WorkspaceCodeExecutionPolicyRepository(db))
+    """Build the request path's reader of a workspace's code execution policy, on the request's session."""
+    return WorkspaceCodeExecutionPolicies(
+        WorkspaceCodeExecutionPolicyRepository(db), on_without_policy=config.code_execution_on_without_policy()
+    )
 
 
 WorkspaceCodeExecutionPoliciesDep = Annotated[
@@ -1246,13 +1244,9 @@ def get_identity_provider_port(
     return container.resolve(IdentityProviderPort, db, uow=uow)
 
 
-def get_mcp_server_port(db: PortSessionDep, container: ContainerDep) -> McpServerPort:
-    """Resolve the MCP server adapter this build bound at startup.
-
-    Invariant: a deployment that holds the rows always has a session here, so
-    the refusal inside the adapter's builder is unreachable through this.
-    """
-    return container.resolve(McpServerPort, db)
+def get_workspace_mcp_servers(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceMcpServers:
+    """Build the request path's reader of a workspace's MCP servers, on the request's session."""
+    return WorkspaceMcpServers(db)
 
 
 def get_model_provider_port(
@@ -1292,16 +1286,6 @@ def get_telemetry_storage_port(
 ) -> TelemetryStoragePort:
     """Resolve the telemetry-storage adapter this build bound at startup."""
     return container.resolve(TelemetryStoragePort, db)
-
-
-def get_code_execution_policy_port(db: PortSessionDep, container: ContainerDep) -> CodeExecutionPolicyPort:
-    """Resolve the code execution policy adapter this build bound at startup."""
-    return container.resolve(CodeExecutionPolicyPort, db)
-
-
-def get_web_search_policy_port(db: PortSessionDep, container: ContainerDep) -> WebSearchPolicyPort:
-    """Resolve the web search policy adapter this build bound at startup."""
-    return container.resolve(WebSearchPolicyPort, db)
 
 
 def get_web_provider_client(request: Request) -> httpx.AsyncClient:
@@ -1511,11 +1495,10 @@ OrganizationGuardrailDefinitionServiceDep = Annotated[
 ApiKeyFormatPortDep = Annotated[ApiKeyFormatPort, Depends(get_api_key_format_port)]
 BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
 RequestSessionBillingPortDep = Annotated[BillingPort, Depends(get_request_session_billing_port)]
-CodeExecutionPolicyPortDep = Annotated[CodeExecutionPolicyPort, Depends(get_code_execution_policy_port)]
 EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
 GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]
 IdentityProviderPortDep = Annotated[IdentityProviderPort, Depends(get_identity_provider_port)]
-McpServerPortDep = Annotated[McpServerPort, Depends(get_mcp_server_port)]
+WorkspaceMcpServersDep = Annotated[WorkspaceMcpServers, Depends(get_workspace_mcp_servers)]
 ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_port)]
 RequestSessionModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_request_session_model_provider_port)]
 
@@ -1625,12 +1608,19 @@ WebSearchKeyServiceDep = Annotated[WebSearchKeyService, Depends(get_web_search_k
 
 
 def get_workspace_search_keys(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceSearchKeys:
-    """Build the resolver of the keys a workspace uses, on the request's session.
-
-    Also the builder the container's stored web search policy takes, which is why it takes a bare session.
-    """
+    """Build the resolver of the keys a workspace uses, on the request's session."""
     return WorkspaceSearchKeys(
         workspaces=WorkspaceRepository(db), overrides=WorkspaceWebSearchKeyOverrideRepository(db)
+    )
+
+
+def get_workspace_web_search_policies(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> WorkspaceWebSearchPolicies:
+    """Build the request path's reader of a workspace's web search policy, on the request's session."""
+    return WorkspaceWebSearchPolicies(
+        db, search_keys=get_workspace_search_keys(db), on_without_policy=config.web_search_on_without_policy()
     )
 
 
@@ -1775,34 +1765,34 @@ def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Dep
 RoutingServiceDep = Annotated[RoutingService, Depends(get_routing_service)]
 
 
-WebSearchPolicyPortDep = Annotated[WebSearchPolicyPort, Depends(get_web_search_policy_port)]
+WorkspaceWebSearchPoliciesDep = Annotated[WorkspaceWebSearchPolicies, Depends(get_workspace_web_search_policies)]
 WebProviderClientDep = Annotated[httpx.AsyncClient, Depends(get_web_provider_client)]
 OptionalWebProviderClientDep = Annotated[httpx.AsyncClient | None, Depends(get_optional_web_provider_client)]
 
 
 @dataclass(frozen=True, kw_only=True)
 class ToolPorts:
-    """The ports a request's tools reach, and the client their web providers are called through.
+    """The ports and policies a request's tools reach, and the client their web providers are called through.
 
     ``web_provider_client`` is the app's; ``None`` outside its lifespan, or where
     a test builds this by hand, and a provider then opens its own for the call.
     """
 
     code_execution: CodeExecutionPort | None
-    code_execution_policy: CodeExecutionPolicyPort
-    mcp_server: McpServerPort
-    web_search_policy: WebSearchPolicyPort
+    code_execution_policy: WorkspaceCodeExecutionPolicies
+    mcp_server: WorkspaceMcpServers
+    web_search_policy: WorkspaceWebSearchPolicies
     web_provider_client: httpx.AsyncClient | None = None
 
 
 def get_tool_ports(
     code_execution: CodeExecutionPortDep,
-    code_execution_policy: CodeExecutionPolicyPortDep,
-    mcp_server: McpServerPortDep,
-    web_search_policy: WebSearchPolicyPortDep,
+    code_execution_policy: WorkspaceCodeExecutionPoliciesDep,
+    mcp_server: WorkspaceMcpServersDep,
+    web_search_policy: WorkspaceWebSearchPoliciesDep,
     web_provider_client: OptionalWebProviderClientDep,
 ) -> ToolPorts:
-    """Resolve the ports a request's tools reach."""
+    """Resolve the ports and policies a request's tools reach."""
     return ToolPorts(
         code_execution=code_execution,
         code_execution_policy=code_execution_policy,
@@ -1957,7 +1947,6 @@ __all__ = [
     "AgentModelRecommenderPortDep",
     "BillingPortDep",
     "RequestSessionBillingPortDep",
-    "CodeExecutionPolicyPortDep",
     "ContainerDep",
     "CallerOrganization",
     "CallerUsageScope",
@@ -1974,7 +1963,6 @@ __all__ = [
     "GrowthSignalPortDep",
     "IdentityProviderPortDep",
     "IdentityServiceDep",
-    "McpServerPortDep",
     "ModelProviderPortDep",
     "HostedProviderServiceDep",
     "OrgProviderModelServiceDep",
@@ -1986,7 +1974,8 @@ __all__ = [
     "ToolPorts",
     "ToolPortsDep",
     "WebProviderClientDep",
-    "WebSearchPolicyPortDep",
+    "WorkspaceMcpServersDep",
+    "WorkspaceWebSearchPoliciesDep",
     "get_agent_model_recommender_port",
     "get_config",
     "get_container",

@@ -90,7 +90,9 @@ def _service(
 
 
 async def _resolve(db: AsyncSession, workspace_id: uuid.UUID) -> ResolvedCodeExecutionPolicy | None:
-    return await WorkspaceCodeExecutionPolicies(WorkspaceCodeExecutionPolicyRepository(db)).resolve(workspace_id)
+    return await WorkspaceCodeExecutionPolicies(
+        WorkspaceCodeExecutionPolicyRepository(db), on_without_policy=True
+    ).resolve(workspace_id)
 
 
 async def test_a_workspace_with_no_policy_reads_as_unconfigured_and_narrows_nothing(

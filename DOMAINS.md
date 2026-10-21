@@ -183,29 +183,20 @@ transactions, with output compensation and cleanup storage calls outside them.
 The tools the gateway runs itself: the tool loop, MCP, web search, web
 retrieval and code execution.
 
-It owns the code execution, code execution policy, MCP server and web search policy ports in `ports/`,
-and their adapters in `adapters/`.
+It owns the code execution port in `ports/` and its adapters in `adapters/`.
 
-`mcp_server_port.py` names where a workspace's MCP servers come from. One
-deployment holds those rows and another asks a peer that holds them for it, so
-the composition root binds the implementation and no caller chooses between them. A
-resolved server is connected to directly; neither implementation proxies MCP
-traffic.
-
-`web_search_policy_port.py` names where a workspace's web search policy comes
-from, in the same two ways. The policy says who may search and how far, and
-carries the workspace's own search key where its organization brought one. A
-tools service applies it to a request with one rule everywhere, and
-neither implementation carries a search.
+A workspace's MCP servers, web search policy and code execution policy are
+read from this deployment's own rows, by `WorkspaceMcpServers`,
+`WorkspaceWebSearchPolicies` and `WorkspaceCodeExecutionPolicies`, with no port
+between them and their callers. A resolved MCP server is connected to directly,
+and nothing proxies MCP traffic. The web search policy says who may search and
+how far, and carries the workspace's own search key where its organization
+brought one; a tools service applies it to a request with one rule everywhere.
+The code execution policy says who may run code and within which limits, and
+the request path and the Playground read it through the same service.
 
 It also owns an organization's web search keys and each workspace's choice
 among them (`org_web_search_keys`, `workspace_web_search_key_overrides`).
-
-`code_execution_policy_port.py` names where a workspace's code execution
-policy comes from, in the same two ways. The policy says who may run code and
-within which limits, and neither implementation runs code. The local one reads
-the row through `WorkspaceCodeExecutionPolicies`, the same read the request
-path and the Playground make.
 
 **The tool test.** A tool is something the model calls during a request. The
 domain holds the registry, the loop and each tool's settings. A capability the

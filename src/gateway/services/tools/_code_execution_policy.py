@@ -246,11 +246,31 @@ class WorkspaceCodeExecutionPolicyPublic(BaseModel):
         )
 
 
+# The policy of a workspace that holds no row where this deployment makes code execution opt-in.
+_NOT_TURNED_ON = ResolvedCodeExecutionPolicy(
+    enabled=False,
+    default_purpose_hint=None,
+    max_iterations=None,
+    exec_timeout_s=None,
+    image=None,
+    tools=None,
+    executor=None,
+)
+
+
 class WorkspaceCodeExecutionPolicies:
     """The policy each workspace's requests run under, read on the request path with no identity."""
 
-    def __init__(self, policies: WorkspaceCodeExecutionPolicyRepository) -> None:
+    def __init__(self, policies: WorkspaceCodeExecutionPolicyRepository, *, on_without_policy: bool) -> None:
         self._policies = policies
+        self._on_without_policy = on_without_policy
+
+    async def for_request(self, workspace_id: uuid.UUID) -> ResolvedCodeExecutionPolicy | None:
+        """The policy a request runs under: the stored one, or the deployment's default where there is none."""
+        policy = await self.resolve(workspace_id)
+        if policy is None and not self._on_without_policy:
+            return _NOT_TURNED_ON
+        return policy
 
     async def resolve(self, workspace_id: uuid.UUID) -> ResolvedCodeExecutionPolicy | None:
         """The workspace's stored policy, or ``None`` when it has none.

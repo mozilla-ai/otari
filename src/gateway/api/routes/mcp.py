@@ -40,7 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from gateway.api.deps import (
-    McpServerPortDep,
+    WorkspaceMcpServersDep,
     get_config,
     get_db,
     verify_api_key_or_master_key,
@@ -53,11 +53,9 @@ from gateway.api.deps import (
 # parameters and every request fails validation before the handler runs.
 from gateway.core.config import API_ROOT, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import release_session
-from gateway.exceptions.tools_exceptions import McpServerResolutionFailedError
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
-from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.rate_limit import check_rate_limit
 from gateway.repositories.users_repository import get_active_user
 
@@ -96,6 +94,7 @@ from gateway.services.mcp_stateless import (
     execute_stored_tool,
 )
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
+from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.workspace_scope import resolve_workspace_id
 
@@ -315,7 +314,7 @@ class McpExecuteRequest(BaseModel):
 class _Principal:
     """Who the request authenticated as."""
 
-    workspace_id: uuid.UUID | None
+    workspace_id: uuid.UUID
 
 
 async def _authenticate(
@@ -361,7 +360,7 @@ async def _refuse_blocked_user(db: AsyncSession, api_key: APIKey) -> None:
 
 async def _resolve_server(
     principal: _Principal,
-    mcp_server_port: McpServerPort,
+    servers: WorkspaceMcpServers,
     mcp_server_id: uuid.UUID,
 ) -> ResolvedMcpServer:
     """Resolve the stored server, applying the outcome ladder.
@@ -369,11 +368,8 @@ async def _resolve_server(
     No MCP network access happens here or in anything it raises, so a refusal on
     these grounds never reaches the remote server.
     """
-    scope = McpServerScope(workspace_id=principal.workspace_id)
     try:
-        resolved = await mcp_server_port.resolve_one(scope, mcp_server_id)
-    except McpServerResolutionFailedError:
-        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
+        resolved = await servers.resolve_one(principal.workspace_id, mcp_server_id)
     except (SecretDecryptionError, SecretBoxUnavailableError):
         # Connecting without the credential the workspace configured would send
         # an unauthenticated request to a server that expects one.
@@ -478,7 +474,7 @@ async def list_mcp_tools(
     mcp_server_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    mcp_server_port: McpServerPortDep,
+    servers: WorkspaceMcpServersDep,
 ) -> McpToolsResponse:
     """List the tools a stored MCP server exposes to the authenticated workspace.
 
@@ -499,7 +495,7 @@ async def list_mcp_tools(
     try:
         async with asyncio.timeout(mcp_stateless.DISCOVERY_TOTAL_TIMEOUT_S):
             principal = await _authenticate(raw_request, db, config)
-            server = await _resolve_server(principal, mcp_server_port, mcp_server_id)
+            server = await _resolve_server(principal, servers, mcp_server_id)
 
             if server.allowed_tools == []:
                 # An operator's explicit deny-all is a complete answer already,
@@ -592,7 +588,7 @@ async def execute_mcp_tool(
     request: McpExecuteRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    mcp_server_port: McpServerPortDep,
+    servers: WorkspaceMcpServersDep,
 ) -> CallToolResult:
     """Execute one caller-authorized tool call against a stored MCP server.
 
@@ -619,11 +615,10 @@ async def execute_mcp_tool(
     try:
         async with asyncio.timeout(mcp_stateless.EXECUTION_TOTAL_TIMEOUT_S):
             principal = await _authenticate(raw_request, db, config)
-            server = await _resolve_server(principal, mcp_server_port, request.mcp_server_id)
+            server = await _resolve_server(principal, servers, request.mcp_server_id)
             _require_allowed(server, request.tool_name)
             if request.server_revision != server.revision:
-                # In memory, over the resolution both modes already needed, so this
-                # costs no database, platform or MCP round trip.
+                # In memory, over the resolution already made, so this costs no database or MCP round trip.
                 raise McpExecutionError(CODE_SERVER_CHANGED, ExecutionState.NOT_STARTED, 409)
 
             # Before DNS, before the concurrency wait, and before any MCP network I/O:

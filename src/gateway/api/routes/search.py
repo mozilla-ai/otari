@@ -60,7 +60,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     WebProviderClientDep,
-    WebSearchPolicyPortDep,
+    WorkspaceWebSearchPoliciesDep,
     get_budget_service,
     get_config,
     get_db,
@@ -100,7 +100,6 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.tools import WebTool
 from gateway.models.usage import UsageLog
-from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit
 from gateway.schemas.tools import SearchRequest, SearchResponse
 from gateway.services.budgets import (
@@ -113,6 +112,7 @@ from gateway.services.budgets import (
 from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.pricing_service import resolve_tool_rate
+from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
 from gateway.services.tools import (
     pick_direct_search_instance,
     refuse_unpriced_direct_search,
@@ -141,7 +141,7 @@ async def create_search(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     budget_service: Annotated[BudgetService, Depends(get_budget_service)],
-    web_search_policy: WebSearchPolicyPortDep,
+    web_search_policy: WorkspaceWebSearchPoliciesDep,
     web_provider_client: WebProviderClientDep,
 ) -> SearchResponse:
     """Run a search against a configured search tool.
@@ -189,7 +189,7 @@ async def create_search_for_tool(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     budget_service: Annotated[BudgetService, Depends(get_budget_service)],
-    web_search_policy: WebSearchPolicyPortDep,
+    web_search_policy: WorkspaceWebSearchPoliciesDep,
     web_provider_client: WebProviderClientDep,
 ) -> SearchResponse:
     """Run a search against the search tool named in the path.
@@ -236,7 +236,7 @@ async def _dispatch_search(
     config: GatewayConfig,
     log_writer: LogWriter,
     budget_service: BudgetService,
-    web_search_policy: WebSearchPolicyPort,
+    web_search_policy: WorkspaceWebSearchPolicies,
     web_provider_client: httpx.AsyncClient,
 ) -> SearchResponse:
     """Run the search request scaffold: reserve, call, log, settle.
@@ -246,7 +246,7 @@ async def _dispatch_search(
     the any-llm provider instances, and a search tool is neither a model nor an
     any-llm provider.
     """
-    # The session the policy port reads on too, so one release before the provider call
+    # The session the policy reads on too, so one release before the provider call
     # frees the request's one connection.
     started_at = time.monotonic()
     request_id = str(uuid.uuid4())
@@ -317,15 +317,12 @@ async def _dispatch_search(
     # down, because the first of them is a question about the workspace.
     usage_workspace_id = await workspace_for_key_id(db, api_key_id)
 
-    # The workspace's web search policy, read through the port the in-loop tool
-    # reads it through. A workspace that has turned web search off has turned it
+    # The workspace's web search policy, read as the in-loop tool reads it. A workspace that has turned web search off has turned it
     # off: leaving this endpoint open would leave the switch bypassable by any key
     # in that workspace, which is a policy that fails open. Of the rest, only the
     # result ceiling and the organization key apply here.
     try:
-        policy = await web_search_policy.resolve(
-            WebSearchPolicyScope(workspace_id=usage_workspace_id), [WebTool.SEARCH]
-        )
+        policy = await web_search_policy.resolve(usage_workspace_id, [WebTool.SEARCH])
     except WebSearchPolicyResolutionFailedError as exc:
         await log_rejection(
             exc.message,
@@ -469,7 +466,7 @@ async def _dispatch_search(
         user_id=user_id,
         api_key_id=api_key_id,
     )
-    # The policy port read on this same session, so this frees the request's one
+    # The policy read on this same session, so this frees the request's one
     # connection before the provider call; settlement checks one back out.
     await release_session(db)
 
