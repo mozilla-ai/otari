@@ -282,6 +282,15 @@ serveable roster, never from the price list, and switching failing models off
 goes through the providers domain too. An outage that ends is kept for 90 days. Every replica
 polls, and the conditional update on the settings row decides which one runs.
 
+### update-check
+
+Whether a deployment checks otari.ai for new releases and the security fixes in
+them, and what the last check heard. Nothing is sent until an operator answers
+in the dashboard or `update_check` answers in config. A check sends the version
+and a random install id, once a day at the time of day the id hashes to. Every
+replica polls, and the conditional update on the state row decides which one
+sends.
+
 ### alerts
 
 Alert destinations, rules, send-once delivery and the test send. It knows
