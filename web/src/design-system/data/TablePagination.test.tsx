@@ -184,4 +184,12 @@ describe("TablePagination", () => {
       screen.queryByRole("button", { name: "Next page" }),
     ).not.toBeInTheDocument()
   })
+
+  it("keeps only the unseen range with an unknown total and a first page that exactly fills the smallest size", () => {
+    // Fifteen rows at 30 and nothing more: they fit one page at 15 too.
+    setup({ total: null, rowsOnPage: 15, pageSize: 30, hasNextFallback: false })
+    expect(
+      screen.queryByRole("button", { name: "Next page" }),
+    ).not.toBeInTheDocument()
+  })
 })
