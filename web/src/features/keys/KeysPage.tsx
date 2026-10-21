@@ -1059,7 +1059,7 @@ function StatusMark({ apiKey }: { apiKey: ApiKey }) {
       : { word: "Active", dot: "bg-success", ink: "text-muted" }
   return (
     <span className={`flex items-center gap-2 text-mono-caption ${ink}`}>
-      <Dot className={dot} />
+      <Dot pulse={word === "Active"} className={dot} />
       {word}
     </span>
   )

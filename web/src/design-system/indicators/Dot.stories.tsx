@@ -55,6 +55,29 @@ export const StatusHues: Story = {
 }
 
 /**
+ * `pulse`: a ring of the dot's own color sweeps out every 2.4s, like a radar
+ * check, on a dot stating a record's live status. Stops under reduced motion,
+ * leaving the dot and its word, which is where the status always was.
+ */
+export const Pulse: Story = {
+  args: { pulse: true },
+  render: (args) => (
+    <div className="flex flex-col gap-2">
+      {[
+        ["bg-success", "Active"],
+        ["bg-danger", "Error"],
+        ["bg-text-subtle", "Disabled"],
+      ].map(([fill, word]) => (
+        <span key={word} className="flex items-center gap-2 text-caption">
+          <Dot {...args} className={fill} />
+          {word}
+        </span>
+      ))}
+    </div>
+  ),
+}
+
+/**
  * The categorical chart slots, which are a separate vocabulary. Assigned in
  * order and never cycled: the color-deficiency margins are computed on adjacent
  * pairs in exactly this order, so wrapping around invalidates them.

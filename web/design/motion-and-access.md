@@ -13,17 +13,26 @@
 `transition-*`. A vestibular disorder is not an edge case, and the guard costs one
 utility.
 
-**Two animations run indefinitely, and both are on the same surface**: the arc
-sweeping the first-run sheet's own border (`Dialog`'s `isScanning`) and the orb
-in the listening panel pinned above its footer. They are the shape of the
-exception rather than licence to add more, and what makes them one exception
-rather than two is that neither outlives the wait. Both run
+**Three animations run indefinitely, as two exceptions.** The first is two
+animations on the same surface: the arc sweeping the first-run sheet's own
+border (`Dialog`'s `isScanning`) and the orb in the listening panel pinned above
+its footer. They are the shape of the exception rather than license to add
+more, and what makes them one exception rather than two is that neither
+outlives the wait. Both run
 only while the product is watching for a request that has not arrived, both stop
 when it does, and neither carries anything that is not also in the text beside
 it.
 
-They stop differently under `prefers-reduced-motion`, because they are different
-machinery. The arc is CSS, so it holds still on its last frame. The orb is a
+**The status dot's radar check is the second exception, and a different kind.** `Dot`'s
+`pulse` runs for as long as the dot is on screen, so it does outlive any wait.
+It is allowed because it is the quietest motion that can run forever: a 6px
+square, transform and opacity only, every dot in step on the document's clock,
+and resting for most of each 2.4s cycle (the ring moves for the first 40%). It says the status is live, and carries nothing the dot and its
+word do not. It stays on status dots only; a bullet or a tag that pulses is
+decoration. Under reduced motion the ring is gone and the dot stays.
+
+The first two stop differently under `prefers-reduced-motion`, because they are
+different machinery. The arc is CSS, so it holds still on its last frame. The orb is a
 canvas the stylesheet cannot reach, so `SetupOrb` reads the preference itself
 and passes `paused`. Anything else that would animate forever is decoration. See
 [feedback.md](feedback.md).
@@ -104,7 +113,7 @@ Two ways a small visual keeps a large target:
   (`before:-inset-y-2.5`), absolutely positioned so the row does not move.
 
 **One control is knowingly under the floor**, and it is the shape of the exception
-rather than a licence to add more. `DismissChip`'s remove button is 24px, because
+rather than a license to add more. `DismissChip`'s remove button is 24px, because
 neither device above reaches it: its row wraps at an 8px gap, so a `before:` bleed
 would overlap the row above and a press near the seam would dismiss the neighboring
 filter, and a real 44px target grows the filter area on three pages. #947 carries

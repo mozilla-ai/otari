@@ -27,6 +27,11 @@ type Story = StoryObj<typeof meta>
 
 export const Default: Story = {}
 
+/** `pulse`, for a verdict about now. A KPI over a movable window leaves it off. */
+export const Pulse: Story = {
+  args: { severity: { status: "ok", word: "healthy" }, pulse: true },
+}
+
 export const EveryStatus: Story = {
   render: () => (
     <div className="flex flex-col items-start gap-2">

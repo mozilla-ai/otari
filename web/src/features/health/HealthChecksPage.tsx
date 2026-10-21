@@ -46,7 +46,7 @@ function ProviderStatus({ status }: { status: HealthCheckProvider["status"] }) {
     <span
       className={`flex items-center gap-2 text-mono-caption ${status === "ok" ? "text-muted" : "text-danger"}`}
     >
-      <Dot className={status === "ok" ? "bg-success" : "bg-danger"} />
+      <Dot pulse className={status === "ok" ? "bg-success" : "bg-danger"} />
       {STATUS_LABELS[status]}
     </span>
   )
@@ -133,6 +133,7 @@ const RESULT_COLUMNS: DataTableColumn<HealthCheckResult>[] = [
         className={`flex items-center gap-2 text-mono-caption ${row.status === "fail" ? "text-danger" : "text-muted"}`}
       >
         <Dot
+          pulse
           className={
             row.status === "pass"
               ? "bg-success"

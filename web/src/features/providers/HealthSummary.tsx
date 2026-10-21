@@ -36,7 +36,7 @@ export function HealthSummary({
       className="border-y border-border py-3"
       contentClassName="flex flex-wrap items-center gap-3 text-sm"
     >
-      <Dot className={dot} />
+      <Dot pulse className={dot} />
       <span className="font-medium text-foreground">
         {healthy} of {total} provider{total === 1 ? "" : "s"} reachable
       </span>
