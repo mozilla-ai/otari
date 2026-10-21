@@ -68,7 +68,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 /** A per-call rate as the API stores it, per million requests. */
-const perCall = (
+const buildPerCallRate = (
   modelKey: string,
   dollars: number,
   overrides: Partial<PricingResponse> = {},
@@ -148,7 +148,7 @@ function renderPage(
   )
 }
 
-const rowOf = async (name: string) => {
+const findRow = async (name: string) => {
   const table = await screen.findByRole("grid", { name: /pricing/ })
   // An instance is named twice in its row, as the tool and as the key it is
   // priced under, so the first match is enough to find the row.
@@ -166,25 +166,25 @@ describe("ToolPricingPage", () => {
   it("prices each web tool and instance, saying where an instance's rate comes from", async () => {
     mockApi({
       rates: {
-        "model:otari:web_search": perCall("otari:web_search", 0.01),
-        "search:exa": perCall("exa", 0.005, { kind: "search" }),
+        "model:otari:web_search": buildPerCallRate("otari:web_search", 0.01),
+        "search:exa": buildPerCallRate("exa", 0.005, { kind: "search" }),
       },
     })
     await renderPage("web_search")
 
-    const exa = await rowOf("exa")
+    const exa = await findRow("exa")
     expect(await within(exa).findByText("$0.005")).toBeInTheDocument()
     expect(within(exa).getByText("Search instance")).toBeInTheDocument()
 
     // No rate of its own, so its searches bill at the gateway's search rate.
-    const tavily = await rowOf("tavily-prod")
+    const tavily = await findRow("tavily-prod")
     expect(
       await within(tavily).findByText("From otari:web_search"),
     ).toBeInTheDocument()
     expect(within(tavily).getByText("config.yml")).toBeInTheDocument()
 
     // Neither its own rate nor a fetch rate to fall back to.
-    const fetcher = await rowOf("builtin_fetch")
+    const fetcher = await findRow("builtin_fetch")
     expect(await within(fetcher).findByText("Unpriced")).toBeInTheDocument()
   })
 
@@ -194,7 +194,7 @@ describe("ToolPricingPage", () => {
     await renderPage("web_search")
 
     await user.click(
-      await within(await rowOf("exa")).findByRole("button", {
+      await within(await findRow("exa")).findByRole("button", {
         name: "Edit the price of exa",
       }),
     )
@@ -244,7 +244,7 @@ describe("ToolPricingPage", () => {
   it("leaves a rate config.yml sets to config.yml", async () => {
     mockApi({
       rates: {
-        "search:tavily-prod": perCall("tavily-prod", 0.008, {
+        "search:tavily-prod": buildPerCallRate("tavily-prod", 0.008, {
           kind: "search",
           origin: "config",
         }),
@@ -252,7 +252,7 @@ describe("ToolPricingPage", () => {
     })
     await renderPage("web_search")
 
-    const tavily = await rowOf("tavily-prod")
+    const tavily = await findRow("tavily-prod")
     expect(
       await within(tavily).findByText("Edit in config.yml"),
     ).toBeInTheDocument()
@@ -271,12 +271,15 @@ describe("ToolPricingPage", () => {
   it("prices code execution under its one gateway row", async () => {
     mockApi({
       rates: {
-        "model:otari:code_execution": perCall("otari:code_execution", 0.02),
+        "model:otari:code_execution": buildPerCallRate(
+          "otari:code_execution",
+          0.02,
+        ),
       },
     })
     await renderPage("code_execution")
 
-    const row = await rowOf("Code execution")
+    const row = await findRow("Code execution")
     expect(within(row).getByText("otari:code_execution")).toBeInTheDocument()
     expect(await within(row).findByText("$0.02")).toBeInTheDocument()
   })
@@ -288,7 +291,7 @@ describe("ToolPricingPage", () => {
     })
     // Visit Web search pricing first, which leaves its instances cached.
     const first = await renderPage("web_search", bootstrap(), client)
-    await rowOf("exa")
+    await findRow("exa")
     first.unmount()
     await renderPage("code_execution", bootstrap(), client)
 

@@ -57,6 +57,8 @@ export function usePricesInEffect(keys: readonly PricedKey[], enabled = true) {
           if (error instanceof ApiError && error.status === 404) return null
           throw error
         }),
+      // As long as the other catalog reads: a write here invalidates it anyway.
+      staleTime: 60_000,
       enabled,
     })),
   })

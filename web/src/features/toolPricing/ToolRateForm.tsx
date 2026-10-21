@@ -5,7 +5,7 @@ import { Field } from "@/design-system/forms/Field"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { useSetPricing } from "@/shared/api/pricing"
 
-import { perCall, storedFromPerCall, type ToolRateRow } from "./toolRates"
+import { parsePerCallPrice, type ToolRateRow, toPerCall } from "./toolRates"
 
 const PRICE_ERROR = "An amount in dollars, such as 0.01."
 
@@ -25,10 +25,10 @@ export function ToolRateForm({
 }) {
   const setPricing = useSetPricing()
   const [price, setPrice] = useState(() =>
-    current === undefined ? "" : String(perCall(current)),
+    current === undefined ? "" : String(toPerCall(current)),
   )
   const { isDirty } = useDirtySnapshot(price)
-  const stored = storedFromPerCall(price)
+  const stored = parsePerCallPrice(price)
   const isInvalid = price.trim() !== "" && stored === undefined
 
   const submit = () => {

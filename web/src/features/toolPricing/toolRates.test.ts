@@ -1,16 +1,21 @@
 import { describe, expect, it } from "vitest"
 
+import { pricingResponse } from "@/tests/fixtures"
+
 import {
   GATEWAY_ROWS,
-  instanceRows,
+  hasUnpricedRow,
   isSetInConfig,
-  perCall,
-  storedFromPerCall,
+  listInstanceRows,
+  pairWithRates,
+  parsePerCallPrice,
+  type RateRead,
+  toPerCall,
 } from "./toolRates"
 
-describe("instanceRows", () => {
+describe("listInstanceRows", () => {
   it("lists the configured instances a stored one does not shadow, then the stored", () => {
-    const rows = instanceRows("search", {
+    const rows = listInstanceRows("search", {
       stored: [
         {
           name: "exa",
@@ -48,12 +53,12 @@ describe("instanceRows", () => {
   })
 
   it("lists nothing before the instances are read", () => {
-    expect(instanceRows("fetch", undefined)).toEqual([])
+    expect(listInstanceRows("fetch", undefined)).toEqual([])
   })
 })
 
 describe("isSetInConfig", () => {
-  const [configured] = instanceRows("search", {
+  const [configured] = listInstanceRows("search", {
     stored: [],
     config: [
       {
@@ -72,7 +77,7 @@ describe("isSetInConfig", () => {
 
   it("leaves a configured instance with an API rate editable", () => {
     expect(isSetInConfig(configured, "api")).toBe(false)
-    expect(isSetInConfig(configured, undefined)).toBe(false)
+    expect(isSetInConfig(configured, "")).toBe(false)
   })
 
   it("never holds a gateway row, which no config entry prices", () => {
@@ -82,13 +87,56 @@ describe("isSetInConfig", () => {
 
 describe("per-call rates", () => {
   it("reads and writes dollars per call against a per-million store", () => {
-    expect(perCall(10_000)).toBe(0.01)
-    expect(storedFromPerCall("0.01")).toBe(10_000)
-    expect(storedFromPerCall(" 0.07 ")).toBe(70_000)
-    expect(storedFromPerCall("0")).toBe(0)
+    expect(toPerCall(10_000)).toBe(0.01)
+    expect(parsePerCallPrice("0.01")).toBe(10_000)
+    expect(parsePerCallPrice(" 0.07 ")).toBe(70_000)
+    expect(parsePerCallPrice("0")).toBe(0)
   })
 
   it.each(["", "1e3", "0x10", "-1", ".5", "abc"])("refuses %j", (text) => {
-    expect(storedFromPerCall(text)).toBeUndefined()
+    expect(parsePerCallPrice(text)).toBeUndefined()
+  })
+})
+
+describe("pairWithRates", () => {
+  const rate = (modelKey: string, stored: number): RateRead => ({
+    data: pricingResponse({
+      model_key: modelKey,
+      input_price_per_million: stored,
+    }),
+    isPending: false,
+    isError: false,
+  })
+  const unpriced: RateRead = { data: null, isPending: false, isError: false }
+  const [search, fetch] = GATEWAY_ROWS.web_search
+  const instances = listInstanceRows("search", {
+    stored: [],
+    config: [
+      {
+        name: "brave",
+        kind: "search",
+        provider: "brave",
+        has_api_key: true,
+        shadowed: false,
+      },
+    ],
+  })
+
+  it("gives an instance its own tool's otari row to fall back to", () => {
+    const entries = pairWithRates(
+      [search, fetch, ...instances],
+      [rate("otari:web_search", 10_000), unpriced, unpriced],
+    )
+
+    expect(entries[2].fallback?.data?.model_key).toBe("otari:web_search")
+    expect(entries[0].fallback).toBeUndefined()
+    // Web fetch has no rate and nothing to fall back to; brave inherits search's.
+    expect(hasUnpricedRow(entries)).toBe(true)
+    expect(hasUnpricedRow([entries[0], entries[2]])).toBe(false)
+  })
+
+  it("does not call a row unpriced before its rate is read", () => {
+    const pending: RateRead = { isPending: true, isError: false }
+    expect(hasUnpricedRow(pairWithRates([search], [pending]))).toBe(false)
   })
 })

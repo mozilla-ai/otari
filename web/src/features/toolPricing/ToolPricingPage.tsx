@@ -1,8 +1,6 @@
-import type { UseQueryResult } from "@tanstack/react-query"
 import { useState } from "react"
 import { FiEdit2 } from "react-icons/fi"
 
-import type { PricingResponse } from "@/client"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
@@ -16,17 +14,19 @@ import { usePricesInEffect } from "@/shared/api/pricing"
 import { useSettings } from "@/shared/api/settings"
 import { useSearchTools } from "@/shared/api/tools"
 import { docsSourceHref } from "@/shared/helpers/docs"
-import { formatDateTimeMinutes, formatUnitRate } from "@/shared/helpers/format"
+import { formatDateTimeMinutes } from "@/shared/helpers/format"
 
+import { ToolRateCell } from "./ToolRateCell"
 import { ToolRateForm } from "./ToolRateForm"
 import {
   GATEWAY_ROWS,
-  instanceRows,
+  hasUnpricedRow,
   isSetInConfig,
-  perCall,
-  rowId,
+  listInstanceRows,
+  type PricedRow,
+  pairWithRates,
   type ToolPricingService,
-  type ToolRateRow,
+  toRowId,
 } from "./toolRates"
 
 // What the deployment charges for each call of a tool the gateway runs itself.
@@ -49,57 +49,9 @@ const INTROS: Readonly<Record<ToolPricingService, string>> = {
     "What this deployment charges for each successful call the gateway runs on its sandbox. A tool a model's provider runs itself is billed by that provider, not here.",
 }
 
-/** The `otari:<tool>` row a call on an instance with no rate of its own falls back to. */
-const FALLBACK_KEY: Readonly<Record<"search" | "fetch", string>> = {
-  search: "otari:web_search",
-  fetch: "otari:web_fetch",
-}
-
 const KIND_LABEL: Readonly<Record<"search" | "fetch", string>> = {
   search: "Search instance",
   fetch: "Fetch instance",
-}
-
-type PriceQuery = UseQueryResult<PricingResponse | null>
-
-interface PricedRow {
-  row: ToolRateRow
-  price: PriceQuery
-  /** The fallback row's price, for an instance with none of its own. */
-  fallback: PriceQuery | undefined
-}
-
-/** The rate a call on the row is billed at, own or inherited, or `undefined` while unpriced or unknown. */
-function billedAt({ price, fallback }: PricedRow): number | undefined {
-  return (
-    price.data?.input_price_per_million ??
-    fallback?.data?.input_price_per_million ??
-    undefined
-  )
-}
-
-function PriceCell({ entry }: { entry: PricedRow }) {
-  const { price, fallback } = entry
-  if (price.isError) return <Badge tone="warn">Could not read</Badge>
-  if (price.isPending) return <span className="text-muted">…</span>
-  if (price.data) {
-    return (
-      <span className="tabular-nums">
-        {formatUnitRate(perCall(price.data.input_price_per_million))}
-      </span>
-    )
-  }
-  if (fallback?.data) {
-    return (
-      <span className="flex flex-col gap-0.5">
-        <span className="tabular-nums">
-          {formatUnitRate(perCall(fallback.data.input_price_per_million))}
-        </span>
-        <span className="text-caption">From {fallback.data.model_key}</span>
-      </span>
-    )
-  }
-  return <Badge tone="warn">Unpriced</Badge>
 }
 
 export function ToolPricingPage({ service }: { service: ToolPricingService }) {
@@ -116,8 +68,8 @@ export function ToolPricingPage({ service }: { service: ToolPricingService }) {
     ...GATEWAY_ROWS[service],
     ...(listsInstances
       ? [
-          ...instanceRows("search", searchTools.data),
-          ...instanceRows("fetch", fetchTools.data),
+          ...listInstanceRows("search", searchTools.data),
+          ...listInstanceRows("fetch", fetchTools.data),
         ]
       : []),
   ]
@@ -138,24 +90,8 @@ export function ToolPricingPage({ service }: { service: ToolPricingService }) {
     )
   }
 
-  const priceOf = new Map(rows.map((row, index) => [rowId(row), prices[index]]))
-  const entries: PricedRow[] = rows.map((row, index) => ({
-    row,
-    price: prices[index],
-    fallback:
-      row.kind === "model"
-        ? undefined
-        : priceOf.get(
-            rowId({ kind: "model", modelKey: FALLBACK_KEY[row.kind] }),
-          ),
-  }))
-  const editing = entries.find((entry) => rowId(entry.row) === editingId)
-  const hasUnpriced = entries.some(
-    (entry) =>
-      !entry.price.isPending &&
-      !entry.price.isError &&
-      billedAt(entry) === undefined,
-  )
+  const entries = pairWithRates(rows, prices)
+  const editing = entries.find((entry) => toRowId(entry.row) === editingId)
 
   const columns: DataTableColumn<PricedRow>[] = [
     {
@@ -188,7 +124,7 @@ export function ToolPricingPage({ service }: { service: ToolPricingService }) {
     {
       id: "price",
       header: "Price per call",
-      cell: (entry) => <PriceCell entry={entry} />,
+      cell: (entry) => <ToolRateCell entry={entry} />,
     },
     {
       id: "since",
@@ -204,7 +140,7 @@ export function ToolPricingPage({ service }: { service: ToolPricingService }) {
       header: "Actions",
       align: "end",
       cell: (entry) =>
-        isSetInConfig(entry.row, entry.price.data?.origin) ? (
+        isSetInConfig(entry.row, entry.price.data?.origin ?? "") ? (
           <span className="text-caption">Edit in config.yml</span>
         ) : (
           <RowActionRow>
@@ -214,7 +150,7 @@ export function ToolPricingPage({ service }: { service: ToolPricingService }) {
               ariaLabel={`Edit the price of ${entry.row.label}`}
               // An unread rate would be overwritten by a price nobody saw.
               isDisabled={entry.price.isPending || entry.price.isError}
-              onPress={() => setEditingId(rowId(entry.row))}
+              onPress={() => setEditingId(toRowId(entry.row))}
             />
           </RowActionRow>
         ),
@@ -231,7 +167,7 @@ export function ToolPricingPage({ service }: { service: ToolPricingService }) {
       </PageIntro>
 
       <ErrorBanner error={searchTools.error ?? fetchTools.error} />
-      {hasUnpriced && settings.data?.require_pricing === true ? (
+      {hasUnpricedRow(entries) && settings.data?.require_pricing === true ? (
         <InfoBanner tone="warning">
           require_pricing is on, so a request that would run an unpriced tool is
           refused with 402 before the model is called. A rate of 0 prices a tool
@@ -243,7 +179,7 @@ export function ToolPricingPage({ service }: { service: ToolPricingService }) {
         ariaLabel={TITLES[service]}
         columns={columns}
         rows={entries}
-        getRowKey={(entry) => rowId(entry.row)}
+        getRowKey={(entry) => toRowId(entry.row)}
         isLoading={searchTools.isLoading || fetchTools.isLoading}
         mobileLayout="cards"
       />
