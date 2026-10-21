@@ -35,8 +35,10 @@ own gateway.
 - **Guides**: how to do one thing with Otari, such as give each end user their
   own budget, add guardrails, or read agent traces.
 - **Self-Hosting**: running your own gateway, starting with the
-  [Self-hosted quickstart](self-hosted-quickstart.md), and connecting it to providers.
-- **Reference**: every setting, endpoint, error code and limit.
+  [Self-hosted quickstart](self-hosted-quickstart.md), and its
+  [configuration](configuration.md) and providers.
+- **Reference**: the API, models, routing, tools and protocols: every endpoint,
+  field, error code and limit.
 
 ### Integrations
 

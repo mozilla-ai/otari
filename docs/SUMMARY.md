@@ -48,6 +48,7 @@
 
 * [Self-hosted quickstart](self-hosted-quickstart.md)
 * [Deployment](deployment.md)
+* [Configuration](configuration.md)
 
 ## Providers
 
@@ -66,7 +67,6 @@
 # Reference
 
 * [API reference](api-reference.md)
-* [Configuration](configuration.md)
 
 ## Gateway
 
