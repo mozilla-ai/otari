@@ -154,7 +154,7 @@ def test_invalid_request_domain_rules_are_rejected_before_dispatch(
     response, seen = _post_with_search_patched(client, api_key_header, body)
 
     assert response.status_code == 400
-    assert response.json()["detail"]["error"]["message"] == (
+    assert response.json()["error"]["message"] == (
         "Web search allowed_domains and blocked_domains must each contain at most 100 bare valid hostnames"
     )
     assert seen.ran is False
@@ -237,7 +237,7 @@ def test_invalid_legacy_domain_rule_fails_closed_but_remains_visible_for_repair(
     response, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
 
     assert response.status_code == 503
-    assert response.json()["detail"]["error"]["message"] == ("Web search configuration contains an invalid domain rule")
+    assert response.json()["error"]["message"] == ("Web search configuration contains an invalid domain rule")
     assert seen.ran is False
     stored = client.get(f"{API_ROOT}/workspaces/{workspace_id}/web-search", headers=master_key_header)
     assert stored.status_code == 200
@@ -258,7 +258,7 @@ def test_a_disabled_workspace_is_refused_before_the_provider_is_called(
 
     assert response.status_code == 403
     # Anthropic-shaped body, the same mapping every other refusal on this route gets.
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["error"]["message"] == "web search is not enabled for this workspace"
     assert seen.ran is False, "the tool loop must never have run"
 
@@ -704,10 +704,11 @@ def test_a_config_read_that_fails_releases_the_budget_reservation(
         "gateway.adapters.web_search_policy_adapter.resolve_workspace_web_search_config",
         failing_resolve,
     )
-    # TestClient re-raises a server exception rather than rendering a 500, so the
-    # failure arrives here; what matters is the state it left behind.
-    with pytest.raises(SQLAlchemyError):
-        _post(funded)
+    # The Messages route answers an unexpected failure as Anthropic's 500; what matters
+    # is the state it left behind.
+    failed = _post(funded)
+    assert failed.status_code == 500, failed.text
+    assert failed.json()["error"]["type"] == "api_error"
 
     session = db_session_factory()
     try:
@@ -751,7 +752,7 @@ def test_an_unresolvable_workspace_refuses_rather_than_searching(
     response, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
 
     assert response.status_code == 500
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["error"]["message"] == "Web search configuration could not be resolved for this request"
     assert seen.ran is False
 
@@ -904,7 +905,7 @@ def test_no_row_is_refused_like_a_disabled_row_where_web_access_is_opt_in(
     refused, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
 
     assert refused.status_code == 403
-    assert refused.json()["detail"]["error"]["message"] == "web search is not enabled for this workspace"
+    assert refused.json()["error"]["message"] == "web search is not enabled for this workspace"
     assert seen.ran is False
 
     _set_config(client, master_key_header, _default_workspace_id(client, master_key_header), enabled=True)

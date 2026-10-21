@@ -139,6 +139,7 @@ from gateway.services.tools import (
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
     WorkspaceSearchKeys,
+    web_search_configured,
 )
 from gateway.services.traces import TraceService
 from gateway.services.usage_admin_service import usage_in
@@ -1125,7 +1126,7 @@ def get_workspace_web_search_service(
     """
     return WorkspaceWebSearchService(
         db,
-        web_search_configured=config.web_search_configured(),
+        web_search_configured=web_search_configured(config),
         default_enabled=config.web_search_on_without_policy(),
     )
 

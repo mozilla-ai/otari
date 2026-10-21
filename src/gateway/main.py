@@ -34,6 +34,7 @@ from gateway.api.deps import (
     get_workspace_search_keys,
     set_config,
 )
+from gateway.api.error_body import BodyHTTPException
 from gateway.api.main import register_routers
 from gateway.api.request_id import with_request_id
 from gateway.api.trace_capture import TraceCaptureMiddleware
@@ -50,7 +51,6 @@ from gateway.core.config import (
 from gateway.core.database import create_session, describe_database_error, dispose_db, init_db
 from gateway.core.error_codes import INVALID_REQUEST, error_code_of, error_headers
 from gateway.core.feature import CoreFeature, Worker
-from gateway.core.settings.tools import warn_about_tool_instances
 from gateway.core.unit_of_work import create_unit_of_work
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
@@ -146,7 +146,7 @@ from gateway.services.tenancy.organization_guardrail_runner import (
     run_guardrail_runner_refresher,
 )
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
-from gateway.services.tools import build_web_provider_client, register_builtin_fetcher
+from gateway.services.tools import build_web_provider_client, register_builtin_fetcher, warn_about_tool_instances
 from gateway.services.traces import RequestTraces, TraceWriter, stored_by
 from gateway.services.workspace_scope import default_workspace_id
 from gateway.version import __version__
@@ -1035,10 +1035,14 @@ async def _http_exception_handler(request: Request, exc: Exception) -> Response:
 
     A body field survives where a header does not (a proxy that drops it, an SDK
     that surfaces only the body), so a client can map the refusal from either.
+    A ``BodyHTTPException`` is answered with its own body rather than under ``detail``.
     """
     if not isinstance(exc, StarletteHTTPException):
         raise exc
     code = error_code_of(exc.headers)
+    if isinstance(exc, BodyHTTPException):
+        body = exc.body if code is None else {**exc.body, "code": code}
+        return with_request_id(request, JSONResponse(body, status_code=exc.status_code, headers=exc.headers))
     if code is None:
         return with_request_id(request, await http_exception_handler(request, exc))
     return with_request_id(

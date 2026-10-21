@@ -160,7 +160,7 @@ describe("PublicCatalogPage", () => {
     expect(
       within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }),
     ).toHaveAttribute("href", "#/models/z-ai/glm-5.3")
-    expect(screen.getByText(/deployment's list rates/)).toBeInTheDocument()
+    expect(screen.getByText(/cheapest offering/)).toBeInTheDocument()
     // A visitor has no organization to ask about, and asking would be a 401.
     expect(
       fetchMock.mock.calls.some(([url]) =>

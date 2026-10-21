@@ -179,6 +179,7 @@ from gateway.exceptions.tools_exceptions import (
     CodeExecutionPolicyResolutionFailedError,
     CodeExecutionPolicyResolutionFailure,
     CodeExecutionRefusedError,
+    GatewayToolPricingRequiredError,
     McpServerConfigurationError,
     McpServerDeclarationError,
     McpServerResolutionFailedError,
@@ -207,7 +208,6 @@ from gateway.models.tools import (
     CodeExecutor,
     ResolvedCodeExecutionPolicy,
     ResolvedWebSearchConfig,
-    WebSearchCredential,
     WebTool,
 )
 from gateway.models.usage import UsageLog
@@ -301,6 +301,7 @@ from gateway.services.pricing_service import (
     pricing_provenance,
     pricing_required_but_missing,
     resolve_model_pricing,
+    resolve_tool_rate,
 )
 from gateway.services.provider_kwargs import (
     MissingCredential,
@@ -355,13 +356,17 @@ from gateway.services.tool_usage import (
 )
 from gateway.services.tools import (
     CONTAINER_GONE_DETAIL_TEMPLATE,
+    NO_WEB_TOOLS,
+    WEB_FETCH_TOOL_NAME,
+    WEB_SEARCH_TOOL_NAME,
     AdmittedCodeExecution,
+    AdmittedWebTools,
     CandidateTools,
     CombinedToolBackend,
     DeclaredCodeExecution,
     DeclaredWebTools,
     Dialect,
-    InLoopSearch,
+    PricedTool,
     ProviderToolDeclaration,
     ToolUseBudget,
     WebClaims,
@@ -380,14 +385,15 @@ from gateway.services.tools import (
     read_web_fetch_max_uses,
     read_web_search_max_uses,
     refuse_shadowed_builtin_tools,
+    tools_to_price,
+    unpriced_tool_detail,
     validate_web_declarations,
+    web_search_configured,
     web_search_intercept_enabled,
 )
 from gateway.services.traces import RequestTrace, SessionRef, TurnFacts, harness_of, is_subagent, resolve_session
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.web_retrieval_backend import (
-    WEB_FETCH_TOOL_NAME,
-    WEB_SEARCH_TOOL_NAME,
     WebRetrievalBackend,
     WebRetrievalCounter,
     WebSearchNotReachableError,
@@ -514,12 +520,6 @@ SANDBOX_UNAVAILABLE_DETAIL = "code_execution sandbox temporarily unavailable. Re
 WEB_SEARCH_UNREACHABLE_DETAIL = (
     "web_search backend unreachable. Check the search URL in the dashboard's Tools "
     "settings, or OTARI_WEB_SEARCH_URL, and that the backend is running."
-)
-UNPRICED_TOOL_DETAIL_TEMPLATE = (
-    "The gateway tool '{tool}' has no pricing, and this gateway runs with "
-    "require_pricing enabled, so it will not run work it cannot bill. Set a "
-    "per-request price for model_key '{key}' (POST /api/v1/pricing, or the dashboard's "
-    "Tools & Guardrails screen), or set require_pricing to false to serve it unpriced."
 )
 
 
@@ -1265,6 +1265,22 @@ def domain_error(adapter: FormatAdapter[Any, Any], exc: TenancyError) -> HTTPExc
         exc.message,
         _DOMAIN_ERROR_KINDS.get(exc.status_code, ErrorKind.INVALID_REQUEST),
         headers=error_headers(exc.error_code) if exc.error_code is not None else None,
+    )
+
+
+def control_plane_error(adapter: FormatAdapter[Any, Any], exc: ControlPlaneError) -> HTTPException:
+    """A control plane peer's refusal in the error envelope of ``adapter``'s dialect.
+
+    Not :func:`domain_error`, which would drop a 429's ``Retry-After`` and read the
+    status as an invalid request. Both are the peer's answer, which
+    ``_control_plane_error_handler`` keeps whole for the same reason.
+    """
+    retry_after = getattr(exc, "retry_after", None)
+    return adapter.error(
+        exc.status_code,
+        exc.message,
+        error_kind_for_status(exc.status_code),
+        {"Retry-After": retry_after} if retry_after else None,
     )
 
 
@@ -3382,20 +3398,12 @@ class ToolContext:
         code_execution_executor: CodeExecutor | None = None,
         sandbox_container_lease: ContainerLease | None = None,
         sandbox_containers: SandboxContainerRegistry | None = None,
-        use_web_search: bool,
-        web_search_tool_entry: dict[str, Any] | None,
-        web_search_url: str | None,
-        web_search_auth_token: str | None,
-        web_search_credential: WebSearchCredential | None = None,
-        web_search: InLoopSearch | None = None,
+        web: AdmittedWebTools | None = None,
         remaining_user_tools: list[dict[str, Any]] | None,
         max_tool_iterations: int,
         tools_header: str | None,
         trace: RequestTrace | None = None,
         config: GatewayConfig,
-        use_web_fetch: bool = False,
-        web_fetch_tool_entry: dict[str, Any] | None = None,
-        web_fetch_policy: DomainPolicy | None = None,
         sandbox_files: SandboxFileBridge | None = None,
         shared: SharedToolUse | None = None,
         web_provider_client: httpx.AsyncClient | None = None,
@@ -3432,18 +3440,8 @@ class ToolContext:
         # made one: ``OTARI`` or ``PROVIDER``, never ``AUTO``. ``None`` when the
         # request declared no code execution at all.
         self.code_execution_executor = code_execution_executor
-        self.use_web_search = use_web_search
-        self.web_search_tool_entry = web_search_tool_entry
-        self.web_search_url = web_search_url
-        self.web_search_auth_token = web_search_auth_token
-        # The workspace's own search key, which its searches use in place of the deployment's.
-        self.web_search_credential = web_search_credential
-        # What the request's searches run on through the libraries, resolved at admission;
-        # None where the old backend serves them.
-        self.web_search = web_search
-        self.use_web_fetch = use_web_fetch
-        self.web_fetch_tool_entry = web_fetch_tool_entry
-        self.web_fetch_policy = web_fetch_policy or DomainPolicy()
+        # The managed web tools admitted for the request, and what runs them.
+        self.web = web if web is not None else NO_WEB_TOOLS
         # The app's client, which a provider fetch instance is called through. None outside
         # a route, where a provider opens its own for each call.
         self.web_provider_client = web_provider_client
@@ -3630,7 +3628,28 @@ class ToolContext:
         backend, the keyword was forwarded and any block in the transcript came from
         the provider that ran the search (see ``routes/messages.py``).
         """
-        return web_search_intercept_enabled(self.config) and self.config.web_search_configured()
+        return web_search_intercept_enabled(self.config) and web_search_configured(self.config)
+
+    @property
+    def use_web_search(self) -> bool:
+        return self.web.search_tool_entry is not None
+
+    @property
+    def web_search_tool_entry(self) -> dict[str, Any] | None:
+        """The search declaration as the workspace's policy narrowed it."""
+        return self.web.search_tool_entry
+
+    @property
+    def use_web_fetch(self) -> bool:
+        return self.web.fetch_tool_entry is not None
+
+    @property
+    def web_fetch_tool_entry(self) -> dict[str, Any] | None:
+        return self.web.fetch_tool_entry
+
+    @property
+    def web_fetch_policy(self) -> DomainPolicy:
+        return self.web.fetch_policy
 
     @property
     def use_tool_loop(self) -> bool:
@@ -3643,14 +3662,14 @@ class ToolContext:
         request's pool, sharing its call allowance. A request that declared only
         the fetch tool keeps the old backend, which delegates its fetches.
         """
-        if self.web_search is None:
+        if self.web.in_loop_search is None:
             return [self.build_web_retrieval_backend()]
         search_tool_entry = self.web_search_tool_entry or {}
         return build_web_search_backends(
             self.config,
-            self.web_search,
+            self.web.in_loop_search,
             search_tool_entry=search_tool_entry,
-            fetch_declared=self.use_web_fetch,
+            fetch=self.web.fetch,
             fetch_policy=self.web_fetch_policy,
             cap=self.web_call_cap,
             purpose_hint=_resolve_web_search_purpose_hint(search_tool_entry, self.config),
@@ -3662,17 +3681,18 @@ class ToolContext:
     def build_web_retrieval_backend(self) -> WebRetrievalBackend:
         """Build the request's shared Search and Fetch backend."""
         return _build_web_retrieval_backend(
-            base_url=self.web_search_url,
+            base_url=self.web.search_url,
             search_tool_entry=self.web_search_tool_entry,
             fetch_tool_entry=self.web_fetch_tool_entry,
             fetch_policy=self.web_fetch_policy,
             counter=self.web_retrieval_counter,
-            auth_token=self.web_search_auth_token,
-            credential=self.web_search_credential,
+            auth_token=self.web.search_auth_token,
+            credential=self.web.search_credential,
             config=self.config,
             tally=self.tally,
             trace=self.trace,
             web_provider_client=self.web_provider_client,
+            fetch=self.web.fetch,
         )
 
 
@@ -3979,17 +3999,8 @@ async def prepare_gateway_tools(
     except ControlPlaneError as exc:
         # A peer's refusal of the web search, code execution or MCP resolve is a domain error,
         # so without this it would answer in `main.py`'s shape rather than this route's.
-        # Not `domain_error`: that one is right for the tenancy family it is named for, and
-        # would drop a 429's `Retry-After` and read the status as an invalid request. Both are
-        # the peer's answer, which `_control_plane_error_handler` keeps whole for the same reason.
         await release_reservation(ctx)
-        retry_after = getattr(exc, "retry_after", None)
-        raise adapter.error(
-            exc.status_code,
-            exc.message,
-            error_kind_for_status(exc.status_code),
-            {"Retry-After": retry_after} if retry_after else None,
-        ) from exc
+        raise control_plane_error(adapter, exc) from exc
     except TenancyError as exc:
         # The admission steps render their own refusals; this keeps the hold from leaking
         # should a new one escape them. After `ControlPlaneError`, which is a `TenancyError`.
@@ -4037,15 +4048,7 @@ async def prepare_gateway_tools(
             code_execution_executor=code.executor,
             sandbox_container_lease=code.container_lease,
             sandbox_containers=code.containers,
-            use_web_search=web.search_tool_entry is not None,
-            web_search_tool_entry=web_access.search_tool_entry,
-            web_search_url=web_access.search_url,
-            web_search_auth_token=web_access.search_auth_token,
-            web_search_credential=web_access.search_credential,
-            web_search=web_access.in_loop_search,
-            use_web_fetch=web.fetch_tool_entry is not None,
-            web_fetch_tool_entry=web.fetch_tool_entry,
-            web_fetch_policy=web_access.fetch_policy,
+            web=web_access,
             remaining_user_tools=web.remaining_user_tools,
             max_tool_iterations=min(
                 declared.max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
@@ -4092,7 +4095,7 @@ class _AdmittedTools:
 
     code: AdmittedCodeExecution
     web: DeclaredWebTools
-    web_access: _AdmittedWebAccess
+    web_access: AdmittedWebTools
 
 
 @dataclass(frozen=True)
@@ -4206,20 +4209,16 @@ async def _admit_claims(
         web_access = await _admit_web_access(adapter, ctx, web, web_policy, requested)
     except HTTPException as exc:
         return _ToolRefusal(exc)
-    billed = [
-        name
-        for name, used in (
-            (CODE_EXECUTION_TOOL_NAME, admitted.use_sandbox),
-            (WEB_SEARCH_TOOL_NAME, web.search_tool_entry is not None),
-            (WEB_FETCH_TOOL_NAME, web.fetch_tool_entry is not None),
-        )
-        if used
-    ]
-    if (unpriced := await _unpriced_tool(ctx, billed)) is not None:
-        # Same kind the model gate uses for its own 402, so both no-pricing
-        # rejections map to one wire shape per format.
-        error = adapter.error(402, _unpriced_tool_detail(unpriced), ErrorKind.INVALID_REQUEST)
-        return _ToolRefusal(error, unpriced_tool=unpriced)
+    priced = tools_to_price(
+        code_execution=admitted.use_sandbox,
+        web=web_access,
+        require_pricing=ctx.config.require_pricing,
+        budget_exempt=ctx.reservation is not None and not ctx.reservation.counts_toward_budget,
+    )
+    if (unpriced := await _unpriced_tool(ctx, priced)) is not None:
+        # The model gate's kind and code, so both no-pricing refusals have one wire shape per format.
+        error = domain_error(adapter, GatewayToolPricingRequiredError(unpriced_tool_detail(unpriced.name)))
+        return _ToolRefusal(error, unpriced_tool=unpriced.name)
     return _AdmittedTools(code=admitted, web=web, web_access=web_access)
 
 
@@ -4355,34 +4354,20 @@ async def _declare_code_execution(
         raise domain_error(adapter, exc) from exc
 
 
-@dataclass(frozen=True)
-class _AdmittedWebAccess:
-    """The web access a request may use, and where its searches go."""
-
-    fetch_policy: DomainPolicy
-    search_auth_token: str | None
-    search_tool_entry: dict[str, Any] | None
-    search_url: str | None
-    search_credential: WebSearchCredential | None = None
-    in_loop_search: InLoopSearch | None = None
-
-
 async def _admit_web_access(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
     web: DeclaredWebTools,
     web_policy: _RequestWebPolicy,
     requested: Sequence[WebTool],
-) -> _AdmittedWebAccess:
-    """Narrow the declared web tools to what the workspace's web search policy permits.
+) -> AdmittedWebTools:
+    """Narrow the declared web tools to what the workspace's web search policy permits, and resolve them.
 
     ``requested`` is what the policy is read for, where this is the first to read it.
     """
     search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
     if not web.declared_any:
-        return _AdmittedWebAccess(
-            fetch_policy=DomainPolicy(), search_auth_token=None, search_tool_entry=None, search_url=search_url
-        )
+        return NO_WEB_TOOLS
     # Forwarded to the search backend as `X-Gateway-Token`, and only where
     # that backend is the control plane, which authenticates the gateway.
     # A deployment without a platform token forwards none.
@@ -4394,21 +4379,14 @@ async def _admit_web_access(
     ):
         search_auth_token = ctx.config.platform_token
     try:
-        grant = admit_web_access(web, policy=await web_policy.read(requested), config=ctx.config)
+        admitted = admit_web_access(web, policy=await web_policy.read(requested), config=ctx.config)
     except WebSearchPolicyResolutionFailedError as exc:
         raise adapter.error(_policy_failure_status(exc.reason), exc.message, ErrorKind.API) from exc
     except (WebAccessRefusedError, WorkspaceWebSearchDomainsExcludedError) as exc:
         raise adapter.error(403, exc.message, ErrorKind.PERMISSION) from exc
     except (WebSearchOptionRefusedError, WebSearchCredentialRefusedError, SearchToolMisconfiguredError) as exc:
         raise domain_error(adapter, exc) from exc
-    return _AdmittedWebAccess(
-        fetch_policy=grant.fetch_policy,
-        search_auth_token=search_auth_token,
-        search_tool_entry=grant.search_tool_entry,
-        search_url=search_url,
-        search_credential=grant.search_credential,
-        in_loop_search=grant.in_loop_search,
-    )
+    return replace(admitted, search_url=search_url, search_auth_token=search_auth_token)
 
 
 def _caller_workspace_id(api_key: APIKey | None, session_principal: SessionPrincipal | None) -> uuid.UUID | None:
@@ -4550,7 +4528,7 @@ async def _log_unpriced_tool_rejection(adapter: FormatAdapter[Any, Any], ctx: Re
         model=key,
         provider=GATEWAY_TOOL_PRICING_PROVIDER,
         endpoint=adapter.endpoint,
-        detail=_unpriced_tool_detail(tool),
+        detail=unpriced_tool_detail(tool),
         status_code=status.HTTP_402_PAYMENT_REQUIRED,
         started_at=ctx.started_at,
         request_id=ctx.request_id,
@@ -4558,41 +4536,20 @@ async def _log_unpriced_tool_rejection(adapter: FormatAdapter[Any, Any], ctx: Re
     )
 
 
-async def _unpriced_tool(ctx: RequestContext, tools: Iterable[str]) -> str | None:
-    """The first of ``tools`` this request would be billed for and has no price, as ``require_pricing`` reads it.
+async def _unpriced_tool(ctx: RequestContext, tools: Sequence[PricedTool]) -> PricedTool | None:
+    """The first of ``tools`` no pricing row prices, looked up as settlement looks it up.
 
-    Same posture ``require_pricing`` already applies to an unpriced model: the
-    gateway does not perform work it cannot meter, because a budget cap cannot
-    restrain a charge that is never recorded. Checked at admission, rather than
-    mid-loop, so the caller pays nothing for a request that was never going to settle.
-
-    MCP tools are deliberately not covered: their names come from a caller-supplied
-    server, are unbounded, and are not something an operator can pre-price.
-
-    A budget-exempt key is skipped for the same reason the model gate skips it: the
-    gate exists because an unrecorded charge cannot be restrained by a budget, and a
-    key that is never debited has no budget to protect. Serving an unpriced model but
-    refusing an unpriced tool on the same key would be arbitrary.
+    Checked at admission, rather than mid-loop, so the caller pays nothing for a
+    request that was never going to settle. Which tools are checked, and which
+    requests skip the check, is :func:`tools_to_price`'s to say.
     """
-    if ctx.db is None or not ctx.config.require_pricing:
-        return None
-    if ctx.reservation is not None and not ctx.reservation.counts_toward_budget:
+    if ctx.db is None:
         return None
     for tool in tools:
-        pricing = await find_model_pricing(
-            ctx.db,
-            GATEWAY_TOOL_PRICING_PROVIDER,
-            tool,
-            use_defaults=False,
-            organization_id=ctx.organization_id,
-        )
-        if pricing is None:
+        rate = await resolve_tool_rate(ctx.db, tool.rate_keys, label=tool.label, organization_id=ctx.organization_id)
+        if rate is None:
             return tool
     return None
-
-
-def _unpriced_tool_detail(tool: str) -> str:
-    return UNPRICED_TOOL_DETAIL_TEMPLATE.format(tool=tool, key=gateway_tool_pricing_key(tool))
 
 
 # ---------------------------------------------------------------------------

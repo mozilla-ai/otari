@@ -1,4 +1,4 @@
-"""The resolver: which provider, key and options one web search or fetch runs with (design G).
+"""The resolver: which provider, key and options one web search or fetch runs with.
 
 Search, in order:
 
@@ -9,7 +9,7 @@ Search, in order:
    and the instance keeps its name and timeout.
 2. Else the policy's credential: the workspace's organization key, or in
    hybrid the control plane's.
-3. Else the in-loop default (design E, rule 6).
+3. Else the in-loop default.
 4. Else nothing, which the caller turns into its refusal.
 
 Fetch, in order: a named fetch instance; for enrichment, the search
@@ -28,7 +28,7 @@ endpoint leaves out the workspace's, and the instance's when an organization
 key serves the call. Fetch takes neither a workspace nor a request layer,
 since both hold search options. The count the layers name is taken out of
 the options, for the caller to apply as its door does. Where a library
-runs the call, each option is checked as the instance's are (design E): a
+runs the call, each option is checked as the instance's are: a
 request's option the provider does not take, or takes only from the
 deployment, is refused, and the other layers' are dropped with a warning that
 names the layer and the key, never the value. What the old code runs takes
@@ -60,7 +60,6 @@ from gateway.core.settings.tools import (
     default_api_base,
     effective_fetch_instances,
     effective_search_instances,
-    in_loop_default,
     option_problems,
     validate_search_tool_transport,
 )
@@ -79,6 +78,7 @@ from gateway.models.tools import (
     WebToolCredentialSource,
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
+from gateway.services.tools._web_search._default import in_loop_default
 from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
 from gateway.types.tool_charges import (
     ORGANIZATION_KEY_LABEL_PREFIX,
@@ -98,7 +98,7 @@ Runner = Literal["library", "old"]
 DIRECT_TIMEOUT_S = 30.0
 IN_LOOP_TIMEOUT_S = 15.0
 
-# The rows that price any backend of each tool (design L).
+# The rows that price any backend of each tool.
 _SEARCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_SEARCH_TOOL_NAME)
 _FETCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_FETCH_TOOL_NAME)
 _NO_OPTIONS: Mapping[str, Any] = MappingProxyType({})
@@ -111,8 +111,8 @@ class _Resolved:
     ``name`` is the instance's, ``None`` where a credential serves an in-loop
     call. ``api_key`` and ``api_base`` go to the library as they are, ``""``
     meaning none. ``options`` are the layered options without the count, for
-    the caller to apply as its door does (design G, item 3). ``label`` and
-    ``rate_keys`` are what billing records (design L). ``on_credential`` says
+    the caller to apply as its door does. ``label`` and
+    ``rate_keys`` are what billing records. ``on_credential`` says
     a credential serves the call rather than an instance.
     """
 
@@ -306,7 +306,7 @@ def _search_on_instance(
         max_results=max_results,
         timeout=instance.timeout or (IN_LOOP_TIMEOUT_S if in_loop else DIRECT_TIMEOUT_S),
         label=label,
-        # On the direct endpoint, the instance's own row alone (contract C5).
+        # On the direct endpoint, the instance's own row alone.
         rate_keys=_instance_rate_keys("search", instance, _SEARCH_FALLBACK_RATE if in_loop else None),
         fetch_tool=instance.fetch_tool,
     )
@@ -359,7 +359,7 @@ def _search_on_credential(
         requires_key, default_base = metadata.requires_api_key, metadata.default_api_base
         requires_base = metadata.requires_api_base and not default_base
     elif provider in (*WEB_SEARCH_PROVIDERS, *SEARCH_PROVIDERS_WITHOUT_ADAPTER):
-        # Tavily, Brave and SearXNG until their adapters exist (decision 28).
+        # Tavily, Brave and SearXNG until their adapters exist.
         runner = "old"
         requires_key, default_base = provider in WEB_SEARCH_PROVIDERS, None
         requires_base = provider in SEARCH_PROVIDERS_REQUIRING_API_BASE
@@ -384,7 +384,7 @@ def _search_on_credential(
     max_results = _count(options, "max_results")
     label, rate_keys = _credential_billing(credential, _SEARCH_FALLBACK_RATE)
     if in_loop and runner == "old":
-        # Design L: in the loop, the old backend records an organization key's calls with no label.
+        # In the loop, the old backend records an organization key's calls with no label.
         label = None
     return ResolvedSearch(
         name=name,
@@ -497,10 +497,10 @@ def _credential_layer(credential: WebToolCredential) -> str:
 
 
 def _credential_billing(credential: WebToolCredential, fallback: str) -> tuple[str | None, tuple[RateKey, ...]]:
-    """The label and rate keys of a call a credential serves (design L).
+    """The label and rate keys of a call a credential serves.
 
     A hybrid data plane settles nothing itself, so the control plane's
-    credential carries neither (design K).
+    credential carries neither.
     """
     if credential.source == WebToolCredentialSource.HYBRID:
         return None, ()

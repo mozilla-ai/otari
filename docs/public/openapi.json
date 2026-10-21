@@ -1590,6 +1590,57 @@
         "title": "Annotations",
         "type": "object"
       },
+      "AnthropicError": {
+        "description": "What went wrong, in Anthropic's terms.",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "description": "Anthropic's error type, such as `invalid_request_error` or `rate_limit_error`.",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "message"
+        ],
+        "title": "AnthropicError",
+        "type": "object"
+      },
+      "AnthropicErrorResponse": {
+        "description": "Anthropic's error envelope, which every error on a Messages route is answered in.",
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The refusal's `Otari-Error-Code`, where it has one.",
+            "title": "Code"
+          },
+          "error": {
+            "$ref": "#/components/schemas/AnthropicError"
+          },
+          "type": {
+            "const": "error",
+            "default": "error",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "AnthropicErrorResponse",
+        "type": "object"
+      },
       "AnthropicFileDeleted": {
         "description": "Anthropic's answer to a delete.",
         "properties": {
@@ -32215,15 +32266,25 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "4XX": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/AnthropicErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request was refused."
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicErrorResponse"
+                }
+              }
+            },
+            "description": "The request failed."
           }
         },
         "security": [
@@ -32265,15 +32326,25 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "4XX": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/AnthropicErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request was refused."
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicErrorResponse"
+                }
+              }
+            },
+            "description": "The request failed."
           }
         },
         "security": [

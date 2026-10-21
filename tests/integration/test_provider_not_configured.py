@@ -132,7 +132,7 @@ def test_the_messages_route_answers_in_its_own_envelope(
     )
     assert response.status_code == 424, response.text
     assert response.headers[ERROR_CODE_HEADER] == PROVIDER_NOT_CONFIGURED
-    message = response.json()["detail"]["error"]["message"]
+    message = response.json()["error"]["message"]
     assert "'anthropic'" in message
     assert "ANTHROPIC_API_KEY" in message
     assert _ANY_LLM_WORDING not in message

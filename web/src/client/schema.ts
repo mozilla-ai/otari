@@ -7797,6 +7797,37 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * AnthropicError
+         * @description What went wrong, in Anthropic's terms.
+         */
+        AnthropicError: {
+            /** Message */
+            message: string;
+            /**
+             * Type
+             * @description Anthropic's error type, such as `invalid_request_error` or `rate_limit_error`.
+             */
+            type: string;
+        };
+        /**
+         * AnthropicErrorResponse
+         * @description Anthropic's error envelope, which every error on a Messages route is answered in.
+         */
+        AnthropicErrorResponse: {
+            /**
+             * Code
+             * @description The refusal's `Otari-Error-Code`, where it has one.
+             */
+            code?: string | null;
+            error: components["schemas"]["AnthropicError"];
+            /**
+             * Type
+             * @default error
+             * @constant
+             */
+            type: "error";
+        };
+        /**
          * AnthropicFileDeleted
          * @description Anthropic's answer to a delete.
          */
@@ -22455,13 +22486,22 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description Validation Error */
-            422: {
+            /** @description The request was refused. */
+            "4XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["AnthropicErrorResponse"];
+                };
+            };
+            /** @description The request failed. */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicErrorResponse"];
                 };
             };
         };
@@ -22488,13 +22528,22 @@ export interface operations {
                     "application/json": components["schemas"]["CountTokensResponse"];
                 };
             };
-            /** @description Validation Error */
-            422: {
+            /** @description The request was refused. */
+            "4XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["AnthropicErrorResponse"];
+                };
+            };
+            /** @description The request failed. */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicErrorResponse"];
                 };
             };
         };

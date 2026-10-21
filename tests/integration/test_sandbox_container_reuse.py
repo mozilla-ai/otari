@@ -174,7 +174,7 @@ def test_an_unknown_container_is_refused_in_the_words_clients_recover_from(
     response = _post(client, api_key_header, _body(f"{CONTAINER_ID_PREFIX}nope"), port)
 
     assert response.status_code == 400, response.text
-    error = response.json()["detail"]["error"]
+    error = response.json()["error"]
     assert error["type"] == "invalid_request_error"
     assert "has expired or does not exist" in error["message"]
     assert port.opened == [], "a refused request leases nothing"
@@ -196,7 +196,7 @@ def test_another_callers_container_is_an_unknown_one(
     response = _post(client, master_key_header, as_someone_else, port)
 
     assert response.status_code == 400, response.text
-    assert "has expired or does not exist" in response.json()["detail"]["error"]["message"]
+    assert "has expired or does not exist" in response.json()["error"]["message"]
     assert len(port.opened) == 1
 
 
@@ -212,7 +212,7 @@ def test_a_container_the_provider_no_longer_has_is_gone_and_forgotten(
     second = _post(client, api_key_header, _body(container_id), port)
 
     assert second.status_code == 400, second.text
-    assert "has expired or does not exist" in second.json()["detail"]["error"]["message"]
+    assert "has expired or does not exist" in second.json()["error"]["message"]
     assert port.opened[1]["resume"] == "sbx-1", "the provider was asked, and said no"
 
     # The lease was dropped on the way out, so the next attempt does not ask again.
@@ -246,7 +246,7 @@ async def test_a_second_request_cannot_run_in_a_sandbox_a_first_is_still_using(
     response = _post(client, api_key_header, _body(container_id), port)
 
     assert response.status_code == 409, response.text
-    error = response.json()["detail"]["error"]
+    error = response.json()["error"]
     assert "in use by another request" in error["message"]
     assert len(port.opened) == 1, "a refused request leases nothing"
 
@@ -346,7 +346,7 @@ def test_an_explicit_executor_pin_still_beats_the_container(
     response = _post(client, pinned, _body(container_id, tools=[_NATIVE_DECLARATION]), port)
 
     assert response.status_code == 400, response.text
-    assert "runs on the provider" in response.json()["detail"]["error"]["message"]
+    assert "runs on the provider" in response.json()["error"]["message"]
 
 
 def test_a_gateway_container_is_refused_when_the_gateway_is_not_running_the_code(
@@ -366,7 +366,7 @@ def test_a_gateway_container_is_refused_when_the_gateway_is_not_running_the_code
     response = _post(client, api_key_header, no_code_execution, port)
 
     assert response.status_code == 400, response.text
-    message = response.json()["detail"]["error"]["message"]
+    message = response.json()["error"]["message"]
     assert "runs on the provider" in message
     assert port.opened == []
 
@@ -412,7 +412,7 @@ def test_an_oversized_container_id_is_not_echoed_back_whole(
     response = _post(client, api_key_header, _body(f"{CONTAINER_ID_PREFIX}{'A' * 100_000}"), port)
 
     assert response.status_code == 400, response.text
-    message = response.json()["detail"]["error"]["message"]
+    message = response.json()["error"]["message"]
     assert len(message) < 200
     assert "has expired or does not exist" in message
 
@@ -446,7 +446,7 @@ def test_with_reuse_off_nothing_is_held_reported_or_resumable(
 
     refused = _post(reuse_off_client, headers, _body(f"{CONTAINER_ID_PREFIX}anything"), port)
     assert refused.status_code == 400, refused.text
-    assert "has expired or does not exist" in refused.json()["detail"]["error"]["message"]
+    assert "has expired or does not exist" in refused.json()["error"]["message"]
 
 
 @pytest.mark.asyncio

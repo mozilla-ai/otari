@@ -24,14 +24,12 @@ from gateway.core.settings.tools import (
     effective_fetch_instances,
     effective_search_instances,
     effective_web_search_max_calls,
-    enrichment_fetch_instance,
-    fetch_default,
-    in_loop_default,
     synthesized_search_instance,
     validate_default_tool,
-    warn_about_tool_instances,
 )
 from gateway.services.tool_settings_service import apply_override
+from gateway.services.tools import resolve_fetch, resolve_search, warn_about_tool_instances, web_search_configured
+from gateway.services.tools._web_search import in_loop_default
 
 _EXA = {"provider": "exa", "api_key": "exa-secret-key"}
 _SEARXNG = {"provider": "searxng", "api_base": "http://searxng:8080"}
@@ -157,12 +155,12 @@ def test_a_dangling_default_falls_through_to_the_single_instance() -> None:
     ],
 )
 def test_search_is_configured_when_the_in_loop_default_yields_one(settings: dict[str, Any], configured: bool) -> None:
-    assert GatewayConfig(**settings).web_search_configured() is configured
+    assert web_search_configured(GatewayConfig(**settings)) is configured
 
 
 def test_a_legacy_url_in_the_environment_alone_configures_search(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
-    assert GatewayConfig().web_search_configured() is True
+    assert web_search_configured(GatewayConfig()) is True
 
 
 def test_a_stored_instance_counts_like_a_configured_one() -> None:
@@ -567,14 +565,19 @@ def test_the_lenient_load_warns_with_names_and_never_values(caplog: pytest.LogCa
 # --------------------------------------------------------------------------- #
 
 
+def _enriched_by(config: GatewayConfig, search: str) -> str | None:
+    """The fetch instance that enriches the search instance ``search``'s hits."""
+    resolved = resolve_search(config, None, requested=search, request_options=None)
+    return resolve_fetch(config, None, requested=None, for_search=resolved).name
+
+
 def test_a_search_instance_is_enriched_by_its_own_fetch_tool() -> None:
     config = GatewayConfig(
         search_tools={"exa": {**_EXA, "fetch_tool": "exa-fetch"}, "other": {"provider": "fake"}},
         fetch_tools={"exa-fetch": {"provider": "exa", "api_key": "k"}},
     )
-    search = effective_search_instances(config)
-    assert enrichment_fetch_instance(config, search["exa"]).name == "exa-fetch"
-    assert enrichment_fetch_instance(config, search["other"]).name == BUILTIN_FETCH
+    assert _enriched_by(config, "exa") == "exa-fetch"
+    assert _enriched_by(config, "other") == BUILTIN_FETCH
 
 
 def test_without_a_fetch_tool_the_fetch_default_enriches() -> None:
@@ -583,19 +586,19 @@ def test_without_a_fetch_tool_the_fetch_default_enriches() -> None:
         fetch_tools={"exa-fetch": {"provider": "exa", "api_key": "k"}},
         web_fetch_default_tool="exa-fetch",
     )
-    assert enrichment_fetch_instance(config, effective_search_instances(config)["exa"]).name == "exa-fetch"
+    assert _enriched_by(config, "exa") == "exa-fetch"
 
 
 def test_a_dangling_fetch_tool_falls_back_to_the_fetch_default(caplog: pytest.LogCaptureFixture) -> None:
     config = GatewayConfig(search_tools={"exa": {**_EXA, "fetch_tool": "gone"}})
     config.validate_search_tools()
-    assert enrichment_fetch_instance(config, effective_search_instances(config)["exa"]).name == BUILTIN_FETCH
+    assert _enriched_by(config, "exa") == BUILTIN_FETCH
     assert "search_tools.exa.fetch_tool names no fetch instance" in _warnings(caplog, config)
 
 
 def test_a_dangling_fetch_default_falls_back_to_builtin_fetch(caplog: pytest.LogCaptureFixture) -> None:
     config = GatewayConfig(web_fetch_default_tool="gone")
-    assert fetch_default(config).name == BUILTIN_FETCH
+    assert _fetch_default_name(config) == BUILTIN_FETCH
     assert "web_fetch_default_tool names no fetch instance (gone)" in _warnings(caplog, config)
 
 
@@ -725,7 +728,9 @@ def _in_loop_default_name(config: GatewayConfig) -> str | None:
 
 
 def _fetch_default_name(config: GatewayConfig) -> str:
-    return fetch_default(config).name
+    name = resolve_fetch(config, None, requested=None, for_search=None).name
+    assert name is not None
+    return name
 
 
 @pytest.mark.parametrize(
