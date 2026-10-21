@@ -236,7 +236,7 @@ never forwarded to the provider.
 What reaches the provider depends on the surface. Chat Completions and Messages
 never forward the caller's `metadata`. On Messages, `metadata.user_id` names the
 billed user and is not a tag; the provider gets an
-[end-user identifier](configuration.md#end-user-identifiers) derived from it in
+[end-user identifier](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#end-user-identifiers) derived from it in
 its place. Responses forwards `metadata`, minus
 `spend_logs_metadata`, because the Responses API stores it.
 
@@ -382,7 +382,7 @@ in `usage` what the gateway metered and what it charged:
   the request was not priced.
 
 How a rerank model is priced, per search unit or per input token, is described in
-[Per-request pricing](configuration.md#per-request-pricing-audio-moderations-rerank-and-completion-models).
+[Per-request pricing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#per-request-pricing-audio-moderations-rerank-and-completion-models).
 
 ## Search
 
@@ -516,7 +516,7 @@ and llama-server also take:
 ```
 
 `model` is `<provider>:<model>`, where the provider is an entry under
-[`decision_providers`](configuration.md#decision-providers). The answer comes back
+[`decision_providers`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#decision-providers). The answer comes back
 as the provider returned it, keyed like the questions, with `probabilities`,
 `confidence` and `usage`. `images` takes data URLs for a vision decision model
 served by llama-server; other providers refuse it.

@@ -28,7 +28,7 @@ Otari stores the key encrypted and offers every model Gemini lists on it; each
 model with a price is switched on, and one nothing prices arrives switched off.
 To keep the provider in configuration instead, declare it under
 `hosted_providers:` in `config.yml` (see
-[Hosted providers in config.yml](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#hosted-providers-in-configyml)).
+[Hosted providers in config.yml](../configuration.md#hosted-providers-in-configyml)).
 Otari does not read `GEMINI_API_KEY` from its environment unless a declaration
 names it; see [Configuring a provider](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#configuring-a-provider).
 

@@ -83,7 +83,7 @@ The plaintext key is returned only when it is created or rotated. Store it then.
 Rotation preserves the key record and invalidates the previous secret.
 A key can also be declared in config.yml with a secret you choose, in which
 case config.yml owns it and writes it back whenever its entry changes; see
-[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#budgets-and-api-keys-in-config).
+[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#budgets-and-api-keys-in-config).
 Rotating a declared key through the API lasts until config.yml changes the
 key's entry or its secret, which restores the secret config.yml declares.
 
@@ -384,7 +384,7 @@ turned back on.
 3. Set the provider's client ID and secret (`google_client_id` and
    `google_client_secret`, or `github_client_id` and `github_client_secret`).
 4. Where an edge serves the dashboard elsewhere, set `ui_base_url` too; see
-   [The interface address](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#the-interface-address).
+   [The interface address](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#the-interface-address).
 
 #### How provider accounts are linked
 
@@ -499,7 +499,7 @@ where anyone can create an organization that would otherwise make it an open
 relay. Over any 24 hours an organization can send only so many invitation
 emails, and an address can receive only so many from every organization
 together, so revoking and inviting again cannot flood it; the settings and their
-defaults are under [Mail](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#mail). An invitation over a limit is
+defaults are under [Mail](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#mail). An invitation over a limit is
 still created, and its link is returned to share by hand, as when mail is off:
 the link costs the deployment nothing, and refusing would stop a legitimate
 admin partway through a bulk invite. The counts are kept in `rate_limit_store`,
@@ -649,5 +649,5 @@ the window in which a transferred domain still admits people.
 - [Track spend per end user](end-users.md)
 - [Hosted providers and BYO credentials](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers)
 - [Admin dashboard](dashboard.md)
-- [Configuration](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration)
+- [Configuration](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration)
 - [API reference](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference)

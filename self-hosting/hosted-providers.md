@@ -80,7 +80,7 @@ A provider stored through the page or the API wins over a `config.yml` entry of
 the same name.
 
 Storing a hosted provider's key requires `OTARI_SECRET_KEY`; see
-[Runtime provider management](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#runtime-provider-management)
+[Runtime provider management](configuration.md#runtime-provider-management)
 for generating and rotating it. The API never returns a hosted provider's key,
 only its last four characters, and it masks credentials in `client_args` and in
 the base URL.
@@ -130,7 +130,7 @@ rate the operator set for an organization is listed beside the organization's
 own on the Providers page, and only the operator may change or remove it. The
 deployment price list has no dashboard page of its own; the models.dev defaults
 are kept current through `/api/v1/pricing/refresh` (see
-[Keeping the defaults current](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#keeping-the-defaults-current)).
+[Keeping the defaults current](configuration.md#keeping-the-defaults-current)).
 
 On the Providers page a model nothing prices is offered and left unserved, a
 key's row counts how many of its offered models are serving, and a key serving

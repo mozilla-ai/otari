@@ -135,7 +135,7 @@ key can use, and [Routing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwn
 Give each project its own Otari key, so its usage and spend are reported apart, a
 budget on the key caps that project alone, and revoking the key stops only that
 project. See [Access control](access-control.md) and
-[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#budgets-and-api-keys-in-config).
+[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#budgets-and-api-keys-in-config).
 
 ## Without the package
 

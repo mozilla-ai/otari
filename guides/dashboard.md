@@ -189,7 +189,7 @@ at runtime and others require a restart. The server marks that distinction in th
 settings response. Its Rate limit rules card adds, edits and removes limits on
 requests per minute, tokens per minute and requests in flight; rules from
 config.yml are listed there read-only (see
-[Rate limit rules](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#rate-limit-rules)).
+[Rate limit rules](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#rate-limit-rules)).
 
 ### Entering a rate
 
@@ -202,7 +202,7 @@ Activity's "Price this model", offered on a served request that carried no cost
 (a failed attempt billed nothing, so its error is the guide instead), which
 opens per request for a rerank, audio or moderation request and per image for
 an image generation. What each unit bills is in
-[Per-request pricing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#per-request-pricing-audio-moderations-rerank-and-completion-models).
+[Per-request pricing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#per-request-pricing-audio-moderations-rerank-and-completion-models).
 
 ## Playground
 
@@ -332,18 +332,18 @@ email domain of the identity's verified address; see
 
 Mail is optional: when an invitation email does not go out, you get the accept
 link to share. See [Invitations](access-control.md#invitations) and
-[Mail](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#mail).
+[Mail](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#mail).
 
 ## Custom documentation
 
 The dashboard's Documentation link opens docs.otari.ai unless `docs_url` names
-another site; see [Documentation links](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#documentation-links).
+another site; see [Documentation links](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#documentation-links).
 
 ## Legal pages
 
 `terms_url` and `privacy_url` name where this deployment's terms of service and
 privacy notice live. The account menu links each row it has an address for; see
-[Configuration](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#legal-pages).
+[Configuration](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#legal-pages).
 
 ## Development
 

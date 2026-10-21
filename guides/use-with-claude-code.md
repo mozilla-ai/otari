@@ -140,7 +140,7 @@ providers:
 
 Claude Code then receives the model's reasoning as thinking blocks and sends them
 back on the next turn, which is what lets the reasoning carry over. See
-[Messages through the Responses API](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#messages-through-the-responses-api)
+[Messages through the Responses API](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#messages-through-the-responses-api)
 for how fields translate.
 
 ## Let Otari choose a subagent's model
@@ -156,7 +156,7 @@ response are in the
 decides is in [Agent model recommendations](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing#agent-model-recommendations).
 
 A gateway you run needs a
-[decision provider](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#decision-providers) that
+[decision provider](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#decision-providers) that
 `agent_recommender_model` resolves to (`typesafe` with an API key by default).
 Without one, the route answers `400` and every subagent starts on the model it
 would have had anyway. On otari.ai a managed recommender answers, with nothing

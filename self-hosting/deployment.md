@@ -15,7 +15,7 @@ A durable deployment should:
 - terminate TLS in front of the gateway
 - restrict database and management access
 - monitor `/api/v1/health/readiness` and, with `enable_metrics` (see
-  [Common settings](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#common-settings)), `/metrics`
+  [Common settings](configuration.md#common-settings)), `/metrics`
 - pin an image version and test migrations before upgrading
 
 The default SQLite database is intended for evaluation and single-node local use.
@@ -51,7 +51,7 @@ from these `/metrics` series, labeled by `pool` (`request` for request traffic,
 | `gateway_db_pool_capacity` | Ceiling on connections the pool hands out at once: `db_pool_size` plus `db_max_overflow` for `request`, `db_log_pool_size` for `log`, which has no overflow |
 
 SQLite keeps no pool, so these series do not appear there. The pool settings
-are in [Database connections](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#database-connections).
+are in [Database connections](configuration.md#database-connections).
 
 ## Docker Compose
 
@@ -111,4 +111,4 @@ declare its providers and create its keys and budgets as a new deployment does.
 
 Otari accepts a mounted YAML file, scalar environment variables, or a complete
 YAML document in `OTARI_CONFIG_YAML` or `OTARI_CONFIG_B64`. See
-[Configuration](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration) for precedence and security notes.
+[Configuration](configuration.md) for precedence and security notes.

@@ -227,7 +227,7 @@ Direct `POST /api/v1/search` prices a search on a tool under that tool's own key
 [organization search key](#organization-search-keys) served it. How that rate
 is reserved and settled, and how `require_pricing` refuses a missing one with a
 `402 pricing_required`, is in
-[Per-request pricing](configuration.md#per-request-pricing-audio-moderations-rerank-and-completion-models).
+[Per-request pricing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#per-request-pricing-audio-moderations-rerank-and-completion-models).
 The deployment pays for a search on one of its tools, so only its own price, or
 an override the deployment operator set, prices it; a search an organization key
 served takes the organization's own override.
@@ -581,7 +581,7 @@ is unacceptable.
 
 ### Fetch providers
 
-A fetch instance, under `fetch_tools` (see [Search tools](configuration.md#search-tools)),
+A fetch instance, under `fetch_tools` (see [Search tools](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#search-tools)),
 names a provider for `otari_web_fetch` and for enriching search results.
 `web_fetch_default_tool` names the instance the fetch tool runs on, and the one
 that enriches search results unless the search instance names its own
@@ -622,7 +622,7 @@ one, and never with the provider's own message.
 The in-loop tool searches with the deployment's in-loop default:
 `web_search_default_tool` when it names a search instance, else the legacy
 settings below while they are set, else the only search instance when there is
-exactly one (see [Search tools](configuration.md#search-tools)).
+exactly one (see [Search tools](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#search-tools)).
 `web_search_default_tool: none` turns it off. A workspace's
 [organization search key](#organization-search-keys) comes before all of them.
 
@@ -779,7 +779,7 @@ provider for production. A runnable example lives under `demo/web-search/`.
 
 `POST /api/v1/search` lets the caller submit a query directly
 instead of waiting for a model to request one. Configure its named providers
-through [`search_tools`](configuration.md#search-tools) or the Search tools API.
+through [`search_tools`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#search-tools) or the Search tools API.
 
 A SearXNG search tool can reuse `web_search_url`, so model-initiated and direct
 search can share one backend. They remain distinct surfaces with separate

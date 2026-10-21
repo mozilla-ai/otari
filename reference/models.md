@@ -179,7 +179,7 @@ pricing data has not caught up with cannot be billed at nothing. With
 `require_pricing: false` the deployment serves unpriced traffic by choice, so
 such a model is offered switched on and served at no cost, like an unpriced
 model of a `providers:` instance (see
-[Default pricing](configuration.md#default-pricing)).
+[Default pricing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#default-pricing)).
 
 A refusal on that path says which narrowing turned the model away. A model the
 key offers with its switch off is a 403 with the code `model_not_serving`, naming
@@ -354,7 +354,7 @@ A request that names a catalog id with more than one offering falls back across 
 The dashboard's Models page and the Routing page's Automatic fallback section
 show this catalog and this order; see [Models and Routing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/dashboard/dashboard#models-and-routing).
 
-With `public_catalog: true` (see [Configuration](configuration.md)), the same
+With `public_catalog: true` (see [Configuration](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration)), the same
 two routes and the same page are served to a visitor with no session, at the
 deployment's rates and for the models the deployment itself serves, its
 hosted providers included. A visitor's

@@ -439,5 +439,5 @@ default here rather than a choice, and the controls over it live in the
 provider's account rather than in Otari's settings. A deployment handling data
 that must not leave should confine it there before choosing this provider.
 
-See [Configuration](configuration.md) for the full settings reference and
+See [Configuration](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration) for the full settings reference and
 [Built-in tools](tools.md) for the user-facing view of the tool.

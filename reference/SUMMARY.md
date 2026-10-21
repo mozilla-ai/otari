@@ -64,7 +64,6 @@
   * [Workspace member budget policies](api-endpoints/workspace-member-budget-policies.md)
   * [Workspace web search](api-endpoints/workspace-web-search.md)
   * [Workspaces](api-endpoints/workspaces.md)
-* [Configuration](configuration.md)
 
 ## Gateway
 

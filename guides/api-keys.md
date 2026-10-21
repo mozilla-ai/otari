@@ -51,6 +51,6 @@ a service key: [Track spend per end user](end-users.md).
 - **Delete** on a key's row removes the key permanently.
 
 A key declared in `config.yml` is owned by that file; see
-[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#budgets-and-api-keys-in-config).
+[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#budgets-and-api-keys-in-config).
 To authenticate a backend with its platform identity instead of a stored
 secret, see [Workload identity](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/operations/workload-identity).

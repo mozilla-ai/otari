@@ -68,7 +68,7 @@ caller with no finite budget.
 In a policy that can fall over, each candidate gets one upstream call unless a
 retry count is configured, so a throttled provider hands over to the next
 candidate at once rather than after its SDK's own retries. See
-[Provider retries](configuration.md#provider-retries).
+[Provider retries](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#provider-retries).
 
 ## Load balance across providers (weighted routing)
 
@@ -107,7 +107,7 @@ Caller allow-lists filter candidates before weights are normalized. Use
 
 The priority router keeps its candidates in the order written. Each request goes
 to the first one that has room under its
-[`per: model` rate limits](configuration.md#rate-limit-rules):
+[`per: model` rate limits](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#rate-limit-rules):
 
 ```yaml
 rate_limits:
