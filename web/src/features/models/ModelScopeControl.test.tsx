@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ModelScopeControl } from "@/features/models/ModelScopeControl"
 import { API_ROOT } from "@/shared/api/client"
-import { organizationContext } from "@/tests/fixtures"
+import { organizationContext, orgProviderKey } from "@/tests/fixtures"
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -23,9 +23,11 @@ function mockApi({
   models = [] as string[],
   modelsStatus = 200,
   operator = false,
+  role = "owner",
   providers = [] as string[],
   hosted = [] as string[],
   aliases = [] as { name: string; target: string }[],
+  providerKeys = [] as ReturnType<typeof orgProviderKey>[],
 } = {}) {
   const urls: string[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -34,8 +36,11 @@ function mockApi({
     if (url.includes(`${API_ROOT}/organizations/me/aliases`)) {
       return json(aliases)
     }
+    if (url.includes(`${API_ROOT}/organizations/me/provider-keys?`)) {
+      return json({ data: providerKeys, count: providerKeys.length })
+    }
     if (url.endsWith(`${API_ROOT}/organizations/me`)) {
-      return json(organizationContext({ deployment_operator: operator }))
+      return json(organizationContext({ role, deployment_operator: operator }))
     }
     if (operator && url.endsWith(`${API_ROOT}/aliases`)) {
       return json([])
@@ -202,5 +207,64 @@ describe("ModelScopeControl", () => {
     expect(
       await screen.findByRole("option", { name: "fast · alias" }),
     ).toBeInTheDocument()
+  })
+
+  it("offers a wildcard for an organization provider key that lists no models", async () => {
+    mockApi({
+      // A managed model, and nothing for the key: it was never refreshed.
+      models: ["mzai:llama-4"],
+      providerKeys: [
+        orgProviderKey({ provider: "openai" }),
+        orgProviderKey({
+          id: "77777777-7777-7777-7777-777777777777",
+          provider: "mistral",
+          archived_at: "2026-09-01T00:00:00+00:00",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    const onChange = renderControl()
+
+    await user.type(await screen.findByLabelText("Add a model"), "i")
+    await user.click(
+      await screen.findByRole("option", {
+        name: "openai:* · all openai models",
+      }),
+    )
+    expect(onChange).toHaveBeenLastCalledWith(
+      ["byok-openai:gpt-4o", "openai:*"],
+      true,
+    )
+    expect(
+      screen.queryByRole("option", { name: /mistral/ }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("lists a provider key's wildcard once when other sources name it too", async () => {
+    mockApi({
+      operator: true,
+      providers: ["openai"],
+      models: ["openai:gpt-4o"],
+      providerKeys: [orgProviderKey({ provider: "openai" })],
+    })
+    const user = userEvent.setup()
+    renderControl()
+
+    await user.type(await screen.findByLabelText("Add a model"), "openai:*")
+    expect(
+      await screen.findAllByRole("option", {
+        name: "openai:* · all openai models",
+      }),
+    ).toHaveLength(1)
+  })
+
+  it("does not ask a plain member for the provider keys", async () => {
+    const urls = mockApi({ role: "member" })
+    renderControl()
+
+    expect(
+      await screen.findByText(/No providers or models discovered yet/),
+    ).toBeInTheDocument()
+    expect(urls.some((url) => url.includes("/provider-keys"))).toBe(false)
   })
 })

@@ -5,8 +5,13 @@ import { ControlField } from "@/design-system/forms/FieldMessages"
 import { DismissChip } from "@/design-system/indicators/DismissChip"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { providerInstanceOf } from "@/features/models/modelKey"
+import { canManage } from "@/features/organization/roles"
 import { useModels } from "@/shared/api/models"
-import { useDeploymentOperator } from "@/shared/api/organizations"
+import {
+  useDeploymentOperator,
+  useOrganizationContext,
+  useOrgProviderKeys,
+} from "@/shared/api/organizations"
 import { useDeploymentProviderNames } from "@/shared/api/providers"
 import { useAliases } from "@/shared/api/routing"
 
@@ -56,6 +61,8 @@ export function ModelScopeControl({
   const { isOperator, isSettled } = useDeploymentOperator()
   // Operator-only: an organization admin is refused it.
   const providers = useDeploymentProviderNames(isSettled && isOperator)
+  // Owner/admin-only, like the operator read above.
+  const orgKeys = useOrgProviderKeys(canManage(useOrganizationContext().data))
   const aliases = useAliases()
   const [mode, setMode] = useState<Mode>(modeOf(initial))
   const [entries, setEntries] = useState<string[]>(initial ?? [])
@@ -70,7 +77,9 @@ export function ModelScopeControl({
   // a canonical selector the backend will accept, so names that resolve through
   // no instance are left out. An operator also gets a wildcard for every
   // configured provider, which covers one whose models GET /models cannot list
-  // (discovery failed or unsupported, nothing priced).
+  // (discovery failed or unsupported, nothing priced). An organization owner or
+  // admin likewise gets one for each of its own provider keys: a key nobody has
+  // refreshed offers no models, so GET /models lists nothing for it.
   const catalog = useMemo<CatalogOption[]>(() => {
     const ids = (models.data?.data ?? [])
       .map((model) => model.id)
@@ -79,6 +88,9 @@ export function ModelScopeControl({
     const instances = [
       ...new Set([
         ...providers,
+        ...(orgKeys.data ?? [])
+          .filter((key) => !key.archived_at)
+          .map((key) => key.provider),
         ...ids.map((id) => providerInstanceOf(id) as string),
       ]),
     ].sort((a, b) => a.localeCompare(b))
@@ -101,7 +113,7 @@ export function ModelScopeControl({
       seen.add(option.id)
       return true
     })
-  }, [models.data, providers, aliases.data])
+  }, [models.data, providers, orgKeys.data, aliases.data])
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
