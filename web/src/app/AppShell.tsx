@@ -1220,7 +1220,7 @@ function AppShellChrome() {
             // which computes to `hidden` beside `overflow-y: auto` anyway.
             className="flex-1 overflow-x-hidden overflow-y-auto focus:outline-none"
           >
-            <div className="mx-auto flex max-w-[112.5rem] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
+            <div className="mx-auto flex max-w-[112.5rem] flex-col gap-6 px-4 pt-5 pb-[calc(1.25rem+var(--shell-corner-clearance))] md:px-6 md:pt-6 md:pb-[calc(1.5rem+var(--shell-corner-clearance))]">
               {answerIsStillComing ? (
                 <PendingPage />
               ) : routeIsGatedOff ? (

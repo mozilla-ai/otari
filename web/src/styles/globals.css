@@ -1003,6 +1003,19 @@
 }
 
 /* =============================================================
+ * Room under the page for something fixed in the bottom-right corner.
+ *
+ * The shell's content area adds this to its bottom padding, so the last thing
+ * on a page (a table's pager, most often) can scroll clear of a control that
+ * floats over the corner. Nothing in this dashboard floats there for long, so
+ * it is zero here; a superset that pins a support launcher or a call to action
+ * to the corner sets it on the root for as long as that control is mounted.
+ * ============================================================= */
+:root {
+  --shell-corner-clearance: 0px;
+}
+
+/* =============================================================
  * Typography scale — semantic, opinionated, role-named.
  *
  * Use these utilities for any text whose purpose maps to one of

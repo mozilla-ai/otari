@@ -110,6 +110,11 @@ rows in the account menu), and `app/nav/overlayAccountBadge.tsx` (the mark on
 the account control, the monogram here). Each ships inert; `src/overlaySeams.test.ts`
 lists every seam and checks it is reached by its `@/…` specifier.
 
+One seam is a CSS custom property rather than a module: `--shell-corner-clearance`
+(`styles/globals.css`, zero here) is added to the bottom padding of the shell's
+content area, so a superset that fixes a control to the bottom-right corner sets
+it on the root and the end of every page still scrolls clear of that control.
+
 ## Icons
 
 Icons come from `react-icons/fi`, the library the sidebar and the nav registry
