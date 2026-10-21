@@ -9,8 +9,8 @@ import {
  * them all at once. Spread `pagination` into `TablePagination`, pass `pageRows`
  * to the table and `pagination.page` as its `scrollResetKey`.
  *
- * `resetKey` returns to the first page when it changes. It is compared by
- * identity, so pass a primitive that changes only with the filters (a
+ * `resetKey` returns to the first page when it changes. It is compared with
+ * `Object.is`, so pass a primitive that changes only with the filters (a
  * serialized filter set, say), never the rows, which a refetch replaces. A
  * page past the end, after the rows shrink, becomes the last one.
  */
@@ -20,7 +20,7 @@ export function useClientPagination<Row>(rows: Row[], resetKey?: unknown) {
   const [seenKey, setSeenKey] = useState(resetKey)
   const lastPage = Math.max(0, Math.ceil(rows.length / pageSize) - 1)
   let shown = page
-  if (resetKey !== seenKey) {
+  if (!Object.is(resetKey, seenKey)) {
     // Ahead of the clamp below, so a filter that also shrinks the rows lands
     // on the first page rather than the new last one.
     setSeenKey(resetKey)

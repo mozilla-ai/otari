@@ -48,6 +48,17 @@ describe("useClientPagination", () => {
     expect(result.current.pagination.page).toBe(0)
   })
 
+  it("treats an unchanged NaN key as unchanged", () => {
+    // `!==` never settles on NaN, and re-renders until React gives up.
+    const { result, rerender } = renderHook(
+      ({ resetKey }) => useClientPagination(rows(32), resetKey),
+      { initialProps: { resetKey: Number.NaN } },
+    )
+    act(() => result.current.pagination.onPageChange(1))
+    rerender({ resetKey: Number.NaN })
+    expect(result.current.pagination.page).toBe(1)
+  })
+
   it("lands a reset on the first page even when the rows shrink with it", () => {
     // Health: 32 results on page 3, then a filter down to 20 failing ones.
     const { result, rerender } = renderHook(
