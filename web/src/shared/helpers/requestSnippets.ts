@@ -6,11 +6,13 @@
  * copies would drift into two dialects of the same call, and an operator who
  * followed one and then the other would be told to authenticate two ways.
  *
- * The base URL is the browser's own origin, because the gateway serving this
- * dashboard is also the gateway serving the API; see `resolveSnippetBaseUrl`.
+ * The base URL is where the dashboard's own API requests go, because the gateway
+ * answering them is also the gateway serving inference; see
+ * `resolveSnippetBaseUrl`.
  */
 
 import { API_ROOT } from "@/shared/api/client"
+import { requestPolicy } from "@/shared/api/overlayRequestPolicy"
 
 /** Stands in for a model when the deployment has none to name yet. */
 export const SNIPPET_MODEL_PLACEHOLDER = "your-model"
@@ -166,14 +168,22 @@ export function buildAgentPrompt({
 }
 
 /**
- * Where a snippet should send its request: the address that served this page.
+ * Where a snippet should send its request: the origin the dashboard's own API
+ * requests reach.
  *
- * The gateway serves the API on the same origin as the dashboard, and the
- * browser's own origin is more trustworthy than anything the server could say
- * about itself from behind a proxy.
+ * That is the browser's own origin, which is more trustworthy than anything the
+ * server could say about itself from behind a proxy, unless the request policy
+ * names another. A build whose one dashboard reaches several deployments serves
+ * the page from one host and sends every request to the deployment chosen, so a
+ * snippet aimed at the page's host would miss the deployment the key was
+ * issued on.
  */
-export function resolveSnippetBaseUrl(
-  origin: string = typeof window === "undefined" ? "" : window.location.origin,
-): string {
+export function resolveSnippetBaseUrl(origin: string = apiOrigin()): string {
   return origin.trim().replace(/\/+$/, "")
+}
+
+function apiOrigin(): string {
+  const { origin } = requestPolicy()
+  if (origin) return origin
+  return typeof window === "undefined" ? "" : window.location.origin
 }

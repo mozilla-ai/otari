@@ -1,11 +1,26 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { API_ROOT } from "@/shared/api/client"
+import type { RequestPolicy } from "@/shared/api/requestPolicy"
 import {
   buildCurlSnippet,
   buildPythonSnippet,
   resolveSnippetBaseUrl,
   SNIPPET_MODEL_PLACEHOLDER,
 } from "@/shared/helpers/requestSnippets"
+
+// Mutable so a case can stand in for a build that reaches several deployments.
+const policy = vi.hoisted(
+  (): RequestPolicy => ({ origin: "", credentials: "same-origin" }),
+)
+vi.mock("@/shared/api/overlayRequestPolicy", () => ({
+  prepareRequests: async () => {},
+  requestPolicy: () => policy,
+}))
+
+afterEach(() => {
+  policy.origin = ""
+  policy.credentials = "same-origin"
+})
 
 const INPUT = {
   baseUrl: "https://otari.example.com",
@@ -138,5 +153,19 @@ describe("resolveSnippetBaseUrl", () => {
 
   it("trims a trailing slash, since the caller suffixes the result", () => {
     expect(resolveSnippetBaseUrl(`${ORIGIN}/`)).toBe(ORIGIN)
+  })
+
+  it("defaults to the page's own origin under the same-origin policy", () => {
+    expect(resolveSnippetBaseUrl()).toBe(window.location.origin)
+  })
+
+  it("defaults to the deployment the dashboard's requests reach", () => {
+    // A dashboard that reaches several deployments is served from one host and
+    // sends every request to the one chosen, so the key just issued belongs to
+    // that deployment and a snippet aimed at the page's host would miss it.
+    policy.origin = "https://eu.otari.example"
+    policy.credentials = "include"
+
+    expect(resolveSnippetBaseUrl()).toBe("https://eu.otari.example")
   })
 })

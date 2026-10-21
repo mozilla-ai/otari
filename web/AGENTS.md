@@ -46,7 +46,8 @@ Public auth and invitation flows render ahead of the authenticated router in
 redirects, so changing one requires changing the producer and its tests.
 
 Request snippets use `shared/helpers/requestSnippets.ts`, which sends them to
-the browser's own origin.
+the request policy's origin: the browser's own, unless a build that reaches
+several deployments names the one chosen.
 
 ## Source layers
 
