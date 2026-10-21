@@ -89,7 +89,7 @@ jobs:
       # as environment variables, which beat a mounted config file, so an image
       # that boots but cannot serve is a break only this step sees.
       - name: Install the smoke's environment
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.14"
 
