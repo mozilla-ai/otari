@@ -1,8 +1,9 @@
+import { Skeleton } from "@/design-system/feedback/Skeleton"
 import { Chip } from "@/design-system/indicators/Chip"
 import { SpendMeter } from "@/design-system/metrics/SpendMeter"
 import { useApiKeyCeiling } from "@/shared/api/budgets"
 import { useDeploymentOperator } from "@/shared/api/organizations"
-import { formatCost, formatPct, formatUsd } from "@/shared/helpers/format"
+import { formatPct, formatUsd } from "@/shared/helpers/format"
 
 import { CostByTool } from "./CostByTool"
 import { formatRelativeTime } from "./format"
@@ -24,19 +25,28 @@ function Spend({
   const { isOperator } = useDeploymentOperator()
   const ceiling = useApiKeyCeiling(apiKeyId, isOperator)
   const limit = ceiling.data?.max_budget ?? null
+  // At a glance states the total; this says what it means for the key.
+  const sentences = [
+    isAtApiPrices
+      ? "The cost above is at API prices: the agent reported its requests rather than sending them through Otari, so on a subscription plan it is what they are worth, not what was charged."
+      : null,
+    ceiling.data && limit !== null
+      ? `This session is ${formatPct(limit > 0 ? cost / limit : 0)} of this key's ${formatUsd(limit)} ceiling, which has ${formatUsd(ceiling.data.current_spend)} spent this period.`
+      : ceiling.isSuccess && !ceiling.data
+        ? "This key has no spend ceiling of its own."
+        : null,
+  ].filter((sentence) => sentence !== null)
+  // The ceiling is a sentence to come while it loads, held as one line so the
+  // sections below do not move when it lands.
+  if (sentences.length === 0 && !ceiling.isLoading) return null
   return (
     <section className="flex flex-col gap-1.5">
       <h3 className="text-overline">Spend</h3>
-      <p className="text-body">
-        {isAtApiPrices
-          ? `At API prices, this session cost ${formatCost(cost)}. The agent reported its requests rather than sending them through Otari, so on a subscription plan this is what they are worth, not what was charged.`
-          : `This session cost ${formatCost(cost)}.`}
-        {ceiling.data && limit !== null
-          ? ` That is ${formatPct(limit > 0 ? cost / limit : 0)} of this key's ${formatUsd(limit)} ceiling, which has ${formatUsd(ceiling.data.current_spend)} spent this period.`
-          : ceiling.isSuccess && !ceiling.data
-            ? " This key has no spend ceiling of its own."
-            : null}
-      </p>
+      {sentences.length > 0 ? (
+        <p className="text-body">{sentences.join(" ")}</p>
+      ) : (
+        <Skeleton className="h-5 w-3/4" />
+      )}
       {ceiling.data && limit !== null ? (
         <SpendMeter
           spent={ceiling.data.current_spend}
@@ -64,7 +74,7 @@ export function GatewayPanel({
   const start = Date.parse(startedAt)
   return (
     <>
-      <SessionAtAGlance stats={gateway.stats} />
+      <SessionAtAGlance stats={gateway.stats} cost={gateway.cost} />
       <Spend
         cost={gateway.cost}
         apiKeyId={gateway.apiKeyId}

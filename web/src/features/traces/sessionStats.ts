@@ -9,6 +9,13 @@ export interface ToolTally {
   runningMs: number
 }
 
+export interface ModelTally {
+  model: string
+  requests: number
+  /** What the gateway recorded for its requests; null when none of them carried a cost. */
+  cost: number | null
+}
+
 export interface Meters {
   input: number
   output: number
@@ -27,14 +34,24 @@ export interface SessionStats {
   gates: { runs: number; verdicts: Partial<Record<GuardrailVerdict, number>> }
   /** The judge gates that called a model: what they ran on and what the priced ones cost. */
   judges: { calls: number; models: string[]; cost: number; priced: number }
-  /** Each overlapping span counted once, but subagents run alongside the main agent, so these can add up past `lengthMs`. */
+  /**
+   * Each overlapping span counted once. A tool runs until any subagent it started
+   * finishes, and that subagent's requests count as model time too, so these can
+   * add up past `lengthMs`.
+   */
   time: { modelMs: number; toolsMs: number; waitingMs: number; hooksMs: number }
+  /** Time something was happening, overlaps counted once; the rest of `lengthMs` was idle. */
+  activeMs: number
+  /** Tool time spent wholly inside a model request, which is where a gateway's built-in tools run. */
+  toolsInModelMs: number
   tokens: Meters
   /** What the priced requests cost per meter; null when none was priced by the token. */
   cost: Meters | null
   /** What reading from the cache saved over paying for those tokens as fresh input. */
   cacheSaved: number | null
   pricedRequests: number
+  /** Each model the requests ran on, the costliest first. */
+  models: ModelTally[]
 }
 
 const EXECUTION = "tool.execution"
@@ -50,18 +67,31 @@ function interval(span: TraceSpan): [number, number] | null {
   return end > start ? [start, end] : null
 }
 
-function unionMs(intervals: Array<[number, number] | null>): number {
+type Interval = [number, number]
+
+// The intervals as the time they cover: sorted, with every overlap merged.
+function merged(intervals: Array<Interval | null>): Interval[] {
   const sorted = intervals
-    .filter((i): i is [number, number] => i !== null)
+    .filter((i): i is Interval => i !== null)
     .sort((a, b) => a[0] - b[0])
-  let total = 0
-  let reach = Number.NEGATIVE_INFINITY
+  const out: Interval[] = []
   for (const [start, end] of sorted) {
-    const from = Math.max(start, reach)
-    if (end > from) total += end - from
-    reach = Math.max(reach, end)
+    const last = out.at(-1)
+    if (last && start <= last[1]) last[1] = Math.max(last[1], end)
+    else out.push([start, end])
   }
-  return total
+  return out
+}
+
+function unionMs(intervals: Array<Interval | null>): number {
+  return merged(intervals).reduce(
+    (total, [start, end]) => total + end - start,
+    0,
+  )
+}
+
+function isWithin(inner: Interval, cover: Interval[]): boolean {
+  return cover.some(([start, end]) => start <= inner[0] && inner[1] <= end)
 }
 
 function spansMs(spans: readonly TraceSpan[]): number {
@@ -135,6 +165,19 @@ export function sessionStats(
     string,
     { calls: number; intervals: Array<[number, number] | null> }
   >()
+  // A model request's span, by the span it ran under.
+  const requestsUnder = new Map<string, Interval[]>()
+  for (const span of llm) {
+    const own = interval(span)
+    if (!own) continue
+    const key = span.parent_span_id ?? ""
+    const under = requestsUnder.get(key)
+    if (under) under.push(own)
+    else requestsUnder.set(key, [own])
+  }
+  for (const [key, list] of requestsUnder) requestsUnder.set(key, merged(list))
+  const running: Interval[] = []
+  const inRequests: Interval[] = []
   for (const span of tools) {
     const name = span.tool_name ?? "tool"
     const tally = tallies.get(name) ?? { calls: 0, intervals: [] }
@@ -142,9 +185,17 @@ export function sessionStats(
     // Its run, when the agent reported one, leaves out waiting for approval. A
     // run that started a subagent ends when the subagent's last span does,
     // since the run's own span closes as soon as it is started.
+    const cover = requestsUnder.get(span.parent_span_id ?? "") ?? []
     for (const run of runs.get(span.span_id) ?? [span]) {
       const own = interval(run)
-      tally.intervals.push(own && [own[0], Math.max(own[1], lastEnd(run))])
+      if (!own) continue
+      const ran: Interval = [own[0], Math.max(own[1], lastEnd(run))]
+      tally.intervals.push(ran)
+      running.push(ran)
+      // Wholly inside a request it ran beside, as a gateway's built-in tool
+      // runs inside the request that called it. A subagent is the reverse: its
+      // requests run inside the tool, and under the tool rather than beside it.
+      if (isWithin(ran, cover)) inRequests.push(ran)
     }
     tallies.set(name, tally)
   }
@@ -152,7 +203,13 @@ export function sessionStats(
   const cost: Meters = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
   let cacheSaved = 0
   let pricedRequests = 0
+  const models = new Map<string, ModelTally>()
   for (const span of llm) {
+    const model = span.model ?? "unknown model"
+    const tally = models.get(model) ?? { model, requests: 0, cost: null }
+    tally.requests += 1
+    if (span.cost != null) tally.cost = (tally.cost ?? 0) + span.cost
+    models.set(model, tally)
     const cacheRead = span.cache_read_tokens ?? 0
     const cacheWrite = span.cache_write_tokens ?? 0
     const used: Meters = {
@@ -175,7 +232,9 @@ export function sessionStats(
     cost.cacheWrite += used.cacheWrite * rate.cache_write
     cacheSaved += used.cacheRead * (rate.input - rate.cache_read)
   }
-  const executions = detail.spans.filter((span) => span.operation === EXECUTION)
+  const waits = detail.spans.filter((span) => span.operation === WAITING)
+  // A gateway guardrail is a guardrail span too, but not a hook's.
+  const hooks = detail.spans.filter((span) => gateVerdict(span))
   const gates: SessionStats["gates"] = { runs: 0, verdicts: {} }
   const judges: SessionStats["judges"] = {
     calls: 0,
@@ -196,10 +255,16 @@ export function sessionStats(
       judges.priced += 1
     }
   }
+  const activeMs = unionMs([
+    ...running,
+    ...[...llm, ...waits, ...hooks].map(interval),
+  ])
   return {
     turns: detail.turns.length,
+    // The spans can outlast the summary's clock by a little, so the session
+    // is at least as long as what happened in it.
     lengthMs: Math.max(
-      0,
+      activeMs,
       Date.parse(summary.last_activity_at) - Date.parse(summary.started_at),
     ),
     requests: llm.length,
@@ -216,16 +281,16 @@ export function sessionStats(
     judges,
     time: {
       modelMs: spansMs(llm),
-      toolsMs: spansMs(executions.length > 0 ? executions : tools),
-      waitingMs: spansMs(
-        detail.spans.filter((span) => span.operation === WAITING),
-      ),
-      // A gateway guardrail is a guardrail span too, but not a hook's.
-      hooksMs: spansMs(detail.spans.filter((span) => gateVerdict(span))),
+      toolsMs: unionMs(running),
+      waitingMs: spansMs(waits),
+      hooksMs: spansMs(hooks),
     },
+    activeMs,
+    toolsInModelMs: unionMs(inRequests),
     tokens,
     cost: pricedRequests > 0 ? cost : null,
     cacheSaved: pricedRequests > 0 ? cacheSaved : null,
     pricedRequests,
+    models: [...models.values()].sort((a, b) => (b.cost ?? 0) - (a.cost ?? 0)),
   }
 }
