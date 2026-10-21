@@ -447,8 +447,8 @@ class WebSearchCredentialRefusedError(TenancyError):
     old code would fill from the server's own settings, so the deployment's key
     or endpoint would serve the tenant; or one naming a base URL the code that
     serves its provider cannot use, which would send the tenant's key to the
-    provider's public endpoint instead. A 502, the status a malformed
-    credential from the control plane gets (design K).
+    provider's public endpoint instead. A 502: the fault is in a stored
+    credential, not in the request.
     """
 
     status_code = status.HTTP_502_BAD_GATEWAY

@@ -245,7 +245,6 @@ class SandboxBackend:
         purpose_hint: str | None = None,
         timeout_s: float = DEFAULT_EXEC_TIMEOUT_S,
         max_executions: int = 1,
-        auth_token: str | None = None,
         image: str | None = None,
         allowed_tools: frozenset[str] | None = None,
         tally: ToolUsageTally | None = None,
@@ -288,8 +287,6 @@ class SandboxBackend:
             timeout_s * max(max_executions, 1) * _CALLS_PER_ROUND_ALLOWANCE + _SESSION_TTL_SLACK_S,
             _MAX_SESSION_TTL_S,
         )
-        # Sent as `Authorization: Bearer` on every sandbox call when set.
-        self._auth_token = auth_token
         # The sandbox image this session asks for: the workspace's pinned image,
         # else the deployment's, else nothing. Sent as an additive field on
         # ``CreateSession`` (see ``docs/code-execution-protocol.md``), so a
@@ -329,7 +326,6 @@ class SandboxBackend:
                 image=self._image,
                 timeout_s=self._timeout_s,
                 session_ttl_s=self._session_ttl_s,
-                auth_token=self._auth_token,
                 resume=self._resume.provider_session_id if self._resume is not None else None,
                 keep_alive_s=keep_alive_s,
             )

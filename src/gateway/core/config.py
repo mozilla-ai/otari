@@ -911,7 +911,7 @@ class GatewayConfig(
             "workspace. It applies to POST /api/v1/auth/signup and to a first OAuth sign-in. "
             "False (the default) limits both to addresses an admin already added. A single-tenant "
             "deployment needs this, because otherwise anyone who can reach the dashboard can "
-            "register. True suits a control plane that serves many tenants. The signup form also "
+            "register. True suits a deployment that serves many tenants. The signup form also "
             "requires mail, because a new account cannot sign in until its address is verified. "
             "An OAuth sign-in does not require mail, because the provider has already verified "
             "the address. Enabling it puts tenant creation on an unauthenticated route: the per-IP throttle "

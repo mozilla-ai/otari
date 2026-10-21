@@ -61,9 +61,9 @@ from gateway.services.usage_admin_service import (
     set_usage_price,
 )
 
-# Two routers under one prefix, because the two planes that meet here
-# authenticate differently. Reading or amending usage rows across an
-# organization is an operator's job, so that gate is declared on the router and a route added later
+# Two routers under one prefix, because their callers authenticate
+# differently. Reading or amending usage rows across an organization is an
+# operator's job, so that gate is declared on the router and a route added later
 # inherits it; ``POST /external-events`` files rows on behalf of the API key that
 # holds them, and ``GET /requests/{request_id}`` reads a key's own request back,
 # so both sit on a router of their own rather than a route-level override, and

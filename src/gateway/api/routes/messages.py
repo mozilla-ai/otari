@@ -818,13 +818,7 @@ class _MessagesAdapter:
         provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
         return await call_messages(amessages, provider_kwargs)  # type: ignore[no-any-return]
 
-    def prepare_stream_kwargs(
-        self,
-        kwargs: dict[str, Any],
-        *,
-        require_usage: bool = False,
-    ) -> dict[str, Any]:
-        del require_usage
+    def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         kwargs["stream"] = True
         return kwargs
 

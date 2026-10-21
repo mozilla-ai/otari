@@ -1097,12 +1097,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ChunkT]: ...
 
-    def prepare_stream_kwargs(
-        self,
-        kwargs: dict[str, Any],
-        *,
-        require_usage: bool = False,
-    ) -> dict[str, Any]:
+    def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Normalize per-call kwargs for a streaming dispatch (e.g. force
         ``stream=True`` or inject ``stream_options``)."""
         ...

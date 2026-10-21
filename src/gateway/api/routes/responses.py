@@ -352,13 +352,7 @@ class _ResponsesAdapter:
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ResponseStreamEvent]:
         return await call_responses(aresponses, _with_upstream_user(kwargs))  # type: ignore[no-any-return]
 
-    def prepare_stream_kwargs(
-        self,
-        kwargs: dict[str, Any],
-        *,
-        require_usage: bool = False,
-    ) -> dict[str, Any]:
-        del require_usage
+    def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         kwargs["stream"] = True
         return kwargs
 

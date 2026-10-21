@@ -260,8 +260,8 @@ class OrganizationPricingService:
         would prove it through the role gate and the identity resolver instead.
 
         The deployment operator is exempt because they are the party the rule
-        protects. On a standalone deployment that identity is also the single
-        organization's administrator, so nothing there changes; on a control plane
+        protects. On a single-tenant deployment that identity is also the single
+        organization's administrator, so nothing there changes; on a deployment
         serving tenants who did not pay for the upstream capacity, an override on a
         deployment-supplied instance would let a tenant name its own cost basis,
         and a zero would make the model free and spend no budget.

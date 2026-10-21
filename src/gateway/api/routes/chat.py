@@ -314,17 +314,9 @@ class _ChatAdapter:
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ChatCompletionChunk]:
         return await acompletion(**_with_upstream_user(kwargs))  # type: ignore[return-value]
 
-    def prepare_stream_kwargs(
-        self,
-        kwargs: dict[str, Any],
-        *,
-        require_usage: bool = False,
-    ) -> dict[str, Any]:
-        options = kwargs.get("stream_options")
-        if options is None:
+    def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if kwargs.get("stream_options") is None:
             kwargs["stream_options"] = {"include_usage": True}
-        elif require_usage:
-            kwargs["stream_options"] = {**options, "include_usage": True}
         return kwargs
 
     async def run_tool_loop(

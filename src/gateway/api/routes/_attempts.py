@@ -2,8 +2,7 @@
 
 This is the executor half of routing: something upstream decides *which*
 candidates to try and in what order (a routing policy), and this module tries them. It makes no
-selection decisions of its own, which is the property that keeps the data plane
-free of routing logic (see ARCHITECTURE.md).
+selection decisions of its own.
 
 It deliberately does **not** settle the budget. A reservation is per request,
 not per attempt, so the caller reserves once, calls this, and reconciles or

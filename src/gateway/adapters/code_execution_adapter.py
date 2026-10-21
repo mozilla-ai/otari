@@ -87,7 +87,6 @@ class ProtocolCodeExecutionAdapter(CodeExecutionPort):
         image: str | None = None,
         timeout_s: float,
         session_ttl_s: float,
-        auth_token: str | None = None,
         resume: str | None = None,
         keep_alive_s: float | None = None,
     ) -> AsyncIterator[CodeExecutionSession]:
@@ -96,8 +95,7 @@ class ProtocolCodeExecutionAdapter(CodeExecutionPort):
         # which is the one lifetime hint the contract has.
         del session_ttl_s
         stack = AsyncExitStack()
-        headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else None
-        client = await stack.enter_async_context(httpx.AsyncClient(timeout=timeout_s, headers=headers))
+        client = await stack.enter_async_context(httpx.AsyncClient(timeout=timeout_s))
         try:
             if resume is not None:
                 session_id = resume

@@ -23,7 +23,7 @@ _SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
     re.compile(r"(?:Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
     # Provider key formats: a known prefix plus the key body. Covers OpenAI
     # (sk-, sk-proj-), Anthropic (sk-ant-), Groq (gsk_), xAI (xai-), and
-    # otari's own tk_ / gw_ tokens.
+    # otari's own keys (tk-, tk_, legacy gw-).
     re.compile(r"\b(?:sk|pk|rk|gsk|xai|tk|gw)[-_][A-Za-z0-9._-]{8,}", re.IGNORECASE),
     # Google API keys, which carry a fixed prefix and no separator.
     re.compile(r"\bAIza[A-Za-z0-9._-]{10,}"),
