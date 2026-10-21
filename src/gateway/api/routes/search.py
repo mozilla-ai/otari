@@ -67,6 +67,7 @@ from gateway.api.deps import (
     get_log_writer,
     verify_api_key_or_master_key,
 )
+from gateway.api.request_id import set_request_id
 from gateway.api.routes._passthrough import (
     PASSTHROUGH_PROVIDER_ERROR_DETAIL,
     resolve_passthrough_user_id,
@@ -250,6 +251,8 @@ async def _dispatch_search(
     # a process serves both planes, which get_db_if_needed hands a session.
     assert db is not None
     started_at = time.monotonic()
+    request_id = str(uuid.uuid4())
+    set_request_id(raw_request, response, request_id)
     api_key, _ = auth_result
     api_key_id = api_key.id if api_key else None
     # A key flagged exclude_from_budget logs cost but is never reserved or folded
@@ -291,6 +294,7 @@ async def _dispatch_search(
             detail=detail,
             status_code=status_code,
             started_at=started_at,
+            request_id=request_id,
         )
 
     # Picked before any reservation is taken, so an unknown tool costs the
@@ -448,6 +452,7 @@ async def _dispatch_search(
             endpoint=SEARCH_ENDPOINT,
             latency_ms=_elapsed_ms(started_at),
             counts_toward_budget=not budget_exempt,
+            request_group_id=request_id,
             **overrides,
         )
 

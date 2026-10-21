@@ -50,6 +50,7 @@ from gateway.api.deps import (
     get_log_writer,
     model_provider_port_on,
 )
+from gateway.api.request_id import set_request_id
 from gateway.api.routes._helpers import resolve_user_id, with_retry_hint
 from gateway.api.routes._pipeline import (
     DB_UNAVAILABLE_DETAIL,
@@ -202,7 +203,7 @@ class PassthroughOutcome(Generic[ResultT]):
     resolved: ResolvedProvider
     """The resolved selector the call was dispatched against."""
     headers: dict[str, str]
-    """Rate-limit headers for routes that build their own response object."""
+    """The request id and rate-limit headers, for routes that build their own response object."""
     pricing: ResolvedPricing | None = None
     """The rate found for the request and where it came from, or ``None`` when there is none."""
     cost: Decimal | None = None
@@ -244,9 +245,9 @@ async def run_passthrough(
     Args:
         endpoint: Path recorded on usage log rows (e.g. ``"/v1/embeddings"``).
         raw_request: Incoming request, used for rate limiting.
-        response: When given, rate-limit headers are set on it. Routes that
-            return their own response object pass ``None`` and read
-            ``PassthroughOutcome.headers`` instead.
+        response: When given, the request id and rate-limit headers are set on
+            it. Routes that return their own response object pass ``None`` and
+            read ``PassthroughOutcome.headers`` instead.
         auth_result: The ``verify_api_key_or_master_key`` dependency result.
         model: The raw request selector; used for the reservation and error
             text, while the resolved short name reaches the provider and logs.
@@ -311,6 +312,10 @@ async def run_passthrough(
             map_provider_error=map_provider_error,
             inline_cost=inline_cost,
         )
+    # Sent on the answer, refusals included, and stamped as every row's
+    # `request_group_id`, as the completion pipeline does.
+    request_id = str(uuid.uuid4())
+    set_request_id(raw_request, response, request_id)
     if auth_result is None or db is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=DB_UNAVAILABLE_DETAIL)
     # Anchor request latency at the earliest point in the scaffold (monotonic,
@@ -361,6 +366,7 @@ async def run_passthrough(
                 detail=str(exc.detail),
                 status_code=exc.status_code,
                 started_at=started_at,
+                request_id=request_id,
             )
         raise
 
@@ -385,6 +391,7 @@ async def run_passthrough(
             detail=detail,
             status_code=status_code,
             started_at=started_at,
+            request_id=request_id,
         )
 
     async def _reserve(estimated_cost: Decimal, *, row_model: str, row_provider: str | None) -> ReservationHandle:
@@ -468,7 +475,7 @@ async def run_passthrough(
                 organization_id=organization_id,
                 api_key_id=api_key_id,
                 user_id=user_id,
-                request_id=None,
+                request_id=request_id,
             )
         except InsufficientFundsError as exc:
             raise await _refuse(
@@ -717,6 +724,7 @@ async def run_passthrough(
             latency_ms=_elapsed_ms(started_at),
             counts_toward_budget=not budget_exempt,
             deployment_paid=deployment_charge is not None,
+            request_group_id=request_id,
             **outcome,
         )
 
@@ -842,6 +850,7 @@ async def run_passthrough(
     if response is not None:
         for key, value in headers.items():
             response.headers[key] = value
+    headers[REQUEST_ID_HEADER] = request_id
 
     if relabel and resolved.alias is not None:
         relabel_model(result, resolved.alias)
@@ -1253,6 +1262,8 @@ async def run_decision(
     held and charged through ``billing`` as well as the budgets, and no rate is looked up.
     """
     started_at = time.monotonic()
+    request_id = str(uuid.uuid4())
+    set_request_id(raw_request, response, request_id)
     api_key, _ = auth_result
     api_key_id = api_key.id if api_key else None
     budget_exempt = api_key is not None and api_key.exclude_from_budget
@@ -1279,6 +1290,7 @@ async def run_decision(
                 detail=str(exc.detail),
                 status_code=exc.status_code,
                 started_at=started_at,
+                request_id=request_id,
             )
         raise
 
@@ -1296,6 +1308,7 @@ async def run_decision(
             detail=detail,
             status_code=status_code,
             started_at=started_at,
+            request_id=request_id,
         )
 
     try:
@@ -1417,6 +1430,7 @@ async def run_decision(
             endpoint=DECISIONS_ENDPOINT,
             latency_ms=_elapsed_ms(started_at),
             counts_toward_budget=not budget_exempt,
+            request_group_id=request_id,
             **outcome,
         )
 

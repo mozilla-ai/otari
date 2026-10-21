@@ -116,8 +116,12 @@ no way to send them back.
 ### Request ID and inline cost
 
 Every Chat, Messages, and Responses response carries an `Otari-Request-ID`
-header, streaming or not. In hybrid mode it is the platform's id for the
-request; a standalone gateway mints its own. A standalone gateway also names the
+header, streaming or not, and so does every response of the embeddings, rerank,
+images, audio, moderations, decisions and search endpoints. In hybrid mode it is
+the platform's id for the request; a standalone gateway mints its own, sends it
+on a refusal as well, and records it on the request's usage rows, so
+[`GET /api/v1/usage/requests/{request_id}`](#cost-of-a-failed-or-interrupted-request)
+finds the request's cost by it. A standalone gateway also names the
 provider instance and model that served the request, whether a fallback did, and
 how long it took, in `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`,
 `Otari-Fallback` and `Otari-Response-Duration-Ms`; see

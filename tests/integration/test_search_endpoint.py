@@ -11,6 +11,7 @@ on the old client until any-search has its adapter, is stubbed at
 """
 
 import logging
+import time
 from collections.abc import Generator, Sequence
 from decimal import Decimal
 from typing import Any
@@ -22,7 +23,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from gateway.api.deps import get_web_search_policy_port, reset_config
-from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig, RateLimitRule
+from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig, RateLimitRule
 from gateway.core.database import reset_db
 from gateway.core.settings.pricing import PricingConfig
 from gateway.exceptions.tools_exceptions import SearchToolNotFoundError
@@ -1489,3 +1490,27 @@ def test_a_search_the_workspaces_own_key_serves_needs_the_web_search_row(
     assert "Tools & Guardrails" in detail
     assert served.status_code == 200, served.text
     keyed.assert_awaited_once()
+
+
+def test_a_search_is_answered_and_recorded_under_its_request_id(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """As on chat completions, the id the caller was sent finds the search's settlement."""
+    resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
+    assert resp.status_code == 200, resp.text
+    request_id = resp.headers[REQUEST_ID_HEADER]
+
+    deadline = time.monotonic() + 3.0
+    while (
+        settled := client.get(f"{API_ROOT}/usage/requests/{request_id}", headers=api_key_header)
+    ).status_code == 404 and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert settled.status_code == 200, settled.text
+    assert settled.json()["status"] == "success"
+    assert settled.json()["row_count"] == 1
+
+
+def test_a_refused_search_carries_its_request_id(client: TestClient, api_key_header: dict[str, str]) -> None:
+    resp = client.post(f"{API_ROOT}/search/no-such-tool", json=SEARCH_PAYLOAD, headers=api_key_header)
+    assert resp.status_code == 400, resp.text
+    assert resp.headers[REQUEST_ID_HEADER]
