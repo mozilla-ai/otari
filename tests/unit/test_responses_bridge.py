@@ -211,9 +211,24 @@ async def test_options_translate_and_responses_only_fields_are_dropped() -> None
 @pytest.mark.asyncio
 async def test_prompt_cache_key_is_dropped_for_a_provider_without_one() -> None:
     captured: dict[str, Any] = {}
-    await _call(captured, _completion({"content": "ok"}), input_data="hi", prompt_cache_key="k")
+    await _call(
+        captured,
+        _completion({"content": "ok"}),
+        provider="anthropic",
+        model="claude-haiku-4-5",
+        input_data="hi",
+        prompt_cache_key="k",
+    )
 
     assert "prompt_cache_key" not in captured
+
+
+@pytest.mark.asyncio
+async def test_prompt_cache_key_reaches_a_provider_with_one() -> None:
+    captured: dict[str, Any] = {}
+    await _call(captured, _completion({"content": "ok"}), input_data="hi", prompt_cache_key="k")
+
+    assert captured["prompt_cache_key"] == "k"
 
 
 @pytest.mark.parametrize("field", ["previous_response_id", "conversation", "background"])

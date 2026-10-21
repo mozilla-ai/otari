@@ -306,7 +306,7 @@ wheels = [
 
 [[package]]
 name = "any-llm-sdk"
-version = "1.38.0"
+version = "1.39.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
@@ -317,9 +317,9 @@ dependencies = [
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c2/91/b6b3bd53f3e49f399b29623ffa1c0fc8a5f6e1dedd2a340223663525fcfc/any_llm_sdk-1.38.0.tar.gz", hash = "sha256:c490d404e4835147724daffe8b55b121dd9ff8a7495ae88a44b86815417d6de5", size = 298677, upload-time = "2026-10-19T11:49:09.394Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3f/68/7d18e955fa7807a1105c61662df43678a1b816f5dd4358b00d1ab1951c86/any_llm_sdk-1.39.0.tar.gz", hash = "sha256:584076c833059734f906852d636d67adc7204eed5fa6e594035a8cf77f8faa4a", size = 301900, upload-time = "2026-10-21T09:00:17.218Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/73/0a/df3e0550ba598d120307f075bc0638c5f4801e56d3d349e86e808cb874c3/any_llm_sdk-1.38.0-py3-none-any.whl", hash = "sha256:252958b1716c0705d8bdaef464e58fc98d603e73266579678b97a3e644d6c0dc", size = 363858, upload-time = "2026-10-19T11:49:07.669Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/f0/4ccc7a340f100ed2d2fe299ff173535227ae6ddd4715ff3056045395654d/any_llm_sdk-1.39.0-py3-none-any.whl", hash = "sha256:2e1926d9e196cb8c2cdcb679eebd550103fb75869f1bf9080afc3111e878a4eb", size = 367800, upload-time = "2026-10-21T09:00:15.297Z" },
 ]
 
 [package.optional-dependencies]
@@ -330,6 +330,7 @@ all = [
     { name = "boto3" },
     { name = "cerebras-cloud-sdk" },
     { name = "cohere" },
+    { name = "fireworks-ai" },
     { name = "google-cloud-storage" },
     { name = "google-genai" },
     { name = "groq" },
@@ -1219,6 +1220,25 @@ wheels = [
 ]
 
 [[package]]
+name = "fireworks-ai"
+version = "1.2.28"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "httpx-aiohttp" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f5/40/7b155a80cee06738850162ea6af27d5e582d70caaa23b1486722635d60a5/fireworks_ai-1.2.28.tar.gz", hash = "sha256:a447feeda64ed7c56a32e4928274c6207dc373cfa90507d4a8a30249d0d5f6a9", size = 803076, upload-time = "2026-10-20T20:33:18.333Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/12/fa/06e38d195575588758fc19c6502db7e455098ac2b734bec244aa133405ce/fireworks_ai-1.2.28-py3-none-any.whl", hash = "sha256:7dabbb535894d9a22b1a1d1ddc1e81a7eacdf7d742a22470659d06050ecff96c", size = 779573, upload-time = "2026-10-20T20:33:16.298Z" },
+]
+
+[[package]]
 name = "flatbuffers"
 version = "25.12.19"
 source = { registry = "https://pypi.org/simple" }
@@ -1399,7 +1419,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13.0" },
     { name = "any-fetch", editable = "any-fetch" },
     { name = "any-guardrail", extras = ["azure-content-safety", "bedrock", "openai", "watsonx"], specifier = ">=0.7.7,<0.8.0" },
-    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.38.0" },
+    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.39.0" },
     { name = "any-search", editable = "any-search" },
     { name = "apron-auth", specifier = ">=0.18.0,<0.19.0" },
     { name = "asyncpg", specifier = ">=0.32.0" },
@@ -1806,6 +1826,19 @@ wheels = [
 [package.optional-dependencies]
 http2 = [
     { name = "h2" },
+]
+
+[[package]]
+name = "httpx-aiohttp"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4c/87/3b2df9732a497403e5f4bbf2ec9f25427d53cec797e83070c503649863ef/httpx_aiohttp-0.2.0.tar.gz", hash = "sha256:d4796b981f04734f1d1db9b4d9326ea16bc994f126460b93b69036262cd4a9d8", size = 195714, upload-time = "2026-07-25T07:34:12.17Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e8/e2/74b6bad3a6d342aee12d8b8d825456c02d21d72319c924326d17444c5ff7/httpx_aiohttp-0.2.0-py3-none-any.whl", hash = "sha256:ccd6eb19ba18805476096e8ef0b369a6beda3955db145a538979eface2fce7ff", size = 9732, upload-time = "2026-07-25T07:34:10.939Z" },
 ]
 
 [[package]]
