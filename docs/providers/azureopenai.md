@@ -24,7 +24,7 @@ providers:
 
 `api_base` is the resource endpoint from that page. `https://YOUR-RESOURCE-NAME.openai.azure.com` and `https://YOUR-RESOURCE-NAME.services.ai.azure.com` are both resource endpoints. The provider calls the v1 route: a URL that already ends in `/openai/v1` is left as it is, and `/openai/v1` is appended to any other URL. Give the resource endpoint. A legacy deployment URL such as `https://YOUR-RESOURCE-NAME.openai.azure.com/openai/deployments/gpt-5-mini` has `/openai/v1` appended as well, and the call misses the resource.
 
-A bearer token belongs in `api_key` the same way a resource key does. The client sends that value as its API key. A token-refresh callback cannot be written in `config.yml`, so a token set here is used as given until it expires.
+A bearer token belongs in `api_key` the same way a resource key does. The client sends that value as its API key. A token-refresh callback cannot be written in `config.yml`, so a token set here is used as given until it expires. When it expires, the caller sees HTTP 424 with code `provider_credential_rejected`.
 
 Export the key before starting Otari:
 
