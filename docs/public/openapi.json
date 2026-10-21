@@ -12397,14 +12397,46 @@
       "OrgWebSearchKeyCreateRequest": {
         "description": "What a caller sends to add a key. The service keeps only its ciphertext and ``last4``.",
         "example": {
-          "api_key": "<your Tavily API key>",
+          "api_key": "<your Exa API key>",
+          "kind": "search",
           "name": "production",
-          "provider": "tavily"
+          "provider": "exa"
         },
         "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's endpoint, when not its own. Must be https when the key carries an API key.",
+            "title": "Api Base"
+          },
           "api_key": {
-            "minLength": 1,
-            "title": "Api Key",
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required unless the provider takes no key.",
+            "title": "Api Key"
+          },
+          "kind": {
+            "default": "search",
+            "description": "Whether the key serves the search tool or the fetch tool, and enrichment. Fixed once created.",
+            "enum": [
+              "search",
+              "fetch"
+            ],
+            "title": "Kind",
             "type": "string"
           },
           "name": {
@@ -12413,8 +12445,21 @@
             "title": "Name",
             "type": "string"
           },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider options, under the names the provider catalog lists for the provider.",
+            "title": "Options"
+          },
           "provider": {
-            "description": "The search provider the key is for: tavily or brave.",
+            "description": "The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, lists for the key's kind, other than searxng, or tavily or brave for a search key.",
             "maxLength": 255,
             "title": "Provider",
             "type": "string"
@@ -12422,8 +12467,7 @@
         },
         "required": [
           "provider",
-          "name",
-          "api_key"
+          "name"
         ],
         "title": "OrgWebSearchKeyCreateRequest",
         "type": "object"
@@ -12431,6 +12475,17 @@
       "OrgWebSearchKeyPublic": {
         "description": "One key as the API shows it: never the key itself, only ``last4``.",
         "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
           "archived_at": {
             "anyOf": [
               {
@@ -12457,6 +12512,14 @@
             "title": "Is Org Default",
             "type": "boolean"
           },
+          "kind": {
+            "enum": [
+              "search",
+              "fetch"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
           "last4": {
             "anyOf": [
               {
@@ -12471,6 +12534,19 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key's provider options, with any value whose name looks like a secret masked.",
+            "title": "Options"
           },
           "organization_id": {
             "format": "uuid",
@@ -12494,7 +12570,7 @@
             "title": "Updated At"
           },
           "usable": {
-            "description": "False when this deployment cannot decrypt the stored key, so no search uses it. It is still listed, because replacing or deleting it is what fixes it.",
+            "description": "False when this deployment cannot decrypt the stored key, so no call uses it. It is still listed, because replacing or deleting it is what fixes it.",
             "title": "Usable",
             "type": "boolean"
           }
@@ -12502,6 +12578,7 @@
         "required": [
           "id",
           "organization_id",
+          "kind",
           "provider",
           "name",
           "is_org_default",
@@ -12512,8 +12589,20 @@
         "type": "object"
       },
       "OrgWebSearchKeyUpdateRequest": {
-        "description": "A partial update: only what is set is applied.",
+        "description": "A partial update: only what is set is applied, and ``null`` clears ``api_base`` or ``options``.\n\n``kind`` is fixed once a key is created, so sending it is refused.",
         "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
           "api_key": {
             "anyOf": [
               {
@@ -12537,6 +12626,18 @@
               }
             ],
             "title": "Name"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
           }
         },
         "title": "OrgWebSearchKeyUpdateRequest",
@@ -21464,7 +21565,7 @@
                 "type": "null"
               }
             ],
-            "description": "A search instance whose provider any-search serves, or 'none' to turn in-loop search off.",
+            "description": "A search instance whose provider any-search serves, or 'none' to turn off the deployment's own in-loop search, which an organization key still serves.",
             "title": "Web Search Default Tool"
           },
           "web_search_engines": {
@@ -24970,7 +25071,7 @@
         "type": "object"
       },
       "WorkspaceWebSearchKeyOverrideRequest": {
-        "description": "Tri-state: an omitted flag keeps its value.\n\nPinning a key re-enables it and unpins any other key of the workspace, and turning a\nkey off unpins it. Sending both flags true is refused. Both false deletes the override.",
+        "description": "Tri-state: an omitted flag keeps its value.\n\nPinning a key re-enables it and unpins the workspace's other key of its kind, and turning a\nkey off unpins it. Sending both flags true is refused. Both false deletes the override.",
         "example": {
           "is_default": true
         },
@@ -25010,14 +25111,22 @@
             "type": "boolean"
           },
           "is_default": {
-            "description": "The workspace pinned this key as its own.",
+            "description": "The workspace pinned this key as its own for its kind.",
             "title": "Is Default",
             "type": "boolean"
           },
           "is_effective": {
-            "description": "This is the key the workspace's searches use.",
+            "description": "This is the key the workspace's calls of its kind use.",
             "title": "Is Effective",
             "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "search",
+              "fetch"
+            ],
+            "title": "Kind",
+            "type": "string"
           },
           "last4": {
             "anyOf": [
@@ -25056,6 +25165,7 @@
         "required": [
           "org_web_search_key_id",
           "workspace_id",
+          "kind",
           "provider",
           "name",
           "is_default",
@@ -25079,6 +25189,30 @@
             },
             "title": "Data",
             "type": "array"
+          },
+          "fetch_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider the workspace's fetch tool runs on, and the enrichment of its search hits unless the search's instance names a fetch instance of its own: its effective fetch key's, else the deployment's default fetch instance's, which is builtin for the built-in fetcher.",
+            "title": "Fetch Provider"
+          },
+          "search_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider the workspace's searches run on: its effective search key's, else the deployment's default search's. Null when nothing searches for it.",
+            "title": "Search Provider"
           }
         },
         "required": [
@@ -39253,7 +39387,7 @@
     },
     "/api/v1/organizations/me/web-search-keys": {
       "get": {
-        "description": "List the caller's organization's web search keys. Organization owners and admins only.",
+        "description": "List the caller's organization's web search and fetch keys. Organization owners and admins only.",
         "operationId": "web-search-keys-list_org_web_search_keys",
         "parameters": [
           {
@@ -39332,7 +39466,7 @@
         ]
       },
       "post": {
-        "description": "Add a web search key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key searches with it rather than with the deployment's search.",
+        "description": "Add a search or fetch key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key of a kind uses it for that kind's calls rather than the deployment's instance.",
         "operationId": "web-search-keys-create_org_web_search_key",
         "requestBody": {
           "content": {
@@ -39382,7 +39516,7 @@
     },
     "/api/v1/organizations/me/web-search-keys/{key_id}": {
       "delete": {
-        "description": "Delete an archived web search key. Organization owners and admins only.",
+        "description": "Delete an archived key. Organization owners and admins only.",
         "operationId": "web-search-keys-delete_org_web_search_key",
         "parameters": [
           {
@@ -39425,7 +39559,7 @@
         ]
       },
       "patch": {
-        "description": "Rename a web search key or replace its secret. Organization owners and admins only.",
+        "description": "Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.\n\nIts kind and provider are fixed.",
         "operationId": "web-search-keys-update_org_web_search_key",
         "parameters": [
           {
@@ -39487,7 +39621,7 @@
     },
     "/api/v1/organizations/me/web-search-keys/{key_id}/archive": {
       "post": {
-        "description": "Take a web search key out of use. Organization owners and admins only.",
+        "description": "Take a key out of use. Organization owners and admins only.",
         "operationId": "web-search-keys-archive_org_web_search_key",
         "parameters": [
           {
@@ -39539,7 +39673,7 @@
     },
     "/api/v1/organizations/me/web-search-keys/{key_id}/default": {
       "post": {
-        "description": "Make a web search key its provider's organization default. Organization owners and admins only.",
+        "description": "Make a key the organization's default of its kind, in place of the previous one.\n\nOrganization owners and admins only.",
         "operationId": "web-search-keys-set_org_default_web_search_key",
         "parameters": [
           {
@@ -39591,7 +39725,7 @@
     },
     "/api/v1/organizations/me/web-search-keys/{key_id}/restore": {
       "post": {
-        "description": "Put an archived web search key back in use. Organization owners and admins only.",
+        "description": "Put an archived key back in use. Organization owners and admins only.",
         "operationId": "web-search-keys-restore_org_web_search_key",
         "parameters": [
           {
@@ -49318,7 +49452,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/web-search-keys": {
       "get": {
-        "description": "The organization's web search keys as this workspace sees them, and which one it searches with.\n\nAny member of the workspace may read it. ``is_effective`` is decided across every key, not only this page.",
+        "description": "The organization's keys as this workspace sees them, and which of each kind it uses.\n\nAny member of the workspace may read it. ``is_effective`` is decided across every key, not only this page,\nand ``search_provider`` and ``fetch_provider`` say what the workspace's searches and fetches run on.",
         "operationId": "web-search-keys-list_workspace_web_search_keys",
         "parameters": [
           {
@@ -49457,7 +49591,7 @@
         ]
       },
       "patch": {
-        "description": "Pin a web search key as this workspace's own, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins. Answers with the list's first page.",
+        "description": "Pin a key as this workspace's own for its kind, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins. Answers with the list's first page.",
         "operationId": "web-search-keys-set_workspace_web_search_key_override",
         "parameters": [
           {

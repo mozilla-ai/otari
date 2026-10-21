@@ -14,9 +14,10 @@ from gateway.adapters import web_search_policy_adapter
 from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy, RemoteWebSearchPolicy
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
 from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError, WebSearchPolicyResolutionFailure
-from gateway.models.tools import WebSearchCredential, WebTool, WebToolCredentialSource
+from gateway.models.tools import WebFetchCredential, WebSearchCredential, WebTool, WebToolCredentialSource
 from gateway.ports.web_search_policy_port import WebSearchPolicyScope
 from gateway.services.tools import WorkspaceSearchKeys
+from gateway.services.tools._web_search_keys import WorkspaceKeys
 
 
 def _scope(user_token: str | None = "tk_user") -> WebSearchPolicyScope:
@@ -227,15 +228,18 @@ async def test_a_local_scope_without_a_workspace_is_a_resolution_failure() -> No
 
 
 class _SearchKeys:
-    """A resolver that answers one credential and records which workspaces asked."""
+    """A resolver that answers one credential of each kind and records which kind each workspace asked for."""
 
-    def __init__(self, credential: WebSearchCredential | None) -> None:
+    def __init__(
+        self, credential: WebSearchCredential | None, fetch_credential: WebFetchCredential | None = None
+    ) -> None:
         self.credential = credential
-        self.asked: list[uuid.UUID] = []
+        self.fetch_credential = fetch_credential
+        self.asked: list[tuple[str, uuid.UUID]] = []
 
-    async def credential_for(self, workspace_id: uuid.UUID) -> WebSearchCredential | None:
-        self.asked.append(workspace_id)
-        return self.credential
+    async def keys_for(self, workspace_id: uuid.UUID, *, search: bool, fetch: bool) -> WorkspaceKeys:
+        self.asked.extend((kind, workspace_id) for kind, wanted in (("search", search), ("fetch", fetch)) if wanted)
+        return WorkspaceKeys(search=self.credential if search else None, fetch=self.fetch_credential if fetch else None)
 
 
 def _local(
@@ -262,7 +266,8 @@ async def test_a_local_search_carries_the_workspaces_own_key(monkeypatch: pytest
 
     assert policy is not None
     assert policy.credential == credential
-    assert search_keys.asked == [workspace_id]
+    assert policy.fetch_credential is None
+    assert search_keys.asked == [("search", workspace_id), ("fetch", workspace_id)]
 
 
 @pytest.mark.asyncio
@@ -275,16 +280,36 @@ async def test_a_local_search_with_no_key_uses_the_deployments_search(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_a_fetch_alone_never_reads_a_key(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_search_carries_the_workspaces_fetch_key_too_for_its_enrichment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch_credential = WebFetchCredential(provider="tabstack", source=WebToolCredentialSource.ORG, api_key="tbs")
+
+    policy = await _local(_SearchKeys(None, fetch_credential), monkeypatch).resolve(
+        WebSearchPolicyScope(workspace_id=uuid.uuid4(), user_token=None), [WebTool.SEARCH]
+    )
+
+    assert policy is not None
+    assert policy.credential is None
+    assert policy.fetch_credential == fetch_credential
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_alone_reads_only_the_fetch_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace_id = uuid.uuid4()
+    fetch_credential = WebFetchCredential(provider="tabstack", source=WebToolCredentialSource.ORG, api_key="tbs")
     search_keys = _SearchKeys(
-        WebSearchCredential(provider="brave", source=WebToolCredentialSource.ORG, api_key="brv-own")
+        WebSearchCredential(provider="brave", source=WebToolCredentialSource.ORG, api_key="brv-own"), fetch_credential
     )
 
-    await _local(search_keys, monkeypatch).resolve(
-        WebSearchPolicyScope(workspace_id=uuid.uuid4(), user_token=None), [WebTool.FETCH]
+    policy = await _local(search_keys, monkeypatch).resolve(
+        WebSearchPolicyScope(workspace_id=workspace_id, user_token=None), [WebTool.FETCH]
     )
 
-    assert search_keys.asked == []
+    assert policy is not None
+    assert policy.credential is None
+    assert policy.fetch_credential == fetch_credential
+    assert search_keys.asked == [("fetch", workspace_id)]
 
 
 @pytest.mark.asyncio

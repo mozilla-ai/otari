@@ -5,7 +5,8 @@ search or fetch keyword, which ``decide_candidate_tools`` then answers per candi
 For the candidates that share one answer, the pipeline calls the rest in order:
 :func:`extract_web_tools` takes the managed web tools out of the request, refusing an
 ambiguous declaration, and :func:`admit_web_access` applies the workspace's web search
-policy, read once for the whole request, and resolves what the admitted tools run on.
+policy, read once for the whole request, and resolves what the admitted tools run on,
+refusing a search nothing can serve.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from gateway.services.tools._web_declarations import (
     web_search_intercept_enabled,
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
-from gateway.services.tools._web_search import resolve_fetch, resolve_in_loop_search
+from gateway.services.tools._web_search import in_loop_search_for, resolve_fetch, resolve_search
 from gateway.services.web_retrieval_policy import MAX_WEB_SEARCH_DOMAINS, DomainPolicy, read_domain_list
 
 if TYPE_CHECKING:
@@ -49,8 +50,9 @@ WEB_SEARCH_INTERCEPTED_DETAIL = (
     "header cannot hand it to the provider"
 )
 WEB_SEARCH_NOT_CONFIGURED_DETAIL = (
-    "otari_web_search tool requested but no search backend is configured on this gateway. "
-    "Set OTARI_WEB_SEARCH_URL on the gateway, or remove otari_web_search from `tools`."
+    "otari_web_search tool requested but there is nothing to search with: this gateway has no search tool, "
+    "and the workspace has no usable organization search key. "
+    "Remove otari_web_search from `tools`, or ask an administrator to add one."
 )
 WEB_SEARCH_MAX_USES_INVALID_DETAIL = "web_search max_uses must be a non-negative integer"
 WEB_FETCH_MAX_USES_INVALID_DETAIL = "web_fetch max_uses must be a non-negative integer"
@@ -282,8 +284,6 @@ def extract_web_tools(
         except ValueError as exc:
             raise WebToolDeclarationError(WEB_FETCH_REQUEST_DOMAIN_INVALID_DETAIL) from exc
     if search_tool_entry is not None:
-        if not _web_search_tool.TOOL.configured(config):
-            raise WebToolDeclarationError(WEB_SEARCH_NOT_CONFIGURED_DETAIL)
         try:
             _canonicalize_request_domains(search_tool_entry)
         except ValueError as exc:
@@ -332,7 +332,9 @@ def admit_web_access(
 
     A declared search, and a declared fetch tool, are resolved here, once for the
     candidates the answer serves, so a credential the resolver cannot use
-    refuses them before any attempt runs.
+    refuses them before any attempt runs. A search runs on the workspace's
+    organization key or the deployment's own search, whichever the resolver
+    finds, and is refused when it finds neither.
 
     Raises:
         WebAccessRefusedError: the policy refuses the request, and the subclass says why.
@@ -340,6 +342,7 @@ def admit_web_access(
         WebSearchOptionRefusedError: the request names an option its search's provider does not take.
         WebSearchCredentialRefusedError: the search's or the fetch tool's credential lacks what its provider needs.
         SearchToolMisconfiguredError: the search's instance cannot be run.
+        WebToolDeclarationError: a search is declared and there is nothing to search with.
     """
     grant = apply_web_access_policy(
         policy,
@@ -353,9 +356,15 @@ def admit_web_access(
         # The request's own options, apart from the workspace's the narrowing merged into its
         # entry, so the resolver refuses a key the provider does not take from a request.
         request_options = (web.search_tool_entry or {}).get("provider_options")
-        in_loop_search = resolve_in_loop_search(
-            config, policy, request_options=request_options if isinstance(request_options, dict) else None
+        search = resolve_search(
+            config,
+            policy,
+            requested=None,
+            request_options=request_options if isinstance(request_options, dict) else None,
         )
+        if search is None:
+            raise WebToolDeclarationError(WEB_SEARCH_NOT_CONFIGURED_DETAIL)
+        in_loop_search = in_loop_search_for(config, policy, search)
     fetch = resolve_fetch(config, policy, requested=None, for_search=None) if web.fetch_tool_entry is not None else None
     return AdmittedWebTools(
         search_tool_entry=grant.search_tool_entry,

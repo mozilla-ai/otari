@@ -4127,15 +4127,15 @@ export interface paths {
         };
         /**
          * List Org Web Search Keys
-         * @description List the caller's organization's web search keys. Organization owners and admins only.
+         * @description List the caller's organization's web search and fetch keys. Organization owners and admins only.
          */
         get: operations["web-search-keys-list_org_web_search_keys"];
         put?: never;
         /**
          * Create Org Web Search Key
-         * @description Add a web search key to the caller's organization. Organization owners and admins only.
+         * @description Add a search or fetch key to the caller's organization. Organization owners and admins only.
          *
-         *     A workspace with a usable key searches with it rather than with the deployment's search.
+         *     A workspace with a usable key of a kind uses it for that kind's calls rather than the deployment's instance.
          */
         post: operations["web-search-keys-create_org_web_search_key"];
         delete?: never;
@@ -4156,14 +4156,16 @@ export interface paths {
         post?: never;
         /**
          * Delete Org Web Search Key
-         * @description Delete an archived web search key. Organization owners and admins only.
+         * @description Delete an archived key. Organization owners and admins only.
          */
         delete: operations["web-search-keys-delete_org_web_search_key"];
         options?: never;
         head?: never;
         /**
          * Update Org Web Search Key
-         * @description Rename a web search key or replace its secret. Organization owners and admins only.
+         * @description Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.
+         *
+         *     Its kind and provider are fixed.
          */
         patch: operations["web-search-keys-update_org_web_search_key"];
         trace?: never;
@@ -4179,7 +4181,7 @@ export interface paths {
         put?: never;
         /**
          * Archive Org Web Search Key
-         * @description Take a web search key out of use. Organization owners and admins only.
+         * @description Take a key out of use. Organization owners and admins only.
          */
         post: operations["web-search-keys-archive_org_web_search_key"];
         delete?: never;
@@ -4199,7 +4201,9 @@ export interface paths {
         put?: never;
         /**
          * Set Org Default Web Search Key
-         * @description Make a web search key its provider's organization default. Organization owners and admins only.
+         * @description Make a key the organization's default of its kind, in place of the previous one.
+         *
+         *     Organization owners and admins only.
          */
         post: operations["web-search-keys-set_org_default_web_search_key"];
         delete?: never;
@@ -4219,7 +4223,7 @@ export interface paths {
         put?: never;
         /**
          * Restore Org Web Search Key
-         * @description Put an archived web search key back in use. Organization owners and admins only.
+         * @description Put an archived key back in use. Organization owners and admins only.
          */
         post: operations["web-search-keys-restore_org_web_search_key"];
         delete?: never;
@@ -6926,9 +6930,10 @@ export interface paths {
         };
         /**
          * List Workspace Web Search Keys
-         * @description The organization's web search keys as this workspace sees them, and which one it searches with.
+         * @description The organization's keys as this workspace sees them, and which of each kind it uses.
          *
-         *     Any member of the workspace may read it. ``is_effective`` is decided across every key, not only this page.
+         *     Any member of the workspace may read it. ``is_effective`` is decided across every key, not only this page,
+         *     and ``search_provider`` and ``fetch_provider`` say what the workspace's searches and fetches run on.
          */
         get: operations["web-search-keys-list_workspace_web_search_keys"];
         put?: never;
@@ -6958,7 +6963,7 @@ export interface paths {
         head?: never;
         /**
          * Set Workspace Web Search Key Override
-         * @description Pin a web search key as this workspace's own, or turn it off for this workspace.
+         * @description Pin a key as this workspace's own for its kind, or turn it off for this workspace.
          *
          *     Organization owners and admins, or this workspace's owners and admins. Answers with the list's first page.
          */
@@ -12892,22 +12897,45 @@ export interface components {
          * OrgWebSearchKeyCreateRequest
          * @description What a caller sends to add a key. The service keeps only its ciphertext and ``last4``.
          * @example {
-         *       "api_key": "<your Tavily API key>",
+         *       "api_key": "<your Exa API key>",
+         *       "kind": "search",
          *       "name": "production",
-         *       "provider": "tavily"
+         *       "provider": "exa"
          *     }
          */
         OrgWebSearchKeyCreateRequest: {
-            /** Api Key */
-            api_key: string;
+            /**
+             * Api Base
+             * @description The provider's endpoint, when not its own. Must be https when the key carries an API key.
+             */
+            api_base?: string | null;
+            /**
+             * Api Key
+             * @description Required unless the provider takes no key.
+             */
+            api_key?: string | null;
+            /**
+             * Kind
+             * @description Whether the key serves the search tool or the fetch tool, and enrichment. Fixed once created.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
             /**
              * Name
              * @description How the organization tells this key apart from its others.
              */
             name: string;
             /**
+             * Options
+             * @description Provider options, under the names the provider catalog lists for the provider.
+             */
+            options?: {
+                [key: string]: unknown;
+            } | null;
+            /**
              * Provider
-             * @description The search provider the key is for: tavily or brave.
+             * @description The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, lists for the key's kind, other than searxng, or tavily or brave for a search key.
              */
             provider: string;
         };
@@ -12916,6 +12944,8 @@ export interface components {
          * @description One key as the API shows it: never the key itself, only ``last4``.
          */
         OrgWebSearchKeyPublic: {
+            /** Api Base */
+            api_base?: string | null;
             /** Archived At */
             archived_at?: string | null;
             /**
@@ -12930,10 +12960,22 @@ export interface components {
             id: string;
             /** Is Org Default */
             is_org_default: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
             /** Last4 */
             last4?: string | null;
             /** Name */
             name: string;
+            /**
+             * Options
+             * @description The key's provider options, with any value whose name looks like a secret masked.
+             */
+            options?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Organization Id
              * Format: uuid
@@ -12945,19 +12987,27 @@ export interface components {
             updated_at?: string | null;
             /**
              * Usable
-             * @description False when this deployment cannot decrypt the stored key, so no search uses it. It is still listed, because replacing or deleting it is what fixes it.
+             * @description False when this deployment cannot decrypt the stored key, so no call uses it. It is still listed, because replacing or deleting it is what fixes it.
              */
             usable: boolean;
         };
         /**
          * OrgWebSearchKeyUpdateRequest
-         * @description A partial update: only what is set is applied.
+         * @description A partial update: only what is set is applied, and ``null`` clears ``api_base`` or ``options``.
+         *
+         *     ``kind`` is fixed once a key is created, so sending it is refused.
          */
         OrgWebSearchKeyUpdateRequest: {
+            /** Api Base */
+            api_base?: string | null;
             /** Api Key */
             api_key?: string | null;
             /** Name */
             name?: string | null;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** OrgWebSearchKeysPublic */
         OrgWebSearchKeysPublic: {
@@ -17138,7 +17188,7 @@ export interface components {
             web_fetch_default_tool?: string | null;
             /**
              * Web Search Default Tool
-             * @description A search instance whose provider any-search serves, or 'none' to turn in-loop search off.
+             * @description A search instance whose provider any-search serves, or 'none' to turn off the deployment's own in-loop search, which an organization key still serves.
              */
             web_search_default_tool?: string | null;
             /** Web Search Engines */
@@ -18483,7 +18533,7 @@ export interface components {
          * WorkspaceWebSearchKeyOverrideRequest
          * @description Tri-state: an omitted flag keeps its value.
          *
-         *     Pinning a key re-enables it and unpins any other key of the workspace, and turning a
+         *     Pinning a key re-enables it and unpins the workspace's other key of its kind, and turning a
          *     key off unpins it. Sending both flags true is refused. Both false deletes the override.
          * @example {
          *       "is_default": true
@@ -18507,14 +18557,19 @@ export interface components {
             disabled: boolean;
             /**
              * Is Default
-             * @description The workspace pinned this key as its own.
+             * @description The workspace pinned this key as its own for its kind.
              */
             is_default: boolean;
             /**
              * Is Effective
-             * @description This is the key the workspace's searches use.
+             * @description This is the key the workspace's calls of its kind use.
              */
             is_effective: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
             /** Last4 */
             last4?: string | null;
             /** Name */
@@ -18543,6 +18598,16 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["WorkspaceWebSearchKeyPublic"][];
+            /**
+             * Fetch Provider
+             * @description The provider the workspace's fetch tool runs on, and the enrichment of its search hits unless the search's instance names a fetch instance of its own: its effective fetch key's, else the deployment's default fetch instance's, which is builtin for the built-in fetcher.
+             */
+            fetch_provider?: string | null;
+            /**
+             * Search Provider
+             * @description The provider the workspace's searches run on: its effective search key's, else the deployment's default search's. Null when nothing searches for it.
+             */
+            search_provider?: string | null;
         };
         /** WorkspacesPublic */
         WorkspacesPublic: {

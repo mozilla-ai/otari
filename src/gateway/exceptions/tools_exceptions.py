@@ -301,17 +301,31 @@ class McpSessionsInterruptedError(Exception):
 
 
 class WebSearchKeyNotFoundError(TenancyNotFoundError):
-    """No web search key with this id in the caller's organization."""
+    """No web search or fetch key with this id in the caller's organization."""
 
     def __init__(self, key_id: object):
         super().__init__(f"Web search key {key_id} not found")
 
 
 class WebSearchKeyUnknownProviderError(TenancyValidationError):
-    """A key named a search provider the managed search tool cannot call."""
+    """A key named a provider its kind's tool cannot call."""
 
-    def __init__(self, provider: str, known: tuple[str, ...]):
-        super().__init__(f"Unknown web search provider '{provider}'. Use one of: {', '.join(known)}")
+    def __init__(self, provider: str, known: tuple[str, ...], *, kind: str = "search"):
+        super().__init__(f"Unknown web {kind} provider '{provider}'. Use one of: {', '.join(known)}")
+
+
+class WebSearchKeyIncompleteError(TenancyValidationError):
+    """A key lacks what its provider needs, which a call would otherwise take from the server's own settings."""
+
+    def __init__(self, provider: str, missing: str):
+        super().__init__(f"A key on {provider} needs {missing}")
+
+
+class WebSearchKeySettingRefusedError(TenancyValidationError):
+    """A key's ``api_base`` or ``options`` its provider, or this deployment, does not take."""
+
+    def __init__(self, field: str, problem: str):
+        super().__init__(f"{field}: {problem}")
 
 
 class WebSearchKeyNameRequiredError(TenancyValidationError):
@@ -325,8 +339,8 @@ class WebSearchKeyMalformedError(TenancyValidationError):
 
 
 class WebSearchKeyAlreadyExistsError(TenancyConflictError):
-    def __init__(self, provider: str, name: str):
-        super().__init__(f"The organization already has a {provider} web search key named '{name}'")
+    def __init__(self, provider: str, name: str, *, kind: str = "search"):
+        super().__init__(f"The organization already has a {provider} web {kind} key named '{name}'")
 
 
 class WebSearchKeyArchivedError(TenancyValidationError):
@@ -344,10 +358,10 @@ class WebSearchKeyNotArchivedError(TenancyValidationError):
 
 
 class WebSearchKeyDefaultConflictError(TenancyConflictError):
-    """Another key became the provider's default at the same time."""
+    """Another key of the same kind became the organization's default at the same time."""
 
-    def __init__(self, provider: str):
-        super().__init__(f"Another {provider} web search key became the default at the same time; retry")
+    def __init__(self, kind: str):
+        super().__init__(f"Another web {kind} key became the default at the same time; retry")
 
 
 class WorkspaceWebSearchKeyOverrideConflictError(TenancyValidationError):

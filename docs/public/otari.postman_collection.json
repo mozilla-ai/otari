@@ -8206,7 +8206,7 @@
         {
           "name": "List Org Web Search Keys",
           "request": {
-            "description": "List the caller's organization's web search keys. Organization owners and admins only.",
+            "description": "List the caller's organization's web search and fetch keys. Organization owners and admins only.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8254,9 +8254,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"api_key\": \"<your Tavily API key>\",\n  \"name\": \"production\",\n  \"provider\": \"tavily\"\n}"
+              "raw": "{\n  \"api_key\": \"<your Exa API key>\",\n  \"kind\": \"search\",\n  \"name\": \"production\",\n  \"provider\": \"exa\"\n}"
             },
-            "description": "Add a web search key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key searches with it rather than with the deployment's search.",
+            "description": "Add a search or fetch key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key of a kind uses it for that kind's calls rather than the deployment's instance.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8289,9 +8289,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"api_key\": \"string\",\n  \"name\": \"string\"\n}"
+              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"name\": \"string\",\n  \"options\": {}\n}"
             },
-            "description": "Rename a web search key or replace its secret. Organization owners and admins only.",
+            "description": "Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.\n\nIts kind and provider are fixed.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8325,7 +8325,7 @@
         {
           "name": "Delete Org Web Search Key",
           "request": {
-            "description": "Delete an archived web search key. Organization owners and admins only.",
+            "description": "Delete an archived key. Organization owners and admins only.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -8354,7 +8354,7 @@
         {
           "name": "Archive Org Web Search Key",
           "request": {
-            "description": "Take a web search key out of use. Organization owners and admins only.",
+            "description": "Take a key out of use. Organization owners and admins only.",
             "header": [],
             "method": "POST",
             "url": {
@@ -8384,7 +8384,7 @@
         {
           "name": "Set Org Default Web Search Key",
           "request": {
-            "description": "Make a web search key its provider's organization default. Organization owners and admins only.",
+            "description": "Make a key the organization's default of its kind, in place of the previous one.\n\nOrganization owners and admins only.",
             "header": [],
             "method": "POST",
             "url": {
@@ -8414,7 +8414,7 @@
         {
           "name": "Restore Org Web Search Key",
           "request": {
-            "description": "Put an archived web search key back in use. Organization owners and admins only.",
+            "description": "Put an archived key back in use. Organization owners and admins only.",
             "header": [],
             "method": "POST",
             "url": {
@@ -8444,7 +8444,7 @@
         {
           "name": "List Workspace Web Search Keys",
           "request": {
-            "description": "The organization's web search keys as this workspace sees them, and which one it searches with.\n\nAny member of the workspace may read it. ``is_effective`` is decided across every key, not only this page.",
+            "description": "The organization's keys as this workspace sees them, and which of each kind it uses.\n\nAny member of the workspace may read it. ``is_effective`` is decided across every key, not only this page,\nand ``search_provider`` and ``fetch_provider`` say what the workspace's searches and fetches run on.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8495,7 +8495,7 @@
               },
               "raw": "{\n  \"is_default\": true\n}"
             },
-            "description": "Pin a web search key as this workspace's own, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins. Answers with the list's first page.",
+            "description": "Pin a key as this workspace's own for its kind, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins. Answers with the list's first page.",
             "header": [
               {
                 "key": "Content-Type",

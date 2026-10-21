@@ -161,7 +161,17 @@ def resolve_in_loop_search(
     they cannot use.
     """
     search = resolve_search(config, policy, requested=None, request_options=request_options)
-    if search is None or search.runner != "library":
+    return in_loop_search_for(config, policy, search) if search is not None else None
+
+
+def in_loop_search_for(
+    config: ToolSettings, policy: ResolvedWebSearchConfig | None, search: ResolvedSearch
+) -> InLoopSearch | None:
+    """``search`` with the fetch that enriches its hits, or ``None`` when the old backend runs it.
+
+    Raises what :func:`resolve_fetch` raises for a fetch credential it cannot use.
+    """
+    if search.runner != "library":
         return None
     return InLoopSearch(search, resolve_fetch(config, policy, requested=None, for_search=search))
 

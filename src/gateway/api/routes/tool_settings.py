@@ -161,7 +161,10 @@ class UpdateToolSettingsRequest(BaseModel):
     web_search_intercept: bool | None = None
     web_search_default_tool: str | None = Field(
         default=None,
-        description="A search instance whose provider any-search serves, or 'none' to turn in-loop search off.",
+        description=(
+            "A search instance whose provider any-search serves, or 'none' to turn off the deployment's own "
+            "in-loop search, which an organization key still serves."
+        ),
     )
     web_fetch_default_tool: str | None = Field(default=None, description="A fetch instance, or 'builtin_fetch'.")
     web_search_max_calls: int | None = Field(default=None, ge=1)

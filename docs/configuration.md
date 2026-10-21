@@ -1097,7 +1097,8 @@ file or environment, then to the built-in default.
 
 - `web_search_default_tool`: the search instance the in-loop tool uses when no
   organization key applies, and the one an unnamed direct call uses. It must be one
-  whose provider the in-loop tool can search with; `none` turns in-loop search off.
+  whose provider the in-loop tool can search with; `none` turns off the deployment's
+  own in-loop search, while a workspace's organization search key still serves it.
   When unset, the in-loop tool uses the search backend the legacy settings
   describe (`web_search_provider` with its key, else `web_search_url`), else the
   only search instance, when there is exactly one and the in-loop tool can search

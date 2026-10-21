@@ -23,7 +23,7 @@ def in_loop_default(settings: ToolSettings) -> ToolInstance | SynthesizedSearchI
     """The search backend the in-loop tool uses when no credential applies.
 
     In order: ``web_search_default_tool`` when it names a search instance whose
-    provider any-search serves, or ``none``, which turns in-loop search off;
+    provider any-search serves, or ``none``, which turns the deployment's own off;
     else the synthesized instance while the legacy settings are present; else
     the one search instance, when there is exactly one and any-search serves its
     provider; else nothing. A default that names no such instance is treated as

@@ -10,19 +10,21 @@ on the old client until any-search has its adapter, is stubbed at
 ``run_keyed_search``.
 """
 
+import json
 import logging
 import time
-from collections.abc import Generator, Sequence
+from collections.abc import AsyncIterator, Generator, Sequence
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from gateway.api.deps import get_web_search_policy_port, reset_config
+from gateway.api.deps import get_web_provider_client, get_web_search_policy_port, reset_config
 from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig, RateLimitRule
 from gateway.core.database import reset_db
 from gateway.core.settings.pricing import PricingConfig
@@ -967,6 +969,46 @@ def test_an_unnamed_call_runs_on_the_workspaces_own_key_priced_as_web_search(
     # The row keeps the tool's names; the cost is the otari:web_search rate, not the tool's.
     assert (row["model"], row["provider"]) == ("fake-search", "fake")
     assert row["cost"] == pytest.approx(0.005)
+
+
+def test_an_unnamed_call_on_an_exa_key_runs_through_any_search_with_the_key(
+    default_tool_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A key on a library provider runs on the library, with its own key and options, under the tool's names."""
+    client = default_tool_client
+    headers = _keyed(client, master_key_header, "exa-key-user")
+    created = client.post(
+        f"{API_ROOT}/organizations/me/web-search-keys",
+        json={"provider": "exa", "name": "ours", "api_key": "exa-org-secret", "options": {"type": "fast"}},
+        headers=master_key_header,
+    )
+    assert created.status_code == 201, created.text
+    _price(client, master_key_header, "otari:web_search", 5000.0)
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        hit = {"url": "https://example.com/exa", "title": "Exa", "text": "From Exa."}
+        return httpx.Response(200, json={"results": [hit], "costDollars": {"total": 0.004}})
+
+    async def web_provider_client() -> AsyncIterator[httpx.AsyncClient]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as answering:
+            yield answering
+
+    client.app.dependency_overrides[get_web_provider_client] = web_provider_client  # type: ignore[attr-defined]
+    resp = client.post(f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "include_raw": True}, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["search_tool"] == "fake-search"
+    assert resp.json()["results"][0]["snippet"] == "From Exa."
+    [request] = seen
+    assert (request.url.host, request.headers["x-api-key"]) == ("api.exa.ai", "exa-org-secret")
+    # The key's own options, not the default tool's, which belong to another provider.
+    assert json.loads(request.content)["type"] == "fast"
+    (row,) = _search_rows(client, master_key_header, "exa-key-user")
+    assert (row["model"], row["provider"]) == ("fake-search", "fake")
+    # Exa's reported cost comes before the otari:web_search rate.
+    assert row["cost"] == pytest.approx(0.004)
 
 
 @pytest.mark.parametrize("field", [{"include_raw": True}, {"provider_options": {"search_depth": "advanced"}}])

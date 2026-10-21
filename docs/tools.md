@@ -183,7 +183,7 @@ served the calls:
 - `<provider>:<instance>` for a search or fetch instance, and
   `builtin:builtin_fetch` for the built-in fetcher;
 - `org:<provider>` for a workspace's
-  [organization search key](#organization-search-keys);
+  [organization search or fetch key](#organization-search-keys);
 - `otari:<tool>` for everything else: code execution, MCP tools, and web search
   on the legacy settings.
 
@@ -853,31 +853,69 @@ where it is `false`, so there web access is something a workspace turns on.
 
 ### Organization search keys
 
-An organization can bring its own key for a search provider (`tavily` or
-`brave`), so its workspaces' searches are paid by its own search account and
-count against its own quota, rather than the deployment's. Organization owners
-and admins manage the keys under `/api/v1/organizations/me/web-search-keys`: add,
-rename or replace a key, archive it, and make one key per provider the
-organization's default. Only the last four characters of a key are ever shown.
+An organization can bring its own provider keys, so its workspaces' searches and
+fetches are paid by its own accounts and count against its own quotas, rather
+than the deployment's. Each key has a kind, fixed when it is added:
 
-Each workspace searches with one key, for model-initiated search and for a
-[direct search](#direct-search) that names no tool:
+- a `search` key serves model-initiated search and a
+  [direct search](#direct-search) that names no tool. Its provider is one
+  `GET /api/v1/search-tools/providers` lists other than `searxng`, or `tavily` or
+  `brave`;
+- a `fetch` key serves the fetch tool and the enrichment of search hits. Its
+  provider is one `GET /api/v1/search-tools/providers?kind=fetch` lists.
 
-1. the key the workspace pinned as its own, if any;
-2. otherwise an organization default, Tavily before Brave;
-3. otherwise the organization's oldest key.
+Organization owners and admins manage the keys under
+`/api/v1/organizations/me/web-search-keys`: add, rename or replace a key,
+archive it, and make one key of each kind the organization's default. Only the
+last four characters of a key are ever shown. A key carries an API key when its
+provider needs one, and may carry its own `api_base` and provider `options`,
+which are checked against the provider when the key is written. An `api_base`
+must use https when the key carries an API key, and the deployment's
+`OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false` refuses one on an internal address,
+as for an organization's model provider keys. A `tavily` or `brave` key takes
+neither, since the older backend that runs them calls their public endpoints.
+A key's calls never fall back to the deployment's own key or endpoint for its
+provider.
+
+Each workspace uses one key of each kind:
+
+1. the key of that kind the workspace pinned as its own, if any;
+2. otherwise the organization's default of that kind;
+3. otherwise the organization's oldest key of that kind.
 
 A key the workspace turned off, an archived key, or one this deployment cannot
-decrypt is passed over. A workspace with no usable key uses the deployment's
-search exactly as before. A workspace's owners and admins pin or turn off keys
-under `/api/v1/workspaces/{workspace_id}/web-search-keys`, which any member of
-the workspace can read to see which key it uses.
+decrypt is passed over. A workspace with no usable key of a kind uses the
+deployment's instance exactly as before. A workspace's owners and admins pin or
+turn off keys under `/api/v1/workspaces/{workspace_id}/web-search-keys`, which
+any member of the workspace can read to see which keys it uses and, as
+`search_provider` and `fetch_provider`, the providers its searches and fetches
+run on.
 
-A key changes who pays for a search, not whether search is available: the
-deployment must still have web search configured, and the workspace's
-web-access policy still applies. In hybrid mode the control plane chooses the
-key and returns it with the workspace's policy; see
+A workspace with a usable search key serves an explicit `otari_web_search`
+declaration even where the deployment has no search of its own, and the
+workspace's web-access policy still applies. Three things stay with the
+deployment's own configuration: `GET /api/v1/tools` and the Playground report
+web search only when the deployment can search, and a provider-native search
+declaration or the `Otari-Web-Search` header is handed to Otari only then, since
+that is decided before the workspace's policy is read. Elsewhere such a
+declaration goes to the model's provider. In hybrid mode the control plane
+chooses the search key and returns it with the workspace's policy; see
 [Web Access resolution](hybrid-mode-protocol.md#web-access-resolution).
+
+A key's calls are labeled `org:<provider>` and priced under `otari:web_search`
+or `otari:web_fetch`, at the cost the provider reported when it reports one (see
+[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). A `tavily` or `brave`
+key's in-loop searches are labeled `otari:web_search` while the older backend runs
+them.
+
+**Upgrading from 0.31.** An organization had one default per provider and now has
+one per kind. Where it had both a Tavily and a Brave default, the Tavily one stays
+the default. A workspace that had turned the Tavily default off, and had neither
+pinned a key nor turned the Brave default off, gets the Brave key pinned, so it
+keeps searching with Brave. One case changes: where this deployment cannot
+decrypt the Tavily default, the workspaces that searched with the Brave default
+in its place now search with the organization's oldest usable key. Check the
+keys' `usable` field before upgrading.
 
 ## Direct search
 

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -143,11 +143,12 @@ class WorkspaceWebSearchConfigPublic(BaseModel):
     # dashboard needs to say "not configured" instead of showing a policy
     # nobody set.
     configured: bool
-    # Whether this deployment can run web search at all, i.e. whether an
-    # operator has pointed it at a backend. The counterpart of
+    # Whether this workspace's ``otari_web_search`` declarations can run at all:
+    # the deployment has a search of its own, or the workspace has a usable
+    # organization search key. The counterpart of
     # `WorkspaceCodeExecutionPolicyPublic.sandbox_configured`, and the ceiling
-    # this row sits under: a workspace switched on where the deployment has no
-    # backend reads as unavailable rather than as working.
+    # this row sits under: a workspace switched on with nothing to search with
+    # reads as unavailable rather than as working.
     web_search_configured: bool
     # What a workspace with no row gets on this deployment: on, or off until a
     # workspace admin turns it on (``web_search_workspace_default``).
@@ -263,10 +264,17 @@ def _stored_domains(value: object) -> tuple[str, ...] | None:
         raise InvalidStoredWebSearchDomainError("stored web-search domain list is invalid") from exc
 
 
+# Whether a workspace has a usable organization search key, which serves its
+# ``otari_web_search`` declarations where the deployment has no search of its own.
+HasSearchKey = Callable[[uuid.UUID], Awaitable[bool]]
+
+
 class WorkspaceWebSearchService:
     """Read, upsert and clear one workspace's web-search configuration."""
 
-    def __init__(self, db: AsyncSession, *, web_search_configured: bool, default_enabled: bool):
+    def __init__(
+        self, db: AsyncSession, *, web_search_configured: bool, default_enabled: bool, has_search_key: HasSearchKey
+    ):
         self.db = db
         self.organizations = OrganizationService(
             db, membership_listener=None, workspace_listener=NullWorkspaceListener()
@@ -276,14 +284,15 @@ class WorkspaceWebSearchService:
         # already holds and a service has no business reaching for.
         self.web_search_configured = web_search_configured
         self.default_enabled = default_enabled
+        self.has_search_key = has_search_key
 
     async def get_config(self, *, user: User, workspace_id: uuid.UUID) -> WorkspaceWebSearchConfigPublic:
         """The workspace's configuration. Reading it takes the same role as setting it."""
         workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)
         config = await self.db.get(WorkspaceWebSearchConfig, workspace.id)
         if config is None:
-            return self._unconfigured(workspace.id)
-        return self._public(config)
+            return await self._unconfigured(workspace.id)
+        return await self._public(config, workspace.id)
 
     async def set_config(
         self,
@@ -328,7 +337,7 @@ class WorkspaceWebSearchService:
             self._apply(config, request)
             await self._commit()
         await self.db.refresh(config)
-        return self._public(config)
+        return await self._public(config, resolved_id)
 
     async def clear_config(self, *, user: User, workspace_id: uuid.UUID) -> WorkspaceWebSearchConfigPublic:
         """Drop the workspace's configuration, returning it to the deployment's behavior.
@@ -342,7 +351,7 @@ class WorkspaceWebSearchService:
         if config is not None:
             await self.db.delete(config)
             await self._commit()
-        return self._unconfigured(workspace.id)
+        return await self._unconfigured(workspace.id)
 
     async def _commit(self) -> None:
         """Commit, rolling back before any failure escapes.
@@ -369,14 +378,22 @@ class WorkspaceWebSearchService:
         config.blocked_domains = request.blocked_domains
         config.provider_options = request.provider_options
 
-    def _public(self, config: WorkspaceWebSearchConfig) -> WorkspaceWebSearchConfigPublic:
+    async def _can_search(self, workspace_id: uuid.UUID) -> bool:
+        """Whether the workspace's search declarations have something to run on, its own key counting."""
+        return self.web_search_configured or await self.has_search_key(workspace_id)
+
+    async def _public(
+        self, config: WorkspaceWebSearchConfig, workspace_id: uuid.UUID
+    ) -> WorkspaceWebSearchConfigPublic:
         return WorkspaceWebSearchConfigPublic.from_model(
-            config, web_search_configured=self.web_search_configured, default_enabled=self.default_enabled
+            config, web_search_configured=await self._can_search(workspace_id), default_enabled=self.default_enabled
         )
 
-    def _unconfigured(self, workspace_id: uuid.UUID) -> WorkspaceWebSearchConfigPublic:
+    async def _unconfigured(self, workspace_id: uuid.UUID) -> WorkspaceWebSearchConfigPublic:
         return WorkspaceWebSearchConfigPublic.unconfigured(
-            workspace_id, web_search_configured=self.web_search_configured, default_enabled=self.default_enabled
+            workspace_id,
+            web_search_configured=await self._can_search(workspace_id),
+            default_enabled=self.default_enabled,
         )
 
     async def _resolve_manageable(self, *, user: User, workspace_id: uuid.UUID) -> Workspace:

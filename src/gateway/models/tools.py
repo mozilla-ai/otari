@@ -289,12 +289,12 @@ class WorkspaceCodeExecutionPolicy(Base):
 
 
 class WorkspaceWebSearchConfig(Base):
-    """A workspace's configuration over the deployment-wide web-search backend.
+    """A workspace's configuration over the web search it runs on.
 
-    The backend itself stays deployment-wide (``web_search_url`` and the
-    credential the adapter in front of it holds are operator concerns and never
-    move here, see ``src/gateway/AGENTS.md``); this row says which workspaces
-    may reach it and how their searches are constrained. Resolved at admission
+    What the workspace searches with is the deployment's instance, or its
+    organization's own key (:class:`OrgWebSearchKey`), which this row never
+    holds; this row says whether the workspace may search and how its searches
+    are constrained. Resolved at admission
     by ``prepare_gateway_tools``, the standalone counterpart of the hybrid
     path's ``/gateway/web-search/resolve``.
 
@@ -368,32 +368,37 @@ class WorkspaceWebSearchConfig(Base):
 
 
 class OrgWebSearchKey(Base):
-    """One web search provider key an organization brings, for its workspaces' searches.
+    """One web search or fetch provider key an organization brings, for its workspaces' calls.
 
     The search counterpart of ``OrgProviderKey`` (``models/provider_keys.py``), decided
     at otari-ai#1748 and mozilla-ai/otari#1724: archival, one default per organization
-    and provider, and per-workspace pin or turn-off overrides
-    (:class:`WorkspaceWebSearchKeyOverride`). A workspace with a usable key searches
-    with it; any other workspace uses the deployment's own search, which this table
-    never changes. The two never merge.
+    and kind, and per-workspace pin or turn-off overrides
+    (:class:`WorkspaceWebSearchKeyOverride`). A workspace with a usable key of a kind
+    uses it for that kind's calls; any other workspace uses the deployment's own
+    instance, which this table never changes. The two never merge.
 
-    ``provider`` is one of ``WEB_SEARCH_PROVIDERS``, the services the managed search
-    tool can call with a key. ``encrypted_api_key`` is Fernet-encrypted with
-    ``OTARI_SECRET_KEY`` (``services/secret_box.py``) and never serialized; ``last4``
-    is what an operator tells two keys apart by.
+    ``kind`` is ``search`` or ``fetch`` and never changes: a search key serves the
+    search tool, a fetch key the fetch tool and the enrichment of search hits.
+    ``provider`` is one the libraries serve for the kind. ``encrypted_api_key`` is
+    Fernet-encrypted with ``OTARI_SECRET_KEY`` (``services/secret_box.py``) and never
+    serialized, and ``None`` for a provider that takes no key; ``last4`` is what an
+    operator tells two keys apart by. ``api_base`` and ``options`` are the key's own
+    endpoint and provider options, ``None`` for the provider's defaults.
 
     CASCADE: an organization-owned credential means nothing once its organization is gone.
     """
 
     __tablename__ = "org_web_search_keys"
     __table_args__ = (
-        UniqueConstraint("organization_id", "provider", "name", name="uq_org_web_search_keys_org_provider_name"),
-        # One live default per (organization, provider), arbitrated by the database
+        UniqueConstraint(
+            "organization_id", "kind", "provider", "name", name="uq_org_web_search_keys_org_kind_provider_name"
+        ),
+        # One live default per (organization, kind), arbitrated by the database
         # so two concurrent "set default" calls cannot both win.
         Index(
-            "uq_org_web_search_keys_org_default",
+            "uq_org_web_search_keys_org_kind_default",
             "organization_id",
-            "provider",
+            "kind",
             unique=True,
             postgresql_where=text("is_org_default AND archived_at IS NULL"),
             sqlite_where=text("is_org_default AND archived_at IS NULL"),
@@ -401,15 +406,21 @@ class OrgWebSearchKey(Base):
         # The target of the override table's composite FK, which pins an override
         # to a key of its own organization.
         UniqueConstraint("organization_id", "id", name="uq_org_web_search_keys_org_id"),
+        # The request schema refuses any other kind first; this is the backstop for
+        # a writer that is not the service.
+        CheckConstraint("kind IN ('search', 'fetch')", name="ck_org_web_search_keys_kind"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="search", server_default="search")
     provider: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    encrypted_api_key: Mapped[str] = mapped_column(Text, nullable=False)
+    api_base: Mapped[str | None] = mapped_column(String(1024), default=None)
+    options: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    encrypted_api_key: Mapped[str | None] = mapped_column(Text, default=None)
     last4: Mapped[str | None] = mapped_column(String(8), default=None)
     archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
     is_org_default: Mapped[bool] = mapped_column(default=False, nullable=False, server_default=false())

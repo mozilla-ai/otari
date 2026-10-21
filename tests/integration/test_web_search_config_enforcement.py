@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.tools import WorkspaceWebSearchConfig
 from gateway.services.tools import WebSearchBackend
+from gateway.services.tools._web_admission import WEB_SEARCH_NOT_CONFIGURED_DETAIL
 from gateway.services.web_retrieval_policy import canonicalize_domain_rules
 
 _SEARCH_URL = "http://127.0.0.1:9998/search"
@@ -261,6 +262,38 @@ def test_a_disabled_workspace_is_refused_before_the_provider_is_called(
     detail = response.json()
     assert detail["error"]["message"] == "web search is not enabled for this workspace"
     assert seen.ran is False, "the tool loop must never have run"
+
+
+def test_a_search_with_nothing_to_search_with_is_refused_without_naming_a_setting(
+    client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No search of the deployment's own and no organization key: refused after the policy is read."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+
+    response, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "type": "error",
+        "error": {"type": "invalid_request_error", "message": WEB_SEARCH_NOT_CONFIGURED_DETAIL},
+    }
+    assert "OTARI_" not in WEB_SEARCH_NOT_CONFIGURED_DETAIL
+    assert seen.ran is False
+
+
+def test_a_disabled_workspace_is_refused_before_its_search_is_found_to_have_nothing_to_run_on(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    _set_config(client, master_key_header, _default_workspace_id(client, master_key_header), enabled=False)
+
+    response, _ = _post_with_search_patched(client, api_key_header, _REQUEST)
+
+    assert response.status_code == 403
+    assert response.json()["error"]["message"] == "web search is not enabled for this workspace"
 
 
 def test_a_disabled_workspace_still_serves_a_request_that_asks_for_no_search(

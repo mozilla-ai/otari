@@ -64,7 +64,7 @@ SEARCH_PROVIDERS_WITHOUT_ADAPTER = ("searxng",)
 # ``builtin`` provider, which no declared instance may use.
 BUILTIN_FETCH = "builtin_fetch"
 BUILTIN_FETCH_PROVIDER = "builtin"
-# The value of ``web_search_default_tool`` that turns in-loop search off, in any
+# The value of ``web_search_default_tool`` that turns the deployment's own in-loop search off, in any
 # case: YAML reads ``None`` as a string, and an operator who writes it means this.
 NO_SEARCH_DEFAULT = "none"
 # Names no instance may take, in any case: each already means something to a
@@ -102,7 +102,7 @@ def supported_fetch_providers() -> tuple[str, ...]:
     )
 
 
-def _is_test_tier(kind: ToolKind, provider: str) -> bool:
+def is_test_tier(kind: ToolKind, provider: str) -> bool:
     """Whether the provider exists for tests: accepted in configuration, never offered."""
     if kind == "fetch":
         return any_fetch.AnyFetch.get_provider_metadata(provider).tier == "test"
@@ -217,7 +217,7 @@ def _validate_tool_entry(kind: ToolKind, name: str, entry: Any) -> str:
     provider = str(entry.get("provider") or name)
     supported = supported_search_providers() if kind == "search" else supported_fetch_providers()
     if provider not in supported:
-        listed = sorted(candidate for candidate in supported if not _is_test_tier(kind, candidate))
+        listed = sorted(candidate for candidate in supported if not is_test_tier(kind, candidate))
         msg = (
             f"{section}.{name}.provider '{provider}' is not a supported {kind} provider (one of: {', '.join(listed)})."
         )
@@ -478,7 +478,8 @@ class ToolSettings(BaseModel):
         description=(
             "The search instance the in-loop otari_web_search tool uses when no organization key "
             "applies, and the one an unnamed POST /api/v1/search call uses. One whose provider "
-            "any-search serves, or 'none' to turn in-loop search off. When unset: the instance the "
+            "any-search serves, or 'none' to turn off the deployment's own in-loop search, which an "
+            "organization key still serves. When unset: the instance the "
             "legacy web_search_provider or web_search_url settings describe, else the only search "
             "instance, if there is exactly one and any-search serves its provider."
         ),

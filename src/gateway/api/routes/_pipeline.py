@@ -4346,7 +4346,12 @@ async def _admit_web_access(
         raise adapter.error(_policy_failure_status(exc.reason), exc.message, ErrorKind.API) from exc
     except (WebAccessRefusedError, WorkspaceWebSearchDomainsExcludedError) as exc:
         raise adapter.error(403, exc.message, ErrorKind.PERMISSION) from exc
-    except (WebSearchOptionRefusedError, WebSearchCredentialRefusedError, SearchToolMisconfiguredError) as exc:
+    except (
+        WebSearchOptionRefusedError,
+        WebSearchCredentialRefusedError,
+        SearchToolMisconfiguredError,
+        WebToolDeclarationError,
+    ) as exc:
         raise domain_error(adapter, exc) from exc
     return replace(admitted, search_url=search_url, search_auth_token=search_auth_token)
 

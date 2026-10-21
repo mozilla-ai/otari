@@ -221,8 +221,11 @@ web-search policy can disable or narrow those settings but cannot widen them.
 A workspace with no row gets `code_execution_on_without_policy()` and
 `web_search_on_without_policy()` (`core/config.py`); the request path, the
 Playground menu and the policy endpoints' `default_enabled` all read them.
-An organization's own web search key changes which account a workspace's
-searches bill to, not whether search is available (`services/tools/_web_search_keys.py`).
+An organization's own search or fetch key changes which account a workspace's
+calls bill to (`services/tools/_web_search_keys.py`). A search key also serves the
+workspace's explicit `otari_web_search` declarations where the deployment has no
+search of its own; provider-native declarations, `GET /api/v1/tools` and the
+Playground follow the deployment's own search alone.
 MCP servers are workspace resources rather than a refinement of a deployment
 server list.
 
