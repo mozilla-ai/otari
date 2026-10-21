@@ -173,13 +173,24 @@ not what was charged.
 A session's header counts its tool calls and the gates its hooks ran, each
 broken down on hover: the calls by tool, and the gates by what they decided.
 **At a glance** opens a session with what it did and where its time and money
-went: its turns, model requests and tool calls; the time spent in model
-requests, hooks, running tools and waiting for you to approve a call; what each
-meter cost (fresh input, output, cache reads and cache writes) and what reading
-from the cache saved over paying for those tokens as fresh input; and each
-tool's calls and running time. A call that started a subagent runs until the
-subagent's last span. Each gate is timed by its own run, so a slow judge gate
-shows on its own.
+went: its turns, model requests and tool calls, then one bar for its time and
+one for its cost, each with a row per part.
+
+- **Time** splits the session into model requests, hooks, running tools,
+  waiting for you to approve a call, and idle between turns. When idle is more
+  than half the session, the bar draws it shorter, marked `//`, and its row
+  keeps the true time and share. Running tools opens onto each tool's calls and
+  running time. A call that started a subagent runs until the subagent's last
+  span, so its time also counts as model time, and the panel says when parts
+  overlap like that. Tools that ran inside the request that called them, as a
+  gateway's built-in web search and code execution do, get a lane of their own
+  under the model's part. Each gate is timed by its own run, so a slow judge
+  gate shows on its own.
+- **Cost** is the session's total, split by meter (fresh input, output, cache
+  reads and cache writes) when the requests were priced by the token, with what
+  reading from the cache saved over paying for those tokens as fresh input.
+  Requests priced whole, as a gateway prices a routed request, are split by
+  model instead. A session with nothing priced says so rather than $0.00.
 
 A judge gate that [reports its model calls](agent-guardrails.md#reporting-to-otari)
 is priced like a request and counted in the session's cost, though not in any

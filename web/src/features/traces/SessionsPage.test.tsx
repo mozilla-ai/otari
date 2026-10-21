@@ -87,6 +87,12 @@ async function openFirstSession(user: Pick<UserEvent, "click"> = userEvent) {
   return screen.findByRole("complementary", { name: "Trace claude-code" })
 }
 
+// The total At a glance heads its Cost block with.
+async function costTotal(peek: HTMLElement) {
+  const heading = await within(peek).findByRole("heading", { name: "Cost" })
+  return heading.nextElementSibling?.textContent
+}
+
 describe("SessionsPage", () => {
   it("opens on the span a link names, and the URL follows the span picked", async () => {
     const user = userEvent.setup()
@@ -181,7 +187,7 @@ describe("SessionsPage", () => {
 
     expect(
       await within(peek).findByText(
-        /This session cost \$0\.50\. That is 5\.0% of this key's \$10\.00 ceiling, which has \$6\.00 spent this period\./,
+        /This session is 5\.0% of this key's \$10\.00 ceiling, which has \$6\.00 spent this period\./,
       ),
     ).toBeInTheDocument()
     expect(
@@ -218,9 +224,7 @@ describe("SessionsPage", () => {
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession()
 
-    expect(
-      await within(peek).findByText("This session cost $0.02."),
-    ).toBeInTheDocument()
+    expect(await costTotal(peek)).toBe("$0.02")
     expect(calls.some((call) => call.url.includes("/scoped-budgets"))).toBe(
       false,
     )
@@ -473,7 +477,7 @@ describe("SessionsPage", () => {
         /^\d+ turns?, \d+ model requests? and \d+ tool calls?/,
       ),
     ).toBeInTheDocument()
-    expect(within(peek).getByText("Tool calls")).toBeInTheDocument()
+    expect(within(peek).getByText("Running tools")).toBeInTheDocument()
   })
 
   it("says in the header how many gates the hooks ran", async () => {
@@ -543,7 +547,7 @@ describe("SessionsPage", () => {
 
     expect(
       await within(peek).findByText(
-        /^Judge gates called a model 1 time, on claude-haiku-4-5-20251001, for \$0\.01\d* of the session's cost\./,
+        /^Judge gates called claude-haiku-4-5-20251001 once, for \$0\.01\d* the split above leaves out\./,
       ),
     ).toBeInTheDocument()
     await userEvent.click(
@@ -596,13 +600,13 @@ describe("SessionsPage", () => {
     ).toHaveAttribute("aria-current", "true")
   })
 
-  it("shows a quiet session's spend", async () => {
+  it("shows a quiet session's cost", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession()
 
-    expect(await within(peek).findByText("Spend")).toBeInTheDocument()
+    expect(await costTotal(peek)).toBe("$0.02")
   })
 
   it("says what a gate is and what its check read when it is opened", async () => {
@@ -887,9 +891,7 @@ describe("SessionsPage", () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
 
-    expect(
-      within(peek).getByText("This session cost $0.50."),
-    ).toBeInTheDocument()
+    expect(await costTotal(peek)).toBe("$0.50")
     expect(within(peek).queryByText(/ceiling/)).not.toBeInTheDocument()
     expect(within(peek).queryByRole("progressbar")).not.toBeInTheDocument()
   })
