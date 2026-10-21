@@ -317,10 +317,11 @@ async def _dispatch_search(
     # down, because the first of them is a question about the workspace.
     usage_workspace_id = await workspace_for_key_id(db, api_key_id)
 
-    # The workspace's web search policy, read as the in-loop tool reads it. A workspace that has turned web search off has turned it
-    # off: leaving this endpoint open would leave the switch bypassable by any key
-    # in that workspace, which is a policy that fails open. Of the rest, only the
-    # result ceiling and the organization key apply here.
+    # The workspace's web search policy, read as the in-loop tool reads it. A
+    # workspace that has turned web search off has turned it off: leaving this
+    # endpoint open would leave the switch bypassable by any key in that
+    # workspace, which is a policy that fails open. Of the rest, only the result
+    # ceiling and the organization key apply here.
     try:
         policy = await web_search_policy.resolve(usage_workspace_id, [WebTool.SEARCH])
     except WebSearchPolicyResolutionFailedError as exc:

@@ -52,8 +52,8 @@ from gateway.api.routes._pipeline import (
     build_streaming_response,
     log_usage,
     prepare_gateway_tools,
-    run_single_attempt_stream,
     run_non_stream,
+    run_single_attempt_stream,
 )
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyValidationError

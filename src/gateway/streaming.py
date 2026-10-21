@@ -235,9 +235,10 @@ async def streaming_generator(
             produced nothing for this long, including while terminal settlement is
             pending. 0 disables.
         is_cost_carrier: Identifies a provider object that can carry cost. It is
-            held, with what follows it, until usage settles. The last match in the stream wins, so a predicate that also matches a non-terminal
-            object costs no buffering beyond the chunks between that match and the
-            next one.
+            held, with what follows it, until usage settles. The last match in
+            the stream wins, so a predicate that also matches a non-terminal
+            object costs no buffering beyond the chunks between that match and
+            the next one.
         attach_settlement: Mutates that carrier with the opaque settlement value.
         on_first_chunk: Called synchronously, at most once, the moment the first
             non-keepalive chunk is about to be formatted and yielded. Lets the

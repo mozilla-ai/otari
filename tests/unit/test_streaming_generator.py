@@ -13,10 +13,10 @@ from sqlalchemy.exc import OperationalError
 from gateway.core.database import describe_database_error
 from gateway.log_config import logger as gateway_logger
 from gateway.streaming import (
+    _MAX_TERMINAL_BUFFER_CHUNKS,
     ANTHROPIC_STREAM_FORMAT,
     OPENAI_STREAM_FORMAT,
     RESPONSES_STREAM_FORMAT,
-    _MAX_TERMINAL_BUFFER_CHUNKS,
     IncompleteStreamError,
     streaming_generator,
 )

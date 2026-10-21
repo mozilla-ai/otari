@@ -58,8 +58,8 @@ from gateway.api.routes._pipeline import (
     release_reservation,
     resolve_dispatch_provider,
     resolve_request_context,
-    run_single_attempt_stream,
     run_non_stream,
+    run_single_attempt_stream,
     scope_prompt_cache_key,
 )
 from gateway.api.routes._request_tags import (
