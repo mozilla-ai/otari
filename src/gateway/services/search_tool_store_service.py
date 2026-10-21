@@ -20,8 +20,7 @@ replica arrives with the rows it names.
 The API key is held encrypted and is optional (a ``searxng`` backend is normally
 keyless); it is decrypted here only to build the in-memory overlay. A row whose
 key cannot be decrypted (no or wrong ``OTARI_SECRET_KEY``) is skipped with a
-warning rather than crashing the gateway. Standalone mode only: the caller must
-not load or refresh this in the hybrid platform path.
+warning rather than crashing the gateway.
 """
 
 import asyncio

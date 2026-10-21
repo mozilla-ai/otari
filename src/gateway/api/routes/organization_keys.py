@@ -44,6 +44,7 @@ from sqlmodel import col
 
 from gateway.api.deps import (
     ApiKeyFormatPortDep,
+    ApiKeyServiceDep,
     CurrentIdentity,
     GrowthSignalPortDep,
     get_config,
@@ -52,8 +53,6 @@ from gateway.api.deps import (
 )
 from gateway.api.routes._helpers import database_error
 from gateway.api.routes.keys import (
-    _KEY_EXCEEDS_USER_DETAIL,
-    NOT_INTERNAL,
     CreateKeyResponse,
     KeyInfo,
     _load_key_in_organization,
@@ -68,10 +67,17 @@ from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.ports.growth_signal_port import GrowthActivationEvent
 from gateway.repositories.users_repository import get_or_create_attribution_user
-from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
+from gateway.services.model_access import (
+    KEY_MODELS_EXCEED_USER_DETAIL,
+    KEY_TOOLS_EXCEED_USER_DETAIL,
+    is_allowlist_subset,
+    tools_within_user,
+    validate_allowed_models,
+    validate_allowed_tools,
+)
+from gateway.services.organizations import AccessLists
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.workspace_scope import organization_default_workspace_id
 
 router = APIRouter(
@@ -100,6 +106,11 @@ class CreateOwnKeyRequest(BaseModel):
         description="Model allow-list: null = any model your user default allows, [] = deny all, "
         "or canonical instance:model entries. A key can only narrow your own model access, "
         "never broaden it.",
+    )
+    allowed_tools: list[str] | None = Field(
+        default=None,
+        description="Search tool allow-list for POST /api/v1/search: null = inherit your own, [] = no tool, "
+        "or search tool names ('*' for every search tool). A key can only narrow your own tool access.",
     )
     reject_user_mismatch: bool | None = Field(
         default=None,
@@ -139,6 +150,8 @@ class UpdateOwnKeyRequest(BaseModel):
     # Tri-state via model_fields_set: absent = unchanged, null = clear to
     # unrestricted (within the user default), [] = deny all, list = restrict.
     allowed_models: list[str] | None = None
+    # Tri-state the same way: null = inherit your own search tool access.
+    allowed_tools: list[str] | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -153,9 +166,7 @@ async def _caller_context(db: AsyncSession, identity: TenancyUser) -> tuple[uuid
     identity's UUID rendered as a string, the attribution convention
     ``get_or_create_attribution_user`` documents.
     """
-    organization = await OrganizationService(
-        db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-    ).get_active_organization_for_user(identity)
+    organization = await OrganizationService(db, membership_listener=None).get_active_organization_for_user(identity)
     return organization.id, str(identity.id)
 
 
@@ -176,7 +187,7 @@ async def create_own_key(
     workspace must be visible to the caller (a member of it, or an organization
     owner/admin, who see every workspace). The secret is returned once.
     """
-    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    organizations = OrganizationService(db, membership_listener=None)
     organization = await organizations.get_active_organization_for_user(identity)
 
     if request.workspace_id is not None:
@@ -217,6 +228,7 @@ async def create_own_key(
 
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)
+        allowed_tools = validate_allowed_tools(config, request.allowed_tools)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -242,8 +254,10 @@ async def create_own_key(
     )
     # A key must not grant more than its user's default, the same narrow-only
     # rule the operator surface enforces; here the user is always the caller.
-    if not is_allowlist_subset(allowed_models, owner.allowed_models):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
+    if not is_allowlist_subset(allowed_models, owner.allowed_models, tool_keys=config.legacy_search_tool_keys()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=KEY_MODELS_EXCEED_USER_DETAIL)
+    if not tools_within_user(config, allowed_tools, user_tools=owner.allowed_tools, user_models=owner.allowed_models):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=KEY_TOOLS_EXCEED_USER_DETAIL)
 
     # ``record_activation`` puts first-occurrence detection on the caller, and
     # this schema has nowhere to record "already notified", so the milestone is
@@ -264,6 +278,7 @@ async def create_own_key(
         user_id=owner.user_id,
         expires_at=request.expires_at,
         allowed_models=allowed_models,
+        allowed_tools=allowed_tools,
         exclude_from_budget=False,
         reject_user_mismatch=request.reject_user_mismatch,
         capture_agent_telemetry=request.capture_agent_telemetry,
@@ -319,7 +334,6 @@ async def list_own_keys(
         .where(
             col(Workspace.organization_id) == organization_id,
             col(APIKey.user_id) == owner_user_id,
-            NOT_INTERNAL,
         )
     )
     if workspace_id is not None:
@@ -340,10 +354,28 @@ async def update_own_key(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    api_keys: ApiKeyServiceDep,
 ) -> KeyInfo:
     """Update one of the caller's own API keys."""
     organization_id, owner_user_id = await _caller_context(db, identity)
     key = await _load_key_in_organization(db, key_id, organization_id, owner_user_id=owner_user_id)
+
+    # Before the key is changed, and narrow-only against the caller's own lists
+    # (see keys.update_key).
+    fields = request.model_fields_set
+    stored = AccessLists(key.allowed_models, key.allowed_tools)
+    try:
+        access = await api_keys.check_access_lists(
+            config,
+            AccessLists(
+                request.allowed_models if "allowed_models" in fields else stored.models,
+                request.allowed_tools if "allowed_tools" in fields else stored.tools,
+            ),
+            stored=stored,
+            owner_id=owner_user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     # Tri-state via model_fields_set: both columns are nullable and the
     # dashboard's edit form sends null to clear them, so "absent" and "null"
@@ -359,18 +391,8 @@ async def update_own_key(
         key.reject_user_mismatch = request.reject_user_mismatch
     if "capture_agent_telemetry" in request.model_fields_set:
         key.capture_agent_telemetry = request.capture_agent_telemetry
-    if "allowed_models" in request.model_fields_set:
-        try:
-            new_allowed = validate_allowed_models(config, request.allowed_models)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        # Narrow-only against the caller's own user default (see create_own_key).
-        user_default = (
-            await db.execute(select(User.allowed_models).where(User.user_id == owner_user_id))
-        ).scalar_one_or_none()
-        if not is_allowlist_subset(new_allowed, user_default):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
-        key.allowed_models = new_allowed
+    key.allowed_models = access.models
+    key.allowed_tools = access.tools
     if request.metadata is not None:
         key.metadata_ = request.metadata
 

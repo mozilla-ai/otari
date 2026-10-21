@@ -1,8 +1,9 @@
-"""Which web search key a workspace uses, and how that key reaches its searches."""
+"""Which web search and fetch keys a workspace uses, how they reach its calls, and which keys may be written."""
 
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -11,9 +12,17 @@ import pytest
 
 from gateway.api.routes._tools import _build_web_retrieval_backend
 from gateway.core.config import GatewayConfig
+from gateway.core.settings.tools import ToolKind
+from gateway.exceptions.tools_exceptions import (
+    WebSearchCredentialRefusedError,
+    WebSearchKeyIncompleteError,
+    WebSearchKeySettingRefusedError,
+    WebSearchKeyUnknownProviderError,
+)
 from gateway.models.tools import (
     OrgWebSearchKey,
     ResolvedWebSearchConfig,
+    WebFetchCredential,
     WebSearchCredential,
     WebTool,
     WebToolCredentialSource,
@@ -22,18 +31,30 @@ from gateway.models.tools import (
 from gateway.repositories.tools import resolve_web_search_key
 from gateway.services import search_backend
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
-from gateway.services.tools import SearchQuery, _web_search_keys, apply_web_access_policy
+from gateway.services.tools import SearchQuery, _web_search_keys, apply_web_access_policy, resolve_search
 from gateway.services.web_search_providers import WebSearchProviderError
 
 _START = datetime(2026, 1, 1, tzinfo=UTC)
 _ORG = WebToolCredentialSource.ORG
+_NO_POLICY = ResolvedWebSearchConfig(
+    enabled=True,
+    max_results=None,
+    purpose_hint=None,
+    allowed_domains=None,
+    blocked_domains=None,
+    provider_options=None,
+    authorized_tools=None,
+)
 
 
-def _key(name: str, *, provider: str = "tavily", default: bool = False, age: int = 0) -> OrgWebSearchKey:
+def _key(
+    name: str, *, provider: str = "tavily", default: bool = False, age: int = 0, kind: str = "search"
+) -> OrgWebSearchKey:
     """A key created ``age`` days after the first, so a smaller age is older."""
     return OrgWebSearchKey(
         id=uuid.uuid4(),
         organization_id=uuid.uuid4(),
+        kind=kind,
         provider=provider,
         name=name,
         encrypted_api_key="ciphertext",
@@ -66,12 +87,11 @@ def test_a_workspace_pin_wins_over_every_default() -> None:
     assert _chosen((old_default, None), (pinned, _override(pinned, pinned=True))) == "pinned"
 
 
-def test_without_a_pin_a_default_wins_and_tavily_before_brave() -> None:
+def test_without_a_pin_the_default_wins_over_an_older_key() -> None:
     oldest = _key("oldest")
-    brave = _key("brave", provider="brave", default=True, age=1)
-    tavily = _key("tavily", default=True, age=2)
+    default = _key("default", provider="brave", default=True, age=1)
 
-    assert _chosen((oldest, None), (brave, None), (tavily, None)) == "tavily"
+    assert _chosen((oldest, None), (default, None)) == "default"
 
 
 def test_without_a_pin_or_default_the_oldest_key() -> None:
@@ -119,9 +139,38 @@ def test_an_organization_key_is_a_credential_from_the_organization(monkeypatch: 
     key = _key("ours", provider="brave")
     key.encrypted_api_key = encrypt_secret("brv-own")
 
-    assert _web_search_keys.search_key_credential(key) == WebSearchCredential(
+    assert _web_search_keys.key_credential(key) == WebSearchCredential(
         provider="brave", source=WebToolCredentialSource.ORG, api_key="brv-own"
     )
+
+
+def test_a_fetch_key_is_a_fetch_credential_with_its_endpoint_and_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    key = _key("pages", provider="tabstack", kind="fetch")
+    key.encrypted_api_key = encrypt_secret("tbs-own")
+    key.api_base = "https://tabstack.example/v1"
+    key.options = {"effort": "standard"}
+
+    assert _web_search_keys.key_credential(key) == WebFetchCredential(
+        provider="tabstack",
+        source=WebToolCredentialSource.ORG,
+        api_key="tbs-own",
+        api_base="https://tabstack.example/v1",
+        options={"effort": "standard"},
+    )
+
+
+def test_a_key_stored_without_a_key_is_never_completed_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EXA_API_KEY", "the-deployments-own-key")
+    key = _key("keyless", provider="exa")
+    key.encrypted_api_key = None
+    credential = _web_search_keys.key_credential(key)
+    assert isinstance(credential, WebSearchCredential)
+    assert credential.api_key is None
+    policy = replace(_NO_POLICY, credential=credential)
+
+    with pytest.raises(WebSearchCredentialRefusedError, match="carries no API key"):
+        resolve_search(GatewayConfig(), policy, requested=None, request_options=None)
 
 
 def test_the_workspace_key_wins_over_the_deployments_provider() -> None:
@@ -274,22 +323,27 @@ class _Overrides:
         self.keys = keys
         self.reads: list[str] = []
 
-    async def preferred_candidates(self, **_kwargs: Any) -> list[tuple[OrgWebSearchKey, None]]:
-        self.reads.append("preferred")
-        return [(key, None) for key in self.keys if key.is_org_default]
+    def _of(self, kind: str | None) -> list[OrgWebSearchKey]:
+        return [key for key in self.keys if kind is None or key.kind == kind]
 
-    async def candidate_page(self, *, skip: int, limit: int, **_kwargs: Any) -> list[tuple[OrgWebSearchKey, None]]:
-        self.reads.append(f"page {skip}")
-        return [(key, None) for key in self.keys[skip : skip + limit]]
+    async def preferred_candidates(self, *, kind: str | None, **_kwargs: Any) -> list[tuple[OrgWebSearchKey, None]]:
+        self.reads.append(f"preferred {kind or 'every kind'}")
+        return [(key, None) for key in self._of(kind) if key.is_org_default]
+
+    async def candidate_page(
+        self, *, skip: int, limit: int, kind: str | None, **_kwargs: Any
+    ) -> list[tuple[OrgWebSearchKey, None]]:
+        self.reads.append(f"page {skip} {kind or 'every kind'}")
+        return [(key, None) for key in self._of(kind)[skip : skip + limit]]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("usable_name", "reads"),
     [
-        ("default", ["preferred"]),
-        ("k3", ["preferred", "page 0"]),
-        ("k45", ["preferred", "page 0", "page 20", "page 40"]),
+        ("default", ["preferred search"]),
+        ("k3", ["preferred search", "page 0 search"]),
+        ("k45", ["preferred search", "page 0 search", "page 20 search", "page 40 search"]),
     ],
 )
 async def test_the_choice_reads_only_the_keys_it_reaches(
@@ -301,13 +355,138 @@ async def test_the_choice_reads_only_the_keys_it_reaches(
     def credential(key: OrgWebSearchKey) -> WebSearchCredential | None:
         return WebSearchCredential(provider=key.provider, source=_ORG, api_key="k") if key.name == usable_name else None
 
-    monkeypatch.setattr(_web_search_keys, "search_key_credential", credential)
+    monkeypatch.setattr(_web_search_keys, "key_credential", credential)
     overrides = _Overrides(keys)
 
-    chosen = await _web_search_keys._choose_key(
-        cast(Any, overrides), uuid.uuid4(), uuid.uuid4(), _web_search_keys._Decrypted()
-    )
+    chosen = (
+        await _web_search_keys._choose_keys(
+            cast(Any, overrides), uuid.uuid4(), uuid.uuid4(), ["search"], _web_search_keys._Decrypted()
+        )
+    )["search"]
 
     assert chosen is not None
     assert chosen.name == usable_name
+    assert overrides.reads == reads
+
+
+@pytest.mark.parametrize(
+    ("kind", "provider"),
+    [
+        ("search", "exa"),
+        ("search", "mojeek"),
+        ("search", "tavily"),
+        ("search", "brave"),
+        ("fetch", "exa"),
+        ("fetch", "tabstack"),
+    ],
+)
+def test_a_key_may_name_a_provider_the_libraries_serve_for_its_kind(kind: ToolKind, provider: str) -> None:
+    assert _web_search_keys._validated_provider(kind, f" {provider.upper()} ") == provider
+
+
+@pytest.mark.parametrize(
+    ("kind", "provider"),
+    [
+        ("search", "fake"),
+        ("fetch", "fake"),
+        ("fetch", "builtin"),
+        ("search", "tabstack"),
+        ("fetch", "mojeek"),
+        ("fetch", "tavily"),
+        ("search", "searxng"),
+        ("search", "nowhere"),
+    ],
+)
+def test_a_key_may_not_name_a_provider_its_kind_does_not_offer(kind: ToolKind, provider: str) -> None:
+    with pytest.raises(WebSearchKeyUnknownProviderError) as refused:
+        _web_search_keys._validated_provider(kind, provider)
+
+    offered = refused.value.message.split("Use one of: ")[1].split(", ")
+    assert provider not in offered
+    assert not {"fake", "builtin"} & set(offered)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("kind", "provider"), [("search", "exa"), ("search", "tavily"), ("fetch", "tabstack")])
+async def test_a_keyed_provider_needs_a_key(kind: ToolKind, provider: str) -> None:
+    with pytest.raises(WebSearchKeyIncompleteError, match="needs an API key"):
+        await _web_search_keys._check_settings(kind, provider, has_key=False, api_base=None, options=None)
+
+
+@pytest.mark.asyncio
+async def test_an_endpoint_takes_a_key_only_over_https() -> None:
+    with pytest.raises(WebSearchKeySettingRefusedError, match="must use https"):
+        await _web_search_keys._check_settings(
+            "search", "exa", has_key=True, api_base="http://exa.example", options=None
+        )
+    with pytest.raises(WebSearchKeySettingRefusedError, match="http or https"):
+        await _web_search_keys._check_settings("search", "exa", has_key=True, api_base="exa.example", options=None)
+
+    await _web_search_keys._check_settings("search", "exa", has_key=True, api_base="https://exa.example", options=None)
+
+
+@pytest.mark.asyncio
+async def test_an_internal_endpoint_is_refused_where_the_deployment_gates_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    internal = "https://10.0.0.7/exa"
+    await _web_search_keys._check_settings("search", "exa", has_key=True, api_base=internal, options=None)
+
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+    with pytest.raises(WebSearchKeySettingRefusedError, match="api_base"):
+        await _web_search_keys._check_settings("search", "exa", has_key=True, api_base=internal, options=None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["tavily", "brave"])
+async def test_a_key_on_the_old_search_code_takes_no_endpoint_or_options(provider: str) -> None:
+    with pytest.raises(WebSearchKeySettingRefusedError, match="neither api_base nor options"):
+        await _web_search_keys._check_settings(
+            "search", provider, has_key=True, api_base="https://search.example", options=None
+        )
+    with pytest.raises(WebSearchKeySettingRefusedError, match="neither api_base nor options"):
+        await _web_search_keys._check_settings(
+            "search", provider, has_key=True, api_base=None, options={"topic": "news"}
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_keys_options_are_checked_against_its_provider() -> None:
+    await _web_search_keys._check_settings("search", "exa", has_key=True, api_base=None, options={"type": "fast"})
+    await _web_search_keys._check_settings("fetch", "tabstack", has_key=True, api_base=None, options={"effort": "max"})
+
+    with pytest.raises(WebSearchKeySettingRefusedError, match="not one the provider knows"):
+        await _web_search_keys._check_settings("search", "exa", has_key=True, api_base=None, options={"effort": "max"})
+    with pytest.raises(WebSearchKeySettingRefusedError, match="a value the provider refuses"):
+        await _web_search_keys._check_settings("search", "exa", has_key=True, api_base=None, options={"type": "neural"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("defaults", "reads"),
+    [
+        ({"search", "fetch"}, ["preferred every kind"]),
+        ({"search"}, ["preferred every kind", "page 0 fetch"]),
+        (set(), ["preferred every kind", "page 0 every kind"]),
+    ],
+    ids=["both-defaults", "search-default", "no-default"],
+)
+async def test_both_kinds_are_chosen_from_one_read_of_the_pins_and_defaults(
+    monkeypatch: pytest.MonkeyPatch, defaults: set[str], reads: list[str]
+) -> None:
+    keys = [
+        _key(f"{kind}-key", provider=provider, kind=kind, default=kind in defaults)
+        for kind, provider in (("search", "exa"), ("fetch", "tabstack"))
+    ]
+    monkeypatch.setattr(
+        _web_search_keys, "key_credential", lambda key: WebSearchCredential(provider=key.provider, source=_ORG)
+    )
+    overrides = _Overrides(keys)
+
+    chosen = await _web_search_keys._choose_keys(
+        cast(Any, overrides), uuid.uuid4(), uuid.uuid4(), ["search", "fetch"], _web_search_keys._Decrypted()
+    )
+
+    assert {kind: key.name if key else None for kind, key in chosen.items()} == {
+        "search": "search-key",
+        "fetch": "fetch-key",
+    }
     assert overrides.reads == reads

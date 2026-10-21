@@ -9,11 +9,6 @@ This works the same way Otari's other "frontier capabilities" do: it
 inspects the request, decides what to do per attachment, and only does work the
 target model actually needs.
 
-> Standalone mode only. Hybrid mode routes to frontier providers that already
-> understand documents/images, so attachments pass through untouched.
-
-
-
 ## Uploading a file
 
 ```bash
@@ -49,8 +44,7 @@ curl http://localhost:8000/api/v1/chat/completions \
 Before you use a local or self-hosted model here (for example
 `ollama:llama3`), make sure Otari is configured for that backend under
 `providers`: set its route (`api_base`, when needed) and any backend
-credentials it expects (such as an API key or token). In standalone mode,
-Otari also requires pricing for that model key by default: add pricing, enable
+credentials it expects (such as an API key or token). Otari also requires pricing for that model key by default: add pricing, enable
 `default_pricing` if it covers the model, or set `require_pricing: false` for
 an intentionally unpriced backend.
 
@@ -85,6 +79,7 @@ Mind the base URL: Anthropic's SDK appends `/v1` itself, so it takes
 
 ```python
 from anthropic import Anthropic
+
 client = Anthropic(base_url="http://localhost:8000/api", api_key="<your-api-key>")
 meta = client.files.upload(file=("report.pdf", open("report.pdf", "rb"), "application/pdf"))
 client.files.download(meta.id)  # Otari serves every stored file's bytes back
@@ -109,9 +104,7 @@ takes the dashboard session rather than an API key. A file uploaded there
 belongs to the signed-in person in the workspace the switcher has selected, the
 same owner a Playground completion runs as, so its `file_id` resolves in their
 messages and in nobody else's. The same person's files uploaded with one of
-their keys in that workspace are listed there too. A hosted control plane does
-not serve these routes, because the data plane that runs its completions could
-not read a file stored on the control plane.
+their keys in that workspace are listed there too.
 
 ## Files and code execution
 

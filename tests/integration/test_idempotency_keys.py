@@ -141,7 +141,8 @@ def test_retry_replays_the_original_response_without_billing_again(
 
     assert second.status_code == 200, second.text
     assert provider.await_count == 1
-    assert second.json() == first.json()
+    assert second.content == first.content
+    assert "system_fingerprint" not in second.json()
     assert second.json()["usage"]["cost_usd"] == first.json()["usage"]["cost_usd"]
     assert second.headers[REQUEST_ID_HEADER] == first.headers[REQUEST_ID_HEADER]
     for name in (PROVIDER_HEADER, MODEL_HEADER, ATTEMPT_COUNT_HEADER, FALLBACK_HEADER):

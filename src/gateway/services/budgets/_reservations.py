@@ -465,7 +465,7 @@ def rerank_estimate(pricing: ModelPricing | None, *, query_chars: int, document_
 def count_estimate(pricing: ModelPricing | None, *, meter: str, count: int) -> Decimal:
     """What a request billed by ``count`` under ``meter`` holds: exactly what that count settles at."""
     clamped = min(max(count, 0), MAX_REPORTED_UNITS)
-    charge = price_usage(pricing, tokens=None, units={meter: clamped}, legacy_unit_reading=True)
+    charge = price_usage(pricing, tokens=None, units={meter: clamped})
     return charge.cost if charge is not None else ZERO
 
 

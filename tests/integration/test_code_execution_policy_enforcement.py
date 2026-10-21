@@ -434,43 +434,6 @@ def test_a_policy_read_that_fails_releases_the_budget_reservation(
     assert float(reserved) == 0.0, "the admission failure left the estimate debited"
 
 
-def test_an_unresolvable_workspace_refuses_rather_than_running_the_sandbox(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The veto's defensive arm fails closed.
-
-    Unreachable today: a standalone request with no session is refused before
-    this, and `resolve_workspace_id` always answers, falling back to the default
-    workspace. It is pinned anyway because the arm guards a veto, so falling
-    through would hand code execution to a workspace whose row refuses it, with
-    nothing to notice. The MCP server adapter's `resolve_many` refuses at the same condition.
-    """
-    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
-
-    async def no_workspace(*_args: Any, **_kwargs: Any) -> None:
-        return None
-
-    monkeypatch.setattr("gateway.api.routes._pipeline.resolve_workspace_id", no_workspace)
-    # The organization-guardrail resolve (otari#654) fails closed on the same
-    # condition and runs first, so without this the request would be refused
-    # before the arm under test. Neutralized rather than asserted around,
-    # because this case is about the sandbox veto; the guardrail gate has its
-    # own coverage in `test_organization_guardrail_enforcement.py`.
-    monkeypatch.setattr(
-        "gateway.api.routes._pipeline._resolve_organization_guardrails",
-        AsyncMock(return_value=[]),
-    )
-
-    response, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
-
-    assert response.status_code == 500
-    detail = response.json()
-    assert detail["error"]["message"] == "Code execution policy could not be resolved for this request"
-    assert seen.max_iterations is None, "the tool loop must never have run"
-
-
 # ---------------------------------------------------------------------------
 # The sandbox image and the exposed tool set (#740)
 # ---------------------------------------------------------------------------

@@ -1,5 +1,7 @@
 """Tests for the POST /api/v1/embeddings endpoint."""
 
+import time
+import uuid
 from collections.abc import Callable
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -14,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gateway.api.routes._pipeline import PROVIDER_TIMEOUT_DETAIL
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, REQUEST_ID_HEADER
 from gateway.core.error_codes import ERROR_CODE_HEADER, UPSTREAM_RATE_LIMITED
 from gateway.exceptions import TenancyValidationError
 from gateway.metrics import REGISTRY
@@ -676,3 +678,111 @@ def test_embeddings_provider_timeout_is_a_504(
         )
     assert resp.status_code == 504
     assert resp.json()["detail"] == PROVIDER_TIMEOUT_DETAIL
+
+
+def _settlement(client: TestClient, request_id: str, headers: dict[str, str], *, timeout: float = 3.0) -> Any:
+    """The request's settlement, polled because the background log writer can lag the response."""
+    deadline = time.monotonic() + timeout
+    while True:
+        response = client.get(f"{API_ROOT}/usage/requests/{request_id}", headers=headers)
+        if response.status_code != 404 or time.monotonic() >= deadline:
+            return response
+        time.sleep(0.1)
+
+
+def _group_ids(db_session_factory: Callable[[], Session], user_id: str) -> list[str | None]:
+    with db_session_factory() as db:
+        rows = db.execute(
+            select(UsageLog).where(UsageLog.user_id == user_id, UsageLog.endpoint == "/v1/embeddings")
+        ).scalars()
+        return [row.request_group_id for row in rows]
+
+
+def test_embeddings_response_carries_a_request_id_its_cost_can_be_looked_up_by(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """As on chat completions, the id the caller was sent is every row's ``request_group_id``."""
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:text-embedding-3-small",
+            "input_price_per_million": 0.02,
+            "output_price_per_million": 0.0,
+        },
+        headers=master_key_header,
+    )
+    mock_resp = _mock_embedding_response(prompt_tokens=1_000)
+    with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+    request_id = resp.headers[REQUEST_ID_HEADER]
+    uuid.UUID(request_id)
+
+    settled = _settlement(client, request_id, api_key_header)
+    assert settled.status_code == 200, settled.text
+    assert settled.json() == {
+        "request_id": request_id,
+        "status": "success",
+        "cost_usd": resp.json()["usage"]["cost_usd"],
+        "prompt_tokens": 1_000,
+        "completion_tokens": 0,
+        "total_tokens": 1_000,
+        "row_count": 1,
+    }
+    assert _group_ids(db_session_factory, api_key_obj["user_id"]) == [request_id]
+
+
+def test_a_failed_embedding_is_answered_and_recorded_under_its_request_id(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    with patch(
+        "gateway.api.routes.embeddings.aembedding",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("provider down"),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 502
+    request_id = resp.headers[REQUEST_ID_HEADER]
+
+    settled = _settlement(client, request_id, api_key_header)
+    assert settled.status_code == 200, settled.text
+    assert settled.json()["status"] == "error"
+    assert _group_ids(db_session_factory, api_key_obj["user_id"]) == [request_id]
+
+
+def test_an_embedding_the_gateway_refuses_is_answered_and_recorded_under_its_request_id(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """A refusal before any provider call carries the id too, as a completion's does."""
+    with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock) as mock:
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "nobodyprovider:some-model", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 400
+    mock.assert_not_called()
+    request_id = resp.headers[REQUEST_ID_HEADER]
+
+    settled = _settlement(client, request_id, api_key_header)
+    assert settled.status_code == 200, settled.text
+    assert settled.json()["status"] == "error"
+    assert _group_ids(db_session_factory, api_key_obj["user_id"]) == [request_id]

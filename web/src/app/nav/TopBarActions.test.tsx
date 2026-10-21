@@ -95,13 +95,6 @@ describe("TopBarActions", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it("adds nothing to the cluster on a gateway attached to otari.ai", async () => {
-    await renderActions({ management_url: "https://otari.ai/" })
-
-    // A management URL does not retarget the local Playground.
-    expect((await settledCluster())?.children).toHaveLength(2)
-  })
-
   it("points Documentation at docs.otari.ai when no docs site is configured", async () => {
     await renderActions()
 

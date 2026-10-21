@@ -104,38 +104,6 @@ describe("App", () => {
     ).toBeInTheDocument()
   })
 
-  it("renders the data-plane landing page for a hybrid gateway", () => {
-    // Signed in locally, which must not matter: a hybrid gateway issues no
-    // management session, so there is no dashboard here to reach.
-    window.localStorage.setItem("otari.dashboard.hasSession", "1")
-    // The landing page's one read. HybridLanding.test.tsx covers what it renders
-    // from the answer; this test is about which root the shell picks.
-    vi.mocked(apiFetch).mockResolvedValue({
-      status: "healthy",
-      mode: "hybrid",
-      platform_reachable: "yes",
-    } as never)
-
-    renderApp(
-      bootstrap({
-        deployment_type: "hybrid",
-        session_type: "none",
-        surfaces: [],
-        management_url: "https://otari.ai",
-      }),
-    )
-
-    expect(
-      screen.getByRole("heading", { name: "Otari gateway" }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("link", { name: "Manage this gateway on otari.ai" }),
-    ).toHaveAttribute("href", "https://otari.ai")
-    expect(document.title).toBe("Gateway · Otari")
-    // The management shell is not merely hidden behind a sign-in here.
-    expect(screen.queryByRole("navigation")).toBeNull()
-  })
-
   it("says so when the deployment context could not be read", () => {
     // main.tsx passes null when /v1/bootstrap did not answer. Assuming a
     // deployment and rendering its dashboard is the failure to avoid.

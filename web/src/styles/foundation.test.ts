@@ -1163,8 +1163,8 @@ describe("content text wears a type role", () => {
       "a workspace description truncated in a cell, and its budget helper",
     ],
     [
-      "features/models/ModelScopeControl.tsx",
-      "the blocked-from-every-model state banner",
+      "features/models/AccessListControl.tsx",
+      "the blocked-from-every-model (or search tool) state banner, ruled in ModelScopeControl before it moved here",
     ],
     [
       "features/overview/OverviewPage.tsx",

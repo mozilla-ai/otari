@@ -5,8 +5,8 @@ handed as keyword arguments: ``org_provider_keys.client_args``,
 ``provider_credentials.client_args`` and ``search_tool_credentials.options``,
 which reach a provider SDK, and ``organization_guardrails.validate_kwargs``,
 which reaches the guardrails service. All four are places a real credential
-legitimately lives (standalone Bedrock needs ``aws_secret_access_key`` in
-``client_args``, ``services/bedrock_gateway_auth.py`` explains why; a guardrail
+legitimately lives (Bedrock needs ``aws_secret_access_key`` in ``client_args``,
+because any-llm never forwards ``api_key`` into its boto3 client; a guardrail
 class can take its vendor key as a parameter), and none of them may echo one
 back over the API. A leaf module rather than a helper on one of the models, so
 the later serializers share the first's rules instead of carrying a copy that

@@ -1,12 +1,11 @@
 """Making an upstream provider message safe to hand back.
 
-Lives in the service layer rather than beside its first caller in
-``api/routes/_platform.py`` because it has a second one that cannot reach the
-API layer: ``services/model_discovery_service`` renders the same class of text
-(an any-llm exception from a provider call) into a provider health or test
-response. ``scripts/check_architecture.py`` forbids a service importing
-``gateway.api``, and a second copy of these patterns would be a copy that goes
-stale, so the patterns live here and both callers import them from here.
+Lives in the service layer because one caller cannot reach the API layer:
+``services/model_discovery_service`` renders the same class of text (an any-llm
+exception from a provider call) into a provider health or test response.
+``scripts/check_architecture.py`` forbids a service importing ``gateway.api``,
+and a second copy of these patterns would go stale, so the patterns live here
+and both callers import them from here.
 """
 
 import re
@@ -24,7 +23,7 @@ _SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
     re.compile(r"(?:Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
     # Provider key formats: a known prefix plus the key body. Covers OpenAI
     # (sk-, sk-proj-), Anthropic (sk-ant-), Groq (gsk_), xAI (xai-), and
-    # otari's own tk_ / gw_ tokens.
+    # otari's own keys (tk-, tk_, legacy gw-).
     re.compile(r"\b(?:sk|pk|rk|gsk|xai|tk|gw)[-_][A-Za-z0-9._-]{8,}", re.IGNORECASE),
     # Google API keys, which carry a fixed prefix and no separator.
     re.compile(r"\bAIza[A-Za-z0-9._-]{10,}"),

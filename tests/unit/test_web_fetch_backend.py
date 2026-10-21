@@ -623,7 +623,10 @@ def test_admission_resolves_no_fetch_where_none_was_declared() -> None:
         fetch_tool_entry=None, remaining_user_tools=None, search_tool_entry={"type": "otari_web_search"}
     )
 
-    assert admit_web_access(search_only, policy=None, config=GatewayConfig()).fetch is None
+    # A search admission refuses where nothing can search, so the deployment has one.
+    config = GatewayConfig(web_search_url="http://searxng:8080")
+
+    assert admit_web_access(search_only, policy=None, config=config).fetch is None
 
 
 @pytest.mark.asyncio

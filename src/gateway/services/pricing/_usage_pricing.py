@@ -2,10 +2,11 @@
 
 The rate's ``unit`` chooses the meter. A ``tokens`` rate prices tokens, an
 ``images`` rate an ``images`` count, and a ``requests`` rate a ``requests`` or
-``search_units`` count, or one request for an attempt that reported neither. A
-rate prices nothing else, so a count never meets a rate written for another
-unit. Standalone settlement and a hybrid gateway's control plane both price
-through :func:`price_usage`, which is how one request costs the same on either.
+``search_units`` count, or one request for an attempt that reported neither.
+The one exception is a ``tokens`` rate on an endpoint billed per image or per
+request, which is read in that endpoint's unit, as the configuration guide
+documented before the rate's unit decided. Settlement prices through
+:func:`price_usage`.
 """
 
 from collections.abc import Mapping
@@ -26,7 +27,7 @@ from gateway.models.pricing import MAX_REPORTED_UNITS, UNIT_METERS, ModelPricing
 
 _REQUESTS, _SEARCH_UNITS, _IMAGES = UNIT_METERS
 
-# The (model key, meter) pairs the legacy reading has already warned about.
+# The (model key, meter) pairs read in the endpoint's unit that have already been warned about.
 _LEGACY_WARNED: set[tuple[str, str]] = set()
 
 
@@ -67,14 +68,11 @@ def price_usage(
     *,
     tokens: BillableUsage | None,
     units: Mapping[str, object],
-    legacy_unit_reading: bool,
 ) -> UsageCharge | None:
     """What one successful attempt costs at ``rate``, or ``None`` when ``rate`` prices nothing it reported.
 
-    ``legacy_unit_reading`` keeps a standalone gateway's older reading of a
-    ``tokens`` rate on the endpoints billed per image or per request: the rate is
-    read in that endpoint's unit, as the configuration guide documented before
-    the rate's unit decided. It warns once per model and meter.
+    A ``tokens`` rate on an attempt that reported images or requests is read in
+    that unit, warning once per model and meter that the rate should name it.
 
     Raises:
         ValueError: ``units`` carries an invalid count (see :func:`validated_units`).
@@ -90,11 +88,10 @@ def price_usage(
         return _per_unit(_IMAGES, counts[_IMAGES], _image_rate(rate)) if _IMAGES in counts else None
     if unit != "tokens":
         return None
-    if legacy_unit_reading:
-        for meter, unit_rate in ((_IMAGES, _legacy_image_rate), (_REQUESTS, _request_rate)):
-            if meter in counts:
-                _warn_legacy(rate, meter)
-                return _per_unit(meter, counts[meter], unit_rate(rate))
+    for meter, unit_rate in ((_IMAGES, _legacy_image_rate), (_REQUESTS, _request_rate)):
+        if meter in counts:
+            _warn_legacy(rate, meter)
+            return _per_unit(meter, counts[meter], unit_rate(rate))
     if to_decimal(rate.input_price_per_million) is None:
         return None
     if tokens is None or (tokens.total_input_tokens <= 0 and tokens.completion_tokens <= 0):
@@ -103,7 +100,7 @@ def price_usage(
     return UsageCharge(cost, meters, lines)
 
 
-def can_price(rate: ModelPricing | None, *, meter: str | None, reports_tokens: bool, legacy_unit_reading: bool) -> bool:
+def can_price(rate: ModelPricing | None, *, meter: str | None, reports_tokens: bool) -> bool:
     """Whether ``rate`` could price an attempt that reports ``meter`` and, when ``reports_tokens``, tokens.
 
     The ``require_pricing`` gate asks this before dispatch, so a rate the
@@ -118,7 +115,7 @@ def can_price(rate: ModelPricing | None, *, meter: str | None, reports_tokens: b
         return meter == _IMAGES
     if unit != "tokens":
         return False
-    return reports_tokens or (legacy_unit_reading and meter in (_IMAGES, _REQUESTS))
+    return reports_tokens or meter in (_IMAGES, _REQUESTS)
 
 
 def request_rate(rate: ModelPricing | None) -> Decimal:

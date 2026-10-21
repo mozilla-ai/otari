@@ -5,7 +5,6 @@
 ## Start here
 
 * [Quickstart](quickstart.md)
-* [Modes](modes.md)
 
 ## For operators
 
@@ -15,6 +14,7 @@
 * [Access control](access-control.md)
 * [Workload identity](workload-identity.md)
 * [Models](models.md)
+* [Hosted providers](hosted-providers.md)
 * [Provider endpoints](provider-endpoints.md)
 * [Routing policies](routing.md)
 * [Health checks](health-checks.md)
@@ -44,5 +44,4 @@
 
 ## For platform builders
 
-* [Hybrid-mode protocol](hybrid-mode-protocol.md)
 * [Code-execution protocol](code-execution-protocol.md)

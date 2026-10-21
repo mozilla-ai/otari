@@ -3,19 +3,14 @@
 from collections.abc import Callable, Generator
 from typing import Any
 
-import httpx
 import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi.testclient import TestClient
 
-from conftest import InstallControlPlane
-from gateway.api.deps import reset_config
-from gateway.api.routes._pipeline import NO_UPSTREAM_USER_DETAIL
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
-from gateway.core.database import reset_db
 from gateway.services.inference import UPSTREAM_USER_FIELD, upstream_user_identifier
 
-from .conftest import app_for, build_test_client
+from .conftest import build_test_client
 
 _MASTER_KEY = "test-master-key"
 _MASTER = {API_KEY_HEADER: f"Bearer {_MASTER_KEY}"}
@@ -222,134 +217,6 @@ def test_turned_off_nothing_is_sent(make_client: ClientFactory, captured: list[d
     _chat(client, headers, user="alice")
 
     assert not {"user", UPSTREAM_USER_FIELD} & set(captured[0])
-
-
-# ---------------------------------------------------------------------------
-# Hybrid mode: the identity comes from the platform's resolve response.
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def hybrid_client(monkeypatch: pytest.MonkeyPatch) -> Generator[Callable[..., TestClient]]:
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    entered: list[TestClient] = []
-
-    def make(**overrides: Any) -> TestClient:
-        app = app_for(GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}, **overrides))
-        client = TestClient(app)
-        client.__enter__()
-        entered.append(client)
-        return client
-
-    yield make
-    for client in entered:
-        client.__exit__(None, None, None)
-    reset_config()
-    reset_db()
-
-
-def _platform(control_plane_transport: InstallControlPlane, **identity: str) -> None:
-    async def fake_post_platform(
-        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
-    ) -> httpx.Response:
-        if url.endswith("/gateway/provider-keys/resolve"):
-            return httpx.Response(
-                200,
-                json={
-                    "request_id": "req-1",
-                    "fallback_enabled": False,
-                    "attempts": [
-                        {
-                            "attempt_id": "att-1",
-                            "position": 0,
-                            "provider": "openai",
-                            "model": "gpt-4o-mini",
-                            "api_key": "sk-platform",
-                            "managed": False,
-                        }
-                    ],
-                    **identity,
-                },
-            )
-        return httpx.Response(204)
-
-    control_plane_transport(fake_post_platform)
-
-
-@pytest.fixture
-def hybrid_captured(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    calls: list[dict[str, Any]] = []
-
-    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
-        calls.append(kwargs)
-        return _completion()
-
-    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
-    return calls
-
-
-_TOKEN = {"Authorization": "Bearer user_test_token"}
-
-
-def test_hybrid_digests_the_platform_workspace_and_user(
-    hybrid_client: Callable[..., TestClient],
-    control_plane_transport: InstallControlPlane,
-    hybrid_captured: list[dict[str, Any]],
-) -> None:
-    _platform(control_plane_transport, workspace_id="ws-1", user_id="platform-user")
-
-    _chat(hybrid_client(), _TOKEN, model="gpt-4o-mini")
-
-    assert hybrid_captured[0]["user"] == upstream_user_identifier("ws-1", "platform-user", None)
-
-
-def test_hybrid_prefers_the_callers_tag(
-    hybrid_client: Callable[..., TestClient],
-    control_plane_transport: InstallControlPlane,
-    hybrid_captured: list[dict[str, Any]],
-) -> None:
-    _platform(control_plane_transport, workspace_id="ws-1")
-
-    _chat(hybrid_client(), _TOKEN, model="gpt-4o-mini", user="end-user-7")
-
-    assert hybrid_captured[0]["user"] == upstream_user_identifier("ws-1", "end-user-7", None)
-
-
-@pytest.mark.parametrize(
-    ("identity", "body"),
-    [({"user_id": "platform-user"}, {"user": "end-user-7"}), ({"workspace_id": "ws-1"}, {}), ({}, {})],
-    ids=["no-workspace", "no-user-no-tag", "neither"],
-)
-def test_hybrid_refuses_a_request_it_cannot_identify(
-    hybrid_client: Callable[..., TestClient],
-    control_plane_transport: InstallControlPlane,
-    hybrid_captured: list[dict[str, Any]],
-    identity: dict[str, str],
-    body: dict[str, Any],
-) -> None:
-    _platform(control_plane_transport, **identity)
-
-    response = hybrid_client().post(
-        f"{API_ROOT}/chat/completions",
-        json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}], **body},
-        headers=_TOKEN,
-    )
-
-    assert response.status_code == 502
-    assert response.json() == {"detail": NO_UPSTREAM_USER_DETAIL}
-    assert hybrid_captured == []
-
-
-def test_hybrid_turned_off_serves_an_unidentified_request(
-    hybrid_client: Callable[..., TestClient],
-    control_plane_transport: InstallControlPlane,
-    hybrid_captured: list[dict[str, Any]],
-) -> None:
-    _platform(control_plane_transport)
-
-    _chat(hybrid_client(provider_user_identifier_enabled=False), _TOKEN, model="gpt-4o-mini")
-
-    assert not {"user", UPSTREAM_USER_FIELD} & set(hybrid_captured[0])
 
 
 # ---------------------------------------------------------------------------

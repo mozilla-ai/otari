@@ -179,7 +179,7 @@ class ApiKeySettings(BaseModel):
         description=(
             "API keys this deployment declares, keyed by a stable name. Each start creates a missing key and "
             "writes the declared secret and settings over an existing one, so config.yml wins over a change made "
-            "through the API. A key removed from here is kept as it is. Standalone mode only."
+            "through the API. A key removed from here is kept as it is."
         ),
     )
 
@@ -188,8 +188,7 @@ class ApiKeySettings(BaseModel):
         description=(
             "OpenID Connect issuers whose identity tokens may authenticate as an API key, in place of its secret, "
             "when they match one of the key's federation rules. Each entry is an https issuer URL or a mapping "
-            "with 'issuer' and an optional 'jwks_uri'. Empty, the default, turns workload identity off. "
-            "Standalone and hosted modes only."
+            "with 'issuer' and an optional 'jwks_uri'. Empty, the default, turns workload identity off."
         ),
     )
 

@@ -13,9 +13,13 @@ An allow-list is one of:
 The matcher (:func:`is_model_allowed`) is the one place membership is decided; both
 the inference gates and the catalog filter feed it the *same* canonical
 ``instance:model`` key so visibility and execution can never disagree.
+
+A search tool has a list of its own, ``allowed_tools``, of tool names
+(:func:`effective_tool_allowlist`), so no model wildcard can grant one.
 """
 
 import uuid
+from collections.abc import Container, Sequence
 from dataclasses import dataclass
 from http import HTTPStatus
 
@@ -25,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
+from gateway.core.settings.tools import ALL_SEARCH_TOOLS
 from gateway.models.api_keys import APIKey
 from gateway.models.users import User
 from gateway.services.alias_service import all_alias_names
@@ -93,16 +98,29 @@ def _covers(parent: list[str], entry: str) -> bool:
     return False
 
 
-def is_allowlist_subset(child: list[str] | None, parent: list[str] | None) -> bool:
+# A key inherits its user's lists and may narrow them, never broaden them, so a
+# key list that grants more than its user's is refused on write.
+KEY_MODELS_EXCEED_USER_DETAIL = (
+    "This key's allowed_models exceeds its user's default; a key can only narrow "
+    "the user's model access, not broaden it."
+)
+KEY_TOOLS_EXCEED_USER_DETAIL = (
+    "This key's allowed_tools exceeds its user's; a key can only narrow the user's search tool access, not broaden it."
+)
+
+
+def is_allowlist_subset(child: list[str] | None, parent: list[str] | None, *, tool_keys: Container[str]) -> bool:
     """Whether ``child`` grants no more than ``parent`` (a key vs its user default).
 
     ``child is None`` means the key inherits the parent, so it can never broaden ->
     always a subset. ``parent is None`` is unrestricted, so any child fits. Otherwise
     every child entry must be covered by the parent; an empty child grants nothing.
+    An entry naming a search tool the deprecated way, one of ``tool_keys``, is
+    covered only by the same entry, since no wildcard grants a tool.
     """
     if child is None or parent is None:
         return True
-    return all(_covers(parent, entry) for entry in child)
+    return all(entry in parent if entry in tool_keys else _covers(parent, entry) for entry in child)
 
 
 def _entry_matches(entry: str, canonical_key: str) -> bool:
@@ -132,19 +150,114 @@ def is_model_allowed(allowlist: list[str] | None, canonical_key: str) -> bool:
     return any(_entry_matches(entry, canonical_key) for entry in allowlist)
 
 
-def _known_prefix(config: GatewayConfig, prefix: str) -> bool:
-    """Whether a prefix names something an allow-list entry can legitimately gate.
+def legacy_tool_grants(config: GatewayConfig, allowed_models: list[str] | None) -> list[str] | None:
+    """The search tools a model list grants by naming ``<provider>:<tool>``, the deprecated way.
 
-    A configured provider instance or a known any-llm provider, plus the
-    providers behind the configured search tools: ``/v1/search`` checks the same
-    allow-list against its ``<provider>:<tool>`` key, so refusing to store that
-    prefix would leave a restricted key permanently denied search with no way for
-    an operator to grant it. The configured decision providers are accepted for
-    the same reason: ``/v1/decisions`` checks ``<provider>:<model>``.
+    ``None`` stays unrestricted. Only an entry naming a configured tool's key
+    whole counts, never a wildcard, which grants models alone.
+    """
+    if allowed_models is None:
+        return None
+    legacy = config.legacy_search_tool_keys()
+    grants = (entry.partition(":")[2] for entry in dict.fromkeys(allowed_models) if entry in legacy)
+    return [name for name in grants if name != ALL_SEARCH_TOOLS]
+
+
+def effective_tool_allowlist(
+    config: GatewayConfig,
+    *,
+    key_tools: list[str] | None,
+    key_models: list[str] | None,
+    user_tools: list[str] | None,
+    user_models: list[str] | None,
+) -> list[str] | None:
+    """The search tools a key may use, by name. ``None`` = every one.
+
+    The key's own ``allowed_tools`` wins, then its user's. With neither set, the
+    tools its model list grants the deprecated way, so a key restricted to models
+    stays refused every tool until one is granted, and never one its user's model
+    list does not grant too: a user's wildcard can admit a key's exact entry at
+    write time, and the wildcard grants no tool.
+    """
+    if key_tools is not None:
+        return key_tools
+    if user_tools is not None:
+        return user_tools
+    if key_models is None:
+        return legacy_tool_grants(config, user_models)
+    grants = legacy_tool_grants(config, key_models) or []
+    user_grants = legacy_tool_grants(config, user_models)
+    return grants if user_grants is None else [name for name in grants if name in user_grants]
+
+
+def tools_within_user(
+    config: GatewayConfig, tools: list[str] | None, *, user_tools: list[str] | None, user_models: list[str] | None
+) -> bool:
+    """Whether a key's ``allowed_tools`` fits its user's: the user's own list, else what its model list grants."""
+    user_allowed = effective_tool_allowlist(
+        config, key_tools=None, key_models=None, user_tools=user_tools, user_models=user_models
+    )
+    return is_tool_allowlist_subset(tools, user_allowed)
+
+
+def is_tool_allowed(allowlist: list[str] | None, tool: str) -> bool:
+    """Whether a search tool, by name, is permitted. ``None`` = every tool, ``[]`` = none."""
+    if allowlist is None:
+        return True
+    return ALL_SEARCH_TOOLS in allowlist or tool in allowlist
+
+
+def is_tool_allowlist_subset(child: list[str] | None, parent: list[str] | None) -> bool:
+    """Whether a key's ``allowed_tools`` grants no more than its user's; ``*`` is covered only by ``*``."""
+    if child is None or parent is None:
+        return True
+    return ALL_SEARCH_TOOLS in parent or all(entry != ALL_SEARCH_TOOLS and entry in parent for entry in child)
+
+
+def validate_allowed_tools(config: GatewayConfig, entries: list[str] | None) -> list[str] | None:
+    """Validate a write of ``allowed_tools``. ``None`` and ``[]`` pass through as-is.
+
+    An entry is a search tool's name, configured or stored, or ``*``. Raises
+    ``ValueError`` (a 400 at the caller) on any other; duplicates are collapsed.
+    """
+    if entries is None:
+        return None
+    if not isinstance(entries, list):
+        raise ValueError("allowed_tools must be a list of strings, [] to deny all, or null to inherit")
+    names: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, str):
+            raise ValueError("allowed_tools entries must be strings")
+        name = entry.strip()
+        if name != ALL_SEARCH_TOOLS and name not in config.search_tools:
+            raise ValueError(f"'{name}' is not a search tool; name a configured one, or '*' for every search tool")
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def tool_not_allowed_detail(tool: str, legacy_key: str, legacy_models: Sequence[list[str]] = ()) -> str:
+    """Human-readable 403 detail for a search tool a key may not use.
+
+    ``legacy_models`` are the model lists the refusal was read off the deprecated
+    way, if it was; a wildcard there that matches ``legacy_key`` is named.
+    """
+    detail = f"Search tool '{tool}' is not permitted for this API key. Name it in allowed_tools to allow it."
+    if any(legacy_key not in models and is_model_allowed(models, legacy_key) for models in legacy_models):
+        detail += f" A wildcard in allowed_models allows models only, not '{legacy_key}'."
+    return detail
+
+
+def _known_prefix(config: GatewayConfig, prefix: str) -> bool:
+    """Whether a prefix names something a model allow-list entry can legitimately gate.
+
+    A configured provider instance or a known any-llm provider. The configured
+    decision providers are accepted because ``/v1/decisions`` checks
+    ``<provider>:<model>``.
     """
     if prefix in config.providers:
         return True
-    if prefix in config.search_tool_providers() or prefix in config.decision_providers:
+    if prefix in config.decision_providers:
         return True
     try:
         LLMProvider(prefix)
@@ -170,9 +283,15 @@ def _validate_entry(config: GatewayConfig, entry: str) -> str:
         raise ValueError(f"'{entry}': wildcards are not allowed in the provider part")
     if "*" in model and (model.count("*") > 1 or not model.endswith("*")):
         raise ValueError(f"'{entry}': only a single trailing '*' is allowed (openai:* or openai:gpt-4*)")
-    if not _known_prefix(config, prefix):
-        raise ValueError(f"'{entry}': unknown provider or instance '{prefix}'")
-    return f"{prefix}:{model}"
+    canonical = f"{prefix}:{model}"
+    if _known_prefix(config, prefix) or canonical in config.legacy_search_tool_keys():
+        return canonical
+    if prefix in config.search_tool_providers():
+        raise ValueError(
+            f"'{entry}' grants no model, and allowed_models grants a search tool only by its exact "
+            "<provider>:<tool> key; name tools in allowed_tools"
+        )
+    raise ValueError(f"'{entry}': unknown provider or instance '{prefix}'")
 
 
 def validate_allowed_models(config: GatewayConfig, entries: list[str] | None) -> list[str] | None:

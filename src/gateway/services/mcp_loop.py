@@ -814,8 +814,7 @@ async def mcp_tool_loop(
     ``native_tools``, across every round.
 
     ``on_first_response`` follows the provider lock-in contract documented on
-    :func:`gateway.services._tool_loop.run_tool_loop`; the hybrid-mode attempt
-    loop in :mod:`gateway.api.routes.chat` is the consumer.
+    :func:`gateway.services._tool_loop.run_tool_loop`.
 
     A first response with no choices is a provider failure, as on a call without
     tools. A later one is returned as the answer, so the rounds before it are billed.

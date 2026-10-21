@@ -151,8 +151,6 @@ where the scope holds no trace of it. A trace outside the caller's scope answers
 
 Deleting a user erases their traces, as it erases their telemetry.
 
-A hybrid data plane records no traces yet: it holds no database to keep them in.
-
 ## Settings
 
 | Setting | Default | |

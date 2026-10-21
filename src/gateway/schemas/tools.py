@@ -14,6 +14,7 @@ import pydantic
 from sqlmodel import Field, SQLModel
 
 from gateway.core.settings.tools import ToolKind
+from gateway.models.secret_fields import redact_secret_like_values
 from gateway.models.tools import OrgWebSearchKey, SearchToolCredential
 
 
@@ -22,20 +23,51 @@ class OrgWebSearchKeyCreateRequest(SQLModel):
 
     model_config = {
         "json_schema_extra": {
-            "example": {"provider": "tavily", "name": "production", "api_key": "<your Tavily API key>"}
+            "example": {"kind": "search", "provider": "exa", "name": "production", "api_key": "<your Exa API key>"}
         }
     }
 
-    provider: str = Field(max_length=255, description="The search provider the key is for: tavily or brave.")
+    kind: ToolKind = Field(
+        default="search",
+        description="Whether the key serves the search tool or the fetch tool, and enrichment. Fixed once created.",
+    )
+    provider: str = Field(
+        max_length=255,
+        description=(
+            "The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, "
+            "lists for the key's kind, other than searxng, or tavily or brave for a search key."
+        ),
+    )
     name: str = Field(max_length=255, description="How the organization tells this key apart from its others.")
-    api_key: str = Field(min_length=1)
+    api_key: str | None = Field(default=None, min_length=1, description="Required unless the provider takes no key.")
+    api_base: str | None = Field(
+        default=None,
+        max_length=1024,
+        description="The provider's endpoint, when not its own. Must be https when the key carries an API key.",
+    )
+    options: dict[str, Any] | None = Field(
+        default=None, description="Provider options, under the names the provider catalog lists for the provider."
+    )
 
 
 class OrgWebSearchKeyUpdateRequest(SQLModel):
-    """A partial update: only what is set is applied."""
+    """A partial update: only what is set is applied, and ``null`` clears ``api_base`` or ``options``.
+
+    ``kind`` is fixed once a key is created, so sending it is refused.
+    """
 
     name: str | None = Field(default=None, max_length=255)
     api_key: str | None = Field(default=None, min_length=1)
+    api_base: str | None = Field(default=None, max_length=1024)
+    options: dict[str, Any] | None = None
+
+    @pydantic.model_validator(mode="before")
+    @classmethod
+    def _refuse_kind(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "kind" in data:
+            msg = "kind cannot be changed; add a key of the other kind instead"
+            raise ValueError(msg)
+        return data
 
 
 class OrgWebSearchKeyPublic(SQLModel):
@@ -43,13 +75,18 @@ class OrgWebSearchKeyPublic(SQLModel):
 
     id: uuid.UUID
     organization_id: uuid.UUID
+    kind: ToolKind
     provider: str
     name: str
     last4: str | None = None
+    api_base: str | None = None
+    options: dict[str, Any] | None = Field(
+        default=None, description="The key's provider options, with any value whose name looks like a secret masked."
+    )
     is_org_default: bool
     usable: bool = Field(
         description=(
-            "False when this deployment cannot decrypt the stored key, so no search uses it. "
+            "False when this deployment cannot decrypt the stored key, so no call uses it. "
             "It is still listed, because replacing or deleting it is what fixes it."
         )
     )
@@ -63,9 +100,12 @@ class OrgWebSearchKeyPublic(SQLModel):
         return cls(
             id=key.id,
             organization_id=key.organization_id,
+            kind="fetch" if key.kind == "fetch" else "search",
             provider=key.provider,
             name=key.name,
             last4=key.last4,
+            api_base=key.api_base,
+            options=redact_secret_like_values(key.options),
             is_org_default=key.is_org_default,
             usable=usable,
             archived_at=key.archived_at,
@@ -82,7 +122,7 @@ class OrgWebSearchKeysPublic(SQLModel):
 class WorkspaceWebSearchKeyOverrideRequest(SQLModel):
     """Tri-state: an omitted flag keeps its value.
 
-    Pinning a key re-enables it and unpins any other key of the workspace, and turning a
+    Pinning a key re-enables it and unpins the workspace's other key of its kind, and turning a
     key off unpins it. Sending both flags true is refused. Both false deletes the override.
     """
 
@@ -97,18 +137,34 @@ class WorkspaceWebSearchKeyPublic(SQLModel):
 
     org_web_search_key_id: uuid.UUID
     workspace_id: uuid.UUID
+    kind: ToolKind
     provider: str
     name: str
     last4: str | None = None
-    is_default: bool = Field(description="The workspace pinned this key as its own.")
+    is_default: bool = Field(description="The workspace pinned this key as its own for its kind.")
     disabled: bool = Field(description="The workspace turned this key off.")
-    is_effective: bool = Field(description="This is the key the workspace's searches use.")
+    is_effective: bool = Field(description="This is the key the workspace's calls of its kind use.")
     usable: bool
 
 
 class WorkspaceWebSearchKeysPublic(SQLModel):
     data: list[WorkspaceWebSearchKeyPublic]
     count: int = Field(description="Every live key of the organization, not only this page.")
+    search_provider: str | None = Field(
+        default=None,
+        description=(
+            "The provider the workspace's searches run on: its effective search key's, else the deployment's "
+            "default search's. Null when nothing searches for it."
+        ),
+    )
+    fetch_provider: str | None = Field(
+        default=None,
+        description=(
+            "The provider the workspace's fetch tool runs on, and the enrichment of its search hits unless the "
+            "search's instance names a fetch instance of its own: its effective fetch key's, else the "
+            "deployment's default fetch instance's, which is builtin for the built-in fetcher."
+        ),
+    )
 
 
 class SearchProviderOptionSchema(SQLModel):

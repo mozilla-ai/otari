@@ -213,10 +213,6 @@ class UsageLog(Base):
     # serving row's value also carries every earlier attempt's setup time.
     # Nothing in the column says so; a percentile keyed by the serving model
     # attributes failover time to the model that actually served.
-    #
-    # Hybrid (platform-fallback) streams never write this column at all: every
-    # settlement callback in build_streaming_response returns before reaching
-    # log_usage on that path, and run_streaming_with_fallback passes db=None.
     ttft_ms: Mapped[int | None] = mapped_column()
 
     api_key = relationship("APIKey", back_populates="usage_logs")

@@ -136,7 +136,6 @@ def _build_web_retrieval_backend(
     fetch_tool_entry: dict[str, Any] | None = None,
     fetch_policy: DomainPolicy | None = None,
     counter: WebRetrievalCounter | None = None,
-    auth_token: str | None = None,
     credential: WebSearchCredential | None = None,
     config: GatewayConfig | None = None,
     tally: ToolUsageTally | None = None,
@@ -225,11 +224,6 @@ def _build_web_retrieval_backend(
     provider_options = tool_entry.get("provider_options")
     if isinstance(provider_options, dict) and provider_options:
         kwargs["provider_options"] = provider_options
-
-    # Forwarded to the search backend as `X-Gateway-Token` so the platform-hosted
-    # backend can authenticate the gateway. Unset (and so unsent) in standalone.
-    if auth_token:
-        kwargs["auth_token"] = auth_token
 
     kwargs["enable_search"] = search_tool_entry is not None
     kwargs["enable_fetch"] = fetch_tool_entry is not None

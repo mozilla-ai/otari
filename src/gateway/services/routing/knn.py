@@ -27,8 +27,7 @@ spaces.
 Known v1 limits (tracked on #187): capability gating is minimal (a request
 carrying tools keeps the default target; vision and context-window gating need a
 capability registry), learning happens only through the preference API rather
-than from live traffic, cost is list price rather than cache-aware, and the
-router is standalone-only because hybrid mode resolves models upstream.
+than from live traffic, and cost is list price rather than cache-aware.
 """
 
 from __future__ import annotations

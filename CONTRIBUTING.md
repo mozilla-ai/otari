@@ -25,11 +25,15 @@ behavior, it belongs upstream.
 import asyncio
 from any_llm import acompletion
 
-print(asyncio.run(acompletion(
-    model="openai:gpt-4o-mini",   # your provider:model
-    messages=[{"role": "user", "content": "hi"}],
-    # plus the param or option you think Otari is mishandling
-)))
+print(
+    asyncio.run(
+        acompletion(
+            model="openai:gpt-4o-mini",  # your provider:model
+            messages=[{"role": "user", "content": "hi"}],
+            # plus the param or option you think Otari is mishandling
+        )
+    )
+)
 ```
 
 **File it in [any-llm](https://github.com/mozilla-ai/any-llm/issues) if:**
@@ -46,7 +50,7 @@ print(asyncio.run(acompletion(
 - route schemas, the OpenAPI spec, or the Anthropic and Responses envelopes
 - routing, fallback across attempts, or routing memory
 - `config.yml` layering, the `providers:` block, or provider instances and aliases
-- the dashboard, built-in tools, the MCP loop, guardrails, or hybrid mode
+- the dashboard, built-in tools, the MCP loop, or guardrails
 
 Two things that look upstream but are ours: the per-provider setup guides in
 `docs/providers/`, and how a provider error becomes a status code and a

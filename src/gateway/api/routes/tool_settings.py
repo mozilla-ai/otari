@@ -3,7 +3,7 @@
 The service-endpoint and web-search fields that ``/api/v1/settings`` keeps
 display-only (the ``*_url`` fields and the web-search knobs are excluded there on
 SSRF grounds) are made editable here, on their own page, with structural URL
-validation and per-service reachability tests. Standalone-only and master-key
+validation and per-service reachability tests. Master-key
 gated, mirroring the other management routers.
 
 * ``GET /api/v1/tool-settings`` returns each field's effective value (the value a
@@ -161,7 +161,10 @@ class UpdateToolSettingsRequest(BaseModel):
     web_search_intercept: bool | None = None
     web_search_default_tool: str | None = Field(
         default=None,
-        description="A search instance whose provider any-search serves, or 'none' to turn in-loop search off.",
+        description=(
+            "A search instance whose provider any-search serves, or 'none' to turn off the deployment's own "
+            "in-loop search, which an organization key still serves."
+        ),
     )
     web_fetch_default_tool: str | None = Field(default=None, description="A fetch instance, or 'builtin_fetch'.")
     web_search_max_calls: int | None = Field(default=None, ge=1)
@@ -258,10 +261,10 @@ async def list_guardrail_profiles(
     caller-supplied and fetching it here would make this a way to have the
     gateway request an address of the caller's choosing.
 
-    Not on ``verify_catalog_reader``, despite being a catalog read: that plane is
-    the three deployment-describing reads a data-plane key may also make, and
-    admitting a key here would let any workspace credential dial the deployment's
-    guardrails service. This is a management read, so it takes the router's own gate.
+    Not on ``verify_catalog_reader``, despite being a catalog read: that gate
+    admits any API key to the deployment-describing reads, and admitting a key
+    here would let any workspace credential dial the deployment's guardrails
+    service. This is a management read, so it takes the router's own gate.
     """
     return await fetch_guardrail_catalog(cast("str | None", effective_value(config, GUARDRAILS_URL)))
 
@@ -310,7 +313,7 @@ async def update_tool_settings(
     """Persist and apply tool/guardrail setting changes.
 
     Uses ``model_fields_set`` so an explicit ``null`` clears a field while an
-    omitted field is left unchanged. Operator-gated and standalone-only.
+    omitted field is left unchanged. Operator-gated.
     """
     updates: dict[str, SettingValue] = {
         key: getattr(request, key) for key in request.model_fields_set if key in TOOL_SETTABLE_KEYS

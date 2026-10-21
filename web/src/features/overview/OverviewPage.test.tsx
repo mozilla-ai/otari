@@ -5,12 +5,7 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type {
-  AllocationHealth,
-  DeploymentBootstrap,
-  OverviewSummary,
-  UsageSummary,
-} from "@/client"
+import type { AllocationHealth, OverviewSummary, UsageSummary } from "@/client"
 import {
   localDayKey,
   OverviewIndex,
@@ -21,10 +16,8 @@ import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,
-  HOSTED_SURFACES,
   organizationContext,
   pendingOrganizationInvitation,
-  STANDALONE_SURFACES,
   seriesPoint,
   usageTotals,
   workspaceActivation,
@@ -219,21 +212,13 @@ function LocationProbe() {
   return <div data-testid="loc">{loc.pathname}</div>
 }
 
-function renderPage(
-  ui: ReactElement,
-  initial = "/overview",
-  deployment: DeploymentBootstrap = bootstrap(),
-) {
+function renderPage(ui: ReactElement, initial = "/overview") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    // The page composes the setup guide, which is gated on the deployment's
-    // surfaces, so the bootstrap has to be in the tree even for the tests that
-    // are about a tile. The guide itself renders nothing here: with no
-    // workspace selected there is nothing for it to be about.
     <QueryClientProvider client={client}>
-      <DeploymentProvider value={deployment}>{ui}</DeploymentProvider>
+      <DeploymentProvider value={bootstrap()}>{ui}</DeploymentProvider>
     </QueryClientProvider>,
     {
       wrapper: withRouter({
@@ -255,18 +240,14 @@ function renderPage(
  * roster is one of those, so a test about it has to seat the provider, which
  * seeds itself from `workspace_memberships` on the organization context.
  */
-function renderPageInWorkspace(
-  ui: ReactElement,
-  selected: string,
-  deployment: DeploymentBootstrap = bootstrap(),
-) {
+function renderPageInWorkspace(ui: ReactElement, selected: string) {
   window.localStorage.setItem("otari.dashboard.selectedWorkspace", selected)
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <DeploymentProvider value={deployment}>
+      <DeploymentProvider value={bootstrap()}>
         <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
       </DeploymentProvider>
     </QueryClientProvider>,
@@ -281,10 +262,6 @@ function renderPageInWorkspace(
     },
   )
 }
-
-const WITHOUT_HOSTED_PROVIDERS = STANDALONE_SURFACES.filter(
-  (surface) => surface !== "hosted_providers",
-)
 
 const WORKSPACE_A = "44444444-4444-4444-4444-444444444444"
 const WORKSPACE_B = "55555555-5555-5555-5555-555555555555"
@@ -693,31 +670,6 @@ describe("OverviewPage", () => {
     )
   })
 
-  it("states an unreachable provider without a link where Hosted providers is not served", async () => {
-    // The organization page lists a different table the instance is not on, so
-    // with no Hosted providers page there is nowhere true to link.
-    mockApi({
-      health: {
-        providers: [],
-        healthy: 2,
-        total: 3,
-        checked_at: "2026-07-22T00:00:00Z",
-      },
-    })
-    renderPage(
-      <OverviewPage />,
-      "/overview",
-      bootstrap({ surfaces: WITHOUT_HOSTED_PROVIDERS }),
-    )
-
-    expect(
-      await screen.findByText("1 provider unreachable"),
-    ).toBeInTheDocument()
-    expect(
-      screen.queryByRole("link", { name: "1 provider unreachable" }),
-    ).toBeNull()
-  })
-
   it("hides the status strip when nothing needs attention", async () => {
     mockApi({
       health: {
@@ -862,24 +814,6 @@ describe("OverviewIndex routing", () => {
     )
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(screen.queryByText("Get started with Otari")).toBeNull()
-  })
-
-  it("falls back to the organization page where Hosted providers is not served", async () => {
-    mockApi({ providers: [] })
-    const user = userEvent.setup()
-    renderPage(
-      <OverviewIndex />,
-      "/overview",
-      bootstrap({ surfaces: WITHOUT_HOSTED_PROVIDERS }),
-    )
-
-    await screen.findByText("Get started with Otari")
-    await user.click(
-      screen.getByRole("button", { name: "Add your first provider" }),
-    )
-    expect(await screen.findByTestId("loc")).toHaveTextContent(
-      "/organization/provider-keys",
-    )
   })
 
   it("reports a failed provider query instead of silently rendering a normal overview", async () => {
@@ -1777,13 +1711,7 @@ describe("OverviewIndex for an identity with no organization", () => {
   } = {}) {
     return render(
       <QueryClientProvider client={client}>
-        <DeploymentProvider
-          value={bootstrap({
-            deployment_type: "hosted",
-            surfaces: HOSTED_SURFACES,
-            open_signup: openSignup,
-          })}
-        >
+        <DeploymentProvider value={bootstrap({ open_signup: openSignup })}>
           <OverviewIndex />
         </DeploymentProvider>
       </QueryClientProvider>,

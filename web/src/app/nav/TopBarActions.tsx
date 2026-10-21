@@ -10,7 +10,7 @@ import { documentationHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // Desktop destinations; the account menu keeps them reachable on mobile.
-// WalletNavSlot is empty in OSS; the hosted overlay supplies its balance control.
+// WalletNavSlot is empty in OSS; otari.ai's overlay supplies its balance control.
 
 const ACTION =
   "flex min-h-[2.125rem] items-center rounded-md px-1 text-shell-label font-medium text-muted transition-colors hover:text-foreground"

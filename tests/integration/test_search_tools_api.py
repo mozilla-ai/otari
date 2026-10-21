@@ -304,7 +304,7 @@ def test_search_catalog_serves_the_library_metadata(
 ) -> None:
     catalog = _catalog(catalog_client, headers=master_key_header)
     # any-search's fake provider exists for tests: accepted in configuration, never offered.
-    assert list(catalog) == ["exa", "mojeek", "searxng"]
+    assert list(catalog) == ["deepseek", "exa", "mojeek", "searxng"]
     exa = catalog["exa"]
     metadata = any_search.AnySearch.get_provider_metadata("exa")
     assert exa["kind"] == "search"
@@ -341,7 +341,7 @@ def test_searxng_keeps_its_entry_without_a_schema(
 def test_fetch_catalog_serves_any_fetch(catalog_client: TestClient, master_key_header: dict[str, str]) -> None:
     catalog = _catalog(catalog_client, "fetch", headers=master_key_header)
     # builtin serves only the implicit builtin_fetch tool, and fake exists for tests.
-    assert list(catalog) == ["exa", "tabstack"]
+    assert list(catalog) == ["deepseek", "exa", "tabstack"]
     exa = catalog["exa"]
     metadata = any_fetch.AnyFetch.get_provider_metadata("exa")
     assert exa["kind"] == "fetch"

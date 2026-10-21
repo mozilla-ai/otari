@@ -47,6 +47,7 @@ import {
   useCurrentOwnerId,
   useMemberAttributionLabels,
 } from "@/features/organization/attribution"
+import { ToolScopeControl } from "@/features/tools/ToolScopeControl"
 import { organizationUsers } from "@/features/users/organizationUsers"
 import { UserComboBox } from "@/features/users/UserComboBox"
 import { isVirtualUser } from "@/features/users/userOptions"
@@ -59,7 +60,6 @@ import {
   useUpdateKey,
 } from "@/shared/api/apiKeys"
 import { useUsers } from "@/shared/api/users"
-import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingGatewayAddressNotice"
 import { formatDate } from "@/shared/helpers/format"
 import {
   buildCurlSnippet,
@@ -72,7 +72,6 @@ import {
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 import { ExpiryFields } from "./ExpiryFields"
 import { KeyActionsMenu } from "./KeyActionsMenu"
 import {
@@ -174,10 +173,7 @@ function KeySecretStep({
   memberLabels: ReadonlyMap<string, string>
   secretRef: RefObject<HTMLInputElement | HTMLTextAreaElement | null>
 }) {
-  // Where a request from this deployment belongs, which is not always the address
-  // that served this page: a hosted control plane serves the dashboard and not
-  // the API. Undefined when it has not said where its gateway is (otari#823).
-  const baseUrl = resolveSnippetBaseUrl(useDeployment())
+  const baseUrl = resolveSnippetBaseUrl()
   const secret = result.key
   // The key and both snippets show one stand-in, so the credential on this
   // screen reads as one thing rather than three.
@@ -190,23 +186,15 @@ function KeySecretStep({
 
   // The same two calls the setup guide hands out with its own key; the builders
   // are shared so an operator cannot be shown two dialects of one request.
-  // One value rather than two, so a deployment that named no gateway drops both
-  // together and the copy under the heading cannot disagree with the fields.
-  const snippets = baseUrl
-    ? {
-        curl: buildCurlSnippet({ baseUrl, apiKey: secret }),
-        python: buildPythonSnippet({ baseUrl, apiKey: secret }),
-        // The same two commands around the stand-in, which is what the
-        // snippets show whenever the key is concealed. Without them concealing
-        // the key would leave it in plain sight twice over, in the requests
-        // that explain it.
-        concealedCurl: buildCurlSnippet({ baseUrl, apiKey: concealedSecret }),
-        concealedPython: buildPythonSnippet({
-          baseUrl,
-          apiKey: concealedSecret,
-        }),
-      }
-    : undefined
+  const snippets = {
+    curl: buildCurlSnippet({ baseUrl, apiKey: secret }),
+    python: buildPythonSnippet({ baseUrl, apiKey: secret }),
+    // The same two commands around the stand-in, which is what the snippets
+    // show whenever the key is concealed. Without them concealing the key would
+    // leave it in plain sight twice over, in the requests that explain it.
+    concealedCurl: buildCurlSnippet({ baseUrl, apiKey: concealedSecret }),
+    concealedPython: buildPythonSnippet({ baseUrl, apiKey: concealedSecret }),
+  }
 
   return (
     // `alert` rather than `status`: this is the one message in the product that
@@ -235,35 +223,27 @@ function KeySecretStep({
       <div className="flex flex-col gap-2">
         <div>
           <div className="text-body">Make your first call</div>
-          {snippets === undefined ? (
-            <MissingGatewayAddressNotice />
-          ) : (
-            <p className="text-caption">
-              Replace <code>{SNIPPET_MODEL_PLACEHOLDER}</code> with a model from
-              the Models page.
-            </p>
-          )}
+          <p className="text-caption">
+            Replace <code>{SNIPPET_MODEL_PLACEHOLDER}</code> with a model from
+            the Models page.
+          </p>
         </div>
-        {snippets !== undefined ? (
-          <>
-            <CopyField
-              label="curl"
-              value={snippets.curl}
-              concealed={snippets.concealedCurl}
-              isRevealed={isSecretRevealed}
-              onRevealChange={setIsSecretRevealed}
-              isMultiline
-            />
-            <CopyField
-              label="Python (Otari SDK)"
-              value={snippets.python}
-              concealed={snippets.concealedPython}
-              isRevealed={isSecretRevealed}
-              onRevealChange={setIsSecretRevealed}
-              isMultiline
-            />
-          </>
-        ) : null}
+        <CopyField
+          label="curl"
+          value={snippets.curl}
+          concealed={snippets.concealedCurl}
+          isRevealed={isSecretRevealed}
+          onRevealChange={setIsSecretRevealed}
+          isMultiline
+        />
+        <CopyField
+          label="Python (Otari SDK)"
+          value={snippets.python}
+          concealed={snippets.concealedPython}
+          isRevealed={isSecretRevealed}
+          onRevealChange={setIsSecretRevealed}
+          isMultiline
+        />
       </div>
     </div>
   )
@@ -463,6 +443,10 @@ function CreateKeyDialog({
   const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
     undefined,
   )
+  const [allowedTools, setAllowedTools] = useState<string[] | undefined>(
+    undefined,
+  )
+  const [toolScopeValid, setToolScopeValid] = useState(true)
   const [excludeFromBudget, setExcludeFromBudget] = useState(false)
   const [serviceKey, setServiceKey] = useState(NO_SERVICE_KEY)
   const [rejectUserMismatch, setRejectUserMismatch] =
@@ -509,6 +493,7 @@ function CreateKeyDialog({
     !excludeFromBudget && keyBudgetIncomplete(budgetDraft)
   const isBlocked =
     !scopeValid ||
+    !toolScopeValid ||
     !serviceKeyReady ||
     ownerMissing ||
     workspaceUnresolved ||
@@ -529,10 +514,12 @@ function CreateKeyDialog({
     expiresAt,
     pickedOwner,
     allowedModels,
+    allowedTools,
     excludeFromBudget,
     serviceKey,
     rejectUserMismatch,
     scopeValid,
+    toolScopeValid,
     budgetDraft,
   })
 
@@ -542,6 +529,8 @@ function CreateKeyDialog({
     setShowAdvanced(false)
     setPickedOwner(undefined)
     setAllowedModels(undefined)
+    setAllowedTools(undefined)
+    setToolScopeValid(true)
     setExcludeFromBudget(false)
     setServiceKey(NO_SERVICE_KEY)
     setRejectUserMismatch("inherit")
@@ -575,6 +564,7 @@ function CreateKeyDialog({
       workspace_id: workspace?.workspace_id,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       allowed_models: allowedModels ?? null,
+      allowed_tools: allowedTools ?? null,
       reject_user_mismatch: storedUserMismatch(rejectUserMismatch),
     }
     // The member surface derives the owner and refuses a budget exemption, so
@@ -738,10 +728,26 @@ function CreateKeyDialog({
             anyLabel={
               isDeploymentWide ? "Inherit owner access" : "Inherit your access"
             }
-            initial={undefined}
+            initial={allowedModels}
             onChange={(value, isValid) => {
               setAllowedModels(value)
               setScopeValid(isValid)
+            }}
+          />
+          <ToolScopeControl
+            title="Restrict this key's search tools"
+            description={
+              isDeploymentWide
+                ? "Which search tools this key may run on /v1/search. Left on Inherit, it takes its owner's list. With no list on either, it follows its model access, or its owner's when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). A key can never exceed its owner's."
+                : "Which search tools this key may run on /v1/search. Left on Inherit, it takes your list. With no list on either, it follows its model access, or yours when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). A key can never exceed yours."
+            }
+            inheritLabel={
+              isDeploymentWide ? "Inherit owner's tools" : "Inherit your tools"
+            }
+            initial={allowedTools}
+            onChange={(value, isValid) => {
+              setAllowedTools(value)
+              setToolScopeValid(isValid)
             }}
           />
           {/* Exempting a key from a budget is the deployment operator's call,
@@ -839,6 +845,10 @@ function EditKeyForm({
   const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
     apiKey.allowed_models ?? undefined,
   )
+  const [allowedTools, setAllowedTools] = useState<string[] | undefined>(
+    apiKey.allowed_tools ?? undefined,
+  )
+  const [toolScopeValid, setToolScopeValid] = useState(true)
   const [excludeFromBudget, setExcludeFromBudget] = useState(
     apiKey.exclude_from_budget,
   )
@@ -856,10 +866,12 @@ function EditKeyForm({
     keyName,
     expiresAt,
     allowedModels,
+    allowedTools,
     excludeFromBudget,
     serviceKey,
     rejectUserMismatch,
     scopeValid,
+    toolScopeValid,
     budgetDraft,
   })
   // Ceilings that land after the form opened are part of its seed, not an edit.
@@ -873,10 +885,12 @@ function EditKeyForm({
       keyName: apiKey.key_name ?? "",
       expiresAt: toDatetimeLocal(apiKey.expires_at),
       allowedModels: apiKey.allowed_models ?? undefined,
+      allowedTools: apiKey.allowed_tools ?? undefined,
       excludeFromBudget: apiKey.exclude_from_budget,
       serviceKey: serviceKeyChoice(apiKey),
       rejectUserMismatch: userMismatchChoice(apiKey.reject_user_mismatch),
       scopeValid: true,
+      toolScopeValid: true,
       budgetDraft: seeded,
     })
   }
@@ -888,6 +902,7 @@ function EditKeyForm({
     budgetDraft.choice !== initialBudget?.choice
   const isBlocked =
     !scopeValid ||
+    !toolScopeValid ||
     !serviceKeyReady ||
     (budgetChanged && keyBudgetIncomplete(budgetDraft))
   const isSaving = update.isPending || keyBudgets.isApplying
@@ -898,6 +913,7 @@ function EditKeyForm({
       key_name: keyName.trim() || null,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       allowed_models: allowedModels ?? null,
+      allowed_tools: allowedTools ?? null,
       reject_user_mismatch: storedUserMismatch(rejectUserMismatch),
     }
     // The member surface has no budget exemption to send (see CreateKeyDialog).
@@ -992,6 +1008,22 @@ function EditKeyForm({
         onChange={(value, isValid) => {
           setAllowedModels(value)
           setScopeValid(isValid)
+        }}
+      />
+      <ToolScopeControl
+        title="Restrict this key's search tools"
+        description={
+          isDeploymentWide
+            ? "Which search tools this key may run on /v1/search. Left on Inherit, it takes its owner's list. With no list on either, it follows its model access, or its owner's when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). It can never exceed its owner's."
+            : "Which search tools this key may run on /v1/search. Left on Inherit, it takes your list. With no list on either, it follows its model access, or yours when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). It can never exceed yours."
+        }
+        inheritLabel={
+          isDeploymentWide ? "Inherit owner's tools" : "Inherit your tools"
+        }
+        initial={apiKey.allowed_tools ?? undefined}
+        onChange={(value, isValid) => {
+          setAllowedTools(value)
+          setToolScopeValid(isValid)
         }}
       />
       {/* Operator-only, as on the create form: a member editing their own key

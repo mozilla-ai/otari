@@ -1,4 +1,4 @@
-"""Organization context, membership, and switching (standalone mode only).
+"""Organization context, membership, and switching.
 
 Thin composition over `gateway.services.tenancy.organization_service`: resolve
 the caller's identity, call the service, return its typed result. The response
@@ -11,8 +11,8 @@ the one that can, because moving that pointer is the one operation that has to
 be told where to; it answers 404 for an organization the caller holds no active
 membership in, so the boundary holds there too.
 
-**Why create, switch, and the membership list are here.** A standalone
-deployment boots one organization and almost always keeps exactly that, but a
+**Why create, switch, and the membership list are here.** A deployment
+boots one organization and almost always keeps exactly that, but a
 second one is already reachable: invite an address that belongs to an
 organization elsewhere on this deployment, they accept, and they hold two
 memberships with nothing to switch between them. The tables are this

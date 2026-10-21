@@ -46,8 +46,6 @@ describe("normalizeBootstrap", () => {
         "passkeys_ready",
         "maintenance_mode",
         "docs_url",
-        "management_url",
-        "data_plane_url",
         "terms_url",
         "privacy_url",
       ),
@@ -58,8 +56,6 @@ describe("normalizeBootstrap", () => {
     expect(completed.passkeys_ready).toBe(false)
     expect(completed.maintenance_mode).toBe(false)
     expect(completed.docs_url).toBeNull()
-    expect(completed.management_url).toBeNull()
-    expect(completed.data_plane_url).toBeNull()
     expect(completed.terms_url).toBeNull()
     expect(completed.privacy_url).toBeNull()
   })
@@ -73,16 +69,5 @@ describe("normalizeBootstrap", () => {
 
     expect(completed.maintenance_mode).toBe(false)
     expect(completed.sign_in_methods).toEqual([])
-  })
-
-  it("does not invent the two fields that say what the deployment is", () => {
-    // web/AGENTS.md: do not guess a deployment. Absent here means absent below,
-    // rather than a deployment identity this file made up.
-    const completed = normalizeBootstrap(
-      omitting("deployment_type", "session_type"),
-    )
-
-    expect(completed.deployment_type).toBeUndefined()
-    expect(completed.session_type).toBeUndefined()
   })
 })

@@ -46,15 +46,15 @@ def _no_builtin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 def test_supported_providers() -> None:
-    assert AnyFetch.get_supported_providers() == ["builtin", "exa", "fake", "tabstack"]
+    assert AnyFetch.get_supported_providers() == ["builtin", "deepseek", "exa", "fake", "tabstack"]
 
 
 def test_only_a_fetcher_that_follows_redirects_itself_reports_the_final_url() -> None:
-    """Exa and Tabstack answer with the URL as asked even after a redirect, so a caller cannot check where it led."""
+    """DeepSeek, Exa and Tabstack answer with the URL as asked even after a redirect, so a caller cannot check it."""
     reported = {
         name: AnyFetch.get_provider_metadata(name).reports_final_url for name in AnyFetch.get_supported_providers()
     }
-    assert reported == {"builtin": True, "exa": False, "fake": True, "tabstack": False}
+    assert reported == {"builtin": True, "deepseek": False, "exa": False, "fake": True, "tabstack": False}
 
 
 def test_provider_class_and_metadata() -> None:
@@ -65,7 +65,7 @@ def test_provider_class_and_metadata() -> None:
 
 @pytest.mark.parametrize("lookup", ["create", "get_provider_class", "get_provider_metadata"])
 def test_an_unknown_provider_is_refused_with_the_supported_ones(lookup: str) -> None:
-    with pytest.raises(UnsupportedProviderError, match="supported: builtin, exa, fake, tabstack"):
+    with pytest.raises(UnsupportedProviderError, match="supported: builtin, deepseek, exa, fake, tabstack"):
         getattr(AnyFetch, lookup)("nope")
 
 

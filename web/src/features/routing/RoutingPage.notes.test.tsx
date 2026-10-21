@@ -3,18 +3,13 @@ import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { DeploymentBootstrap } from "@/client"
 import { RoutingPage } from "@/features/routing/RoutingPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import {
-  bootstrap,
-  HOSTED_SURFACES,
-  organizationContext,
-} from "@/tests/fixtures"
+import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
-// The page's empty state and the deployment note. The table and the create
+// The page's empty state. The table and the create
 // dialog are covered in RoutingPage.test.tsx and RoutingPage.create.test.tsx.
 
 function mockEmptyApi() {
@@ -30,12 +25,12 @@ function mockEmptyApi() {
   })
 }
 
-function renderPage(deployment: Partial<DeploymentBootstrap> = {}) {
+function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <DeploymentProvider value={bootstrap(deployment)}>
+    <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>
         <RoutingPage />
       </QueryClientProvider>
@@ -43,8 +38,6 @@ function renderPage(deployment: Partial<DeploymentBootstrap> = {}) {
     { wrapper: withRouter({ url: "/" }) },
   )
 }
-
-const NOTE = /Policies are a standalone feature/
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -84,45 +77,5 @@ describe("RoutingPage empty state", () => {
     expect(await screen.findByRole("dialog")).toHaveAccessibleName(
       "New fallback",
     )
-  })
-
-  it("leaves the catalog tip off a deployment that compiles no plan itself", async () => {
-    mockEmptyApi()
-    renderPage({
-      deployment_type: "hosted",
-      surfaces: [...HOSTED_SURFACES],
-    })
-
-    await screen.findByRole("heading", { name: "No routing policies yet" })
-    expect(screen.queryByText(/falls back/)).not.toBeInTheDocument()
-  })
-})
-
-describe("RoutingPage deployment note", () => {
-  it("says nothing on a standalone gateway, which honors its policies", async () => {
-    mockEmptyApi()
-    renderPage()
-
-    await screen.findByRole("heading", { name: "No routing policies yet" })
-    expect(screen.queryByText(NOTE)).not.toBeInTheDocument()
-  })
-
-  it("says a hosted deployment's policies are not where its plans come from", async () => {
-    mockEmptyApi()
-    renderPage({
-      deployment_type: "hosted",
-      surfaces: [...HOSTED_SURFACES],
-    })
-
-    expect(await screen.findByText(NOTE)).toHaveTextContent(
-      "A hybrid gateway receives its attempt plan from the connected control plane.",
-    )
-  })
-
-  it("says the same on a hybrid gateway", async () => {
-    mockEmptyApi()
-    renderPage({ deployment_type: "hybrid", surfaces: [] })
-
-    expect(await screen.findByText(NOTE)).toBeInTheDocument()
   })
 })

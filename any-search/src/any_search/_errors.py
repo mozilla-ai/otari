@@ -4,6 +4,16 @@ None of them carries a response body, a URL, the query or a key: a host logs
 and returns these, and the query is the user's content.
 """
 
+import re
+from typing import Any
+
+_TAG = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
+
+def safe_tag(value: Any) -> str | None:
+    """A provider's error type or code when it looks like one, else ``None``, so no body text reaches an error."""
+    return value if isinstance(value, str) and _TAG.fullmatch(value) else None
+
 
 class AnySearchError(Exception):
     """Base of every error any_search raises."""

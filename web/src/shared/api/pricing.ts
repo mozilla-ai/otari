@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   CreateOrganizationPricingOverride,
   OrganizationPricingOverride,
@@ -7,7 +12,7 @@ import type {
   SetPricingRequest,
   UpdateOrganizationPricingOverride,
 } from "@/client"
-import { apiFetch } from "@/shared/api/client"
+import { ApiError, apiFetch } from "@/shared/api/client"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { fetchAllRows } from "@/shared/api/paging"
 import {
@@ -25,6 +30,37 @@ export function usePricing(enabled = true) {
     queryKey: [PRICING],
     queryFn: fetchAllPricing,
     enabled,
+  })
+}
+
+/** One key of one kind, as `GET /pricing/{model_key}?kind=` names it. */
+export interface PricedKey {
+  kind: PricingResponse["kind"]
+  modelKey: string
+}
+
+/**
+ * The rate in force for each key, `null` where nothing prices it, in order.
+ *
+ * Targeted reads rather than the whole history `usePricing` walks: a page
+ * pricing a handful of tools needs a row each, and the 404 that says a key is
+ * unpriced is an answer here, not a failure.
+ */
+export function usePricesInEffect(keys: readonly PricedKey[], enabled = true) {
+  return useQueries({
+    queries: keys.map(({ kind, modelKey }) => ({
+      queryKey: [PRICING, "in-effect", kind, modelKey],
+      queryFn: () =>
+        apiFetch<PricingResponse>(
+          `/pricing/${encodeURIComponent(modelKey)}?kind=${encodeURIComponent(kind)}`,
+        ).catch((error: unknown) => {
+          if (error instanceof ApiError && error.status === 404) return null
+          throw error
+        }),
+      // As long as the other catalog reads: a write here invalidates it anyway.
+      staleTime: 60_000,
+      enabled,
+    })),
   })
 }
 

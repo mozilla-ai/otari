@@ -152,7 +152,6 @@ def test_auto_decides_each_candidate_on_its_own(providers: list[str | None], cla
 
 
 def test_a_uniform_auto_claims_for_every_candidate_unless_all_run_the_search() -> None:
-    """How hybrid mode decides, since the platform's attempts share one set of tools."""
     assert _claimed(requested=CodeExecutor.AUTO, providers=["anthropic", "bedrock"], uniform=True) == [True, True]
     assert _claimed(requested=CodeExecutor.AUTO, providers=["anthropic", "anthropic"], uniform=True) == [False, False]
 

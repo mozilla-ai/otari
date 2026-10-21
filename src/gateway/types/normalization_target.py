@@ -12,12 +12,9 @@ from gateway.models.tools import CodeExecutor
 class NormalizationTarget:
     """The resolved facts a request's attachments are normalized against.
 
-    Two workspaces, because they answer different questions.
     ``file_workspace_id`` is the caller's own, so a key confined to one
     workspace reaches only its files, and it is ``None`` for the master key,
     which sees every workspace.
-    ``credential_workspace_id`` is the one the request dispatches under, so
-    anything done at a provider is done with the credential the request will use.
     ``candidate_providers`` is the provider of every candidate the request may
     dispatch to, head first, which is what the code-execution executor decides against.
     """
@@ -27,6 +24,5 @@ class NormalizationTarget:
     model: str
     instance: str | None
     file_workspace_id: uuid.UUID | None
-    credential_workspace_id: uuid.UUID | None
     workspace_executor: CodeExecutor | None
     candidate_providers: tuple[LLMProvider | None, ...]

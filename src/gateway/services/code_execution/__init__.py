@@ -14,8 +14,8 @@ from gateway.services.code_execution.containers import (
     ContainerNotFoundError,
     SandboxContainerRegistry,
     SandboxContainers,
-    check_container_on_credential,
     gateway_container_value,
+    names_provider_container,
     new_container_id,
     requested_container,
 )
@@ -29,8 +29,8 @@ __all__ = [
     "ContainerNotFoundError",
     "SandboxContainerRegistry",
     "SandboxContainers",
-    "check_container_on_credential",
     "gateway_container_value",
+    "names_provider_container",
     "new_container_id",
     "requested_container",
 ]

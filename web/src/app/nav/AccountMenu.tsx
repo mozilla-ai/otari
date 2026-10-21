@@ -48,7 +48,7 @@ import {
 // menu repeated it under an avatar the trigger already draws, so that block is
 // gone and /account is where an identity is actually read.
 //
-// Three of these are real in a standalone gateway. Appearance drives the dark
+// Three of these are real in this build. Appearance drives the dark
 // token block globals.css has carried since the design foundation was rehomed,
 // logging out ends the session, and Account settings opens the page that owns
 // the credential it was minted from (otari#653): a session is per-identity
@@ -76,16 +76,11 @@ const MENU_ICON_CLASS = `${NAV_ICON_CLASS} text-muted`
 const MENU_DIVIDER = "h-px shrink-0 bg-border"
 
 // Whose session this is, as the trigger at the foot of the rail names it: the
-// person, not their standing. It used to name a standing, because nothing
-// authenticated reported the caller's own identity and the bootstrap's
-// `session_type` was the only thing to hand; keyed on that, the trigger read
-// "Operator" for every signed-in caller, which is a role rather than a name and
-// on a hosted deployment was not even true of the person reading it (#832).
+// person, not their standing (#832).
 // `OrganizationMembershipContextPublic.caller` is the identity itself, on the
 // read `AppShellChrome` already makes, so naming the person costs no request.
 //
-// A standalone operator still reads "Operator", now because that *is* their
-// name: first boot provisions the identity with it (`OPERATOR_FULL_NAME`), and
+// The operator reads "Operator" because that *is* their name: first boot provisions the identity with it (`OPERATOR_FULL_NAME`), and
 // the roster shows the same word in the same place.
 //
 // Three answers, each for a real identity this deployment can hold. A member

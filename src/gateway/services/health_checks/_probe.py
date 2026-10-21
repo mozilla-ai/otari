@@ -14,18 +14,12 @@ from typing import Any, Literal
 from any_llm.exceptions import ModelNotFoundError
 
 from gateway.services.providers import acompletion
+from gateway.services.upstream_redaction import redact_upstream_message
 
 PROBE_TIMEOUT_SECONDS = 60.0
 PROBE_CONCURRENCY = 8
 _ERROR_LIMIT = 300
 _MAX_EXCEPTION_CHAIN = 5
-# Provider errors sometimes quote the credential they refused.
-_SECRET = re.compile(
-    r"\b(?:sk|gw|tk|key)-[A-Za-z0-9_\-]{8,}"
-    r"|\bAIza[0-9A-Za-z_\-]{30,}"
-    r"|(?i:\bbearer\s+)\S+"
-    r"|(?i:[?&](?:api[_-]?)?key=)[^&\s'\"]+"
-)
 # The catalog has no field for what a model is for, so the id decides where models.dev is silent.
 _NOT_CHAT_ID = re.compile(r"embed|rerank|bge-|whisper|tts|dall-e|image", re.IGNORECASE)
 
@@ -85,8 +79,9 @@ def _status_code(exc: BaseException) -> int | None:
 
 
 def _describe(exc: BaseException) -> str:
-    text = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
-    text = _SECRET.sub("[redacted]", text)
+    # Shown on the Health page and mailed to the alert list, so redacted as any provider message is, before the cap.
+    text = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
+    text = redact_upstream_message(text) or type(exc).__name__
     return text if len(text) <= _ERROR_LIMIT else text[: _ERROR_LIMIT - 1] + "…"
 
 

@@ -1,4 +1,4 @@
-# Minimal standalone Otari configuration.
+# Minimal Otari configuration.
 # See docs/configuration.md for sources, precedence, and advanced settings.
 
 # Docker Compose provides this PostgreSQL service. For a local process without
@@ -159,7 +159,7 @@ providers:
 
 # What a workspace with no tool policy of its own gets. false makes web access
 # (search, fetch, POST /api/v1/search) or code execution something a workspace
-# owner or admin turns on. Unset: on, except on a hosted deployment.
+# owner or admin turns on. Both default to true.
 # See docs/configuration.md.
 # web_search_workspace_default: false
 # code_execution_workspace_default: false

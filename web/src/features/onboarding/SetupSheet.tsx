@@ -19,7 +19,6 @@ import {
   SETUP_TABS,
   type SetupSnippetId,
 } from "@/features/onboarding/setupSnippets"
-import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingGatewayAddressNotice"
 import {
   SNIPPET_KEY_ENV_VAR,
   SNIPPET_MODEL_PLACEHOLDER,
@@ -66,8 +65,8 @@ export function SetupSheet({
   /** The fingerprint the server stored for the issued key, shown while it is concealed. */
   keyPrefix?: string
   keySuffix?: string
-  /** Where a request belongs, or undefined when the deployment names none. */
-  baseUrl?: string
+  /** Where a request belongs. */
+  baseUrl: string
   /** The first model the gateway can serve, when it can serve one. */
   model?: string
   failure?: SetupFailure
@@ -98,19 +97,16 @@ export function SetupSheet({
   // the moment before it exists: what is rendered needs no key, so the examples
   // are here from the first frame rather than appearing under the operator once
   // the mint lands. Only the copy waits for the real thing.
-  const shown =
-    baseUrl === undefined
-      ? undefined
-      : buildSetupSnippets({
-          baseUrl,
-          apiKey: isRevealed && apiKey !== undefined ? apiKey : concealedKey,
-          model,
-        })
+  const shown = buildSetupSnippets({
+    baseUrl,
+    apiKey: isRevealed && apiKey !== undefined ? apiKey : concealedKey,
+    model,
+  })
   // What a copy yields, always the real key: an operator who copies without
   // revealing still gets something that runs. Undefined until there is a key,
   // and `CodeBlock` then offers no copy control rather than a dead one.
   const copied =
-    baseUrl === undefined || apiKey === undefined
+    apiKey === undefined
       ? undefined
       : buildSetupSnippets({ baseUrl, apiKey, model })
 
@@ -196,56 +192,48 @@ export function SetupSheet({
         </p>
       </DialogSection>
 
-      {baseUrl === undefined ? (
-        <DialogSection>
-          <MissingGatewayAddressNotice />
-        </DialogSection>
-      ) : null}
-
-      {shown !== undefined ? (
-        <DialogSection>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-emphasis">{instruction}</p>
-            <TabRow>
-              {SETUP_TABS.map(({ id, label }) => (
-                <Tab key={id} isActive={tab === id} onPress={() => setTab(id)}>
-                  {label}
-                </Tab>
-              ))}
-            </TabRow>
-          </div>
-          {/* Bare: the tab row above already names the language, so a label row
+      <DialogSection>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-emphasis">{instruction}</p>
+          <TabRow>
+            {SETUP_TABS.map(({ id, label }) => (
+              <Tab key={id} isActive={tab === id} onPress={() => setTab(id)}>
+                {label}
+              </Tab>
+            ))}
+          </TabRow>
+        </div>
+        {/* Bare: the tab row above already names the language, so a label row
               under it would say it twice. */}
-          <CodeBlock
-            label={tab}
-            value={copied?.[tab]}
-            arrangement="bare"
-            isBounded
-          >
-            {shown[tab]}
-          </CodeBlock>
+        <CodeBlock
+          label={tab}
+          value={copied?.[tab]}
+          arrangement="bare"
+          isBounded
+        >
+          {shown[tab]}
+        </CodeBlock>
+        <p className="text-caption text-subtle">
+          {tab === "agent"
+            ? "Works with Claude Code, Codex, and Cursor. Reads your key from the environment."
+            : "Hidden keys use a stand-in; copies include your real key."}
+        </p>
+        {model === undefined ? (
           <p className="text-caption text-subtle">
-            {tab === "agent"
-              ? "Works with Claude Code, Codex, and Cursor. Reads your key from the environment."
-              : "Hidden keys use a stand-in; copies include your real key."}
+            No model is being served yet, so the examples name{" "}
+            <code>{SNIPPET_MODEL_PLACEHOLDER}</code>. Replace it with one from
+            the{" "}
+            <Link
+              to="/models"
+              onClick={onDismiss}
+              className="text-link hover:text-link-hover font-medium"
+            >
+              Models
+            </Link>{" "}
+            page.
           </p>
-          {model === undefined ? (
-            <p className="text-caption text-subtle">
-              No model is being served yet, so the examples name{" "}
-              <code>{SNIPPET_MODEL_PLACEHOLDER}</code>. Replace it with one from
-              the{" "}
-              <Link
-                to="/models"
-                onClick={onDismiss}
-                className="text-link hover:text-link-hover font-medium"
-              >
-                Models
-              </Link>{" "}
-              page.
-            </p>
-          ) : null}
-        </DialogSection>
-      ) : null}
+        ) : null}
+      </DialogSection>
     </Dialog>
   )
 }
