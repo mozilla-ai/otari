@@ -166,11 +166,15 @@ otari:web_fetch
 The dashboard accepts dollars per call. The pricing API stores the value in
 `input_price_per_million`, so one cent per call is `10000`.
 
-With `require_pricing: true`, an unpriced gateway-run tool is refused before the
-model call. For web search and web fetch that check still reads only the
-`otari:web_search` and `otari:web_fetch` rows, whichever instance serves the calls
-and whether or not its provider reports a cost, so price those rows too. A failed tool invocation is recorded
-but not charged. Charges settle on the final usage row alongside model tokens.
+With `require_pricing: true`, a gateway-run tool whose calls no row would price
+is refused before the model call, with a `402` and the code `pricing_required`.
+The check looks for the rows settlement prices the calls with, described below:
+a search or fetch on an instance passes on its own row, and a call the
+deployment pays for does not pass on an organization's own override. A provider
+that reports its cost still needs a row, and a zero rate counts as one. The
+refusal names the tool's `otari:` row, which prices it on any instance. A failed
+tool invocation is recorded but not charged. Charges settle on the final usage
+row alongside model tokens.
 
 The usage row's pricing breakdown has one line per tool and label, and the
 dashboard's request detail shows each line with its label. The label says what
@@ -184,9 +188,15 @@ served the calls:
   on the legacy settings.
 
 A call is priced at the cost its provider reported, when it reports one, and
-otherwise at the first of its label's rows that has a price: an instance's own
-`<provider>:<instance>` or `builtin:builtin_fetch`, then `otari:web_search` or
-`otari:web_fetch`. An organization key's calls take the `otari:` row only,
+otherwise at the first of its label's rows that has a price: the instance's own
+search or fetch row (its `price_per_call`, or a price row of kind `search` or
+`fetch` keyed by the instance's name, `builtin_fetch` for the built-in fetcher),
+then the `<provider>:<instance>` model-kind row it was priced under before tools
+had a kind of their own (read until a later release, with a startup warning),
+then `otari:web_search` or `otari:web_fetch`. A tool's own row and a model's
+never share a key, so a search provider named like a model provider, such as
+DeepSeek, cannot price its models. The `otari:<tool>` rows of gateway-run tools
+stay model-kind rows. An organization key's calls take the `otari:` row only,
 since the deployment cannot price the organization's own account. A search also
 adds what its enrichment fetches reported. The line's `unit_rate` is its cost
 over its calls.
@@ -232,48 +242,50 @@ label of what served it in Otari (see
 [Pricing a gateway-run tool](#pricing-a-gateway-run-tool)), and never also as
 `<provider>:web_search`.
 
-Direct `POST /api/v1/search` prices a search on a tool under that tool's own key,
-`<provider>:<search-tool-name>`, because it calls a configured search provider
-without a model tool loop. The deployment pays for that search, so only its own
-price, or an override the deployment operator set, prices it. A search a
-workspace's [organization search key](#organization-search-keys) served is
-priced under `otari:web_search` instead, since the deployment cannot price the
-organization's own provider account, and the organization's own override
-applies to it. A provider's reported cost, when it reports one, comes first.
+Direct `POST /api/v1/search` prices a search on a tool at that tool's own search
+price, then at its old `<provider>:<search-tool-name>` row, because it calls a
+configured search provider without a model tool loop. The deployment pays for
+that search, so only its own price, or an override the deployment operator set,
+prices it. A search a workspace's [organization search key](#organization-search-keys)
+served is priced under `otari:web_search` instead, since the deployment cannot
+price the organization's own provider account, and the organization's own
+override applies to it. A provider's reported cost, when it reports one, comes first.
 
-With `require_pricing: true`, the default, a direct search whose row is missing
-is refused with a `402` and the code `pricing_required`, its detail naming the
-row to add, as an unpriced model is. That holds for a provider that reports its
-charge too, such as Exa, and a zero rate is a valid row. A key exempt from
+With `require_pricing: true`, the default, a direct search with no price is
+refused with a `402` and the code `pricing_required`, its detail naming the
+price to add, as an unpriced model is. That holds for a provider that reports its
+charge too, such as Exa, and a zero rate is a valid price. A key exempt from
 budgets is not refused.
 
 **Upgrading from 0.29.** Direct searches were exempt from `require_pricing`, so
-where it is on, a search on a tool with no row of its own now answers `402`. Add
-a row for each search tool, and `otari:web_search` if workspaces search on an
-organization search key. With the master key:
+where it is on, a search on a tool with no price of its own now answers `402`.
+Give each search tool a price, and `otari:web_search` one if workspaces search on
+an organization search key. In `config.yml`:
+
+```yaml
+search_tools:
+  exa-search:
+    provider: exa
+    api_key: ${EXA_API_KEY}
+    price_per_call: 0.005
+```
+
+or with the master key:
 
 ```bash
 curl http://localhost:8000/api/v1/pricing \
   -H "Authorization: Bearer $OTARI_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model_key": "exa:exa-search", "input_price_per_million": 5000, "output_price_per_million": 0}'
-```
-
-or in `config.yml`:
-
-```yaml
-pricing:
-  exa:exa-search:
-    input_price_per_million: 5000   # $0.005 per search
-    output_price_per_million: 0
+  -d '{"kind": "search", "model_key": "exa-search", "input_price_per_million": 5000, "output_price_per_million": 0}'
 ```
 
 Set the rate at about what one search costs: it is what a search holds against
 the caller's budget before it runs, and it is billed when the provider reports
 no charge of its own. A provider's reported charge still comes first. A zero
-rate is valid too and bills as before, but holds nothing. The dashboard cannot
-price a tool's own row yet, so use the API or the configuration file;
-`otari:web_search` can also be set on the dashboard's Tools & Guardrails screen.
+rate is valid too and bills as before, but holds nothing. A row written as
+`exa:exa-search` before tools had a kind still counts. The dashboard cannot
+price a tool yet, so use the configuration file or the API; `otari:web_search`
+can also be set on the dashboard's Tools & Guardrails screen.
 `require_pricing: false` serves unpriced searches again, and unpriced models with
 them. And whether `require_pricing` is on or not, an organization's own pricing
 override no longer prices a search on one of the deployment's tools.
@@ -673,8 +685,8 @@ one, and never with the provider's own message.
   reports what each fetch costs (`costDollars.total`).
 - **Tabstack** (`tabstack`) needs an API key, read from the instance's
   `api_key`, such as `${TABSTACK_API_KEY}`. It reports no cost, so a fetch is
-  billed at the instance's rate, `tabstack:<fetch-tool-name>`, else
-  `otari:web_fetch`. Tabstack's
+  billed at the instance's own rate (its `price_per_call`, or a `fetch` price set
+  through the API), else `otari:web_fetch`. Tabstack's
   [pricing](https://docs.tabstack.ai/pricing), read 2026-10-13, is 10 credits a
   page, and a credit costs $0.0001 to $0.0003 depending on the plan and on
   whether the plan's monthly credits are used up, so $0.001 to $0.003 a page.
@@ -905,7 +917,8 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
 - **Mojeek** (`mojeek`) needs an API key, read from the tool's `api_key`, such as
   `${MOJEEK_API_KEY}`. Mojeek takes the key and the query in the request URL,
   which Otari keeps out of its logs. It reports no cost, so a search is billed at
-  the tool's rate, `mojeek:<search-tool-name>`. Mojeek's
+  the tool's own rate (its `price_per_call`, or a `search` price set through the
+  API). Mojeek's
   [pricing](https://www.mojeek.com/services/search/web-search-api/), read
   2026-10-13, is per search, in pounds before taxes: £2 per 1,000 on the Startup
   plan, £3 on Business, Enterprise by arrangement; set the rate in dollars at what

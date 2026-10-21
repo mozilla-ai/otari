@@ -90,7 +90,7 @@ created. Set `activation_guide: false` to disable the flow for the deployment.
 The workspace view contains day-to-day gateway operations:
 
 - Overview, Activity, and Usage
-- Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers. Routing lists each policy with its main model, its backups in order, and who it applies to. On a standalone gateway, Automatic fallback lists the models your organization used in the last 30 days with the providers their catalog ID tries in order, how many requests a backup served, and which ones have no backup. The Models guide explains the order. Create policy first asks what the policy is for (a fallback, a traffic split, a smart router, spill-over at rate limits, or a budget tier-down) and then shows only that kind's fields; the empty list offers a fallback directly. Models are chosen by model and then by provider. Each policy has its own page, opened from Edit in the list, where its main selection, fallback chain, budget tier-down and guardrails are combined, each section with its own Save. Policies from `config.yml` open there read-only. A hybrid or hosted deployment says that its policies are not where a request's attempt plan comes from.
+- Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers. Routing lists each policy with its main model, its backups in order, and who it applies to. On a standalone gateway, Automatic fallback lists the models your organization used in the last 30 days with the providers their catalog ID tries in order, how many requests a backup served, and which ones have no backup, including those most requests pin to one provider. The Models guide explains the order. Create policy first asks what the policy is for (a fallback, a traffic split, a smart router, spill-over at rate limits, or a budget tier-down) and then shows only that kind's fields; the empty list offers a fallback directly. Models are chosen by model and then by provider. Each policy has its own page, opened from Edit in the list, where its main selection, fallback chain, budget tier-down and guardrails are combined, each section with its own Save. Policies from `config.yml` open there read-only. A hybrid or hosted deployment says that its policies are not where a request's attempt plan comes from.
 - Tools
 - API keys and workspace members
 
@@ -281,7 +281,10 @@ where the deployment records traces (`trace_capture_enabled`, on by default; a
 hybrid gateway records none), and has no entry where it does not. Its chart
 counts sessions per hour or day as succeeded or failed, and its Levels column
 counts each session's errors, tools' errors included; a tool's error alone does
-not fail a session (see [Sessions and failures](traces.md#sessions-and-failures)). A session
+not fail a session (see [Sessions and failures](traces.md#sessions-and-failures)). The
+Last activity, Levels, Latency, Tokens and Total cost headers sort the list
+across every page: a header's first press puts the largest first and a second
+press flips it, and the order is kept in the URL with the filters. A session
 opens in a side panel as a tree of its turns, LLM calls and tool calls, a
 timeline of the same spans, or a flat log. The token count in its header breaks
 down into input, the share of it the prompt cache served, and output, for the
@@ -353,11 +356,10 @@ daily invitation mail limit), you get the accept link to share,
 and an invitee new to the deployment chooses a password on the page it opens,
 so a deployment without SMTP can still bring people in. See [Configuration](configuration.md#mail).
 
-## Bundled guide and custom documentation
+## Custom documentation
 
-This guide is bundled into the dashboard at `/#/docs`. Set `docs_url` to make
-the dashboard's Documentation link open a different site. The bundled route
-remains available.
+The dashboard's Documentation link opens [docs.otari.ai](https://docs.otari.ai/).
+Set `docs_url` to make it open a different site.
 
 ## Legal pages
 
@@ -369,4 +371,4 @@ privacy notice live. The account menu links each row it has an address for; see
 
 The dashboard source is under `web/`. The published Docker image includes the
 bundle. A source checkout needs `make dashboard` for the gateway to serve it, or
-`pnpm --dir web dev` for frontend development. See [web/README.md](https://github.com/mozilla-ai/otari/blob/v0.30.1/web/README.md).
+`pnpm --dir web dev` for frontend development. See [web/README.md](https://github.com/mozilla-ai/otari/blob/v0.31.0/web/README.md).

@@ -62,8 +62,9 @@ retries, since a request without it starts a trace of its own.
   identifier-shaped (up to 128 letters, digits and `_ . : / @ + -`, and not
   shaped like an email address, a file path or a credential), it is also stored
   as the session's name: the Sessions list shows it, and its search box finds
-  the session by it (`hackbot-1234`, or a prefix such as `hackbot-`). Any other
-  value is not stored. A harness's own id and an OTLP session id are never
+  the session by any part of it, in any case (`hackbot-1234`, `hackbot-` or
+  `BOT-12`). The same box also matches any part of a session's id, agent or
+  user. Any other value is not stored. A harness's own id and an OTLP session id are never
   stored as a name.
 - Give each run its own id rather than reusing one for days: after
   `trace_session_max_age_days` a reused id starts a new trace anyway.
