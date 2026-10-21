@@ -241,8 +241,8 @@ describe("AccountMenu", () => {
   })
 
   // #832: the trigger names a person rather than a standing, read off the
-  // caller rather than off the bootstrap, which says what kind of session the
-  // deployment issues and not who holds this one.
+  // caller rather than off the bootstrap, which describes the deployment and
+  // not who is signed in to it.
   it("names the person signed in, not a role", async () => {
     mockCaller({
       user_id: "44444444-4444-4444-4444-444444444444",

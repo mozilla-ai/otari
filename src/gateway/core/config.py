@@ -102,8 +102,6 @@ API_VERSION = "v1"
 API_ROOT = f"/api/{API_VERSION}"
 # Base only: OTel exporters append /otlp/v1/traces and the other signal paths.
 OTLP_ROOT = "/otlp"
-# Selected a runtime mode before modes were removed; each is ignored with a warning at startup.
-_REMOVED_MODE_ENV_VARS = ("OTARI_MODE", "OTARI_AI_TOKEN", "OTARI_DATA_PLANE_URL")
 # User-facing config env vars use the OTARI_ prefix (e.g. OTARI_MASTER_KEY,
 # OTARI_PORT), which is also the native pydantic prefix below.
 OTARI_ENV_PREFIX = "OTARI_"
@@ -2439,13 +2437,6 @@ class GatewayConfig(
             raise ValueError(msg)
 
 
-def warn_about_removed_mode_settings() -> None:
-    """Log that a leftover runtime-mode variable is ignored, so an upgrade does not refuse to start over it."""
-    for name in _REMOVED_MODE_ENV_VARS:
-        if os.getenv(name, "").strip():
-            logger.warning("Ignoring %s: Otari no longer has runtime modes.", name)
-
-
 def _load_structured_env_config() -> dict[str, Any] | None:
     """Parse a full YAML config supplied through the environment.
 
@@ -2521,9 +2512,6 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     yaml_bridged_fields = {name for name in ENV_BRIDGED_FIELDS if config_dict.get(name) is not None}
 
     _apply_otari_env_overrides(config_dict)
-    for removed_key in ("platform", "mode", "data_plane_url"):
-        if config_dict.pop(removed_key, None) is not None:
-            logger.warning("Ignoring the '%s' config key: Otari no longer has runtime modes.", removed_key)
 
     config = GatewayConfig(**config_dict)
     config.validate_provider_instances()

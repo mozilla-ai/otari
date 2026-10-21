@@ -1,8 +1,8 @@
 """Deployment bootstrap the dashboard shell reads before it renders.
 
-One server-derived payload: what kind of session this deployment issues, which
-management surfaces it offers, and how a caller may sign in. The shell reads it
-once and gates navigation on it.
+One server-derived payload: which management surfaces this deployment offers
+and how a caller may sign in. The shell reads it once and gates navigation on
+it.
 
 Unauthenticated by necessity: this is what tells a browser whether a sign-in
 screen is even the right thing to show. It therefore carries no secret:
@@ -48,8 +48,6 @@ from gateway.services.tenancy.webauthn_service import has_any_credential
 
 router = APIRouter(prefix="/bootstrap", tags=["bootstrap"])
 
-DeploymentType = Literal["standalone"]
-SessionType = Literal["local_operator"]
 # How a caller may sign in to this deployment. ``master_key`` is the first-boot
 # credential and ``password`` the steady-state one, and a standalone gateway
 # offers exactly one of them: the master key until the operator claims the
@@ -100,16 +98,6 @@ def published_surfaces(enabled_features: tuple[CoreFeature, ...]) -> list[str]:
 class DeploymentBootstrap(BaseModel):
     """What the dashboard shell needs before it can render anything."""
 
-    deployment_type: DeploymentType = Field(
-        description="Which kind of deployment serves this URL. Every Otari deployment answers 'standalone'."
-    )
-    session_type: SessionType = Field(
-        description=(
-            "The kind of session this deployment issues, not whether the caller holds one. "
-            "'local_operator' is this deployment's own sign-in (see sign_in_methods for which "
-            "credential it currently accepts)."
-        )
-    )
     surfaces: list[str] = Field(
         description=(
             "Management API groups this deployment serves, sorted, which is what its dashboard "
@@ -249,8 +237,6 @@ async def get_bootstrap(
     password (#702).
     """
     return DeploymentBootstrap(
-        deployment_type="standalone",
-        session_type="local_operator",
         surfaces=published_surfaces(enabled_features),
         sign_in_methods=await _sign_in_methods(db, config),
         docs_url=config.docs_url,

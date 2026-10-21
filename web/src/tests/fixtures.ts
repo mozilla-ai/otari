@@ -173,8 +173,6 @@ export function bootstrap(
   overrides: Partial<DeploymentBootstrap> = {},
 ): DeploymentBootstrap {
   return {
-    deployment_type: "standalone",
-    session_type: "local_operator",
     surfaces: [...SURFACES],
     // The master key, because an unclaimed deployment is what a fixture
     // describes by default; a test about the password login overrides it.

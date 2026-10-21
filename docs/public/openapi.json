@@ -5853,12 +5853,6 @@
       "DeploymentBootstrap": {
         "description": "What the dashboard shell needs before it can render anything.",
         "properties": {
-          "deployment_type": {
-            "const": "standalone",
-            "description": "Which kind of deployment serves this URL. Every Otari deployment answers 'standalone'.",
-            "title": "Deployment Type",
-            "type": "string"
-          },
           "docs_url": {
             "anyOf": [
               {
@@ -5927,12 +5921,6 @@
             "title": "Public Catalog",
             "type": "boolean"
           },
-          "session_type": {
-            "const": "local_operator",
-            "description": "The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is this deployment's own sign-in (see sign_in_methods for which credential it currently accepts).",
-            "title": "Session Type",
-            "type": "string"
-          },
           "sign_in_methods": {
             "description": "How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; past that it stays the credential for the management API but is no longer a dashboard login. 'password' is offered while any active identity holds one, which is not the same question and not always the later half of it: a member can hold a password on a deployment whose operator never claimed it, so both typed credentials can appear together. 'passkey' appears alongside either when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. The login page renders from this rather than trying a credential to find out.",
             "items": {
@@ -5980,8 +5968,6 @@
           }
         },
         "required": [
-          "deployment_type",
-          "session_type",
           "surfaces",
           "docs_url",
           "terms_url",

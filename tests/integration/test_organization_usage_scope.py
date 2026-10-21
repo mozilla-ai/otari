@@ -464,7 +464,6 @@ def test_the_deployment_publishes_and_scopes_the_surface(client: TestClient, wor
     sees only its own rows.
     """
     answered = client.get(f"{API_ROOT}/bootstrap").json()
-    assert answered["deployment_type"] == "standalone"
     assert "organization_usage" in answered["surfaces"]
 
     assert _models_listed(client, world, "alpha_member") == set(_ALPHA_ONE_MODELS)

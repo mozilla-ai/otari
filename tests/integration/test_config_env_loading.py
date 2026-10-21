@@ -7,8 +7,7 @@ from unittest import mock
 import pytest
 
 import gateway.core.config as config_module
-from gateway import log_config
-from gateway.core.config import GatewayConfig, load_config, warn_about_removed_mode_settings
+from gateway.core.config import GatewayConfig, load_config
 from gateway.core.env import otari_env
 from gateway.services.url_safety import (
     UnsafeURLError,
@@ -460,41 +459,6 @@ def test_load_config_otari_env_overrides_yaml(tmp_path: Path, monkeypatch: pytes
     config = load_config(str(config_file))
 
     assert config.budget_strategy == "disabled"
-
-
-@pytest.mark.parametrize("key", ["platform", "mode", "data_plane_url"])
-def test_load_config_ignores_a_leftover_mode_key_with_a_warning(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, key: str
-) -> None:
-    config_file = tmp_path / "gateway.yml"
-    value = "\n  base_url: http://localhost:8100/api/v1" if key == "platform" else " hosted"
-    config_file.write_text(f"{key}:{value}\n", encoding="utf-8")
-    warning = mock.Mock()
-    monkeypatch.setattr(log_config.logger, "warning", warning)
-
-    config = load_config(str(config_file))
-
-    assert not hasattr(config, key)
-    warning.assert_any_call("Ignoring the '%s' config key: Otari no longer has runtime modes.", key)
-
-
-@pytest.mark.parametrize("name", ["OTARI_MODE", "OTARI_AI_TOKEN", "OTARI_DATA_PLANE_URL"])
-def test_a_leftover_mode_variable_starts_with_a_warning(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
-) -> None:
-    # otari.ai's environment may still carry OTARI_MODE=hosted when it upgrades, so
-    # these are ignored rather than refused.
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("", encoding="utf-8")
-    monkeypatch.setenv(name, "hosted")
-    warning = mock.Mock()
-    monkeypatch.setattr(log_config.logger, "warning", warning)
-
-    config = load_config(str(config_file))
-    warn_about_removed_mode_settings()
-
-    assert not hasattr(config, "mode")
-    warning.assert_any_call("Ignoring %s: Otari no longer has runtime modes.", name)
 
 
 def _isolate_structured_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

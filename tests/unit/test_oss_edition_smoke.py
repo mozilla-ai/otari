@@ -68,8 +68,6 @@ def test_the_gate_walks_the_root_the_app_actually_serves() -> None:
 @pytest.mark.parametrize(
     "name",
     [
-        "OTARI_MODE",  # a removed runtime mode's selector
-        "OTARI_AI_TOKEN",  # a removed runtime mode's token
         "OTARI_BOOTSTRAP",  # the overlay selector, which would boot a build nobody chose
         "OTARI_DATABASE_URL",  # would smoke a database nobody chose
         # A name the scrub has never heard of, so a regression from the prefix

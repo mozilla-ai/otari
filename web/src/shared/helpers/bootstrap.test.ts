@@ -70,15 +70,4 @@ describe("normalizeBootstrap", () => {
     expect(completed.maintenance_mode).toBe(false)
     expect(completed.sign_in_methods).toEqual([])
   })
-
-  it("does not invent the two fields that say what the deployment is", () => {
-    // web/AGENTS.md: do not guess a deployment. Absent here means absent below,
-    // rather than a deployment identity this file made up.
-    const completed = normalizeBootstrap(
-      omitting("deployment_type", "session_type"),
-    )
-
-    expect(completed.deployment_type).toBeUndefined()
-    expect(completed.session_type).toBeUndefined()
-  })
 })

@@ -9701,12 +9701,6 @@ export interface components {
          */
         DeploymentBootstrap: {
             /**
-             * Deployment Type
-             * @description Which kind of deployment serves this URL. Every Otari deployment answers 'standalone'.
-             * @constant
-             */
-            deployment_type: "standalone";
-            /**
              * Docs Url
              * @description Where this deployment's documentation lives, when it is not docs.otari.ai. Set, the dashboard's Documentation links open it in a new tab; null, they open https://docs.otari.ai/. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
              */
@@ -9757,12 +9751,6 @@ export interface components {
              * @default false
              */
             public_catalog: boolean;
-            /**
-             * Session Type
-             * @description The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is this deployment's own sign-in (see sign_in_methods for which credential it currently accepts).
-             * @constant
-             */
-            session_type: "local_operator";
             /**
              * Sign In Methods
              * @description How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; past that it stays the credential for the management API but is no longer a dashboard login. 'password' is offered while any active identity holds one, which is not the same question and not always the later half of it: a member can hold a password on a deployment whose operator never claimed it, so both typed credentials can appear together. 'passkey' appears alongside either when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. The login page renders from this rather than trying a credential to find out.

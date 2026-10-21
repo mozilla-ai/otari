@@ -43,7 +43,6 @@ from gateway.core.config import (
     TAGS_HEADER,
     X_API_KEY_HEADER,
     GatewayConfig,
-    warn_about_removed_mode_settings,
 )
 from gateway.core.database import create_session, describe_database_error, dispose_db, init_db
 from gateway.core.error_codes import INVALID_REQUEST, error_code_of, error_headers
@@ -1049,7 +1048,6 @@ async def _validation_error_handler(_: Request, exc: Exception) -> Response:
 def create_app(config: GatewayConfig) -> FastAPI:
     """Create and configure FastAPI application."""
 
-    warn_about_removed_mode_settings()
     _validate_metrics_support(config)
     _validate_rate_limit_store(config)
     config.validate_declared_access()

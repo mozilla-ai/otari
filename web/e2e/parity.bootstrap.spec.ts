@@ -13,8 +13,6 @@ test("the deployment bootstrap is served unauthenticated", async ({
 
   expect(response.status()).toBe(200)
   expect(await response.json()).toEqual({
-    deployment_type: "standalone",
-    session_type: "local_operator",
     // Spelled out rather than derived: this is the list the sidebar gates on,
     // and a surface that quietly appears or disappears should fail here.
     surfaces: [

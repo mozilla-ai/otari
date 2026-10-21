@@ -24,11 +24,6 @@ type Schemas = components["schemas"]
  * is true of a response and false of a request body: the point of a default is
  * that a client may omit it. Applied only where the dashboard actually omits
  * one, so it stays a correction rather than a blanket loosening.
- *
- * Exported because the response side has the same problem from the other
- * direction: a gateway older than a field does not send it, whatever the
- * current schema says. `WireBootstrap` in `shared/helpers/bootstrap.ts` is that
- * case, and reuses this rather than restating it.
  */
 export type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 

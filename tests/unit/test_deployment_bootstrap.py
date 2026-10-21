@@ -68,7 +68,7 @@ def _gateway_config(
     )
 
 
-def test_the_bootstrap_reports_a_local_operator_and_the_full_surface_set(tmp_path: Path) -> None:
+def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
     app = create_app(_gateway_config(tmp_path))
 
     with TestClient(app) as client:
@@ -76,8 +76,6 @@ def test_the_bootstrap_reports_a_local_operator_and_the_full_surface_set(tmp_pat
 
     assert response.status_code == 200
     assert response.json() == {
-        "deployment_type": "standalone",
-        "session_type": "local_operator",
         # The trace explorer and the Health page are core features, published on top of the declared surfaces
         # while they are on.
         "surfaces": sorted({*SURFACES, "health_checks", "traces"}),
@@ -116,7 +114,6 @@ def test_a_database_outage_reports_no_sign_in_rather_than_failing(
         response = client.get(f"{API_ROOT}/bootstrap")
 
     assert response.status_code == 200
-    assert response.json()["deployment_type"] == "standalone"
     assert response.json()["sign_in_methods"] == []
 
 

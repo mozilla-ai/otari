@@ -585,22 +585,18 @@ def check_health(base_url: str) -> None:
 
 
 def check_bootstrap(base_url: str) -> None:
-    """Assert the deployment bootstrap answers, uncredentialed, as standalone.
+    """Assert the deployment bootstrap answers, uncredentialed, with its surfaces.
 
     This is the first request any browser makes, before it holds a credential, so
-    it is checked without one. It is also an independent statement of
-    which edition booted: an enterprise or hosted build answers something other
-    than ``standalone`` here.
+    it is checked without one.
     """
     status, body = _request("GET", f"{base_url}{API_ROOT}/bootstrap")
     _expect(status, 200, f"GET {API_ROOT}/bootstrap", body)
     if not isinstance(body, dict):
         raise SmokeFailure(f"GET {API_ROOT}/bootstrap did not return an object: {body!r}")
-    if body.get("deployment_type") != "standalone" or body.get("session_type") != "local_operator":
-        raise SmokeFailure(f"GET {API_ROOT}/bootstrap does not describe the OSS edition: {body!r}")
     if not body.get("surfaces"):
         raise SmokeFailure(f"GET {API_ROOT}/bootstrap reports no management surfaces: {body!r}")
-    log("The deployment bootstrap answers without a credential, as standalone")
+    log("The deployment bootstrap answers without a credential")
 
 
 def check_mail_is_honestly_unavailable(base_url: str, admin: dict[str, str]) -> None:

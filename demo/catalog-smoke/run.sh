@@ -53,8 +53,6 @@ fi
 MASTER_KEY="$(cat "$STATE/master-key")"
 export OTARI_SECRET_KEY="$(cat "$STATE/secret-key")"
 export OTARI_PROVIDER_ACCOUNT_PEPPER="$(cat "$STATE/provider-account-pepper")"
-# A stale token from the removed hybrid mode only makes the gateway log a warning.
-unset OTARI_AI_TOKEN
 
 LAN_IP="$( (ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}') || true)"
 PUBLIC_BASE_URL="http://${LAN_IP:-localhost}:$PORT"

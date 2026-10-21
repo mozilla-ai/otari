@@ -10,10 +10,6 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
 config="web/e2e/otari.yml"
 
-# A platform token in the shell of whoever is running this must not reach the
-# gateway these specs sign in to.
-unset OTARI_AI_TOKEN
-
 # A throwaway Fernet key so provider credentials can be stored during the run;
 # not a secret (E2E-only, on an ephemeral DB).
 export OTARI_SECRET_KEY="${OTARI_SECRET_KEY:-wdhWKyd1gwpMjxj9h4EbpW9B6pilzfrNTe0wTnwqPHg=}"
