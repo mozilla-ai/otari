@@ -32,7 +32,6 @@ from gateway.repositories.tools import WorkspaceCodeExecutionPolicyRepository
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAMES, SERVED_TOOL_NAMES
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.tools import (
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
@@ -80,9 +79,7 @@ def _service(
     return WorkspaceCodeExecutionPolicyService(
         uow,
         WorkspaceCodeExecutionPolicyRepository(uow),
-        WorkspaceAccess(
-            db, OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
-        ),
+        WorkspaceAccess(db, OrganizationService(db, membership_listener=None)),
         sandbox_configured=sandbox_configured,
         default_enabled=default_enabled,
         allowed_images=allowed_images,
@@ -90,7 +87,9 @@ def _service(
 
 
 async def _resolve(db: AsyncSession, workspace_id: uuid.UUID) -> ResolvedCodeExecutionPolicy | None:
-    return await WorkspaceCodeExecutionPolicies(WorkspaceCodeExecutionPolicyRepository(db)).resolve(workspace_id)
+    return await WorkspaceCodeExecutionPolicies(
+        WorkspaceCodeExecutionPolicyRepository(db), on_without_policy=True
+    ).resolve(workspace_id)
 
 
 async def test_a_workspace_with_no_policy_reads_as_unconfigured_and_narrows_nothing(

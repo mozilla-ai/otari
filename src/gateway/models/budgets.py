@@ -325,9 +325,6 @@ class BudgetReservation(Base):
     row is the pre-existing leak the sweep bounds; a row with no hold would have
     the sweep release an amount nobody holds, under-counting the live ones. Of
     the two inconsistent windows only one is safe, and this is it.
-
-    Standalone mode only: hybrid mode reserves nothing locally, because the
-    platform holds against its own ledger.
     """
 
     __tablename__ = "budget_reservations"

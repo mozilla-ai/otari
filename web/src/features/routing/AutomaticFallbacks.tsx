@@ -151,7 +151,7 @@ const COLUMNS: DataTableColumn<AutomaticFallback>[] = [
 ]
 
 /**
- * The fallbacks a standalone gateway gives with no policy: a model served on
+ * The fallbacks a gateway gives with no policy: a model served on
  * several providers fails over between them when callers send its catalog ID.
  * A model on one provider is listed too, marked as having no backup.
  */

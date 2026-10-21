@@ -1,4 +1,4 @@
-# OSS gateway demo config — standalone mode (no platform service).
+# OSS gateway demo config.
 # Mounted as /app/config.yml by docker-compose.
 #
 # Anthropic API key is *not* hardcoded here. Set ANTHROPIC_API_KEY in your

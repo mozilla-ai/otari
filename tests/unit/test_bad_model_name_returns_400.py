@@ -12,7 +12,8 @@ These tests cover:
 - resolve_dispatch_provider returns cached provider when ctx.resolved_provider is set
 """
 
-from unittest.mock import MagicMock, patch
+from collections.abc import Iterator
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from any_llm.exceptions import AnyLLMError
@@ -55,13 +56,18 @@ def test_detail_contains_model_name() -> None:
 def _make_ctx(resolved_provider: object = None) -> MagicMock:
     ctx = MagicMock()
     ctx.resolved_provider = resolved_provider
-    # No DB: keeps these tests on the 400 mapping alone. The rejection row
-    # resolve_dispatch_provider writes on the same path (and the refund it does
-    # first) are both no-ops without a session, and are covered end to end in
+    # No reservation and a stubbed rejection row keep these tests on the 400
+    # mapping alone. Both are covered end to end in
     # tests/integration/test_gateway_rejection_logging.py.
-    ctx.db = None
+    ctx.reservation = None
     ctx.rate_limit_grant = None
     return ctx
+
+
+@pytest.fixture(autouse=True)
+def _no_rejection_row() -> Iterator[AsyncMock]:
+    with patch("gateway.api.routes._pipeline.log_gateway_rejection", new=AsyncMock()) as stub:
+        yield stub
 
 
 def _make_config() -> MagicMock:

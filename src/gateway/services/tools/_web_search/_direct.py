@@ -205,8 +205,7 @@ def refuse_unpriced_direct_search(
     ``require_pricing`` is on and nothing priced it, even if the provider
     reports its own cost; a zero rate is a price. Two calls pass unpriced: one
     on a key exempt from budgets, which is never debited, and one with no rate
-    keys (a hybrid control plane's credential), which this gateway does not
-    settle. Raises :class:`DirectSearchPricingRequiredError`, whose message
+    keys, which this gateway does not settle. Raises :class:`DirectSearchPricingRequiredError`, whose message
     names the row to add.
     """
     rate_keys = search.resolved.rate_keys
@@ -220,22 +219,22 @@ def refuse_unpriced_direct_search(
 def _unpriced_detail(tool: str, rate_key: RateKey, *, organization_key: bool) -> str:
     """The 402's message: the price ``rate_key`` names for a search on ``tool``, and where to set it.
 
-    Of the two, only ``otari:web_search`` can be set on the dashboard (Tools &
-    Guardrails); an instance's own price is set through the API, or by
-    ``price_per_call`` for an instance declared in the configuration file.
+    Both can be set on the dashboard's Web search pricing page or through the
+    API, and an instance declared in the configuration file by its ``price_per_call``.
     """
     if organization_key:
         missing = f"is priced at {describe_rate_key(rate_key)}, which has no pricing"
         how = (
             f"Set a per-request rate for it (POST {API_ROOT}/pricing, the pricing section of config.yml, "
-            "or the dashboard's Tools & Guardrails screen)"
+            "or the dashboard's Web search pricing page)"
         )
     else:
         # The deployment pays for the call, so an organization's own override does not count.
         missing = "has no price the deployment's operator set"
         how = (
-            f"Set one with POST {API_ROOT}/pricing using kind 'search' and the tool's name as model_key, "
-            "or with price_per_call on its entry if it is declared in config.yml"
+            f"Set one on the dashboard's Web search pricing page, with POST {API_ROOT}/pricing using kind "
+            "'search' and the tool's name as model_key, or with price_per_call on its entry if it is declared "
+            "in config.yml"
         )
     return (
         f"A search on '{tool}' {missing}, and require_pricing is on, so it is not run. "

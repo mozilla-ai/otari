@@ -129,7 +129,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Agent Telemetry Rows
-         * @description Delete agent_telemetry rows by explicit ids or by filter (standalone).
+         * @description Delete agent_telemetry rows by explicit ids or by filter.
          *
          *     Target either an explicit selection (`ids`) or everything matching a filter
          *     (`by_filter: true` plus optional `user_id` / `api_key_id` / `name` / date
@@ -151,7 +151,7 @@ export interface paths {
         };
         /**
          * Count Agent Telemetry
-         * @description Total agent_telemetry rows matching the given filters (standalone).
+         * @description Total agent_telemetry rows matching the given filters.
          *
          *     The filter set mirrors the purge endpoint's, so this sizes exactly what a
          *     "delete all N matching" would remove. Behavioral and metric rows are counted
@@ -175,7 +175,7 @@ export interface paths {
         };
         /**
          * Agent Telemetry Series
-         * @description Row volume over time, split by user or API key (standalone).
+         * @description Row volume over time, split by user or API key.
          *
          *     Mirrors `/api/v1/usage/series`: same window bounds and bucket-grid cap, the top
          *     groups as their own series with the remainder folded into a reconciling
@@ -200,7 +200,7 @@ export interface paths {
         };
         /**
          * Agent Telemetry Summary
-         * @description What the coding agent produced in a window, and what it cost (standalone).
+         * @description What the coding agent produced in a window, and what it cost.
          *
          *     Range-bounded like `/api/v1/usage/summary` (default last 30 days, hard-capped),
          *     so the aggregates stay served by the timestamp index. Returns the outcome
@@ -973,8 +973,7 @@ export interface paths {
          *
          *     The database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``
          *     marker, and the identity it names, to answer whether *that* identity holds a
-         *     password (#702). It runs only in standalone mode: a hybrid gateway has no session to describe,
-         *     and ``get_db_if_needed`` hands it no session to read one from.
+         *     password (#702).
          */
         get: operations["bootstrap-get_bootstrap"];
         put?: never;
@@ -2352,10 +2351,7 @@ export interface paths {
          * @description Anthropic Messages API-compatible endpoint.
          *
          *     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
-         *     web_search in both standalone mode and hybrid mode. Hybrid-mode requests
-         *     resolve credentials via the platform service and get multi-attempt
-         *     fallback across the resolved route, tool-loop requests included (fallback
-         *     applies up to the pre-lock-in point, same as chat).
+         *     web_search.
          */
         post: operations["messages-create_message"];
         delete?: never;
@@ -2379,9 +2375,8 @@ export interface paths {
          *
          *     Returns ``{"input_tokens": N}`` without contacting an upstream provider:
          *     counting is local, so there is no budget reservation, pricing, or usage
-         *     logging. Authentication mirrors :func:`create_message` — hybrid mode
-         *     resolves the caller's token against the platform, standalone mode validates
-         *     the API key — so the endpoint is not an open token-counting oracle.
+         *     logging. Authentication mirrors :func:`create_message`, validating the API
+         *     key, so the endpoint is not an open token-counting oracle.
          */
         post: operations["messages-count_message_tokens"];
         delete?: never;
@@ -4127,15 +4122,15 @@ export interface paths {
         };
         /**
          * List Org Web Search Keys
-         * @description List the caller's organization's web search keys. Organization owners and admins only.
+         * @description List the caller's organization's web search and fetch keys. Organization owners and admins only.
          */
         get: operations["web-search-keys-list_org_web_search_keys"];
         put?: never;
         /**
          * Create Org Web Search Key
-         * @description Add a web search key to the caller's organization. Organization owners and admins only.
+         * @description Add a search or fetch key to the caller's organization. Organization owners and admins only.
          *
-         *     A workspace with a usable key searches with it rather than with the deployment's search.
+         *     A workspace with a usable key of a kind uses it for that kind's calls rather than the deployment's instance.
          */
         post: operations["web-search-keys-create_org_web_search_key"];
         delete?: never;
@@ -4156,14 +4151,16 @@ export interface paths {
         post?: never;
         /**
          * Delete Org Web Search Key
-         * @description Delete an archived web search key. Organization owners and admins only.
+         * @description Delete an archived key. Organization owners and admins only.
          */
         delete: operations["web-search-keys-delete_org_web_search_key"];
         options?: never;
         head?: never;
         /**
          * Update Org Web Search Key
-         * @description Rename a web search key or replace its secret. Organization owners and admins only.
+         * @description Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.
+         *
+         *     Its kind and provider are fixed.
          */
         patch: operations["web-search-keys-update_org_web_search_key"];
         trace?: never;
@@ -4179,7 +4176,7 @@ export interface paths {
         put?: never;
         /**
          * Archive Org Web Search Key
-         * @description Take a web search key out of use. Organization owners and admins only.
+         * @description Take a key out of use. Organization owners and admins only.
          */
         post: operations["web-search-keys-archive_org_web_search_key"];
         delete?: never;
@@ -4199,7 +4196,9 @@ export interface paths {
         put?: never;
         /**
          * Set Org Default Web Search Key
-         * @description Make a web search key its provider's organization default. Organization owners and admins only.
+         * @description Make a key the organization's default of its kind, in place of the previous one.
+         *
+         *     Organization owners and admins only.
          */
         post: operations["web-search-keys-set_org_default_web_search_key"];
         delete?: never;
@@ -4219,7 +4218,7 @@ export interface paths {
         put?: never;
         /**
          * Restore Org Web Search Key
-         * @description Put an archived web search key back in use. Organization owners and admins only.
+         * @description Put an archived key back in use. Organization owners and admins only.
          */
         post: operations["web-search-keys-restore_org_web_search_key"];
         delete?: never;
@@ -4282,11 +4281,6 @@ export interface paths {
          *
          *     ``user`` in the body is the one field the pipeline will not read here: spend
          *     binds to the session's own attribution user, derived and never accepted.
-         *
-         *     On a hosted control plane there is no local pipeline to call, so the same
-         *     principal is forwarded to the data-plane gateway instead
-         *     (:func:`_dispatch_to_data_plane`). The request and the response are the same
-         *     either way.
          */
         post: operations["playground-playground_chat_completions"];
         delete?: never;
@@ -5081,10 +5075,7 @@ export interface paths {
          * @description OpenAI-compatible Responses endpoint.
          *
          *     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
-         *     web_search in both standalone mode and hybrid mode. Hybrid-mode requests
-         *     resolve credentials via the platform service and get multi-attempt
-         *     fallback across the resolved route, tool-loop requests included (fallback
-         *     applies up to the pre-lock-in point, same as chat).
+         *     web_search.
          */
         post: operations["responses-create_response"];
         delete?: never;
@@ -5223,9 +5214,9 @@ export interface paths {
          *     session and the spawning tool call, the subagent type, the task, the
          *     parent's model and the model the caller asked for, if any. The recommender
          *     this build binds picks one of the candidate models and the answer names it.
-         *     A standalone deployment asks the decision model `agent_recommender_model`
+         *     By default the deployment asks the decision model `agent_recommender_model`
          *     names to choose among `agent_recommender_candidates` for Claude Code and
-         *     among the request's own `candidates` for pi; a hosted build may bind a
+         *     among the request's own `candidates` for pi; a bootstrap may bind a
          *     recommender of its own, which the caller never configures. Where
          *     the recommender reports them, the answer also carries a one-line reason
          *     and its probability for each candidate.
@@ -5770,7 +5761,7 @@ export interface paths {
          * @description Persist and apply tool/guardrail setting changes.
          *
          *     Uses ``model_fields_set`` so an explicit ``null`` clears a field while an
-         *     omitted field is left unchanged. Operator-gated and standalone-only.
+         *     omitted field is left unchanged. Operator-gated.
          */
         patch: operations["tool-settings-update_tool_settings"];
         trace?: never;
@@ -5851,10 +5842,10 @@ export interface paths {
          *     caller-supplied and fetching it here would make this a way to have the
          *     gateway request an address of the caller's choosing.
          *
-         *     Not on ``verify_catalog_reader``, despite being a catalog read: that plane is
-         *     the three deployment-describing reads a data-plane key may also make, and
-         *     admitting a key here would let any workspace credential dial the deployment's
-         *     guardrails service. This is a management read, so it takes the router's own gate.
+         *     Not on ``verify_catalog_reader``, despite being a catalog read: that gate
+         *     admits any API key to the deployment-describing reads, and admitting a key
+         *     here would let any workspace credential dial the deployment's guardrails
+         *     service. This is a management read, so it takes the router's own gate.
          */
         get: operations["tool-settings-list_guardrail_profiles"];
         put?: never;
@@ -6049,7 +6040,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Usage Rows
-         * @description Delete imported usage rows by explicit ids or by filter (standalone).
+         * @description Delete imported usage rows by explicit ids or by filter.
          *
          *     Target either the current selection (``ids``) or everything matching a filter
          *     (``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /
@@ -6106,7 +6097,7 @@ export interface paths {
         put?: never;
         /**
          * Ingest External Usage
-         * @description Ingest a batch of externally-observed usage events (standalone).
+         * @description Ingest a batch of externally-observed usage events.
          *
          *     Authenticated with either an API key or the master key. Usage binds to the
          *     authenticated principal: an API key attributes to its own user (and stamps its
@@ -6164,7 +6155,7 @@ export interface paths {
         };
         /**
          * Get Request Settlement
-         * @description Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).
+         * @description Look up a request's settled cost by the ``Otari-Request-ID`` it was sent.
          *
          *     This is how a caller recovers the cost of a request whose response never
          *     carried one: a stream that failed or was disconnected mid-response, or a
@@ -6225,7 +6216,7 @@ export interface paths {
         put?: never;
         /**
          * Set Usage Price Rows
-         * @description Set the cost of imported usage rows from manual per-1M rates (standalone).
+         * @description Set the cost of imported usage rows from manual per-1M rates.
          *
          *     Target either the current selection (``ids``) or everything matching a filter
          *     (``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed
@@ -6353,32 +6344,6 @@ export interface paths {
          * @description Get usage history for a user in the caller's organization.
          */
         get: operations["users-get_user_usage"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/web-search/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Web Search
-         * @description Run one search through this deployment's configured search provider.
-         *
-         *     The declared query params are the ``provider_options`` keys the providers
-         *     understand. Everything else the caller sends, ``format`` and ``engines``
-         *     included, is ignored rather than forwarded: the bag is opaque to the gateway
-         *     that filled it, so passing it upstream unread would let a workspace set
-         *     provider request fields this deployment never chose.
-         */
-        get: operations["web-search-web_search"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6926,9 +6891,10 @@ export interface paths {
         };
         /**
          * List Workspace Web Search Keys
-         * @description The organization's web search keys as this workspace sees them, and which one it searches with.
+         * @description The organization's keys as this workspace sees them, and which of each kind it uses.
          *
-         *     Any member of the workspace may read it. ``is_effective`` is decided across every key, not only this page.
+         *     Any member of the workspace may read it. ``is_effective`` is decided across every key, not only this page,
+         *     and ``search_provider`` and ``fetch_provider`` say what the workspace's searches and fetches run on.
          */
         get: operations["web-search-keys-list_workspace_web_search_keys"];
         put?: never;
@@ -6958,7 +6924,7 @@ export interface paths {
         head?: never;
         /**
          * Set Workspace Web Search Key Override
-         * @description Pin a web search key as this workspace's own, or turn it off for this workspace.
+         * @description Pin a key as this workspace's own for its kind, or turn it off for this workspace.
          *
          *     Organization owners and admins, or this workspace's owners and admins. Answers with the list's first page.
          */
@@ -8917,7 +8883,7 @@ export interface components {
             service_tier?: string | null;
             /**
              * Session Label
-             * @description Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.
+             * @description Optional caller-supplied label for a run, experiment or conversation, which names the session the request's trace is grouped under. Stripped before the request is forwarded upstream to the provider.
              */
             session_label?: string | null;
             /** Stop */
@@ -9215,6 +9181,11 @@ export interface components {
              */
             allowed_models?: string[] | null;
             /**
+             * Allowed Tools
+             * @description Search tool allow-list for POST /api/v1/search: null = inherit the user's, [] = no tool, or search tool names ('*' for every search tool). A model wildcard never grants a tool.
+             */
+            allowed_tools?: string[] | null;
+            /**
              * Capture Agent Telemetry
              * @description Per-key override of the deployment-wide capture_agent_telemetry setting: null (default) inherits it, true always stores this key's coding-agent telemetry, false always discards it. Covers both behavioral events (tool_result, tool_decision, user_prompt, api_error) from POST /otlp/v1/logs and outcome-metric data points (lines of code, commits, pull requests, active time) from POST /otlp/v1/metrics. Usage capture and billing are unaffected either way.
              */
@@ -9286,6 +9257,8 @@ export interface components {
         CreateKeyResponse: {
             /** Allowed Models */
             allowed_models: string[] | null;
+            /** Allowed Tools */
+            allowed_tools: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry: boolean | null;
             /** Created At */
@@ -9337,6 +9310,11 @@ export interface components {
              * @description Model allow-list: null = any model your user default allows, [] = deny all, or canonical instance:model entries. A key can only narrow your own model access, never broaden it.
              */
             allowed_models?: string[] | null;
+            /**
+             * Allowed Tools
+             * @description Search tool allow-list for POST /api/v1/search: null = inherit your own, [] = no tool, or search tool names ('*' for every search tool). A key can only narrow your own tool access.
+             */
+            allowed_tools?: string[] | null;
             /**
              * Capture Agent Telemetry
              * @description Per-key override of the deployment-wide capture_agent_telemetry setting: null (default) inherits it, true always stores this key's coding-agent telemetry, false always discards it.
@@ -9506,6 +9484,11 @@ export interface components {
              * @description Default model access-list this user's keys inherit; null = unrestricted, [] = deny all
              */
             allowed_models?: string[] | null;
+            /**
+             * Allowed Tools
+             * @description Default search tool access-list this user's keys inherit: null = the tools allowed_models grants, [] = no tool, or search tool names ('*' for every search tool).
+             */
+            allowed_tools?: string[] | null;
             /**
              * Blocked
              * @description Whether user is blocked
@@ -9735,17 +9718,6 @@ export interface components {
          */
         DeploymentBootstrap: {
             /**
-             * Data Plane Url
-             * @description Where this deployment's inference traffic belongs, when it is not served here. The mirror of management_url: that one says where management lives when this deployment is not the control plane, this one says where the data plane is when this deployment is not it. Set only by a hosted control plane, which serves the dashboard but not inference (otari#822); null for standalone and hybrid, both of which serve inference at the address that reached this page. Not a human link target like management_url: it is the gateway's bare address, which the dashboard suffixes with the API root to build its request snippets. So it must carry no API root anywhere (a value ending in /api/v1, or a whole endpoint like /api/v1/chat/completions, renders that path twice) and no credential, since this response is unauthenticated. This gateway refuses both at startup; any deployment serving this contract should publish the same shape. Null on a hosted deployment means unconfigured, and the dashboard then shows no snippet rather than one naming this host.
-             */
-            data_plane_url: string | null;
-            /**
-             * Deployment Type
-             * @description Which deployment serves this URL. 'standalone' owns its own data and serves one tenant; 'hosted' owns its own data and serves many (otari.ai, or any deployment run as a control plane), which is why its management surfaces are the per-organization ones; 'hybrid' is a gateway attached to otari.ai, which is data-plane only and holds no management surface of its own.
-             * @enum {string}
-             */
-            deployment_type: "standalone" | "hosted" | "hybrid";
-            /**
              * Docs Url
              * @description Where this deployment's documentation lives, when it is not docs.otari.ai. Set, the dashboard's Documentation links open it in a new tab; null, they open https://docs.otari.ai/. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
              */
@@ -9757,37 +9729,32 @@ export interface components {
             feedback_enabled: boolean;
             /**
              * Mail Ready
-             * @description Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this control plane sends carries such a link, which is why this is one flag and not one per feature. False for a hybrid gateway, whose control plane is otari.ai and which sends no mail of its own.
+             * @description Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this deployment sends carries such a link, which is why this is one flag and not one per feature.
              */
             mail_ready: boolean;
             /**
              * Maintenance Mode
-             * @description Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the management API and the data plane are unaffected. False for a hybrid gateway, which issues no session.
+             * @description Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the API is unaffected.
              */
             maintenance_mode: boolean;
             /**
-             * Management Url
-             * @description Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.
-             */
-            management_url: string | null;
-            /**
              * Oauth Providers
-             * @description OAuth providers this deployment can sign somebody in with, sorted, one entry per provider with a client ID, a client secret and a public_base_url to build a redirect URI from. The sign-in screen renders a button per entry and none at all when the list is empty, so a provider nobody configured is absent rather than offered and then refused. Additive to sign_in_methods rather than part of it: an OAuth sign-in coexists with whichever typed credential is current, the way a passkey does. Empty for a hybrid gateway, which issues no session.
+             * @description OAuth providers this deployment can sign somebody in with, sorted, one entry per provider with a client ID, a client secret and a public_base_url to build a redirect URI from. The sign-in screen renders a button per entry and none at all when the list is empty, so a provider nobody configured is absent rather than offered and then refused. Additive to sign_in_methods rather than part of it: an OAuth sign-in coexists with whichever typed credential is current, the way a passkey does.
              */
             oauth_providers: string[];
             /**
              * Open Signup
-             * @description Whether POST /api/v1/auth/signup creates an account for an address nobody has added yet, each with an organization of its own, or only lets an address an admin already put on the roster set its password. The signup page reads as registration or as claiming an invitation accordingly, and the sign-in screen links to it with the wording that matches. False for a hybrid gateway, which holds no identities.
+             * @description Whether POST /api/v1/auth/signup creates an account for an address nobody has added yet, each with an organization of its own, or only lets an address an admin already put on the roster set its password. The signup page reads as registration or as claiming an invitation accordingly, and the sign-in screen links to it with the wording that matches.
              */
             open_signup: boolean;
             /**
              * Passkeys Enabled
-             * @description Whether this deployment offers passkeys at all (the passkeys_enabled setting). False means the passkey routes are not mounted and the dashboard hides its passkey page, which is a different answer from passkeys_ready: a deployment that merely has not configured a relying party is ready for nobody yet but still shows the page that says so. False for a hybrid gateway, which issues no session of its own.
+             * @description Whether this deployment offers passkeys at all (the passkeys_enabled setting). False means the passkey routes are not mounted and the dashboard hides its passkey page, which is a different answer from passkeys_ready: a deployment that merely has not configured a relying party is ready for nobody yet but still shows the page that says so.
              */
             passkeys_enabled: boolean;
             /**
              * Passkeys Ready
-             * @description Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them. False for a hybrid gateway, which issues no session of its own.
+             * @description Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them.
              */
             passkeys_ready: boolean;
             /**
@@ -9797,19 +9764,13 @@ export interface components {
             privacy_url: string | null;
             /**
              * Public Catalog
-             * @description Whether the model catalog is served to a visitor with no session: GET /api/v1/catalog/models answers anonymously and the dashboard renders Models ahead of sign-in. False for a hybrid gateway, which serves no catalog of its own.
+             * @description Whether the model catalog is served to a visitor with no session: GET /api/v1/catalog/models answers anonymously and the dashboard renders Models ahead of sign-in.
              * @default false
              */
             public_catalog: boolean;
             /**
-             * Session Type
-             * @description The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone operator sign-in (see sign_in_methods for which credential it currently accepts), 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.
-             * @enum {string}
-             */
-            session_type: "local_operator" | "hosted_user" | "none";
-            /**
              * Sign In Methods
-             * @description How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; past that it stays the credential for the management API but is no longer a dashboard login. 'password' is offered while any active identity holds one, which is not the same question and not always the later half of it: a member can hold a password on a deployment whose operator never claimed it, so both typed credentials can appear together. 'passkey' appears alongside either when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.
+             * @description How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; past that it stays the credential for the management API but is no longer a dashboard login. 'password' is offered while any active identity holds one, which is not the same question and not always the later half of it: a member can hold a password on a deployment whose operator never claimed it, so both typed credentials can appear together. 'passkey' appears alongside either when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. The login page renders from this rather than trying a credential to find out.
              */
             sign_in_methods: ("master_key" | "password" | "passkey")[];
             /**
@@ -9819,7 +9780,7 @@ export interface components {
             site_url: string | null;
             /**
              * Surfaces
-             * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis, and this is the deployment (topology) axis. Empty for a hybrid gateway.
+             * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on: a fixed set plus one for each enabled feature. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis.
              */
             surfaces: string[];
             /**
@@ -10158,7 +10119,7 @@ export interface components {
             cost_usd?: string | null;
             /**
              * Pricing Source
-             * @description Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced
+             * @description Which rate priced the request: `organization`, `deployment` or `defaults`; absent when it was not priced
              */
             pricing_source?: string | null;
             /** Prompt Tokens */
@@ -10651,8 +10612,6 @@ export interface components {
              * @enum {string}
              */
             master_key_source: "configured" | "generated";
-            /** Mode */
-            mode: string;
             /** Model Discovery */
             model_discovery: boolean;
             /** Require Pricing */
@@ -11683,6 +11642,8 @@ export interface components {
         KeyInfo: {
             /** Allowed Models */
             allowed_models: string[] | null;
+            /** Allowed Tools */
+            allowed_tools: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry: boolean | null;
             /** Config Name */
@@ -12070,7 +12031,7 @@ export interface components {
             server_id: string;
             /**
              * Server Revision
-             * @description An opaque revision of the stored server's URL, credential, enabled state and allowlist. It detects Otari-side and platform-side configuration changes only: a remote server that changes its own catalog or a tool's behavior behind an unchanged URL will not move it.
+             * @description An opaque revision of the stored server's URL, credential, enabled state and allowlist. It detects Otari-side configuration changes only: a remote server that changes its own catalog or a tool's behavior behind an unchanged URL will not move it.
              */
             server_revision: string;
             /** Tools */
@@ -12089,6 +12050,8 @@ export interface components {
         MemberAttributionPublic: {
             /** Allowed Models */
             allowed_models?: string[] | null;
+            /** Allowed Tools */
+            allowed_tools?: string[] | null;
             /** Blocked */
             blocked: boolean;
             /** Reserved */
@@ -12215,7 +12178,7 @@ export interface components {
             service_tier?: string | null;
             /**
              * Session Label
-             * @description Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.
+             * @description Optional caller-supplied label for a run, experiment or conversation, which names the session the request's trace is grouped under. Stripped before the request is forwarded upstream to the provider.
              */
             session_label?: string | null;
             /** Stop Sequences */
@@ -12892,22 +12855,45 @@ export interface components {
          * OrgWebSearchKeyCreateRequest
          * @description What a caller sends to add a key. The service keeps only its ciphertext and ``last4``.
          * @example {
-         *       "api_key": "<your Tavily API key>",
+         *       "api_key": "<your Exa API key>",
+         *       "kind": "search",
          *       "name": "production",
-         *       "provider": "tavily"
+         *       "provider": "exa"
          *     }
          */
         OrgWebSearchKeyCreateRequest: {
-            /** Api Key */
-            api_key: string;
+            /**
+             * Api Base
+             * @description The provider's endpoint, when not its own. Must be https when the key carries an API key.
+             */
+            api_base?: string | null;
+            /**
+             * Api Key
+             * @description Required unless the provider takes no key.
+             */
+            api_key?: string | null;
+            /**
+             * Kind
+             * @description Whether the key serves the search tool or the fetch tool, and enrichment. Fixed once created.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
             /**
              * Name
              * @description How the organization tells this key apart from its others.
              */
             name: string;
             /**
+             * Options
+             * @description Provider options, under the names the provider catalog lists for the provider.
+             */
+            options?: {
+                [key: string]: unknown;
+            } | null;
+            /**
              * Provider
-             * @description The search provider the key is for: tavily or brave.
+             * @description The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, lists for the key's kind, other than searxng, or tavily or brave for a search key.
              */
             provider: string;
         };
@@ -12916,6 +12902,8 @@ export interface components {
          * @description One key as the API shows it: never the key itself, only ``last4``.
          */
         OrgWebSearchKeyPublic: {
+            /** Api Base */
+            api_base?: string | null;
             /** Archived At */
             archived_at?: string | null;
             /**
@@ -12930,10 +12918,22 @@ export interface components {
             id: string;
             /** Is Org Default */
             is_org_default: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
             /** Last4 */
             last4?: string | null;
             /** Name */
             name: string;
+            /**
+             * Options
+             * @description The key's provider options, with any value whose name looks like a secret masked.
+             */
+            options?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Organization Id
              * Format: uuid
@@ -12945,19 +12945,27 @@ export interface components {
             updated_at?: string | null;
             /**
              * Usable
-             * @description False when this deployment cannot decrypt the stored key, so no search uses it. It is still listed, because replacing or deleting it is what fixes it.
+             * @description False when this deployment cannot decrypt the stored key, so no call uses it. It is still listed, because replacing or deleting it is what fixes it.
              */
             usable: boolean;
         };
         /**
          * OrgWebSearchKeyUpdateRequest
-         * @description A partial update: only what is set is applied.
+         * @description A partial update: only what is set is applied, and ``null`` clears ``api_base`` or ``options``.
+         *
+         *     ``kind`` is fixed once a key is created, so sending it is refused.
          */
         OrgWebSearchKeyUpdateRequest: {
+            /** Api Base */
+            api_base?: string | null;
             /** Api Key */
             api_key?: string | null;
             /** Name */
             name?: string | null;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** OrgWebSearchKeysPublic */
         OrgWebSearchKeysPublic: {
@@ -13618,11 +13626,6 @@ export interface components {
          *     and what the caller may do there.
          */
         OrganizationMembershipContextPublic: {
-            /**
-             * Byo Provider Keys Allowed
-             * @default false
-             */
-            byo_provider_keys_allowed: boolean;
             caller?: components["schemas"]["CallerIdentityPublic"] | null;
             /**
              * Deployment Operator
@@ -15445,7 +15448,7 @@ export interface components {
             cost_usd?: string | null;
             /**
              * Pricing Source
-             * @description Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced
+             * @description Which rate priced the request: `organization`, `deployment` or `defaults`; absent when it was not priced
              */
             pricing_source?: string | null;
             /**
@@ -15607,7 +15610,7 @@ export interface components {
             service_tier?: string | null;
             /**
              * Session Label
-             * @description Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.
+             * @description Optional caller-supplied label for a run, experiment or conversation, which names the session the request's trace is grouped under. Stripped before the request is forwarded upstream to the provider.
              */
             session_label?: string | null;
             /** Store */
@@ -16945,6 +16948,8 @@ export interface components {
         UpdateKeyRequest: {
             /** Allowed Models */
             allowed_models?: string[] | null;
+            /** Allowed Tools */
+            allowed_tools?: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry?: boolean | null;
             /** End User Budget Id */
@@ -16993,6 +16998,8 @@ export interface components {
         UpdateOwnKeyRequest: {
             /** Allowed Models */
             allowed_models?: string[] | null;
+            /** Allowed Tools */
+            allowed_tools?: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry?: boolean | null;
             /** Expires At */
@@ -17138,7 +17145,7 @@ export interface components {
             web_fetch_default_tool?: string | null;
             /**
              * Web Search Default Tool
-             * @description A search instance whose provider any-search serves, or 'none' to turn in-loop search off.
+             * @description A search instance whose provider any-search serves, or 'none' to turn off the deployment's own in-loop search, which an organization key still serves.
              */
             web_search_default_tool?: string | null;
             /** Web Search Engines */
@@ -17165,6 +17172,8 @@ export interface components {
             alias?: string | null;
             /** Allowed Models */
             allowed_models?: string[] | null;
+            /** Allowed Tools */
+            allowed_tools?: string[] | null;
             /** Blocked */
             blocked?: boolean | null;
             /** Budget Id */
@@ -17698,6 +17707,8 @@ export interface components {
             alias: string | null;
             /** Allowed Models */
             allowed_models: string[] | null;
+            /** Allowed Tools */
+            allowed_tools: string[] | null;
             /** Blocked */
             blocked: boolean;
             /** Budget Id */
@@ -17850,42 +17861,6 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["WebAuthnCredentialPublic"][];
-        };
-        /**
-         * WebSearchBackendResponse
-         * @description A SearXNG-compatible ``/search`` body.
-         */
-        WebSearchBackendResponse: {
-            /** Results */
-            results: components["schemas"]["WebSearchBackendResult"][];
-        };
-        /**
-         * WebSearchBackendResult
-         * @description One hit, in the shape ``WebSearchBackend`` reads off a SearXNG response.
-         */
-        WebSearchBackendResult: {
-            /**
-             * Content
-             * @default
-             */
-            content: string;
-            /**
-             * Extracted Content
-             * @description The page's own text, when the provider returned it, so the caller can skip fetching the page.
-             */
-            extracted_content?: string | null;
-            /**
-             * Published Date
-             * @description The provider's own recency string for the page, forwarded unparsed. Declared so a search over this hop renders the same date an in-process one does.
-             */
-            published_date?: string | null;
-            /**
-             * Title
-             * @default
-             */
-            title: string;
-            /** Url */
-            url: string;
         };
         /**
          * WorkspaceActivationPublic
@@ -18483,7 +18458,7 @@ export interface components {
          * WorkspaceWebSearchKeyOverrideRequest
          * @description Tri-state: an omitted flag keeps its value.
          *
-         *     Pinning a key re-enables it and unpins any other key of the workspace, and turning a
+         *     Pinning a key re-enables it and unpins the workspace's other key of its kind, and turning a
          *     key off unpins it. Sending both flags true is refused. Both false deletes the override.
          * @example {
          *       "is_default": true
@@ -18507,14 +18482,19 @@ export interface components {
             disabled: boolean;
             /**
              * Is Default
-             * @description The workspace pinned this key as its own.
+             * @description The workspace pinned this key as its own for its kind.
              */
             is_default: boolean;
             /**
              * Is Effective
-             * @description This is the key the workspace's searches use.
+             * @description This is the key the workspace's calls of its kind use.
              */
             is_effective: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
             /** Last4 */
             last4?: string | null;
             /** Name */
@@ -18543,6 +18523,16 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["WorkspaceWebSearchKeyPublic"][];
+            /**
+             * Fetch Provider
+             * @description The provider the workspace's fetch tool runs on, and the enrichment of its search hits unless the search's instance names a fetch instance of its own: its effective fetch key's, else the deployment's default fetch instance's, which is builtin for the built-in fetcher.
+             */
+            fetch_provider?: string | null;
+            /**
+             * Search Provider
+             * @description The provider the workspace's searches run on: its effective search key's, else the deployment's default search's. Null when nothing searches for it.
+             */
+            search_provider?: string | null;
         };
         /** WorkspacesPublic */
         WorkspacesPublic: {
@@ -20216,7 +20206,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
                 /** @description Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider. */
                 "Otari-Tags"?: string | null;
@@ -22463,7 +22453,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
                 /** @description Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider. */
                 "Otari-Tags"?: string | null;
@@ -27172,7 +27162,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
                 /** @description Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider. */
                 "Otari-Tags"?: string | null;
@@ -29097,45 +29087,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageLogResponse"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "web-search-web_search": {
-        parameters: {
-            query: {
-                /** @description The search query. */
-                q: string;
-                max_results?: number | null;
-                search_depth?: string | null;
-                topic?: string | null;
-                time_range?: string | null;
-                include_answer?: boolean | null;
-            };
-            header?: {
-                "x-gateway-token"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebSearchBackendResponse"];
                 };
             };
             /** @description Validation Error */

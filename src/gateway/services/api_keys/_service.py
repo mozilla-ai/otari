@@ -1,6 +1,7 @@
 import uuid
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 
+from gateway.core.config import GatewayConfig
 from gateway.core.settings.api_keys import ApiKeyConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.api_keys_exceptions import (
@@ -9,23 +10,39 @@ from gateway.exceptions.api_keys_exceptions import (
     FederationRuleLimitError,
     FederationRuleNotFoundError,
 )
-from gateway.models.api_keys import MAX_FEDERATION_RULES_PER_KEY
+from gateway.log_config import logger
+from gateway.models.api_keys import MAX_FEDERATION_RULES_PER_KEY, APIKey
 from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.services.api_keys._declared import apply_declared_key
+from gateway.services.model_access import (
+    KEY_MODELS_EXCEED_USER_DETAIL,
+    KEY_TOOLS_EXCEED_USER_DETAIL,
+    effective_tool_allowlist,
+    is_allowlist_subset,
+    is_model_allowed,
+    is_tool_allowed,
+    tool_not_allowed_detail,
+    tools_within_user,
+    validate_allowed_models,
+    validate_allowed_tools,
+)
+from gateway.services.organizations import AccessLists, UserAccess
 
 
 class ApiKeyService:
-    """Answer questions about API keys and the workspaces that hold them, and manage their federation rules.
+    """Answer questions about API keys and their workspaces, and manage their federation rules and access lists.
 
     The lookups run in the caller's Unit of Work block and raise ``OutsideUnitOfWorkError`` outside one; the
-    federation-rule methods are business steps of their own.
+    federation-rule and access-list methods are business steps of their own. A key's owner's lists come from
+    ``users``.
     """
 
-    def __init__(self, uow: UnitOfWork, repositories: ApiKeyRepositories) -> None:
+    def __init__(self, uow: UnitOfWork, repositories: ApiKeyRepositories, *, users: UserAccess) -> None:
         self._uow = uow
         self._keys = repositories.keys
         self._federation_rules = repositories.federation_rules
+        self._users = users
 
     async def get_workspace_id_for_key(self, key_id: str) -> uuid.UUID | None:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""
@@ -126,3 +143,137 @@ class ApiKeyService:
             if row is None:
                 raise FederationRuleNotFoundError(rule_id)
             await self._federation_rules.delete(row)
+
+    async def check_access_lists(
+        self, config: GatewayConfig, requested: AccessLists, *, stored: AccessLists, owner_id: str | None
+    ) -> AccessLists:
+        """The ``allowed_models`` and ``allowed_tools`` to store on a key or a user, each checked only if it changes.
+
+        A list sent back unchanged grants nothing new, so it is not checked again: a
+        tool deleted since, or an owner narrowed since, would otherwise refuse an
+        unrelated edit. A key's changed list must fit its owner's (``owner_id``;
+        ``None`` for a user, or a key with no owner). The owner is read in a block of
+        its own, whose commit would also store what the caller had staged, so a route
+        calls this first.
+
+        Raises:
+            ValueError: a changed list names something unknown, or grants more than the owner's.
+        """
+        models_changed = requested.models != stored.models
+        tools_changed = requested.tools != stored.tools
+        checked = AccessLists(
+            validate_allowed_models(config, requested.models) if models_changed else stored.models,
+            validate_allowed_tools(config, requested.tools) if tools_changed else stored.tools,
+        )
+        if owner_id is None or not (models_changed or tools_changed):
+            return checked
+        async with self._uow:
+            owner = await self._users.lists(owner_id)
+        if owner is None:
+            return checked
+        tool_keys = config.legacy_search_tool_keys()
+        if models_changed and not is_allowlist_subset(checked.models, owner.models, tool_keys=tool_keys):
+            raise ValueError(KEY_MODELS_EXCEED_USER_DETAIL)
+        if tools_changed and not tools_within_user(
+            config, checked.tools, user_tools=owner.tools, user_models=owner.models
+        ):
+            raise ValueError(KEY_TOOLS_EXCEED_USER_DETAIL)
+        return checked
+
+    async def search_tool_refusal(
+        self, config: GatewayConfig, api_key: APIKey | None, *, provider: str, tool: str
+    ) -> str | None:
+        """Why a request's key may not run a search tool, or ``None`` when it may.
+
+        Master-key callers (``api_key is None``) run every tool. The key's owner's
+        lists are read only when the key has no ``allowed_tools`` of its own.
+        """
+        if api_key is None:
+            return None
+        owner = AccessLists(None, None)
+        if api_key.allowed_tools is None and api_key.user_id is not None:
+            async with self._uow:
+                owner = await self._users.lists(api_key.user_id) or owner
+        allowed = effective_tool_allowlist(
+            config,
+            key_tools=api_key.allowed_tools,
+            key_models=api_key.allowed_models,
+            user_tools=owner.tools,
+            user_models=owner.models,
+        )
+        if is_tool_allowed(allowed, tool):
+            return None
+        # With no allowed_tools on either, the answer was read off the model lists, the deprecated way.
+        legacy_models: list[list[str]] = []
+        if api_key.allowed_tools is None and owner.tools is None:
+            legacy_models = [models for models in (api_key.allowed_models, owner.models) if models is not None]
+        return tool_not_allowed_detail(tool, f"{provider}:{tool}", legacy_models)
+
+    async def pin_before_user_grant(
+        self, config: GatewayConfig, user_id: str, *, before: AccessLists, user_tools: list[str] | None
+    ) -> None:
+        """Fix each of a user's narrowed keys at the tools it may run, as the user is first given ``allowed_tools``.
+
+        A key with a model list of its own and no ``allowed_tools`` reads its tools
+        off that list, bounded by its user's model list; once the user has
+        ``user_tools``, the key would inherit those instead, which can widen it. It
+        keeps what both allow. Only a user going from no list (``before``) to a list
+        pins. The keys are saved in a block of their own, so a route calls this
+        before staging the user's change.
+        """
+        if before.tools is not None or user_tools is None:
+            return
+        async with self._uow:
+            for key in await self._keys.keys_reading_tools_off_models(user_id):
+                current = effective_tool_allowlist(
+                    config, key_tools=None, key_models=key.allowed_models, user_tools=None, user_models=before.models
+                )
+                key.allowed_tools = [name for name in current or [] if is_tool_allowed(user_tools, name)]
+
+    async def warn_about_legacy_tool_grants(self, config: GatewayConfig) -> None:
+        """Warn at startup while keys or users reach a search tool through ``allowed_models``.
+
+        An exact ``<provider>:<tool>`` entry still works, read as the tool's name, for
+        a key or user with no ``allowed_tools`` to inherit; a wildcard no longer does.
+        Counts and tool names only.
+        """
+        legacy = config.legacy_search_tool_keys()
+        if not legacy:
+            return
+        named: set[str] = set()
+        wildcard_only: set[str] = set()
+
+        def grants(lists: Iterable[AccessLists]) -> int:
+            count = 0
+            for access in lists:
+                if access.tools is not None or not access.models:
+                    continue
+                hit = legacy.intersection(access.models)
+                wildcard_only.update(key for key in legacy - hit if is_model_allowed(access.models, key))
+                if hit:
+                    named.update(hit)
+                    count += 1
+            return count
+
+        async with self._uow:
+            users = await self._users.live_lists()
+            key_lists = await self._keys.access_lists()
+        users_with_tools = {user_id for user_id, access in users.items() if access.tools is not None}
+        keys = grants(
+            AccessLists(models, tools) for user_id, models, tools in key_lists if user_id not in users_with_tools
+        )
+        user_count = grants(users.values())
+        message: list[str] = []
+        if keys or user_count:
+            message.append(
+                f"{keys} API key(s) and {user_count} user(s) grant search tools through allowed_models entries "
+                f"({', '.join(sorted(named))}). These still work but are deprecated: name the tools in allowed_tools "
+                "instead."
+            )
+        if wildcard_only:
+            message.append(
+                "Search tools some keys or users reached only through an allowed_models wildcard "
+                f"({', '.join(sorted(wildcard_only))}) are no longer granted that way; name them in allowed_tools."
+            )
+        if message:
+            logger.warning(" ".join(message))

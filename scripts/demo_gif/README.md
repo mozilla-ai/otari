@@ -1,6 +1,6 @@
 # Dashboard demo GIF
 
-Regenerates `assets/otari-demo.gif` (the README hero): a tour of the standalone
+Regenerates `assets/otari-demo.gif` (the README hero): a tour of the
 dashboard's most useful pages, populated with seven providers, fourteen current
 models, routing policies, organization members, budgets, keys, and ~26k usage
 rows, with a side-by-side Playground comparison streamed from a mock upstream.

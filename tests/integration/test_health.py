@@ -7,8 +7,7 @@ def test_health_check(client: TestClient) -> None:
     """Test health check endpoint."""
     response = client.get(f"{API_ROOT}/health")
     assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "healthy"
+    assert response.json() == {"status": "healthy"}
 
 
 def test_health_liveness(client: TestClient) -> None:

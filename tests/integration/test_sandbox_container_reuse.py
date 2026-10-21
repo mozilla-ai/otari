@@ -82,11 +82,10 @@ class _FakePort:
         image: str | None = None,
         timeout_s: float,
         session_ttl_s: float,
-        auth_token: str | None = None,
         resume: str | None = None,
         keep_alive_s: float | None = None,
     ) -> AsyncIterator[_FakeSession]:
-        del image, timeout_s, session_ttl_s, auth_token
+        del image, timeout_s, session_ttl_s
         self.opened.append({"resume": resume, "keep_alive_s": keep_alive_s})
         if resume is not None and resume in self.gone:
             raise SandboxSessionGoneError(f"{resume} is gone")

@@ -900,7 +900,7 @@ def test_an_organization_key_label_is_priced_under_the_fallback_row_and_never_lo
 
 
 def test_empty_rate_keys_price_nothing_and_warn_about_nothing() -> None:
-    """A hybrid credential's calls carry no rate keys (design K): only a reported cost would count."""
+    """Calls that carry no rate keys (design K) price nothing: only a reported cost would count."""
 
     async def scenario(session: AsyncSession) -> None:
         await _tool_price(session, "otari:web_search", 10_000.0)

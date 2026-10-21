@@ -17,7 +17,6 @@ from fastapi.testclient import TestClient
 from gateway.api.routes.messages import CountTokensRequest
 from gateway.core.config import API_KEY_HEADER, API_ROOT, API_VERSION, GatewayConfig
 from gateway.exceptions import TenancyError
-from gateway.exceptions.control_plane_exceptions import ControlPlaneRefusedError
 
 
 def _make_message_response(**overrides: Any) -> MessageResponse:
@@ -165,16 +164,10 @@ class _NotFound(TenancyError):
 @pytest.mark.parametrize(
     ("raised", "status_code", "error", "retry_after"),
     [
-        (
-            ControlPlaneRefusedError("slow down", status_code=429, retry_after="30"),
-            429,
-            {"type": "rate_limit_error", "message": "slow down"},
-            "30",
-        ),
         (_NotFound("no such workspace"), 404, {"type": "not_found_error", "message": "no such workspace"}, None),
         (RuntimeError("secret internals"), 500, {"type": "api_error", "message": "Internal server error"}, None),
     ],
-    ids=["control-plane", "tenancy", "unexpected"],
+    ids=["tenancy", "unexpected"],
 )
 def test_an_error_no_one_rendered_still_answers_in_anthropic_s_envelope(
     client: TestClient,

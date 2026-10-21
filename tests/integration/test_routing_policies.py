@@ -1871,7 +1871,7 @@ def test_tools_run_by_the_candidate_that_serves_are_billed_once_on_its_row(
     with (
         patch("gateway.services.mcp_loop.acompletion", new=scripted_provider),
         patch(
-            "gateway.services.web_search_backend.WebSearchBackend._search_tool",
+            "gateway.services.web_retrieval_backend.WebSearchBackend._search_tool",
             new=AsyncMock(return_value="results"),
         ),
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
@@ -1942,7 +1942,7 @@ def test_a_locked_in_tool_loop_cannot_fail_over_and_still_owes_for_its_searches(
     with (
         patch("gateway.services.mcp_loop.acompletion", new=scripted_provider),
         patch(
-            "gateway.services.web_search_backend.WebSearchBackend._search_tool",
+            "gateway.services.web_retrieval_backend.WebSearchBackend._search_tool",
             new=AsyncMock(return_value="results"),
         ),
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),

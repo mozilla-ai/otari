@@ -111,7 +111,6 @@ def test_settings_reports_pricing_flags(tmp_path: Path) -> None:
     body = response.json()
     assert body["default_pricing"] is True
     assert body["require_pricing"] is False
-    assert body["mode"] == "standalone"
     assert body["master_key_source"] == "configured"
     assert "version" in body
 
@@ -191,7 +190,6 @@ def test_settings_includes_full_config_view(tmp_path: Path) -> None:
         "host",
         "port",
         "database_url",
-        "mode",
         "db_pool_size",
         "cors_allow_origins",
         "budget_strategy",
@@ -358,9 +356,9 @@ def test_the_ui_base_url_keeps_a_query_and_refuses_a_fragment() -> None:
 def test_every_config_field_is_shown_or_deliberately_omitted() -> None:
     """The roster is hand-maintained, so its completeness is checked rather than remembered.
 
-    ``data_plane_url`` was added to ``GatewayConfig`` and left out of the view
-    (otari#823) with nothing to notice, which is what this closes: a new field
-    now fails here until somebody either shows it or says why not. It asserts
+    A field added to ``GatewayConfig`` and left out of the view would go
+    unnoticed, which is what this closes: a new field now fails here until
+    somebody either shows it or says why not. It asserts
     the partition and not the contents, so moving a name out of
     ``_DELIBERATELY_OMITTED`` and into a group above needs no change here.
     """
@@ -396,17 +394,6 @@ def test_no_credential_is_shown_in_the_config_view() -> None:
         "oauth_github_client_secret",
     )
     assert not shown & set(credentials)
-
-
-def test_config_view_shows_the_data_plane_address() -> None:
-    # A hosted control plane showing no snippet beside a new key is explained by
-    # this value, so the operator who set it (or forgot to) can read it back
-    # where they read docs_url back. A public gateway address, not a credential.
-    by_key = {field.key: field for field in _config_fields(GatewayConfig(data_plane_url="https://gateway.otari.ai"))}
-
-    assert by_key["data_plane_url"].value == "https://gateway.otari.ai"
-    # Read-only: where inference belongs is a restart-time decision.
-    assert by_key["data_plane_url"].settable is False
 
 
 def test_config_view_exposes_numeric_bounds() -> None:

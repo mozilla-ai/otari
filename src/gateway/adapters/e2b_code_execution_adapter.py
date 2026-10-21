@@ -70,14 +70,9 @@ class E2BCodeExecutionAdapter(CodeExecutionPort):
         image: str | None = None,
         timeout_s: float,
         session_ttl_s: float,
-        auth_token: str | None = None,
         resume: str | None = None,
         keep_alive_s: float | None = None,
     ) -> AsyncIterator[CodeExecutionSession]:
-        # ``auth_token`` is the caller's own bearer credential, which only means
-        # something to a backend that authenticates the request. E2B
-        # authenticates the deployment, through the SDK's own E2B_API_KEY.
-        del auth_token
         # ``timeout_s`` is one execute's budget; what E2B's ``timeout`` sets is
         # how long the sandbox lives before it reclaims it, which has to cover
         # every execute a request makes and the file work around them.

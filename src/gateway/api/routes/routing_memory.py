@@ -1,4 +1,4 @@
-"""Teaching the learned router: scored examples and warmth (standalone only).
+"""Teaching the learned router: scored examples and warmth.
 
 A policy that names ``router: knn`` decides nothing until someone has told the
 gateway which candidate is good enough for which kind of prompt. Two routes:

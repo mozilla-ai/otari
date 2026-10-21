@@ -1,4 +1,4 @@
-"""The dashboard's first-request setup guide (standalone mode only).
+"""The dashboard's first-request setup guide.
 
 Thin composition over
 `gateway.services.tenancy.workspace_activation_service`, following

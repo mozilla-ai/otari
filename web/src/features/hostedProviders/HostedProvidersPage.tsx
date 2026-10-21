@@ -44,8 +44,6 @@ import {
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
-import { UnavailableHere } from "@/shared/components/access/UnavailableHere"
-import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 import { AddHostedProviderForm } from "./AddHostedProviderForm"
 import { DeploymentProviderMigration } from "./DeploymentProviderMigration"
@@ -262,15 +260,6 @@ function HostedProviderRowActions({
 }
 
 export function HostedProvidersPage() {
-  const hostsSurface = useSurfaces()
-  // Before any hook that asks the API, so an unpublished surface asks nothing.
-  if (!hostsSurface("hosted_providers")) {
-    return <UnavailableHere title="Hosted providers" />
-  }
-  return <HostedProvidersContent />
-}
-
-function HostedProvidersContent() {
   const access = useDeploymentAdminAccess()
   // Withheld until the gate answers, so a non-operator load does not put a 404
   // in the console to learn what the gate is about to say.

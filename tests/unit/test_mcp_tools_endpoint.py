@@ -12,16 +12,16 @@ import asyncio
 import uuid
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any
 
-import httpx
 import pytest
+from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 from mcp.types import ListToolsResult, ToolAnnotations
 from mcp.types import Tool as MCPTool
 
-from conftest import InstallControlPlane
-from gateway.api.deps import reset_config
+from gateway.api.deps import get_workspace_mcp_servers, reset_config
 from gateway.api.routes import mcp as mcp_route
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
@@ -31,7 +31,8 @@ from gateway.services import mcp_stateless
 
 SERVER_ID = uuid.UUID("2c948a61-dc96-4cd8-96bb-8e1434bf424e")
 PUBLIC_URL = "https://93.184.216.34/mcp"
-USER_AUTH = {"Authorization": "Bearer platform-user-token"}
+USER_AUTH = {"Authorization": "Bearer sk-workspace-key"}
+WORKSPACE_ID = uuid.UUID("0b6f3c1e-8d2a-4f7b-9c5e-1a2b3c4d5e6f")
 TOOLS_PATH = f"{API_ROOT}/mcp/servers/{SERVER_ID}/tools"
 
 
@@ -86,39 +87,57 @@ def session(monkeypatch: pytest.MonkeyPatch) -> _FakeSession:
     return fake
 
 
-class _Platform:
+class _Servers:
+    """The workspace's MCP servers, and a record of what was asked of them."""
+
     def __init__(self) -> None:
-        self.servers: list[dict[str, Any]] | None = [_stored().model_dump(mode="json")]
-        self.status_code = 200
-        self.bodies: list[dict[str, Any]] = []
+        self.server: ResolvedMcpServer | None = _stored()
+        self.asked: list[tuple[uuid.UUID, uuid.UUID]] = []
         self.delay_s = 0.0
 
+    async def resolve_many(self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> Any:
+        raise AssertionError("the stateless routes resolve one server")
 
-@pytest.fixture
-def platform(monkeypatch: pytest.MonkeyPatch, control_plane_transport: InstallControlPlane) -> _Platform:
-    fake = _Platform()
-
-    async def post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> Any:
-        fake.bodies.append(body)
-        await asyncio.sleep(fake.delay_s)
-        payload = {"servers": fake.servers} if fake.status_code == 200 else {"detail": "refused"}
-        return httpx.Response(fake.status_code, json=payload)
-
-    control_plane_transport(post)
-    return fake
+    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+        self.asked.append((workspace_id, server_id))
+        await asyncio.sleep(self.delay_s)
+        return self.server
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw-test-token")
-    app = create_app(GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}))
+def servers() -> _Servers:
+    return _Servers()
+
+
+@pytest.fixture(scope="module")
+def database_url(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """One database for the module: the route reads no row, so migrating it once is enough."""
+    return f"sqlite:///{tmp_path_factory.mktemp('mcp') / 'mcp-tools.db'}"
+
+
+@pytest.fixture
+def client(monkeypatch: pytest.MonkeyPatch, database_url: str, servers: _Servers) -> Iterator[TestClient]:
+    """A standalone app whose key lookup answers one workspace key for any bearer token."""
+
+    async def verify(raw_request: Request, *args: Any, **kwargs: Any) -> tuple[Any, bool]:
+        if not raw_request.headers.get("Authorization"):
+            raise HTTPException(status_code=401, detail="Missing API key")
+        return SimpleNamespace(id=uuid.uuid4(), user_id=None), False
+
+    async def workspace_of(*args: Any, **kwargs: Any) -> uuid.UUID:
+        return WORKSPACE_ID
+
+    monkeypatch.setattr(mcp_route, "verify_api_key_or_master_key", verify)
+    monkeypatch.setattr(mcp_route, "resolve_workspace_id", workspace_of)
+    app = create_app(GatewayConfig(database_url=database_url))
+    app.dependency_overrides[get_workspace_mcp_servers] = lambda: servers
     with TestClient(app) as test_client:
         yield test_client
 
 
 def test_the_live_catalog_is_returned_with_the_stored_server_revision(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     response = client.get(TOOLS_PATH, headers=USER_AUTH)
@@ -142,15 +161,16 @@ def test_the_live_catalog_is_returned_with_the_stored_server_revision(
         "warnings": [],
     }
     assert response.headers["Otari-Request-ID"]
+    assert servers.asked == [(WORKSPACE_ID, SERVER_ID)]
 
 
 def test_the_response_discloses_no_url_credential_or_allowlist(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     """The allowlist's effect shows; its contents never do."""
-    platform.servers = [_stored(allowed_tools=["create_issue", "never_listed"]).model_dump(mode="json")]
+    servers.server = _stored(allowed_tools=["create_issue", "never_listed"])
 
     response = client.get(TOOLS_PATH, headers=USER_AUTH)
 
@@ -162,12 +182,12 @@ def test_the_response_discloses_no_url_credential_or_allowlist(
 
 def test_a_tool_the_allowlist_excludes_is_not_exposed(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     """A server-added tool is not exposed just because it was listed."""
     session.tools.append(MCPTool(name="delete_repo", description="danger", inputSchema={"type": "object"}))
-    platform.servers = [_stored(allowed_tools=["create_issue"]).model_dump(mode="json")]
+    servers.server = _stored(allowed_tools=["create_issue"])
 
     response = client.get(TOOLS_PATH, headers=USER_AUTH)
 
@@ -176,12 +196,12 @@ def test_a_tool_the_allowlist_excludes_is_not_exposed(
 
 def test_an_explicit_empty_allowlist_denies_every_tool_without_connecting(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     """An operator's deny-all is answered without touching the server."""
     stored = _stored(allowed_tools=[])
-    platform.servers = [stored.model_dump(mode="json")]
+    servers.server = stored
 
     response = client.get(TOOLS_PATH, headers=USER_AUTH)
 
@@ -197,7 +217,7 @@ def test_an_explicit_empty_allowlist_denies_every_tool_without_connecting(
 
 def test_the_total_deadline_includes_authentication(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -211,18 +231,18 @@ def test_the_total_deadline_includes_authentication(
 
     assert response.status_code == 502, response.text
     assert response.json()["code"] == "mcp_discovery_limit_exceeded"
-    assert platform.bodies == []
+    assert servers.asked == []
     assert session.pages == 0
 
 
-def test_the_total_deadline_includes_platform_resolution(
+def test_the_total_deadline_includes_server_resolution(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(mcp_stateless, "DISCOVERY_TOTAL_TIMEOUT_S", 0.01)
-    platform.delay_s = 10
+    servers.delay_s = 10
 
     response = client.get(TOOLS_PATH, headers=USER_AUTH)
 
@@ -233,7 +253,7 @@ def test_the_total_deadline_includes_platform_resolution(
 
 def test_the_total_deadline_includes_mcp_discovery(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -249,7 +269,7 @@ def test_the_total_deadline_includes_mcp_discovery(
 
 def test_an_unusable_descriptor_is_omitted_and_labeled(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     """The one permitted partial result, and its siblings survive."""
@@ -271,7 +291,7 @@ def test_an_unusable_descriptor_is_omitted_and_labeled(
 
 def test_an_unexecutable_tool_name_is_omitted_and_labeled(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     session.tools.append(
@@ -296,7 +316,7 @@ def test_an_unexecutable_tool_name_is_omitted_and_labeled(
 
 def test_the_response_ceiling_includes_warnings_and_envelope(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -316,7 +336,7 @@ def test_the_response_ceiling_includes_warnings_and_envelope(
 
 def test_an_unknown_schema_keyword_survives_the_round_trip(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     """Otari never truncates, rewrites, or drops a keyword."""
@@ -335,7 +355,7 @@ def test_an_unknown_schema_keyword_survives_the_round_trip(
 
 def test_a_pagination_failure_returns_no_partial_catalog(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -356,25 +376,25 @@ def test_a_pagination_failure_returns_no_partial_catalog(
     assert "tools" not in payload
 
 
-def test_an_unauthenticated_request_reaches_neither_platform_nor_server(
+def test_an_unauthenticated_request_reaches_neither_resolution_nor_server(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     response = client.get(TOOLS_PATH)
 
     assert response.status_code == 401
     assert response.json()["code"] == "authentication_failed"
-    assert platform.bodies == []
+    assert servers.asked == []
     assert session.pages == 0
 
 
 def test_a_disabled_server_is_not_found(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
-    platform.servers = [_stored(enabled=False).model_dump(mode="json")]
+    servers.server = _stored(enabled=False)
 
     response = client.get(TOOLS_PATH, headers=USER_AUTH)
 
@@ -385,10 +405,10 @@ def test_a_disabled_server_is_not_found(
 
 def test_an_unsafe_resolved_url_is_refused_before_connecting(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
-    platform.servers = [_stored(url="http://169.254.169.254/mcp").model_dump(mode="json")]
+    servers.server = _stored(url="http://169.254.169.254/mcp")
 
     response = client.get(TOOLS_PATH, headers=USER_AUTH)
 
@@ -399,11 +419,25 @@ def test_an_unsafe_resolved_url_is_refused_before_connecting(
 
 def test_a_non_uuid_server_id_is_refused(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     response = client.get(f"{API_ROOT}/mcp/servers/not-a-uuid/tools", headers=USER_AUTH)
 
     assert response.status_code == 422, response.text
     assert response.json()["code"] == "invalid_request"
-    assert platform.bodies == []
+    assert servers.asked == []
+
+
+def test_an_id_naming_no_server_is_not_found(
+    client: TestClient,
+    servers: _Servers,
+    session: _FakeSession,
+) -> None:
+    servers.server = None
+
+    response = client.get(TOOLS_PATH, headers=USER_AUTH)
+
+    assert response.status_code == 404, response.text
+    assert response.json()["code"] == "mcp_server_not_found"
+    assert session.pages == 0

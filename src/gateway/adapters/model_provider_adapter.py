@@ -7,10 +7,9 @@ configured instance is served on the deployment's own credential. The port is
 asked after every rung upstream of it has missed, so a row here never displaces
 a credential the caller supplied.
 
-Built with the request's Unit of Work, which the composition root hands in. In
-hybrid mode there is no database and no Unit of Work, so the adapter is built
-with no service and answers nothing: a hybrid data plane resolves credentials
-over the platform protocol, never through this port.
+Built with the request's Unit of Work, which the composition root hands in.
+Without one (the boot-time shape check) the adapter is built with no service
+and answers nothing.
 
 The adapter hands nothing out over the wire: its one consumer on the request
 path puts the key in an any-llm client in this process and dials the upstream.

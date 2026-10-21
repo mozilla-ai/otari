@@ -1,12 +1,10 @@
-"""The standalone half of the caller-orchestrated MCP endpoints.
+"""The caller-orchestrated MCP endpoints against stored servers.
 
-The hybrid half is unit-tested in ``tests/unit/test_mcp_execute_endpoint.py``
-and ``tests/unit/test_mcp_tools_endpoint.py``, where the platform resolver is
-the only seam. Here the resolution is real: a key authenticates, its workspace
-is derived from the key row, and the stored server, its encrypted credential and
-its allowlist come out of the database. What that buys, and what only this half
-can show, is that the request-scoped database session is handed back before any
-outbound work and that a master key cannot reach a tenant's stored server.
+The resolution is real: a key authenticates, its workspace is derived from the
+key row, and the stored server, its encrypted credential and its allowlist come
+out of the database. What that buys, and what a unit test cannot show, is
+that the request-scoped database session is handed back before any outbound
+work and that a master key cannot reach a tenant's stored server.
 
 URLs are public IP literals, so ``validate_mcp_url`` never reaches a resolver
 and the suite does not need egress.

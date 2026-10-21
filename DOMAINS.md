@@ -94,12 +94,7 @@ membership change without organizations importing budgets. The listener writes
 through the caller's Unit of Work, so a service that changes membership is built
 with one and makes the change inside its block.
 
-It also defines `WorkspaceListener`, the interface another domain implements to
-set up a workspace in the transaction that creates it. Every service that
-creates a workspace takes one, with no default, and the binding is chosen per
-mode: a hosted control plane gets tools' `CodeExecutionWorkspaceDefaults`, and
-every other deployment `NullWorkspaceListener`. It also owns
-`models/users.py`, `repositories/users_repository.py` and
+It also owns `models/users.py`, `repositories/users_repository.py` and
 `services/workspace_scope.py`.
 
 ### api-keys
@@ -120,8 +115,7 @@ them from there.
 
 The deployment price list, organization rate overrides and upstream price
 snapshots, and the rule that says what a rate bills: its unit chooses the meter
-it prices (`price_usage` in `services/pricing/`). Standalone settlement and a
-hybrid gateway's control plane both price through it.
+it prices (`price_usage` in `services/pricing/`).
 
 `services/pricing/` also holds the deployment price list's service, which is how
 another domain reads a current rate or stores one. It also owns
@@ -154,9 +148,9 @@ model a coding agent's subagent should start on.
 It owns `ports/agent_model_recommender_port.py` and its adapter in
 `adapters/`, and `exceptions/routing_exceptions.py`. The port names who
 answers a subagent model recommendation and at what price. The core asks the
-decision model the deployment configured, which may be a local one, and a
-hosted build binds a recommender of its own, so the composition root binds
-the implementation and no caller reads a mode. Neither implementation meters
+decision model the deployment configured, which may be a local one, and an
+overlay may bind a recommender of its own, so the composition root binds
+the implementation and no caller chooses between them. Neither implementation meters
 the call; the decisions scaffold does.
 
 ### files
@@ -185,29 +179,20 @@ transactions, with output compensation and cleanup storage calls outside them.
 The tools the gateway runs itself: the tool loop, MCP, web search, web
 retrieval and code execution.
 
-It owns the code execution, code execution policy, MCP server and web search policy ports in `ports/`,
-and their adapters in `adapters/`.
+It owns the code execution port in `ports/` and its adapters in `adapters/`.
 
-`mcp_server_port.py` names where a workspace's MCP servers come from. One
-deployment holds those rows and another asks a peer that holds them for it, so
-the composition root binds the implementation and no caller reads a mode. A
-resolved server is connected to directly; neither implementation proxies MCP
-traffic.
-
-`web_search_policy_port.py` names where a workspace's web search policy comes
-from, in the same two ways. The policy says who may search and how far, and
-carries the workspace's own search key where its organization brought one. A
-tools service applies it to a request with one rule on every plane, and
-neither implementation carries a search.
+A workspace's MCP servers, web search policy and code execution policy are
+read from this deployment's own rows, by `WorkspaceMcpServers`,
+`WorkspaceWebSearchPolicies` and `WorkspaceCodeExecutionPolicies`, with no port
+between them and their callers. A resolved MCP server is connected to directly,
+and nothing proxies MCP traffic. The web search policy says who may search and
+how far, and carries the workspace's own search key where its organization
+brought one; a tools service applies it to a request with one rule everywhere.
+The code execution policy says who may run code and within which limits, and
+the request path and the Playground read it through the same service.
 
 It also owns an organization's web search keys and each workspace's choice
 among them (`org_web_search_keys`, `workspace_web_search_key_overrides`).
-
-`code_execution_policy_port.py` names where a workspace's code execution
-policy comes from, in the same two ways. The policy says who may run code and
-within which limits, and neither implementation runs code. The local one reads
-the row through `WorkspaceCodeExecutionPolicies`, the same read the request
-path and the Playground make.
 
 **The tool test.** A tool is something the model calls during a request. The
 domain holds the registry, the loop and each tool's settings. A capability the
@@ -256,20 +241,11 @@ and the Playground.
 
 ### platform
 
-Deployment settings, health, modes, maintenance mode and mail.
+Deployment settings, health, maintenance mode and mail.
 
-`control_plane/` is how a deployment asks the control plane a peer runs for it
-what a workspace may do. It is a Gateway in Fowler's sense and an
-anticorruption layer in Evans's: it holds how a deployment asks a peer for
-policy and credentials, and raises this codebase's own errors so the peer's
-status codes stop at its edge. Usage reporting still builds its own call from
-the API layer. `ResolveEndpoint` is a closed set, so it answers questions and cannot
-grow into a route for the data plane's own traffic.
-
-`deployment.py` holds `Plane`, which names the control plane and the data
-plane, and the value that says which of them a process serves. `surface.py`
-says which deployments publish a dashboard page and `feature.py` shapes an
-optional feature, so the three together are how a build describes itself.
+`surface.py` names the dashboard pages a deployment publishes and `feature.py`
+shapes an optional feature, so the two together are how a build describes
+itself.
 
 ### rate-limits
 

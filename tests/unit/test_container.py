@@ -19,16 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.adapters.agent_model_recommender_adapter import DecisionProviderRecommender
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
-from gateway.adapters.code_execution_policy_adapter import LocalCodeExecutionPolicy, RemoteCodeExecutionPolicy
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
-from gateway.adapters.mcp_server_adapter import LocalMcpServers, RemoteMcpServers
 from gateway.adapters.model_provider_adapter import HostedProviderModelProviderAdapter
 from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
-from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy, RemoteWebSearchPolicy
 from gateway.container import (
     BootstrapError,
     Container,
@@ -43,19 +40,14 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
-from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
-from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
-from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.services.tenancy.membership_listener import MembershipListener
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
-from gateway.services.tools import WorkspaceCodeExecutionPolicies, WorkspaceSearchKeys
 
 # The core adapters ignore the session, so a placeholder stands in for one; a
 # unit test of the wiring has no database and needs none.
@@ -109,20 +101,8 @@ def _no_membership_listener(uow: UnitOfWork) -> MembershipListener:
     return cast(MembershipListener, object())
 
 
-def _no_workspace_listener(uow: UnitOfWork) -> WorkspaceListener:
-    return NullWorkspaceListener()
-
-
-def _no_search_keys(session: AsyncSession) -> WorkspaceSearchKeys:
-    return cast(WorkspaceSearchKeys, object())
-
-
-def _no_code_execution_policies(session: AsyncSession) -> WorkspaceCodeExecutionPolicies:
-    return cast(WorkspaceCodeExecutionPolicies, object())
-
-
 def test_core_defaults_are_bound_for_every_port() -> None:
-    container = build_container(membership_listener=_no_membership_listener, workspace_listener=_no_workspace_listener)
+    container = build_container(membership_listener=_no_membership_listener)
 
     assert isinstance(container.resolve(BillingPort, NO_SESSION), NullBillingAdapter)
     assert isinstance(container.resolve(EntitlementPort, NO_SESSION), BaseEntitlementAdapter)
@@ -138,7 +118,7 @@ def test_core_defaults_are_bound_for_every_port() -> None:
 
 
 def test_no_selector_contributes_no_routers_and_says_so() -> None:
-    container = build_container(workspace_listener=None)
+    container = build_container()
 
     assert container.router_contributions() == ()
     assert container.summary.startswith("no bootstrap, core defaults for ")
@@ -155,9 +135,7 @@ def test_no_selector_contributes_no_routers_and_says_so() -> None:
 
 def test_file_storage_resolves_to_one_store_for_the_whole_container(tmp_path: Path) -> None:
     """The retention sweep reclaims the bytes the request path wrote, so both get one store."""
-    container = build_container(
-        config=GatewayConfig(files_backend="local", files_local_dir=str(tmp_path)), workspace_listener=None
-    )
+    container = build_container(config=GatewayConfig(files_backend="local", files_local_dir=str(tmp_path)))
 
     store = container.resolve(FileStoragePort, NO_SESSION)
 
@@ -167,7 +145,7 @@ def test_file_storage_resolves_to_one_store_for_the_whole_container(tmp_path: Pa
 
 def test_file_storage_refuses_a_container_built_without_config() -> None:
     """With no config there is no ``files_backend`` to honor, so resolving says so."""
-    container = build_container(workspace_listener=None)
+    container = build_container()
 
     with pytest.raises(ContainerError, match="FileStoragePort"):
         container.resolve(FileStoragePort, NO_SESSION)
@@ -175,7 +153,7 @@ def test_file_storage_refuses_a_container_built_without_config() -> None:
 
 def test_the_recommender_asks_the_configured_decision_model_and_is_shared() -> None:
     """The core answers from the deployment's own decision provider, with one adapter for every request."""
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
+    container = build_container(config=GatewayConfig())
 
     recommender = container.resolve(AgentModelRecommenderPort, NO_SESSION)
 
@@ -185,15 +163,15 @@ def test_the_recommender_asks_the_configured_decision_model_and_is_shared() -> N
 
 def test_the_recommender_refuses_a_container_built_without_config() -> None:
     """With no config there is no ``agent_recommender_model`` to ask, so resolving says so."""
-    container = build_container(workspace_listener=None)
+    container = build_container()
 
     with pytest.raises(ContainerError, match="AgentModelRecommenderPort"):
         container.resolve(AgentModelRecommenderPort, NO_SESSION)
 
 
 def test_the_model_provider_answers_nothing_without_a_unit_of_work() -> None:
-    """The hybrid data plane has no database, and the boot-time shape check passes none either."""
-    container = build_container(membership_listener=_no_membership_listener, workspace_listener=None)
+    """The boot-time shape check passes no Unit of Work."""
+    container = build_container(membership_listener=_no_membership_listener)
 
     adapter = container.resolve(ModelProviderPort, NO_SESSION)
 
@@ -202,7 +180,7 @@ def test_the_model_provider_answers_nothing_without_a_unit_of_work() -> None:
 
 
 def test_the_model_provider_refuses_to_build_on_a_unit_of_work_without_a_service_builder() -> None:
-    container = build_container(membership_listener=_no_membership_listener, workspace_listener=None)
+    container = build_container(membership_listener=_no_membership_listener)
 
     with pytest.raises(ContainerError, match="hosted-provider service builder"):
         container.resolve(ModelProviderPort, A_SESSION, uow=UnitOfWork(A_SESSION))
@@ -215,9 +193,7 @@ def test_the_model_provider_builds_its_service_on_the_requests_unit_of_work() ->
         seen.append(uow)
         return object()
 
-    container = build_container(
-        membership_listener=_no_membership_listener, workspace_listener=None, hosted_provider_service=build
-    )
+    container = build_container(membership_listener=_no_membership_listener, hosted_provider_service=build)
     uow = UnitOfWork(A_SESSION)
 
     adapter = container.resolve(ModelProviderPort, A_SESSION, uow=uow)
@@ -227,33 +203,23 @@ def test_the_model_provider_builds_its_service_on_the_requests_unit_of_work() ->
 
 
 def test_the_identity_provider_refuses_to_build_without_a_session() -> None:
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
+    container = build_container(config=GatewayConfig())
 
     with pytest.raises(ContainerError, match="a session and a unit of work are required"):
         container.resolve(IdentityProviderPort, NO_SESSION)
 
 
 def test_the_identity_provider_refuses_to_build_without_a_unit_of_work() -> None:
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
+    container = build_container(config=GatewayConfig())
 
     with pytest.raises(ContainerError, match="a session and a unit of work are required"):
         container.resolve(IdentityProviderPort, A_SESSION)
 
 
 def test_the_identity_provider_refuses_to_build_without_a_membership_listener() -> None:
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
+    container = build_container(config=GatewayConfig())
 
     with pytest.raises(ContainerError, match="a membership listener is required"):
-        container.resolve(IdentityProviderPort, A_SESSION, uow=UnitOfWork(A_SESSION))
-
-
-def test_the_identity_provider_refuses_to_build_without_a_workspace_listener() -> None:
-    """Built without one, a workspace its open signup creates would skip what this deployment stages for it."""
-    container = build_container(
-        config=GatewayConfig(), membership_listener=_no_membership_listener, workspace_listener=None
-    )
-
-    with pytest.raises(ContainerError, match="a workspace listener is required"):
         container.resolve(IdentityProviderPort, A_SESSION, uow=UnitOfWork(A_SESSION))
 
 
@@ -264,9 +230,7 @@ def test_the_identity_provider_builds_its_membership_listener_on_the_requests_un
         built_on.append(uow)
         return _no_membership_listener(uow)
 
-    container = build_container(
-        config=GatewayConfig(), membership_listener=build_listener, workspace_listener=_no_workspace_listener
-    )
+    container = build_container(config=GatewayConfig(), membership_listener=build_listener)
     uow = UnitOfWork(A_SESSION)
 
     container.resolve(IdentityProviderPort, A_SESSION, uow=uow)
@@ -276,172 +240,22 @@ def test_the_identity_provider_builds_its_membership_listener_on_the_requests_un
 
 def test_a_plain_bind_replaces_a_unit_of_work_binding() -> None:
     """An overlay that rebinds the port with ``bind`` gets a session-only call, as every other port does."""
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
+    container = build_container(config=GatewayConfig())
     adapter = object()
     container.bind(IdentityProviderPort, lambda session: adapter)
 
     assert container.resolve(IdentityProviderPort, A_SESSION, uow=UnitOfWork(A_SESSION)) is adapter
 
 
-def test_mcp_servers_refuse_a_deployment_that_holds_the_rows_and_has_no_session() -> None:
-    """A deployment reading its own rows cannot do so without the request's session.
-
-    The refusal is a wiring fault rather than a failed resolve, so it must not
-    reach a caller as this deployment's MCP resolution error.
-    """
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
-
-    with pytest.raises(ContainerError, match="a session is required"):
-        container.resolve(McpServerPort, NO_SESSION)
-
-
-def test_mcp_servers_need_no_session_where_a_peer_holds_the_rows() -> None:
-    """A deployment with a peer reads no rows of its own, so it is built without one."""
-    container = build_container(
-        config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}),
-        workspace_listener=None,
-    )
-
-    assert isinstance(container.resolve(McpServerPort, NO_SESSION), RemoteMcpServers)
-
-
-def test_mcp_servers_are_chosen_once_when_the_container_is_built() -> None:
-    """A config change after the build does not move the port to another plane."""
-    config = GatewayConfig()
-    container = build_container(config=config, workspace_listener=None)
-    config.mode = "hybrid"
-
-    assert isinstance(container.resolve(McpServerPort, A_SESSION), LocalMcpServers)
-
-
-def test_web_search_policy_refuses_a_deployment_that_holds_the_rows_and_has_no_session() -> None:
-    """A deployment reading its own policy rows cannot do so without the request's session."""
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
-
-    with pytest.raises(ContainerError, match="a session is required"):
-        container.resolve(WebSearchPolicyPort, NO_SESSION)
-
-
-def test_web_search_policy_needs_no_session_where_a_peer_holds_the_rows() -> None:
-    """A deployment with a peer reads no rows of its own, so it is built without one."""
-    container = build_container(
-        config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}),
-        workspace_listener=None,
-    )
-
-    assert isinstance(container.resolve(WebSearchPolicyPort, NO_SESSION), RemoteWebSearchPolicy)
-
-
-def test_web_search_policy_is_chosen_once_when_the_container_is_built() -> None:
-    """A config change after the build does not move the port to another plane."""
-    config = GatewayConfig()
-    container = build_container(config=config, search_keys=_no_search_keys, workspace_listener=None)
-    config.mode = "hybrid"
-
-    assert isinstance(container.resolve(WebSearchPolicyPort, A_SESSION), LocalWebSearchPolicy)
-
-
-def test_the_stored_web_search_policy_refuses_to_build_without_a_search_key_resolver() -> None:
-    """Built without one, a workspace's own key would be silently skipped and the deployment would pay."""
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
-
-    with pytest.raises(ContainerError, match="a search key resolver is required"):
-        container.resolve(WebSearchPolicyPort, A_SESSION)
-
-
-def test_the_stored_web_search_policy_builds_its_search_key_resolver_on_the_requests_session() -> None:
-    built_on: list[AsyncSession] = []
-
-    def build_search_keys(session: AsyncSession) -> WorkspaceSearchKeys:
-        built_on.append(session)
-        return _no_search_keys(session)
-
-    container = build_container(config=GatewayConfig(), search_keys=build_search_keys, workspace_listener=None)
-
-    container.resolve(WebSearchPolicyPort, A_SESSION)
-
-    assert built_on == [A_SESSION]
-
-
-def test_code_execution_policy_refuses_a_deployment_that_holds_the_rows_and_has_no_session() -> None:
-    """A deployment reading its own policy rows cannot do so without the request's session."""
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
-
-    with pytest.raises(ContainerError, match="a session is required"):
-        container.resolve(CodeExecutionPolicyPort, NO_SESSION)
-
-
-def test_code_execution_policy_needs_no_session_where_a_peer_holds_the_rows() -> None:
-    """A deployment with a peer reads no rows of its own, so it is built without one."""
-    container = build_container(
-        config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}),
-        workspace_listener=None,
-    )
-
-    assert isinstance(container.resolve(CodeExecutionPolicyPort, NO_SESSION), RemoteCodeExecutionPolicy)
-
-
-def test_code_execution_policy_is_chosen_once_when_the_container_is_built() -> None:
-    """A config change after the build does not move the port to another plane."""
-    config = GatewayConfig()
-    container = build_container(
-        config=config, workspace_listener=None, code_execution_policies=_no_code_execution_policies
-    )
-    config.mode = "hybrid"
-
-    assert isinstance(container.resolve(CodeExecutionPolicyPort, A_SESSION), LocalCodeExecutionPolicy)
-
-
-def test_the_stored_code_execution_policy_refuses_to_build_without_a_policy_reader() -> None:
-    container = build_container(config=GatewayConfig(), workspace_listener=None)
-
-    with pytest.raises(ContainerError, match="a code execution policy reader is required"):
-        container.resolve(CodeExecutionPolicyPort, A_SESSION)
-
-
-def test_the_stored_code_execution_policy_builds_its_reader_on_the_requests_session() -> None:
-    built_on: list[AsyncSession] = []
-
-    def build_policies(session: AsyncSession) -> WorkspaceCodeExecutionPolicies:
-        built_on.append(session)
-        return _no_code_execution_policies(session)
-
-    container = build_container(config=GatewayConfig(), workspace_listener=None, code_execution_policies=build_policies)
-
-    container.resolve(CodeExecutionPolicyPort, A_SESSION)
-
-    assert built_on == [A_SESSION]
-
-
-@pytest.mark.parametrize("port", [CodeExecutionPolicyPort, McpServerPort, WebSearchPolicyPort])
-def test_workspace_ports_share_one_adapter_where_a_peer_holds_the_rows(port: type[Any]) -> None:
-    """A deployment with a peer serves every request from the one adapter it built at startup."""
-    container = build_container(
-        config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}),
-        workspace_listener=None,
-    )
-
-    assert container.resolve(port, NO_SESSION) is container.resolve(port, NO_SESSION)
-
-
-@pytest.mark.parametrize("port", [CodeExecutionPolicyPort, McpServerPort, WebSearchPolicyPort])
-def test_workspace_ports_refuse_a_container_built_without_config(port: type[Any]) -> None:
-    """With no config there are no planes to choose by, so resolving says so."""
-    container = build_container(workspace_listener=None)
-
-    with pytest.raises(ContainerError, match=port.__name__):
-        container.resolve(port, NO_SESSION)
-
-
 def test_resolve_refuses_a_port_nothing_bound() -> None:
-    container = build_container(workspace_listener=None)
+    container = build_container()
 
     with pytest.raises(PortNotBoundError, match="UnusedPort"):
         container.resolve(UnusedPort, NO_SESSION)
 
 
 def test_a_later_bind_replaces_an_earlier_one() -> None:
-    container = build_container(workspace_listener=None)
+    container = build_container()
     replacement = _ReboundBilling
 
     container.bind(BillingPort, replacement)
@@ -451,7 +265,7 @@ def test_a_later_bind_replaces_an_earlier_one() -> None:
 
 
 def test_bindings_is_a_snapshot_not_a_live_view() -> None:
-    container = build_container(workspace_listener=None)
+    container = build_container()
     before = dict(container.bindings())
 
     container.bind(BillingPort, _ReboundBilling)
@@ -487,7 +301,7 @@ def register(container: Container) -> None:
 """,
     )
 
-    container = build_container("probe_bootstrap:register", workspace_listener=None)
+    container = build_container("probe_bootstrap:register")
 
     entitlements = container.resolve(EntitlementPort, NO_SESSION)
     assert type(entitlements).__name__ == "ProbeEntitlements"
@@ -525,7 +339,7 @@ def register(container):
     )
 
     with pytest.raises(PortShapeError, match="StaleModelProvider, bound to ModelProviderPort, lacks get_hosted_models"):
-        build_container("stale_bootstrap:register", workspace_listener=None)
+        build_container("stale_bootstrap:register")
 
 
 def test_bootstrap_that_rebinds_nothing_leaves_the_core_defaults(
@@ -538,7 +352,7 @@ def test_bootstrap_that_rebinds_nothing_leaves_the_core_defaults(
         "def register(container):\n    return None\n",
     )
 
-    container = build_container("inert_bootstrap:register", workspace_listener=None)
+    container = build_container("inert_bootstrap:register")
 
     assert isinstance(container.resolve(BillingPort, NO_SESSION), NullBillingAdapter)
     assert container.summary == "inert_bootstrap:register rebound no ports"
@@ -552,7 +366,7 @@ def test_a_selector_with_surrounding_whitespace_still_loads(tmp_path: Path, monk
         "def register(container):\n    return None\n",
     )
 
-    container = build_container("  spaced_bootstrap:register  ", workspace_listener=None)
+    container = build_container("  spaced_bootstrap:register  ")
 
     assert "rebound no ports" in container.summary
 
@@ -568,12 +382,12 @@ def test_a_selector_with_surrounding_whitespace_still_loads(tmp_path: Path, monk
 )
 def test_a_malformed_selector_refuses_to_boot(selector: str, message: str) -> None:
     with pytest.raises(BootstrapError, match=message):
-        build_container(selector, workspace_listener=None)
+        build_container(selector)
 
 
 def test_a_missing_bootstrap_module_is_reported_as_not_found() -> None:
     with pytest.raises(BootstrapError, match="was not found"):
-        build_container("gateway_bootstrap_that_does_not_exist:register", workspace_listener=None)
+        build_container("gateway_bootstrap_that_does_not_exist:register")
 
 
 def test_a_bootstrap_whose_own_import_fails_is_reported_as_such(
@@ -590,21 +404,21 @@ def test_a_bootstrap_whose_own_import_fails_is_reported_as_such(
     )
 
     with pytest.raises(BootstrapError, match="failed to import"):
-        build_container("broken_bootstrap:register", workspace_listener=None)
+        build_container("broken_bootstrap:register")
 
 
 def test_a_bootstrap_missing_its_callable_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_bootstrap(tmp_path, monkeypatch, "empty_bootstrap", "value = 1\n")
 
     with pytest.raises(BootstrapError, match="has no attribute 'register'"):
-        build_container("empty_bootstrap:register", workspace_listener=None)
+        build_container("empty_bootstrap:register")
 
 
 def test_a_bootstrap_attribute_that_is_not_callable_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_bootstrap(tmp_path, monkeypatch, "value_bootstrap", "register = 1\n")
 
     with pytest.raises(BootstrapError, match="is not callable"):
-        build_container("value_bootstrap:register", workspace_listener=None)
+        build_container("value_bootstrap:register")
 
 
 def test_an_async_bootstrap_is_refused_rather_than_silently_dropped(
@@ -624,7 +438,7 @@ def test_an_async_bootstrap_is_refused_rather_than_silently_dropped(
     )
 
     with pytest.raises(BootstrapError, match="is async"):
-        build_container("async_bootstrap:register", workspace_listener=None)
+        build_container("async_bootstrap:register")
 
 
 def test_an_async_callable_object_bootstrap_is_refused_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -645,7 +459,7 @@ def test_an_async_callable_object_bootstrap_is_refused_too(tmp_path: Path, monke
     )
 
     with pytest.raises(BootstrapError, match="returned an awaitable"):
-        build_container("async_callable_bootstrap:register", workspace_listener=None)
+        build_container("async_callable_bootstrap:register")
 
 
 def test_router_contributions_keep_their_order() -> None:

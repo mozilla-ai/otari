@@ -224,7 +224,7 @@ def _install_idle_ping(engine: AsyncEngine) -> None:
     event.listen(pool, "checkout", _ping_if_idle)
 
 
-async def release_session(session: AsyncSession | None) -> bool:
+async def release_session(session: AsyncSession) -> bool:
     """End *session*'s transaction so its connection goes back to the pool.
 
     The gateway's request path reads the API key, the billed user and its
@@ -252,11 +252,7 @@ async def release_session(session: AsyncSession | None) -> bool:
     worse outcome. The session is rolled back in that case, because a failed
     commit leaves it unusable and the settlement writes after dispatch would
     otherwise raise ``PendingRollbackError`` on it.
-
-    ``None`` is accepted for hybrid mode, which is handed no session at all.
     """
-    if session is None:
-        return False
     try:
         await session.commit()
     except DATABASE_ERRORS as exc:

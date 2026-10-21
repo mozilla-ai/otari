@@ -126,14 +126,11 @@ async def test_searxng_search_normalizes_results() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
-        seen["token"] = request.headers.get("x-gateway-token")
         return httpx.Response(200, json=_SEARXNG_BODY)
 
     outcome = await _run_search(handler, _SEARXNG_TOOL, SearchQuery(query="otari"))
 
     assert seen["url"] == "http://searxng:8080/search?max_results=10&q=otari&format=json"
-    # A self-hosted SearXNG has no credential to send.
-    assert seen["token"] is None
     # SearXNG reports no charge, so the tool's configured flat rate bills.
     assert outcome.cost_usd is None
     # The result without a URL is dropped: it cannot be cited or followed.
@@ -147,20 +144,6 @@ async def test_searxng_search_normalizes_results() -> None:
     # An adapter that already had the page text wins over the engine snippet.
     assert outcome.results[1].snippet == "full page text"
     assert outcome.results[1].date == "2026-02-03"
-
-
-@pytest.mark.asyncio
-async def test_searxng_search_forwards_a_configured_key_as_the_gateway_token() -> None:
-    """A tool with a key fronts something that authenticates the gateway."""
-    seen: dict[str, Any] = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["token"] = request.headers.get("x-gateway-token")
-        return httpx.Response(200, json={"results": []})
-
-    tool = replace(_SEARXNG_TOOL, api_base="https://searxng.example.com", api_key="adapter-secret")
-    await _run_search(handler, tool, SearchQuery(query="otari"))
-    assert seen["token"] == "adapter-secret"
 
 
 @pytest.mark.asyncio

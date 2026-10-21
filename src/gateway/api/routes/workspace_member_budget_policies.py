@@ -1,7 +1,6 @@
 """Workspace per-member budget defaults.
 
 A default is a workspace-level template for the per-member ``scoped_budgets`` ceiling.
-The router is mounted in standalone and hosted modes, and not in hybrid mode.
 The router requires the master key, and the caller's tenancy identity decides the per-workspace role checks.
 """
 

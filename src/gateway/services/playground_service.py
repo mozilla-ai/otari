@@ -51,7 +51,6 @@ from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.tools import WorkspaceCodeExecutionPolicies, web_search_configured
 from gateway.services.workspace_scope import organization_default_workspace_id
 from gateway.types.session_principal import SessionPrincipal
@@ -90,7 +89,7 @@ async def resolve_playground_workspace(
     Every Playground route resolves through here, reads included, so a read and a
     completion can never disagree about which workspace a caller reached.
     """
-    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    organizations = OrganizationService(db, membership_listener=None)
     organization = await organizations.get_active_organization_for_user(identity)
 
     resolved = workspace_id
@@ -219,14 +218,10 @@ _WORKSPACE_DISABLED = "Turned off for this workspace."
 _WORKSPACE_NOT_ENABLED = "Not turned on for this workspace."
 _NOT_CONFIGURED = "No backend is configured on this deployment."
 _FILES_OFF = "File uploads are turned off on this deployment."
-_FILES_NOT_FORWARDED = "This deployment's models run on another gateway, which cannot read files stored here."
 
 
 class PlaygroundToolOffer(Protocol):
-    """What the deployment offers a Playground message before its workspace narrows it.
-
-    Bound per mode where the app is wired, so nothing here reads the mode.
-    """
+    """What the deployment offers a Playground message before its workspace narrows it."""
 
     def code_execution(self, workspace_enabled: bool | None) -> ToolAvailability:
         """Code execution, given the workspace's stored switch (``None`` when it stored none)."""
@@ -248,7 +243,7 @@ class LocalToolOffer:
         return _tool_availability(
             self._config.sandbox_configured(),
             workspace_enabled,
-            on_without_policy=self._config.code_execution_on_without_policy(),
+            on_without_policy=self._config.code_execution_workspace_default,
         )
 
     def files(self) -> ToolAvailability:
@@ -256,32 +251,6 @@ class LocalToolOffer:
         if not self._config.files_enabled:
             return ToolAvailability(configured=False, enabled=False, reason=_FILES_OFF)
         return ToolAvailability(configured=True, enabled=True)
-
-
-class ForwardedToolOffer:
-    """A hosted control plane, which forwards each Playground completion to its data plane."""
-
-    def __init__(self, config: GatewayConfig) -> None:
-        self._config = config
-
-    def code_execution(self, workspace_enabled: bool | None) -> ToolAvailability:
-        """Code execution, read the way the platform reads it.
-
-        The platform's sandbox behind the data plane runs the code, so this
-        process's own sandbox config says nothing.
-        """
-        return _tool_availability(
-            True, workspace_enabled, on_without_policy=self._config.code_execution_on_without_policy()
-        )
-
-    def files(self) -> ToolAvailability:
-        """No uploads: the data plane resolves a ``file_id`` against its own store, and would not find one stored here.
-
-        So an upload is refused rather than accepted and then lost.
-        """
-        if not self._config.files_enabled:
-            return ToolAvailability(configured=False, enabled=False, reason=_FILES_OFF)
-        return ToolAvailability(configured=False, enabled=False, reason=_FILES_NOT_FORWARDED)
 
 
 async def resolve_tool_availability(
@@ -323,7 +292,7 @@ async def resolve_tool_availability(
 
     return PlaygroundToolAvailability(
         web_search=_tool_availability(
-            web_search_configured(config), web_search_row, on_without_policy=config.web_search_on_without_policy()
+            web_search_configured(config), web_search_row, on_without_policy=config.web_search_workspace_default
         ),
         code_execution=offer.code_execution(code_execution_row),
         files=offer.files(),

@@ -16,10 +16,6 @@ Three fields that look redundant and are not (the distinction
   fixed ``api_key`` field, because a locally resolved attempt may have no API key
   at all: the Vertex AI path returns environment setup plus ``client_args``, and
   any instance may carry arbitrary provider-specific keys.
-
-Hybrid-mode attempts are the special case, not the general one: the platform
-returns exactly ``api_key`` (+ optional ``api_base``), which is one possible
-``kwargs`` shape.
 """
 
 from dataclasses import dataclass, field
@@ -63,10 +59,6 @@ class Attempt:
     """Why this candidate is here: ``static``, ``default``, ``condition:<key>``,
     ``router:<name>``, ``catalog``, or ``on_failure``."""
 
-    attempt_id: str | None = None
-    """Correlation id when an external control plane supplied the attempt.
-    ``None`` for locally resolved attempts."""
-
     deployment_paid: bool = False
     """Served on a credential the deployment owns (``ModelProviderPort``), and
     priced at the rate such a request settles at."""
@@ -80,9 +72,7 @@ class Attempt:
         """Merge this attempt's credentials with the shared request fields.
 
         ``model`` is applied last, so the attempt's own selector always wins over
-        whatever the caller asked for. Precedence between the other two is the
-        same as the hybrid helper's (``default_attempt_kwargs``): request fields
-        override credentials by key.
+        whatever the caller asked for. Request fields override credentials by key.
 
         That ordering is only safe because caller-supplied credentials cannot
         reach here. The request models derive their fields from any-llm's

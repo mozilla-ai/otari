@@ -8,7 +8,7 @@ import pytest
 from any_llm.types.audio import Transcription
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, REQUEST_ID_HEADER
 from gateway.services.pricing_service import (
     configure_default_pricing,
     default_model_pricing,
@@ -594,3 +594,18 @@ def test_transcription_param_the_provider_sdk_refuses(
         )
     assert resp.status_code == expected_status
     assert ("'language'" in resp.json()["detail"]) is (expected_status == 400)
+
+
+def test_speech_response_carries_a_request_id(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Speech builds its own response, so the id reaches it through the outcome's headers."""
+    with patch("gateway.api.routes.audio.aspeech", new_callable=AsyncMock, return_value=FAKE_AUDIO_BYTES):
+        resp = client.post(
+            f"{API_ROOT}/audio/speech",
+            json={"model": "openai:tts-1", "input": "Hello", "voice": "alloy"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+    assert resp.headers[REQUEST_ID_HEADER]

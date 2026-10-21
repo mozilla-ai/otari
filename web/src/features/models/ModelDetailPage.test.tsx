@@ -209,6 +209,9 @@ describe("ModelDetailPage", () => {
     )
 
     const offerings = screen.getByRole("grid", { name: "Offerings of GLM-5.3" })
+    expect(
+      within(offerings).getByRole("columnheader", { name: "Price from" }),
+    ).toBeInTheDocument()
     const rows = within(offerings).getAllByRole("row").slice(1)
     expect(rows).toHaveLength(2)
     // Cheapest first: Fireworks' sub-cent rate keeps its digits (otari#700).
@@ -418,7 +421,7 @@ describe("ModelDetailPage", () => {
   })
 
   it("gives a deployment operator its organization's own rate link", async () => {
-    // On a standalone deployment the operator *is* the single organization's
+    // On a single-tenant deployment the operator *is* the organization's
     // owner, so a gate that excluded them would leave the one caller who can set
     // a rate without the link to set it.
     mockApi()

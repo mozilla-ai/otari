@@ -66,7 +66,6 @@ from gateway.services.tools._code_execution_policy import (
     WorkspaceCodeExecutionPolicyPublic,
     WorkspaceCodeExecutionPolicyService,
     WorkspaceCodeExecutionPolicyUpdate,
-    read_code_execution_policy,
 )
 from gateway.services.tools._code_execution_responses import CODE_INTERPRETER_CALL_ID_PREFIX
 from gateway.services.tools._code_execution_tool import TOOL as CODE_EXECUTION_TOOL
@@ -165,16 +164,13 @@ from gateway.services.tools._web_search_keys import WebSearchKeyService, Workspa
 from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
 from gateway.services.tools._web_search_results import DEFAULT_MAX_RESULTS, web_search_max_results_baseline
 from gateway.services.tools._web_tool_failure import WebToolFailure
-from gateway.services.tools._workspace_defaults import CodeExecutionWorkspaceDefaults
 
 __all__ = [
     "MAX_TOOL_ITERATIONS_CAP",
-    "CodeExecutionWorkspaceDefaults",
     "WorkspaceCodeExecutionPolicies",
     "WorkspaceCodeExecutionPolicyPublic",
     "WorkspaceCodeExecutionPolicyService",
     "WorkspaceCodeExecutionPolicyUpdate",
-    "read_code_execution_policy",
     "BUILTIN_TOOLS",
     "CODE_EXECUTION_HEADER",
     "CODE_EXECUTION_TOOL",

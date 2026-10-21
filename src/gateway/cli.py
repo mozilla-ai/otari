@@ -114,29 +114,14 @@ def serve(
     if auto_migrate is not None:
         gateway_config.auto_migrate = auto_migrate
 
-    gateway_config.validate_mode_selection()
-
-    if gateway_config.is_hybrid_mode:
-        platform_base_url = gateway_config.platform.get("base_url")
-        if not platform_base_url:
-            raise click.ClickException("platform.base_url is required when hybrid mode is active")
-        if gateway_config.providers:
-            raise click.ClickException(
-                "Local provider credentials are not supported in hybrid mode. Remove configured providers."
-            )
-        logger.info("Hybrid mode active. Base URL: %s", platform_base_url)
-
-    if not gateway_config.master_key and not gateway_config.is_hybrid_mode:
+    if not gateway_config.master_key:
         logger.info(
             "No master key configured; one will be generated and printed at startup. "
             "Set OTARI_MASTER_KEY (or --master-key) to choose your own instead.",
         )
 
     logger.info("Starting Otari on %s:%s", gateway_config.host, gateway_config.port)
-    if gateway_config.is_hybrid_mode:
-        logger.info("Database: disabled (hybrid mode)")
-    else:
-        logger.info("Database: %s", gateway_config.database_url)
+    logger.info("Database: %s", gateway_config.database_url)
 
     if gateway_config.providers:
         logger.info("Configured providers: %s", ", ".join(gateway_config.providers.keys()))

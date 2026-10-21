@@ -6,8 +6,8 @@
 # params), but exposing one of these as a client-settable request field would let
 # a caller override an operator-controlled value: the provider-call merge spreads
 # request fields last (e.g. ``{**get_provider_kwargs(...), **request_fields}``),
-# so a client value would win. The gateway resolves these itself (from ``config``
-# / the platform service), so they must never be derived onto a public request
+# so a client value would win. The gateway resolves these itself (from
+# ``config``), so they must never be derived onto a public request
 # schema, and they are also stripped before forwarding (see
 # ``_tools._strip_gateway_fields``) to cover schemas that allow extra fields
 # (the Responses request uses ``extra="allow"``).
@@ -30,12 +30,9 @@ SENSITIVE_PARAM_FIELDS: frozenset[str] = frozenset(
         "aws_access_key_id",
         "aws_secret_access_key",
         # any-llm's acompletion()/aresponses() forward this dict straight to
-        # the provider's client constructor (see build_attempt_client_args in
-        # _platform.py). A hybrid-mode attempt with no extra_params of its own
-        # (the common case for every provider except Bedrock) never sets this
-        # key at all, so a caller-supplied client_args smuggled in through a
-        # schema that allows extra fields would otherwise reach the provider
-        # call unfiltered.
+        # the provider's client constructor, so a caller-supplied client_args
+        # smuggled in through a schema that allows extra fields would otherwise
+        # reach the provider call unfiltered.
         "client_args",
     }
 )

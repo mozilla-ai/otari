@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import NamedTuple, Never
 
 from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -8,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import OrganizationMember, Workspace
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
+from gateway.repositories.base_repository import BaseRepository
 
 # The owner a key falls back to when it is created without a user_id (the API's
 # convenience path, and the first-run bootstrap key). One shared, visible,
@@ -258,3 +261,33 @@ async def count_users(db: AsyncSession, organization_id: uuid.UUID, filters: Use
     """How many users :func:`page_users` would page through."""
     total = await db.scalar(select(func.count()).select_from(User).where(*_listed(organization_id, filters)))
     return int(total or 0)
+
+
+class AccessLists(NamedTuple):
+    """A user's or a key's ``allowed_models`` and ``allowed_tools``."""
+
+    models: list[str] | None
+    tools: list[str] | None
+
+
+class UserAccessRepository(BaseRepository[User, Never, Never]):
+    """Read users' model and search tool access lists."""
+
+    def __init__(self, uow: UnitOfWork) -> None:
+        super().__init__(uow, User)
+
+    async def access_lists(self, user_id: str) -> AccessLists | None:
+        """A user's access lists, or ``None`` when there is no such user."""
+        row = (
+            await self.db.execute(select(User.allowed_models, User.allowed_tools).where(User.user_id == user_id))
+        ).one_or_none()
+        return None if row is None else AccessLists(*row)
+
+    async def live_access_lists(self) -> dict[str, AccessLists]:
+        """Every live user's access lists, by user id."""
+        rows = (
+            await self.db.execute(
+                select(User.user_id, User.allowed_models, User.allowed_tools).where(User.deleted_at.is_(None))
+            )
+        ).all()
+        return {user_id: AccessLists(models, tools) for user_id, models, tools in rows}

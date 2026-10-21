@@ -53,7 +53,7 @@ class InferenceSettings(BaseModel):
         default=15000,
         ge=0,
         description=(
-            "How long in milliseconds a standalone gateway holds a streaming response's status line "
+            "How long in milliseconds the gateway holds a streaming response's status line "
             "for the provider's first chunk, so a provider failure before any output is answered with "
             "its own HTTP status (and falls over in a routing policy) rather than as an error event "
             "after a 200. A provider slower than this still streams: the response is committed and "
@@ -69,7 +69,7 @@ class InferenceSettings(BaseModel):
             "How long a non-streaming completion sent with an Idempotency-Key is kept, so that a "
             "retry with the same key returns the stored response instead of calling the provider "
             "and billing again. The stored response includes the generated content. 0 ignores the "
-            "header. Standalone mode only."
+            "header."
         ),
     )
     idempotency_lease_sec: Annotated[int, OMITTED] = Field(

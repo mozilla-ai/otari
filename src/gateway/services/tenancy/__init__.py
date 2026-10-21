@@ -1,7 +1,7 @@
 """The reconciled control plane's tenancy services.
 
 A feature module: organizations, workspaces, memberships, and the first-boot
-provisioning that gives a standalone deployment an identity to act as. The route
+provisioning that gives a deployment an identity to act as. The route
 files under `gateway.api.routes` stay thin composition over these services.
 
 Nothing here may reach model discovery. `workspace_scope` imports this package

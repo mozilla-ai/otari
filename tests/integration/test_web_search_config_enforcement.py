@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.tools import WorkspaceWebSearchConfig
 from gateway.services.tools import WebSearchBackend
+from gateway.services.tools._web_admission import WEB_SEARCH_NOT_CONFIGURED_DETAIL
 from gateway.services.web_retrieval_policy import canonicalize_domain_rules
 
 _SEARCH_URL = "http://127.0.0.1:9998/search"
@@ -263,6 +264,38 @@ def test_a_disabled_workspace_is_refused_before_the_provider_is_called(
     assert seen.ran is False, "the tool loop must never have run"
 
 
+def test_a_search_with_nothing_to_search_with_is_refused_without_naming_a_setting(
+    client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No search of the deployment's own and no organization key: refused after the policy is read."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+
+    response, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "type": "error",
+        "error": {"type": "invalid_request_error", "message": WEB_SEARCH_NOT_CONFIGURED_DETAIL},
+    }
+    assert "OTARI_" not in WEB_SEARCH_NOT_CONFIGURED_DETAIL
+    assert seen.ran is False
+
+
+def test_a_disabled_workspace_is_refused_before_its_search_is_found_to_have_nothing_to_run_on(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    _set_config(client, master_key_header, _default_workspace_id(client, master_key_header), enabled=False)
+
+    response, _ = _post_with_search_patched(client, api_key_header, _REQUEST)
+
+    assert response.status_code == 403
+    assert response.json()["error"]["message"] == "web search is not enabled for this workspace"
+
+
 def test_a_disabled_workspace_still_serves_a_request_that_asks_for_no_search(
     client: TestClient,
     api_key_header: dict[str, str],
@@ -362,7 +395,7 @@ def test_a_request_cannot_shed_the_workspace_block_list(
     master_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The fail-open case the hybrid path's default-only precedence would allow."""
+    """The fail-open case a default-only precedence would allow."""
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=True, blocked_domains=["banned.example"])
@@ -701,7 +734,7 @@ def test_a_config_read_that_fails_releases_the_budget_reservation(
         raise SQLAlchemyError("connection lost mid-admission")
 
     monkeypatch.setattr(
-        "gateway.adapters.web_search_policy_adapter.resolve_workspace_web_search_config",
+        "gateway.services.tenancy.workspace_web_search_service.resolve_workspace_web_search_config",
         failing_resolve,
     )
     # The Messages route answers an unexpected failure as Anthropic's 500; what matters
@@ -718,43 +751,6 @@ def test_a_config_read_that_fails_releases_the_budget_reservation(
     finally:
         session.close()
     assert float(reserved) == 0.0, "the admission failure left the estimate debited"
-
-
-def test_an_unresolvable_workspace_refuses_rather_than_searching(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The veto's defensive arm fails closed.
-
-    Unreachable today: a standalone request with no session is refused before
-    this, and `resolve_workspace_id` always answers, falling back to the default
-    workspace. It is pinned anyway because the arm guards a veto, so falling
-    through would hand web search to a workspace whose row refuses it, with
-    nothing to notice.
-    """
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
-
-    async def no_workspace(*_args: Any, **_kwargs: Any) -> None:
-        return None
-
-    monkeypatch.setattr("gateway.api.routes._pipeline.resolve_workspace_id", no_workspace)
-    # The organization-guardrail resolve (otari#654) fails closed on the same
-    # condition and runs first, so without this the request would be refused
-    # before the arm under test. Neutralized rather than asserted around,
-    # because this case is about the web-search veto; the guardrail gate has its
-    # own coverage in `test_organization_guardrail_enforcement.py`.
-    monkeypatch.setattr(
-        "gateway.api.routes._pipeline._resolve_organization_guardrails",
-        AsyncMock(return_value=[]),
-    )
-
-    response, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
-
-    assert response.status_code == 500
-    detail = response.json()
-    assert detail["error"]["message"] == "Web search configuration could not be resolved for this request"
-    assert seen.ran is False
 
 
 def _stored_search_tool(client: TestClient, master_key_header: dict[str, str], name: str) -> None:
