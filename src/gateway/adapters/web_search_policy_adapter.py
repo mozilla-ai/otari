@@ -53,7 +53,8 @@ class LocalWebSearchPolicy(WebSearchPolicyPort):
     async def resolve(
         self, scope: WebSearchPolicyScope, requested_tools: Sequence[WebTool]
     ) -> ResolvedWebSearchConfig | None:
-        # A stored row authorizes no tool by name, so the requested tools decide only whether a key is read.
+        # A stored row authorizes no tool by name, so the requested tools decide only which keys are read:
+        # the search key for a search, the fetch key for either tool, since it also enriches search hits.
         if scope.workspace_id is None:
             raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.NO_WORKSPACE)
         try:
@@ -62,12 +63,13 @@ class LocalWebSearchPolicy(WebSearchPolicyPort):
             raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID) from None
         if policy is None and not self._on_without_policy:
             return _NOT_TURNED_ON
-        if WebTool.SEARCH not in requested_tools:
+        search = WebTool.SEARCH in requested_tools
+        keys = await self._search_keys.keys_for(
+            scope.workspace_id, search=search, fetch=search or WebTool.FETCH in requested_tools
+        )
+        if keys.search is None and keys.fetch is None:
             return policy
-        credential = await self._search_keys.credential_for(scope.workspace_id)
-        if credential is None:
-            return policy
-        return replace(policy or _NO_NARROWING, credential=credential)
+        return replace(policy or _NO_NARROWING, credential=keys.search, fetch_credential=keys.fetch)
 
 
 class RemoteWebSearchPolicy(WebSearchPolicyPort):

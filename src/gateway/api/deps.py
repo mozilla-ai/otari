@@ -1119,15 +1119,16 @@ def get_workspace_web_search_service(
 ) -> WorkspaceWebSearchService:
     """Build the service on the request's session.
 
-    The backend-presence check is the same one ``prepare_gateway_tools`` makes
-    when it decides whether a request may declare ``otari_web_search``, and the
-    default is the one the request path applies to a workspace with no row, so
-    the page and the request path agree.
+    The backend-presence check, with the workspace's organization key, is the
+    one admission makes when it decides whether a request may declare
+    ``otari_web_search``, and the default is the one the request path applies
+    to a workspace with no row, so the page and the request path agree.
     """
     return WorkspaceWebSearchService(
         db,
         web_search_configured=web_search_configured(config),
         default_enabled=config.web_search_on_without_policy(),
+        has_search_key=get_workspace_search_keys(db).has_search_key,
     )
 
 
@@ -1708,8 +1709,12 @@ ProviderEndpointServiceDep = Annotated[ProviderEndpointService, Depends(get_prov
 def get_web_search_key_service(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> WebSearchKeyService:
-    """Build the organization web search key service on the request's Unit of Work."""
+    """Build the organization web search key service on the request's Unit of Work.
+
+    The config tells a workspace without a key of a kind what its calls run on.
+    """
     organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     return WebSearchKeyService(
         uow,
@@ -1718,6 +1723,7 @@ def get_web_search_key_service(
         organizations=organizations,
         workspaces=WorkspaceAccess(db, organizations),
         lock_workspace=WorkspaceRepository(db).lock,
+        config=config,
     )
 
 
@@ -1725,7 +1731,7 @@ WebSearchKeyServiceDep = Annotated[WebSearchKeyService, Depends(get_web_search_k
 
 
 def get_workspace_search_keys(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceSearchKeys:
-    """Build the resolver of the key a workspace searches with, on the request's session.
+    """Build the resolver of the keys a workspace uses, on the request's session.
 
     Also the builder the container's stored web search policy takes, which is why it takes a bare session.
     """
