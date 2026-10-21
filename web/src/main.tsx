@@ -19,8 +19,9 @@ if (!container) {
 
 // Read before the first render rather than during it. The answer decides
 // whether this URL is a management dashboard or a sign-in screen, and painting
-// one only to swap it for the other is worse than waiting one same-origin round trip. A failure hands App null,
-// which says the gateway is unreachable instead of guessing a deployment.
+// one only to swap it for the other is worse than waiting one same-origin round
+// trip. A failure hands App null, which says the gateway is unreachable instead
+// of guessing a deployment.
 // Shorter than apiFetch's 30s default, because nothing at all is on screen until
 // this settles: a stalled gateway or proxy would otherwise hold a blank page for
 // half a minute before the error state appears. A refused connection fails fast

@@ -102,9 +102,8 @@ adds vocabulary rather than borrowing it:
 - `indicators/` holds the small status marks (`Dot`, `Badge`, `DismissChip`).
   `colors.md` describes the status roles they wear but documents no component.
 - `access/` holds what renders in place of a page the deployment does not serve or
-  the caller is not entitled to (`EntitlementGate`, `UnavailableHere`,
-  `MissingGatewayAddressNotice`). This is the surface and entitlement axes reaching
-  the UI, described in web/AGENTS.md and ARCHITECTURE.md rather than in a design
+  the caller is not entitled to (`EntitlementGate`, `UnavailableHere`). This is
+  the surface and entitlement axes reaching the UI, described in web/AGENTS.md and ARCHITECTURE.md rather than in a design
   topic, because it is a deployment fact and not a visual one.
 
 If either name is unwanted, the fallback is `indicators/` into `metrics/` and
@@ -180,7 +179,6 @@ spells a pure module `camelCase.ts`, and neither returns JSX.
 | `ConfirmDialog.tsx` | `feedback/ConfirmDialog.tsx` |
 | `FilterChips.tsx` | `navigation/FilterChips.tsx` |
 | `EntitlementGate.tsx` | `access/EntitlementGate.tsx` |
-| `MissingGatewayAddressNotice.tsx` | `access/MissingGatewayAddressNotice.tsx` |
 | `ui/RowActions.tsx` | `deprecated/RowActions.tsx` |
 | `ui/SettingsSection.tsx` | `deprecated/SettingsSection.tsx` |
 | `ProductMark.tsx` | unchanged |

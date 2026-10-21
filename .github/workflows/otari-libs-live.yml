@@ -10,7 +10,7 @@ name: Otari Libs Live
 #
 # Weekly, so a change is noticed in a quiet week; GitHub notifies the person who
 # last changed the schedule of a failed scheduled run. Also on a pull request
-# that changes either library, unlike otari-live-providers.yml: a run costs a
+# that changes either library: a run costs a
 # few cents and the providers' answers are stable enough to block a merge on.
 # A pull request from a fork gets no secrets, so its live tests skip, as they do
 # anywhere without a key, and a notice says so. A scheduled or manual run without

@@ -41,7 +41,7 @@ services:
       # stays in this process and is never handed to a caller.
       - OTARI_WEB_SEARCH_PROVIDER=${OTARI_WEB_SEARCH_PROVIDER:-}
       - OTARI_WEB_SEARCH_PROVIDER_API_KEY=${OTARI_WEB_SEARCH_PROVIDER_API_KEY:-}
-      # Optional knobs. Defaults are conservative — see web_search_backend.py.
+      # Optional knobs. Defaults are conservative — see web_retrieval_backend.py.
       - OTARI_WEB_SEARCH_ENGINES=${OTARI_WEB_SEARCH_ENGINES:-}
       - OTARI_WEB_SEARCH_MAX_RESULTS=${OTARI_WEB_SEARCH_MAX_RESULTS:-}
       - OTARI_WEB_SEARCH_EXTRACT=${OTARI_WEB_SEARCH_EXTRACT:-}

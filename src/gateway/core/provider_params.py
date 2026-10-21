@@ -6,8 +6,8 @@
 # params), but exposing one of these as a client-settable request field would let
 # a caller override an operator-controlled value: the provider-call merge spreads
 # request fields last (e.g. ``{**get_provider_kwargs(...), **request_fields}``),
-# so a client value would win. The gateway resolves these itself (from ``config``
-# / the platform service), so they must never be derived onto a public request
+# so a client value would win. The gateway resolves these itself (from
+# ``config``), so they must never be derived onto a public request
 # schema, and they are also stripped before forwarding (see
 # ``_tools._strip_gateway_fields``) to cover schemas that allow extra fields
 # (the Responses request uses ``extra="allow"``).

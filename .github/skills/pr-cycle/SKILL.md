@@ -111,7 +111,7 @@ PR with almost no CI, and neither of them reports anything:
 
   A GitHub stack is the exception. A PR that `gh stack submit` (the `github/gh-stack`
   extension) opens on its parent's branch still runs the workflows filtered on `main`: #1816
-  ran the full set, the OSS and Docker smokes included. So stack with `gh stack`. Everything
+  ran the full set, every smoke included. So stack with `gh stack`. Everything
   above describes a PR whose base was set to another branch by hand.
 - **A `CONFLICTING` PR.** A `pull_request` workflow builds the PR's merge ref, and a conflicting
   PR has none, so nothing runs until the conflict is resolved. The tell is

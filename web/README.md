@@ -1,8 +1,7 @@
 # Otari admin dashboard
 
 A React + [HeroUI v3](https://www.heroui.com) single-page app for Otari. It
-renders the standalone or hosted management dashboard from the deployment
-contract returned by `/api/v1/bootstrap`.
+renders the management dashboard from the deployment contract returned by `/api/v1/bootstrap`.
 
 Local sign-in exchanges the deployment's current credential for an HttpOnly
 session cookie. The credential is not written to browser storage, and page
@@ -95,6 +94,5 @@ builds on every change under `web/`.
 The gateway serves `index.html` at `/` and the hashed assets under `/assets`
 (see `src/gateway/main.py` and `src/gateway/dashboard.py`). The app routes on
 hash history (`/#/models`, `/#/usage`), so no server-side catch-all route is
-needed. Both modes serve the same bundle: the page asks `GET /api/v1/bootstrap`
-which deployment it reached. Without a built bundle the root falls back to the
+needed. Without a built bundle the root falls back to the
 get-started tutorial.

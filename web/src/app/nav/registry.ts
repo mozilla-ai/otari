@@ -228,8 +228,8 @@ const BASE_NAV_SECTIONS = [
  * Reached from the sidebar footer and left by the "Back to" link at its top,
  * so the two contexts never render together. Gated on the caller managing the
  * organization, which today is always true: there is one session, the local
- * operator, and it owns the organization the gateway provisioned for itself. The gate is written anyway because it is the thing
- * that becomes load-bearing the moment per-user sign-in lands (otari-ai#1716).
+ * operator, and it owns the organization the gateway provisioned for itself.
+ * The gate is written anyway because it is the thing that becomes load-bearing the moment per-user sign-in lands (otari-ai#1716).
  *
  * Every row is gated on a surface the bootstrap publishes (`SURFACES` in
  * `src/gateway/api/routes/bootstrap.py`), and a group whose every row a

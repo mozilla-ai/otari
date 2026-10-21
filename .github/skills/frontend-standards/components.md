@@ -183,7 +183,6 @@ than duplicating their markup. See [design-tokens.md](./design-tokens.md).
 | Applied filters, each removable | `FilterChips` (`navigation/`); one chip per value, and pass `clearLabel` so several chips of one dimension stay distinguishable |
 | Form field wrapper | `Field` (`forms/`), or `SecretField` for a credential |
 | Tabular data | `DataTable` (`data/`), with `TablePagination` and `BulkActionBar` beside it |
-| What stands where a request snippet would be, when the deployment named no gateway | `MissingGatewayAddressNotice` (`access/`); pairs with `resolveSnippetBaseUrl` answering `undefined` |
 | Settings page section (header + body) | `SettingsGroup` (`layout/`). **Not** `SettingsSection`, which is in `deprecated/` and has no call site left |
 | Table row's trailing icon-button cluster | `RowActionRow` (`actions/`). **Not** `RowActions`, which is in `deprecated/` |
 

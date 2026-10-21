@@ -12,8 +12,8 @@ TestClient) so a failure to *start* counts as a failure, then walks the path a
 self-hoster walks on day one:
 
 1. ``/api/v1/health``, ``/api/v1/health/liveness``, ``/api/v1/health/readiness`` answer.
-2. ``/api/v1/bootstrap`` answers with no credential and reports ``standalone``. It is
-   the first request a browser makes, and a statement of which edition booted.
+2. ``/api/v1/bootstrap`` answers with no credential. It is the first request a
+   browser makes.
 3. Create a budget that resets on the UTC calendar day, a user on it, then an
    API key for it (master-key admin surface). The period puts a stored reset
    time in front of the budget gate on every request, which SQLite reads back

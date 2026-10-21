@@ -431,7 +431,6 @@ def record_inline_cost_settlement(outcome: str) -> None:
 # Shared wire-level detail strings. These are client-visible API contract
 # values; do not edit them without a deprecation plan.
 # ---------------------------------------------------------------------------
-DB_UNAVAILABLE_DETAIL = "Database session unavailable"
 API_KEY_VALIDATION_FAILED_DETAIL = "API key validation failed"
 API_KEY_NO_USER_DETAIL = "API key has no associated user"
 NO_UPSTREAM_USER_DETAIL = (
@@ -3625,8 +3624,7 @@ async def _resolve_organization_guardrails(
     by hand.
 
     Both preconditions fail closed together. ``workspace.organization_id`` is
-    not nullable, so
-    ``organization_for_workspace_id`` answers ``None`` only when the workspace
+    not nullable, so ``organization_for_workspace_id`` answers ``None`` only when the workspace
     row itself is missing; such a request still carries a non-``None``
     ``ctx.workspace_id``, so treating that case as "no organization plane to
     consult" would skip every mandate silently on the one input that proves the

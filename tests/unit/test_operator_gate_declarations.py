@@ -88,8 +88,8 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
 # putting it on the whole of `models.py`, `pricing.py`, `providers.py`,
 # `search_tools.py`, `tool_settings.py` or `usage.py` is the plausible wrong fix,
 # and it would take the dashboard's Models and Pricing pages, the organization
-# forms' lists of BYO providers, of search providers and of built-in guardrails,
-# and a data-plane gateway's usage report with it. An entry here is not
+# forms' lists of BYO providers, of search providers and of built-in guardrails
+# with it. An entry here is not
 # enforced by the totality case below, which sees only that a router declares
 # some gate in `_ROUTER_LEVEL_GATES`; a router split off the operator one has
 # to be added by hand.

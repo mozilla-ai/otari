@@ -971,7 +971,7 @@ async def test_the_tool_allow_list_is_bounded() -> None:
 
 
 async def test_mcp_server_ids_is_bounded_on_the_request() -> None:
-    """A workspace holds at most 50 servers in either mode, so a longer list can only be waste."""
+    """A workspace holds at most 50 servers, so a longer list can only be waste."""
     with pytest.raises(ValidationError):
         ChatCompletionRequest(
             model="openai:gpt-4o",

@@ -106,13 +106,17 @@ without affecting ordinary inference.
 
 See [Built-in tools](tools.md) and [Guardrails](guardrails.md).
 
-## Upgrading a former hosted deployment
+## Upgrading from hosted or hybrid mode
 
 A deployment that ran in hosted mode now serves inference and the Playground as
 well. Set `OTARI_PROVIDER_ACCOUNT_PEPPER` if `files_provider_upload_enabled` is
 on, since startup now requires it there too. `web_search_workspace_default` and
 `code_execution_workspace_default` left unset now mean on; set them to `false`
 to keep the old default.
+
+A gateway that ran in hybrid mode serves from its own database too: leftover
+`OTARI_MODE`, `OTARI_AI_TOKEN` and `OTARI_DATA_PLANE_URL` are ignored, so
+declare its providers and create its keys and budgets as a new deployment does.
 
 ## Configuration
 

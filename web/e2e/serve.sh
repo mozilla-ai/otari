@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Boot a gateway for the Playwright E2E suite: a fresh SQLite DB, migrated to
-# head, serving the built dashboard bundle in standalone mode. `pnpm run e2e`
+# head, serving the built dashboard bundle. `pnpm run e2e`
 # builds it first, so the suite always runs against fresh output. Invoked by
 # Playwright's webServer (see web/playwright.config.ts).
 set -euo pipefail
