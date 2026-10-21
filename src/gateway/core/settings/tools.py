@@ -435,12 +435,12 @@ class ToolSettings(BaseModel):
             "gateway, and every other keyword reaches the provider untouched. Requires a search backend."
         ),
     )
-    web_search_workspace_default: Annotated[bool | None, Shown(SettingsGroup.TOOLS)] = Field(
-        default=None,
+    web_search_workspace_default: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
+        default=True,
         description=(
             "Whether a workspace with no web-access policy of its own may use otari_web_search, "
             "otari_web_fetch and POST /api/v1/search. False makes web access something a workspace "
-            "admin turns on. On when unset."
+            "admin turns on."
         ),
     )
     web_search_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
@@ -611,6 +611,12 @@ class ToolSettings(BaseModel):
                     "names are unique across the two maps."
                 )
                 raise ValueError(msg)
+
+    @field_validator("web_search_workspace_default", mode="before")
+    @classmethod
+    def _null_web_search_workspace_default_is_on(cls, value: object) -> object:
+        # An earlier release accepted null here, so a config still carrying it keeps the default.
+        return True if value is None else value
 
     @field_validator("web_search_provider")
     @classmethod

@@ -1436,11 +1436,11 @@ class GatewayConfig(
             "The explicit otari_code_execution type is always run by the gateway."
         ),
     )
-    code_execution_workspace_default: Annotated[bool | None, Shown(SettingsGroup.TOOLS)] = Field(
-        default=None,
+    code_execution_workspace_default: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
+        default=True,
         description=(
             "Whether a workspace with no code-execution policy of its own may run code on the sandbox. "
-            "False makes code execution something a workspace admin turns on. Unset means on."
+            "False makes code execution something a workspace admin turns on."
         ),
     )
     mcp_allow_loopback: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
@@ -2082,14 +2082,6 @@ class GatewayConfig(
             return True
         return bool(self.sandbox_url or otari_env("SANDBOX_URL"))
 
-    def web_search_on_without_policy(self) -> bool:
-        """Whether a workspace with no stored web-access policy may use the web tools."""
-        return self.web_search_workspace_default is not False
-
-    def code_execution_on_without_policy(self) -> bool:
-        """Whether a workspace with no stored code-execution policy may use the sandbox."""
-        return self.code_execution_workspace_default is not False
-
     def effective_sandbox_image(self) -> str | None:
         """The image this deployment asks a sandbox session for, or ``None``.
 
@@ -2252,6 +2244,12 @@ class GatewayConfig(
             msg = f"sandbox_provider must be one of {allowed}, got '{value}'"
             raise ValueError(msg)
         return provider
+
+    @field_validator("code_execution_workspace_default", mode="before")
+    @classmethod
+    def _null_code_execution_workspace_default_is_on(cls, value: object) -> object:
+        # An earlier release accepted null here, so a config still carrying it keeps the default.
+        return True if value is None else value
 
     @field_validator("code_execution_executor")
     @classmethod

@@ -1245,7 +1245,7 @@ code_execution_workspace_default: false  # OTARI_CODE_EXECUTION_WORKSPACE_DEFAUL
 Each decides only for a workspace with no stored policy: `false` refuses the
 tool there as a stored disabled policy would, and a workspace owner or admin
 turns it on from the Tools pages or the workspace policy API. A stored policy
-always wins. Unset, the tools are on. See [Built-in tools](tools.md#per-workspace-web-access-policy) for what
+always wins. Both default to `true`. See [Built-in tools](tools.md#per-workspace-web-access-policy) for what
 each policy covers.
 
 ## Documentation links

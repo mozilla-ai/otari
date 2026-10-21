@@ -213,8 +213,8 @@ web search and web fetch as two of them when a search instance serves the reques
 
 Deployment settings establish available backends. Workspace code-execution and
 web-search policy can disable or narrow those settings but cannot widen them.
-A workspace with no row gets `code_execution_on_without_policy()` and
-`web_search_on_without_policy()` (`core/config.py`); the request path, the
+A workspace with no row gets `code_execution_workspace_default` and
+`web_search_workspace_default` (on unless an operator turns them off); the request path, the
 Playground menu and the policy endpoints' `default_enabled` all read them.
 An organization's own search or fetch key changes which account a workspace's
 calls bill to (`services/tools/_web_search_keys.py`). A search key also serves the

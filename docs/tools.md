@@ -568,8 +568,8 @@ Workspace-selected images must come from
 The authenticating API key determines the workspace. A workspace with no policy
 gets what `code_execution_workspace_default` says: `true`, deployment defaults
 apply; `false`, code execution is off until a workspace owner or admin turns it
-on, and the request is refused as if a disabled policy were stored. Unset, it is
-`true`. The Playground's tools menu and the policy endpoint's `default_enabled`
+on, and the request is refused as if a disabled policy were stored. It defaults
+to `true`. The Playground's tools menu and the policy endpoint's `default_enabled`
 field read the same setting.
 
 ## Web retrieval
@@ -805,7 +805,7 @@ nothing is narrowed; `false`, web access (all three doors above) is
 off until a workspace owner or admin turns it on, and a request is refused as if
 a disabled policy were stored, whatever search key the organization holds. The
 Playground's tools menu and the policy endpoint's `default_enabled` field read
-the same setting. Unset, it is `true`.
+the same setting. It defaults to `true`.
 
 ### Organization search keys
 

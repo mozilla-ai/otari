@@ -1030,7 +1030,7 @@ def get_workspace_code_execution_policy_service(
             db, OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
         ),
         sandbox_configured=config.sandbox_configured(),
-        default_enabled=config.code_execution_on_without_policy(),
+        default_enabled=config.code_execution_workspace_default,
         allowed_images=config.pinnable_sandbox_images(),
     )
 
@@ -1054,7 +1054,7 @@ def get_workspace_web_search_service(
     return WorkspaceWebSearchService(
         db,
         web_search_configured=web_search_configured(config),
-        default_enabled=config.web_search_on_without_policy(),
+        default_enabled=config.web_search_workspace_default,
         has_search_key=get_workspace_search_keys(db).has_search_key,
     )
 
@@ -1068,7 +1068,7 @@ def get_workspace_code_execution_policies(
 ) -> WorkspaceCodeExecutionPolicies:
     """Build the request path's reader of a workspace's code execution policy, on the request's session."""
     return WorkspaceCodeExecutionPolicies(
-        WorkspaceCodeExecutionPolicyRepository(db), on_without_policy=config.code_execution_on_without_policy()
+        WorkspaceCodeExecutionPolicyRepository(db), on_without_policy=config.code_execution_workspace_default
     )
 
 
@@ -1620,7 +1620,7 @@ def get_workspace_web_search_policies(
 ) -> WorkspaceWebSearchPolicies:
     """Build the request path's reader of a workspace's web search policy, on the request's session."""
     return WorkspaceWebSearchPolicies(
-        db, search_keys=get_workspace_search_keys(db), on_without_policy=config.web_search_on_without_policy()
+        db, search_keys=get_workspace_search_keys(db), on_without_policy=config.web_search_workspace_default
     )
 
 

@@ -244,7 +244,7 @@ class LocalToolOffer:
         return _tool_availability(
             self._config.sandbox_configured(),
             workspace_enabled,
-            on_without_policy=self._config.code_execution_on_without_policy(),
+            on_without_policy=self._config.code_execution_workspace_default,
         )
 
     def files(self) -> ToolAvailability:
@@ -293,7 +293,7 @@ async def resolve_tool_availability(
 
     return PlaygroundToolAvailability(
         web_search=_tool_availability(
-            web_search_configured(config), web_search_row, on_without_policy=config.web_search_on_without_policy()
+            web_search_configured(config), web_search_row, on_without_policy=config.web_search_workspace_default
         ),
         code_execution=offer.code_execution(code_execution_row),
         files=offer.files(),
