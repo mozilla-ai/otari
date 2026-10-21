@@ -9,7 +9,9 @@ artifacts are the source of truth for paths, parameters, and schemas.
 The default server address is `http://localhost:8000`. The API is mounted at
 `/api/v1`. OpenAI-compatible clients use `http://localhost:8000/api/v1` as their
 base URL; Anthropic-compatible clients use `http://localhost:8000/api`, because
-their SDK appends `/v1/messages` itself. OTLP ingest is a sibling at `/otlp`:
+their SDK appends `/v1/messages` itself. A request under the old `/v1` root
+(a base URL of `http://localhost:8000/v1`, for example) is not served: it gets a
+404 whose detail names the same path under `/api/v1`. OTLP ingest is a sibling at `/otlp`:
 point `OTEL_EXPORTER_OTLP_ENDPOINT` at `http://localhost:8000/otlp` and the
 exporter appends `/v1/traces`, `/v1/logs` and `/v1/metrics`.
 

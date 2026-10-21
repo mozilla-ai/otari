@@ -93,8 +93,8 @@ Playground link through the same predicate. Organization and workspace
 authorization still comes from server responses.
 
 The workspace and organization rails have separate registries. A sidebar item
-points to a real page, never a redirect. `/playground`, `/docs`, and `/account` are chrome
-destinations and do not belong in a rail.
+points to a real page, never a redirect. `/playground`, `/account`, and `/invitations` are
+chrome destinations and do not belong in a rail.
 
 Overlay navigation uses the empty seam modules under `src/app/nav/` for new
 sections, items inserted into base sections, and label overrides. Keep their
@@ -289,8 +289,7 @@ ancestor, before reporting geometry.
 `fullPage: true`, but the shell scrolls its content in an inner container rather
 than scrolling the document, so a capture comes back at the viewport size
 (1280x800 for the desktop projects) and anything further down the page is not in
-it. The docs page is the clearest case: its one code fence sits below the fold
-and appears in no screenshot project. Do not read a page's presence in that
+it. Do not read a page's presence in that
 suite as coverage of the whole page.
 
 **Read the reporter, not the exit code, when a command is in a pipeline.** A

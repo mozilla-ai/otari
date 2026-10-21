@@ -201,9 +201,10 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
 
 8. **Navigation is data, and its three gates stay three.** A *rail* destination is declared in
    `web/src/app/nav/registry.ts` and nowhere else; flag a sidebar link hand-written into a
-   component. `/playground`, `/docs`, and `/account` are chrome destinations, so they
+   component. `/playground` and `/account` are chrome destinations, so they
    use hand-written `Link`s outside the sidebar sections. Playground and Documentation
-   appear in the top bar and in the account menu below `md`; Account settings is that
+   appear in the top bar and in the account menu below `md`, Documentation as an external
+   link to `docs_url` or `https://docs.otari.ai/` rather than a route; Account settings is that
    menu's first row. Playground remains in route lookup to preserve its surface gate.
    An entry gates on `surface` (the deployment axis, from `GET /v1/bootstrap`
    via `useDeployment`), `capability` (the entitlement axis, via `useEntitlements`), and

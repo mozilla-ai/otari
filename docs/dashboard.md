@@ -281,7 +281,10 @@ where the deployment records traces (`trace_capture_enabled`, on by default; a
 hybrid gateway records none), and has no entry where it does not. Its chart
 counts sessions per hour or day as succeeded or failed, and its Levels column
 counts each session's errors, tools' errors included; a tool's error alone does
-not fail a session (see [Sessions and failures](traces.md#sessions-and-failures)). A session
+not fail a session (see [Sessions and failures](traces.md#sessions-and-failures)). The
+Last activity, Levels, Latency, Tokens and Total cost headers sort the list
+across every page: a header's first press puts the largest first and a second
+press flips it, and the order is kept in the URL with the filters. A session
 opens in a side panel as a tree of its turns, LLM calls and tool calls, a
 timeline of the same spans, or a flat log. The token count in its header breaks
 down into input, the share of it the prompt cache served, and output, for the

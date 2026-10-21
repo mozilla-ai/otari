@@ -107,8 +107,9 @@ can link Vite's esbuild binary at all.
   `EntitlementGate` is the component form for wrapping a page. See
   [web/AGENTS.md](../../../web/AGENTS.md) for how the gates compose and where a capability
   the base build ships has to be declared. A route the *chrome* reaches is the exception and
-  is a hand-written `Link` on purpose: `/docs` from the top bar and the account menu, and
-  `/account` from that menu's first row. The registry is what the rails render, so an entry
+  is a hand-written `Link` on purpose: `/playground` from the top bar and the account menu,
+  and `/account` from that menu's first row. Documentation is not a route at all: it opens
+  `docs_url`, or `https://docs.otari.ai/`, in a new tab. The registry is what the rails render, so an entry
   there would duplicate into the sidebar a row the design draws once. Adding to the sidebar
   has no exception.
 - Add a Vitest test for any component, hook, or helper whose behavior you change (`Foo.tsx` →
