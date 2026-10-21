@@ -21,7 +21,7 @@ import { bootstrap } from "@/tests/fixtures"
  *
  * The default bootstrap is the fixture's, so it describes a standalone deployment
  * with every standalone surface hosted. A story overrides it through
- * `parameters.deployment`, which is how the hybrid and claimed-key cases are
+ * `parameters.deployment`, which is how the hosted and claimed-key cases are
  * reached:
  *
  *   parameters: { deployment: { sign_in_methods: ["password"] } }

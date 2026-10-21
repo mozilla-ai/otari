@@ -150,20 +150,6 @@ async def test_searxng_search_normalizes_results() -> None:
 
 
 @pytest.mark.asyncio
-async def test_searxng_search_forwards_a_configured_key_as_the_gateway_token() -> None:
-    """A tool with a key fronts something that authenticates the gateway."""
-    seen: dict[str, Any] = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["token"] = request.headers.get("x-gateway-token")
-        return httpx.Response(200, json={"results": []})
-
-    tool = replace(_SEARXNG_TOOL, api_base="https://searxng.example.com", api_key="adapter-secret")
-    await _run_search(handler, tool, SearchQuery(query="otari"))
-    assert seen["token"] == "adapter-secret"
-
-
-@pytest.mark.asyncio
 async def test_run_search_never_sends_a_credential_over_http() -> None:
     called = False
 

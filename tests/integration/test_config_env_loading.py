@@ -7,7 +7,8 @@ from unittest import mock
 import pytest
 
 import gateway.core.config as config_module
-from gateway.core.config import GatewayConfig, load_config
+from gateway import log_config
+from gateway.core.config import GatewayConfig, load_config, warn_about_removed_mode_settings
 from gateway.core.env import otari_env
 from gateway.services.url_safety import (
     UnsafeURLError,
@@ -461,183 +462,39 @@ def test_load_config_otari_env_overrides_yaml(tmp_path: Path, monkeypatch: pytes
     assert config.budget_strategy == "disabled"
 
 
-def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("key", ["platform", "mode", "data_plane_url"])
+def test_load_config_ignores_a_leftover_mode_key_with_a_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, key: str
+) -> None:
     config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: hybrid\n", encoding="utf-8")
-
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    monkeypatch.setenv("PLATFORM_BASE_URL", "http://localhost:8100/api/v1")
-    monkeypatch.setenv("PLATFORM_HEALTH_PATH", "/healthz")
-    monkeypatch.setenv("PLATFORM_HEALTH_URL", "http://localhost:8100/health")
-    monkeypatch.setenv("PLATFORM_RESOLVE_TIMEOUT_MS", "1234")
-    monkeypatch.setenv("PLATFORM_USAGE_TIMEOUT_MS", "2345")
-    monkeypatch.setenv("PLATFORM_USAGE_INLINE_TIMEOUT_MS", "150")
-    monkeypatch.setenv("PLATFORM_USAGE_MAX_RETRIES", "7")
-    monkeypatch.setenv("STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS", "3000")
-    monkeypatch.setenv("STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP", "12000")
-    monkeypatch.setenv("STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS", "4000")
+    value = "\n  base_url: http://localhost:8100/api/v1" if key == "platform" else " hosted"
+    config_file.write_text(f"{key}:{value}\n", encoding="utf-8")
+    warning = mock.Mock()
+    monkeypatch.setattr(log_config.logger, "warning", warning)
 
     config = load_config(str(config_file))
 
-    assert config.is_hybrid_mode
-    assert config.platform["base_url"] == "http://localhost:8100/api/v1"
-    assert config.platform["health_path"] == "/healthz"
-    assert config.platform["health_url"] == "http://localhost:8100/health"
-    assert config.platform["resolve_timeout_ms"] == 1234
-    assert config.platform["usage_timeout_ms"] == 2345
-    assert config.platform["usage_inline_timeout_ms"] == 150
-    assert config.platform["usage_max_retries"] == 7
-    assert config.platform["streaming_first_chunk_timeout_ms"] == 3000
-    assert config.platform["streaming_first_chunk_timeout_ms_tool_loop"] == 12000
-    assert config.platform["streaming_final_attempt_extra_first_chunk_timeout_ms"] == 4000
+    assert not hasattr(config, key)
+    warning.assert_any_call("Ignoring the '%s' config key: Otari no longer has runtime modes.", key)
 
 
-def test_load_config_sets_default_platform_base_url_when_token_is_set(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("name", ["OTARI_MODE", "OTARI_AI_TOKEN", "OTARI_DATA_PLANE_URL"])
+def test_a_leftover_mode_variable_starts_with_a_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: hybrid\n", encoding="utf-8")
-
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    monkeypatch.delenv("PLATFORM_BASE_URL", raising=False)
-
-    config = load_config(str(config_file))
-
-    assert config.is_hybrid_mode
-    assert config.platform["base_url"] == "https://api.otari.ai/api/v1"
-
-
-def test_load_config_rejects_hybrid_mode_without_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: hybrid\n", encoding="utf-8")
-    monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
-
-    with pytest.raises(ValueError, match="OTARI_AI_TOKEN"):
-        load_config(str(config_file))
-
-
-def test_load_config_derives_hybrid_mode_from_token_when_mode_unset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Token present and no explicit mode: the runtime mode is derived as hybrid.
+    # otari.ai's environment may still carry OTARI_MODE=hosted when it upgrades, so
+    # these are ignored rather than refused.
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("", encoding="utf-8")
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
+    monkeypatch.setenv(name, "hosted")
+    warning = mock.Mock()
+    monkeypatch.setattr(log_config.logger, "warning", warning)
 
     config = load_config(str(config_file))
+    warn_about_removed_mode_settings()
 
-    assert config.mode is None
-    assert config.is_hybrid_mode
-    assert config.effective_mode == "hybrid"
-
-
-def test_load_config_rejects_standalone_mode_when_token_is_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Explicitly asserting standalone while a platform token selects hybrid is a
-    # conflicting configuration and must fail at startup rather than silently
-    # running hybrid.
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: standalone\n", encoding="utf-8")
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-
-    with pytest.raises(ValueError, match="conflicts with OTARI_AI_TOKEN"):
-        load_config(str(config_file))
-
-
-def test_load_config_rejects_standalone_mode_from_env_when_token_is_set(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # The conflict check also covers OTARI_MODE supplied via the environment.
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("", encoding="utf-8")
-    monkeypatch.setenv("OTARI_MODE", "standalone")
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-
-    with pytest.raises(ValueError, match="conflicts with OTARI_AI_TOKEN"):
-        load_config(str(config_file))
-
-
-def test_load_config_honors_explicit_standalone_without_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: standalone\n", encoding="utf-8")
-    monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
-
-    config = load_config(str(config_file))
-
-    assert config.mode == "standalone"
-    assert not config.is_hybrid_mode
-    assert config.effective_mode == "standalone"
-
-
-def test_load_config_unset_mode_without_token_is_standalone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("", encoding="utf-8")
-    monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
-
-    config = load_config(str(config_file))
-
-    assert config.mode is None
-    assert not config.is_hybrid_mode
-    assert config.effective_mode == "standalone"
-
-
-def test_load_config_honors_hosted_mode_without_making_it_a_data_plane(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Hosted is standalone's multi-tenant sibling, so it holds its own control
-    # plane: every request path that asks whether this is a hybrid gateway has to
-    # keep getting "no".
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: hosted\n", encoding="utf-8")
-    monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
-
-    config = load_config(str(config_file))
-
-    assert config.effective_mode == "hosted"
-    assert config.is_hosted_mode
-    assert not config.is_hybrid_mode
-
-
-def test_load_config_rejects_hosted_mode_when_token_is_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Same conflict as standalone, for the same reason: a deployment holding its
-    # own management API is not also reporting to somebody else's control plane.
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: hosted\n", encoding="utf-8")
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-
-    with pytest.raises(ValueError, match="conflicts with OTARI_AI_TOKEN"):
-        load_config(str(config_file))
-
-
-def test_load_config_accepts_legacy_platform_mode_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # "platform" is the pre-rename alias for the "hybrid" mode; it must keep
-    # working so existing configs do not break.
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: platform\n", encoding="utf-8")
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-
-    config = load_config(str(config_file))
-
-    assert config.is_hybrid_mode
-    assert config.effective_mode == "hybrid"
-
-
-@pytest.mark.parametrize("legacy_token_var", ["OTARI_PLATFORM_TOKEN", "ANY_LLM_PLATFORM_TOKEN"])
-def test_load_config_ignores_legacy_platform_token_aliases(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_token_var: str
-) -> None:
-    # The pre-rename platform-token env aliases were removed: only OTARI_AI_TOKEN
-    # selects hybrid mode now, so a legacy alias alone leaves the gateway
-    # standalone.
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("", encoding="utf-8")
-
-    monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
-    monkeypatch.setenv(legacy_token_var, "legacy-token")
-
-    config = load_config(str(config_file))
-
-    assert not config.is_hybrid_mode
-    assert config.platform_token is None
+    assert not hasattr(config, "mode")
+    warning.assert_any_call("Ignoring %s: Otari no longer has runtime modes.", name)
 
 
 def _isolate_structured_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

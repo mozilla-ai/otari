@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, Uuid, false, func, text
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, Uuid, false, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from gateway.models.base import Base, UtcDateTime
@@ -21,27 +21,6 @@ class APIKey(Base):
     __tablename__ = "api_keys"
 
     __table_args__ = (
-        # The hosted Playground resolves its dispatch key on every message, by
-        # owner and workspace among the rows this deployment minted for itself
-        # (``services/playground_dispatch``). Partial, because those rows are a
-        # handful beside every key on the deployment, so the index stays the size
-        # of the thing it answers for rather than the size of the table.
-        #
-        # ``created_at`` and ``id`` are the resolver's tie-break, carried here so
-        # the read is ordered by the index rather than sorted after it. They
-        # matter only where the race that resolver tolerates has left a second
-        # row, which is also why they cost nothing: neither column is ever
-        # updated, so the per-message write that refreshes the row's allow-list
-        # does not touch this index.
-        Index(
-            "ix_api_keys_internal_dispatch",
-            "user_id",
-            "workspace_id",
-            "created_at",
-            "id",
-            postgresql_where=text("internal_secret IS NOT NULL"),
-            sqlite_where=text("internal_secret IS NOT NULL"),
-        ),
         # One row per config.yml entry, which is what lets replicas starting at
         # once insert it without a second copy: the loser's insert conflicts here.
         # NULLs are distinct on both engines, so every other key is unconstrained.
@@ -117,14 +96,6 @@ class APIKey(Base):
     # request that would create or revive one more is refused. NULL is no cap.
     max_end_users: Mapped[int | None] = mapped_column(default=None)
 
-    # Set only on a key this deployment mints for itself and has to present
-    # again later, which today is the one the hosted Playground forwards with
-    # (``services/playground_dispatch``). Holds that key's plaintext encrypted
-    # with ``secret_box``, because presenting a credential is the one thing the
-    # hash above cannot do. NULL on every key a person created, which is what the
-    # key listings filter on: a row with a value here is machinery rather than a
-    # credential anybody manages, and no endpoint ever returns the value itself.
-    internal_secret: Mapped[str | None] = mapped_column()
     # The name config.yml declares this key under, set only while it does. Every
     # start finds the key by it, and writes the declared settings and secret back
     # when the entry's digest differs from ``declared_digest``.

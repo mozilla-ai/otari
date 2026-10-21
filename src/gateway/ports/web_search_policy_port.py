@@ -1,8 +1,5 @@
 """Where a workspace's web search policy comes from.
 
-One deployment holds a workspace's policy itself and another asks a peer that holds it.
-Both answer the same question, so a caller reads the policy without knowing which answered.
-
 The policy says who may search and how far, and nothing here carries a search.
 """
 
@@ -17,15 +14,9 @@ from gateway.models.tools import ResolvedWebSearchConfig, WebTool
 
 @dataclass(frozen=True)
 class WebSearchPolicyScope:
-    """Whose policy to resolve.
-
-    A deployment that holds the policy reads the workspace ID.
-    A deployment that asks a peer reads the caller's token.
-    Neither field defaults, so a caller cannot drop the one its deployment reads.
-    """
+    """Whose policy to resolve."""
 
     workspace_id: uuid.UUID | None
-    user_token: str | None
 
 
 class WebSearchPolicyPort(Protocol):
@@ -38,7 +29,6 @@ class WebSearchPolicyPort(Protocol):
 
         Raises:
             WebSearchPolicyResolutionFailedError: the policy could not be resolved, and ``reason`` says why.
-            ControlPlaneError: a peer that holds the policy refused or could not answer.
         """
         ...
 

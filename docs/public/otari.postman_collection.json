@@ -10,7 +10,7 @@
     "type": "bearer"
   },
   "info": {
-    "description": "otari management + inference collection, generated from the OpenAPI spec by scripts/generate_postman.py. Stopgap client for driving a running Otari server until the web UI lands.\n\nSet the `baseUrl` and `otariKey` collection variables (or override them with a Postman environment). Auth is sent as an `Authorization: Bearer <otariKey>` header on every request via collection-level auth. The web-search backend request is the exception: it is one gateway calling another and reads `gatewayToken` instead, the serving deployment's `web_search_backend_token`.",
+    "description": "otari management + inference collection, generated from the OpenAPI spec by scripts/generate_postman.py. Stopgap client for driving a running Otari server until the web UI lands.\n\nSet the `baseUrl` and `otariKey` collection variables (or override them with a Postman environment). Auth is sent as an `Authorization: Bearer <otariKey>` header on every request via collection-level auth.",
     "name": "otari API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -156,7 +156,7 @@
         {
           "name": "Delete Agent Telemetry Rows",
           "request": {
-            "description": "Delete agent_telemetry rows by explicit ids or by filter (standalone).\n\nTarget either an explicit selection (`ids`) or everything matching a filter\n(`by_filter: true` plus optional `user_id` / `api_key_id` / `name` / date\nrange). A selection matching zero rows succeeds with `deleted: 0`.\nMaster-key only.",
+            "description": "Delete agent_telemetry rows by explicit ids or by filter.\n\nTarget either an explicit selection (`ids`) or everything matching a filter\n(`by_filter: true` plus optional `user_id` / `api_key_id` / `name` / date\nrange). A selection matching zero rows succeeds with `deleted: 0`.\nMaster-key only.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -175,7 +175,7 @@
         {
           "name": "Count Agent Telemetry",
           "request": {
-            "description": "Total agent_telemetry rows matching the given filters (standalone).\n\nThe filter set mirrors the purge endpoint's, so this sizes exactly what a\n\"delete all N matching\" would remove. Behavioral and metric rows are counted\ntogether: neither this nor the purge distinguishes them. Master-key only.",
+            "description": "Total agent_telemetry rows matching the given filters.\n\nThe filter set mirrors the purge endpoint's, so this sizes exactly what a\n\"delete all N matching\" would remove. Behavioral and metric rows are counted\ntogether: neither this nor the purge distinguishes them. Master-key only.",
             "header": [],
             "method": "GET",
             "url": {
@@ -227,7 +227,7 @@
         {
           "name": "Agent Telemetry Series",
           "request": {
-            "description": "Row volume over time, split by user or API key (standalone).\n\nMirrors `/api/v1/usage/series`: same window bounds and bucket-grid cap, the top\ngroups as their own series with the remainder folded into a reconciling\n``other``, and sparse points (populated cells only). Counts rows, not spend,\nso it charts telemetry volume rather than cost. Master-key only.",
+            "description": "Row volume over time, split by user or API key.\n\nMirrors `/api/v1/usage/series`: same window bounds and bucket-grid cap, the top\ngroups as their own series with the remainder folded into a reconciling\n``other``, and sparse points (populated cells only). Counts rows, not spend,\nso it charts telemetry volume rather than cost. Master-key only.",
             "header": [],
             "method": "GET",
             "url": {
@@ -291,7 +291,7 @@
         {
           "name": "Agent Telemetry Summary",
           "request": {
-            "description": "What the coding agent produced in a window, and what it cost (standalone).\n\nRange-bounded like `/api/v1/usage/summary` (default last 30 days, hard-capped),\nso the aggregates stay served by the timestamp index. Returns the outcome\ntotals (commits, pull requests, lines changed, active time), the behavioral\ncounts already captured from the logs signal (tool calls and their mix, tool\naccept/reject, turns, API errors), the recorded spend over the same scope,\nand the derived per-unit measures: cost per commit / pull request / line,\nspend per active hour, acceptance rate, turns per session, and error rate.\nEach measure is null rather than an error when its denominator is zero.\nFilterable by user, API key, and `session_label`, so cost per outcome can be\nread for one agent session as well as for a whole window.\n\nThe spend side is every usage row in scope, not only the agent's: unfiltered,\nthat includes traffic from clients that never reported telemetry, so a\nper-outcome measure read over a whole deployment answers \"what did this\ndeployment spend per commit\", not \"what did the agent spend per commit\".\nFilter by user, API key, or session to divide only the matching spend.\n\nOutcome metrics are stored exactly as the agent reported them, so a\ncumulative counter is converted to a window increment here, at read time,\ndiffed per series generation: a re-exported total adds nothing, and a counter\nreset never reads as negative work. Master-key only.",
+            "description": "What the coding agent produced in a window, and what it cost.\n\nRange-bounded like `/api/v1/usage/summary` (default last 30 days, hard-capped),\nso the aggregates stay served by the timestamp index. Returns the outcome\ntotals (commits, pull requests, lines changed, active time), the behavioral\ncounts already captured from the logs signal (tool calls and their mix, tool\naccept/reject, turns, API errors), the recorded spend over the same scope,\nand the derived per-unit measures: cost per commit / pull request / line,\nspend per active hour, acceptance rate, turns per session, and error rate.\nEach measure is null rather than an error when its denominator is zero.\nFilterable by user, API key, and `session_label`, so cost per outcome can be\nread for one agent session as well as for a whole window.\n\nThe spend side is every usage row in scope, not only the agent's: unfiltered,\nthat includes traffic from clients that never reported telemetry, so a\nper-outcome measure read over a whole deployment answers \"what did this\ndeployment spend per commit\", not \"what did the agent spend per commit\".\nFilter by user, API key, or session to divide only the matching spend.\n\nOutcome metrics are stored exactly as the agent reported them, so a\ncumulative counter is converted to a window increment here, at read time,\ndiffed per series generation: a re-exported total adds nothing, and a counter\nreset never reads as negative work. Master-key only.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1480,7 +1480,7 @@
         {
           "name": "Get Bootstrap",
           "request": {
-            "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.\nThat is also why ``sign_in_methods`` is answered here rather than behind a\ncredential, and it publishes nothing an unauthenticated caller could not\nalready learn by trying both credentials against the sign-in endpoint.\n\nThe database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``\nmarker, and the identity it names, to answer whether *that* identity holds a\npassword (#702). It runs only in standalone mode: a hybrid gateway has no session to describe,\nand ``get_db_if_needed`` hands it no session to read one from.",
+            "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.\nThat is also why ``sign_in_methods`` is answered here rather than behind a\ncredential, and it publishes nothing an unauthenticated caller could not\nalready learn by trying both credentials against the sign-in endpoint.\n\nThe database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``\nmarker, and the identity it names, to answer whether *that* identity holds a\npassword (#702).",
             "header": [],
             "method": "GET",
             "url": {
@@ -4203,7 +4203,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"messages\": [\n    {}\n  ],\n  \"max_tokens\": 0\n}"
             },
-            "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
+            "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search.",
             "header": [
               {
                 "key": "Content-Type",
@@ -4236,7 +4236,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"messages\": [\n    {}\n  ]\n}"
             },
-            "description": "Anthropic ``/v1/messages/count_tokens``-compatible endpoint.\n\nReturns ``{\"input_tokens\": N}`` without contacting an upstream provider:\ncounting is local, so there is no budget reservation, pricing, or usage\nlogging. Authentication mirrors :func:`create_message` \u2014 hybrid mode\nresolves the caller's token against the platform, standalone mode validates\nthe API key \u2014 so the endpoint is not an open token-counting oracle.",
+            "description": "Anthropic ``/v1/messages/count_tokens``-compatible endpoint.\n\nReturns ``{\"input_tokens\": N}`` without contacting an upstream provider:\ncounting is local, so there is no budget reservation, pricing, or usage\nlogging. Authentication mirrors :func:`create_message`, validating the API\nkey, so the endpoint is not an open token-counting oracle.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8614,7 +8614,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"messages\": [\n    {}\n  ]\n}"
             },
-            "description": "Run one chat completion for the signed-in caller.\n\nStreaming and non-streaming both, identically to ``POST\n/api/v1/chat/completions``: this resolves the principal and then calls the\nvery same handler. The request is billed to the caller's own attribution\nuser in the workspace they named (or their organization's default), against\nthat user's budget, and writes the ordinary usage row with no ``api_key_id``,\nbecause there was no key.\n\nThe body is ``ChatCompletionRequest`` unchanged, so the page sends the same\nrequest an SDK would and a model, tool or parameter the gateway gains is\navailable here the day it lands. The workspace rides in the query string\nrather than in the body for that reason: a field added to the body would\nalso have to be added to the pipeline's strip list, and a gateway-internal\nfield that is not stripped is forwarded to the provider as a call kwarg.\n\n``user`` in the body is the one field the pipeline will not read here: spend\nbinds to the session's own attribution user, derived and never accepted.\n\nOn a hosted control plane there is no local pipeline to call, so the same\nprincipal is forwarded to the data-plane gateway instead\n(:func:`_dispatch_to_data_plane`). The request and the response are the same\neither way.",
+            "description": "Run one chat completion for the signed-in caller.\n\nStreaming and non-streaming both, identically to ``POST\n/api/v1/chat/completions``: this resolves the principal and then calls the\nvery same handler. The request is billed to the caller's own attribution\nuser in the workspace they named (or their organization's default), against\nthat user's budget, and writes the ordinary usage row with no ``api_key_id``,\nbecause there was no key.\n\nThe body is ``ChatCompletionRequest`` unchanged, so the page sends the same\nrequest an SDK would and a model, tool or parameter the gateway gains is\navailable here the day it lands. The workspace rides in the query string\nrather than in the body for that reason: a field added to the body would\nalso have to be added to the pipeline's strip list, and a gateway-internal\nfield that is not stripped is forwarded to the provider as a call kwarg.\n\n``user`` in the body is the one field the pipeline will not read here: spend\nbinds to the session's own attribution user, derived and never accepted.",
             "header": [
               {
                 "key": "Content-Type",
@@ -9946,7 +9946,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"input\": null\n}"
             },
-            "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
+            "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search.",
             "header": [
               {
                 "key": "Content-Type",
@@ -10704,7 +10704,7 @@
               },
               "raw": "{\n  \"web_search_max_results\": 5,\n  \"web_search_url\": \"http://searxng:8080\"\n}"
             },
-            "description": "Persist and apply tool/guardrail setting changes.\n\nUses ``model_fields_set`` so an explicit ``null`` clears a field while an\nomitted field is left unchanged. Operator-gated and standalone-only.",
+            "description": "Persist and apply tool/guardrail setting changes.\n\nUses ``model_fields_set`` so an explicit ``null`` clears a field while an\nomitted field is left unchanged. Operator-gated.",
             "header": [
               {
                 "key": "Content-Type",
@@ -11301,7 +11301,7 @@
         {
           "name": "Delete Usage Rows",
           "request": {
-            "description": "Delete imported usage rows by explicit ids or by filter (standalone).\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /\n``status`` / date range / ``priced``). Only imported rows\n(``counts_toward_budget = false``) are ever removed: enforced gateway rows and\nthe spend ledger (``users.spend``) are untouched, so a delete can never desync a\nbudget. Master-key only.",
+            "description": "Delete imported usage rows by explicit ids or by filter.\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /\n``status`` / date range / ``priced``). Only imported rows\n(``counts_toward_budget = false``) are ever removed: enforced gateway rows and\nthe spend ledger (``users.spend``) are untouched, so a delete can never desync a\nbudget. Master-key only.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -11453,7 +11453,7 @@
               },
               "raw": "{\n  \"source\": \"string\",\n  \"events\": [\n    {\n      \"source_event_id\": \"string\",\n      \"timestamp\": \"2024-01-01T00:00:00Z\",\n      \"provider\": \"string\",\n      \"model\": \"string\"\n    }\n  ]\n}"
             },
-            "description": "Ingest a batch of externally-observed usage events (standalone).\n\nAuthenticated with either an API key or the master key. Usage binds to the\nauthenticated principal: an API key attributes to its own user (and stamps its\nid on the rows); the master key may name any user via ``user_id``. Records\nsubscription-backed usage (e.g. Claude Code) as usage-log rows tagged with their\n``source``, priced at the effective API rate for each event's timestamp.\nImported usage is real cost, but never counts toward budgets or mutates\n``users.spend`` (it is retrospective, so it cannot be reserved). Idempotent by\n``(source, source_event_id)``. The payload is content-free; any\nprompt/completion/tool field is rejected (422), not stored.",
+            "description": "Ingest a batch of externally-observed usage events.\n\nAuthenticated with either an API key or the master key. Usage binds to the\nauthenticated principal: an API key attributes to its own user (and stamps its\nid on the rows); the master key may name any user via ``user_id``. Records\nsubscription-backed usage (e.g. Claude Code) as usage-log rows tagged with their\n``source``, priced at the effective API rate for each event's timestamp.\nImported usage is real cost, but never counts toward budgets or mutates\n``users.spend`` (it is retrospective, so it cannot be reserved). Idempotent by\n``(source, source_event_id)``. The payload is content-free; any\nprompt/completion/tool field is rejected (422), not stored.",
             "header": [
               {
                 "key": "Content-Type",
@@ -11498,7 +11498,7 @@
         {
           "name": "Get Request Settlement",
           "request": {
-            "description": "Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).\n\nThis is how a caller recovers the cost of a request whose response never\ncarried one: a stream that failed or was disconnected mid-response, or a\nrequest that errored. An API key sees only the requests it made; the master\nkey sees any. Returns 404 until the request has settled (its rows are written\nby a background writer, so a lookup made the instant a stream closes can\nprecede them), and for an id that is unknown or belongs to another key, with\nno way to tell those apart. A stream that ended before the provider reported\nusage, and ran no gateway tools, writes no row, so its id stays 404.",
+            "description": "Look up a request's settled cost by the ``Otari-Request-ID`` it was sent.\n\nThis is how a caller recovers the cost of a request whose response never\ncarried one: a stream that failed or was disconnected mid-response, or a\nrequest that errored. An API key sees only the requests it made; the master\nkey sees any. Returns 404 until the request has settled (its rows are written\nby a background writer, so a lookup made the instant a stream closes can\nprecede them), and for an id that is unknown or belongs to another key, with\nno way to tell those apart. A stream that ended before the provider reported\nusage, and ran no gateway tools, writes no row, so its id stays 404.",
             "header": [],
             "method": "GET",
             "url": {
@@ -11665,7 +11665,7 @@
               },
               "raw": "{\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0\n}"
             },
-            "description": "Set the cost of imported usage rows from manual per-1M rates (standalone).\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed\nfrom each row's own token counts at the supplied ``input`` / ``output`` /\n``cache_read`` / ``cache_write`` per-1M rates (manual rates, not a recompute from\nconfigured pricing). Only imported rows (``counts_toward_budget = false``) are\ntouched, so ``users.spend`` is never affected. Master-key only.",
+            "description": "Set the cost of imported usage rows from manual per-1M rates.\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed\nfrom each row's own token counts at the supplied ``input`` / ``output`` /\n``cache_read`` / ``cache_write`` per-1M rates (manual rates, not a recompute from\nconfigured pricing). Only imported rows (``counts_toward_budget = false``) are\ntouched, so ``users.spend`` is never affected. Master-key only.",
             "header": [
               {
                 "key": "Content-Type",
@@ -12057,74 +12057,6 @@
         }
       ],
       "name": "users"
-    },
-    {
-      "item": [
-        {
-          "name": "Web Search",
-          "request": {
-            "description": "Run one search through this deployment's configured search provider.\n\nThe declared query params are the ``provider_options`` keys the providers\nunderstand. Everything else the caller sends, ``format`` and ``engines``\nincluded, is ignored rather than forwarded: the bag is opaque to the gateway\nthat filled it, so passing it upstream unread would let a workspace set\nprovider request fields this deployment never chose.",
-            "header": [
-              {
-                "key": "X-Gateway-Token",
-                "value": "{{gatewayToken}}"
-              }
-            ],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "web-search",
-                "search"
-              ],
-              "query": [
-                {
-                  "description": "The search query.",
-                  "disabled": false,
-                  "key": "q",
-                  "value": ""
-                },
-                {
-                  "description": "",
-                  "disabled": true,
-                  "key": "max_results",
-                  "value": ""
-                },
-                {
-                  "description": "",
-                  "disabled": true,
-                  "key": "search_depth",
-                  "value": ""
-                },
-                {
-                  "description": "",
-                  "disabled": true,
-                  "key": "topic",
-                  "value": ""
-                },
-                {
-                  "description": "",
-                  "disabled": true,
-                  "key": "time_range",
-                  "value": ""
-                },
-                {
-                  "description": "",
-                  "disabled": true,
-                  "key": "include_answer",
-                  "value": ""
-                }
-              ],
-              "raw": "{{baseUrl}}/api/v1/web-search/search?q=&max_results=&search_depth=&topic=&time_range=&include_answer="
-            }
-          }
-        }
-      ],
-      "name": "web-search"
     },
     {
       "item": [
@@ -13240,11 +13172,6 @@
     },
     {
       "key": "otariKey",
-      "type": "string",
-      "value": ""
-    },
-    {
-      "key": "gatewayToken",
       "type": "string",
       "value": ""
     }

@@ -3,7 +3,7 @@
 The service-endpoint and web-search fields that ``/api/v1/settings`` keeps
 display-only (the ``*_url`` fields and the web-search knobs are excluded there on
 SSRF grounds) are made editable here, on their own page, with structural URL
-validation and per-service reachability tests. Standalone-only and master-key
+validation and per-service reachability tests. Master-key
 gated, mirroring the other management routers.
 
 * ``GET /api/v1/tool-settings`` returns each field's effective value (the value a
@@ -313,7 +313,7 @@ async def update_tool_settings(
     """Persist and apply tool/guardrail setting changes.
 
     Uses ``model_fields_set`` so an explicit ``null`` clears a field while an
-    omitted field is left unchanged. Operator-gated and standalone-only.
+    omitted field is left unchanged. Operator-gated.
     """
     updates: dict[str, SettingValue] = {
         key: getattr(request, key) for key in request.model_fields_set if key in TOOL_SETTABLE_KEYS

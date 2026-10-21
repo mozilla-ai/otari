@@ -1,17 +1,9 @@
 """``/v1``, the API root before otari#1026, answers with a 404 naming the address to use."""
 
-from collections.abc import Generator
-
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gateway.api.deps import reset_config
-from gateway.core.config import API_ROOT, PLATFORM_TOKEN_ENV_VAR, GatewayConfig
-from gateway.core.database import reset_db
-from gateway.main import create_app
-
-from .conftest import build_test_client
+from gateway.core.config import API_ROOT
 
 MOVED = ("/models", "/chat/completions", "/messages")
 
@@ -61,35 +53,3 @@ def test_the_old_root_is_not_published(client: TestClient) -> None:
 
     assert paths
     assert not [p for p in paths if p == "/v1" or p.startswith("/v1/")]
-
-
-def _config(postgres_url: str, mode: str) -> GatewayConfig:
-    return GatewayConfig(
-        mode=mode,
-        database_url=postgres_url,
-        master_key="test-master-key",
-        auto_migrate=False,
-        require_pricing=False,
-        model_discovery=False,
-        bootstrap_api_key=False,
-    )
-
-
-@pytest.fixture
-def hosted_client(postgres_url: str) -> Generator[TestClient]:
-    yield from build_test_client(_config(postgres_url, "hosted"))
-
-
-def test_a_hosted_deployment_points_to_the_api_root(hosted_client: TestClient) -> None:
-    _assert_points_to_api_root(hosted_client)
-
-
-def test_a_hybrid_gateway_points_to_the_api_root(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(PLATFORM_TOKEN_ENV_VAR, "gw_test_token")
-    config = GatewayConfig(mode="hybrid", platform={"base_url": "http://localhost:8100/api/v1"})
-
-    with TestClient(create_app(config)) as client:
-        _assert_points_to_api_root(client)
-
-    reset_config()
-    reset_db()

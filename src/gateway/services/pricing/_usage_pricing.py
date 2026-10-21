@@ -4,8 +4,7 @@ The rate's ``unit`` chooses the meter. A ``tokens`` rate prices tokens, an
 ``images`` rate an ``images`` count, and a ``requests`` rate a ``requests`` or
 ``search_units`` count, or one request for an attempt that reported neither. A
 rate prices nothing else, so a count never meets a rate written for another
-unit. Standalone settlement and a hybrid gateway's control plane both price
-through :func:`price_usage`, which is how one request costs the same on either.
+unit. Settlement prices through :func:`price_usage`.
 """
 
 from collections.abc import Mapping

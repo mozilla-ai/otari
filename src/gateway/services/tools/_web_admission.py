@@ -11,7 +11,6 @@ refusing a search nothing can serve.
 
 from __future__ import annotations
 
-import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -304,15 +303,13 @@ class AdmittedWebTools:
     declaration. ``in_loop_search`` is what the searches run on through the
     libraries, ``None`` where the old backend serves them, and ``fetch`` the
     instance the fetch tool runs on, ``None`` where it was not declared.
-    ``search_url`` and ``search_auth_token`` are the old backend's, which the
-    pipeline sets: the URL it searches, and the token it forwards there.
+    ``search_url`` is the old backend's, which the pipeline sets.
     """
 
     search_tool_entry: dict[str, Any] | None
     fetch_tool_entry: dict[str, Any] | None
     fetch_policy: DomainPolicy
     search_url: str | None = None
-    search_auth_token: str | None = dataclasses.field(default=None, repr=False)
     # The workspace's own search key, set only where it declared a search.
     search_credential: WebSearchCredential | None = None
     in_loop_search: InLoopSearch | None = None

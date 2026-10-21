@@ -35,16 +35,6 @@ A provider-native code-execution type is decided by the request's
 own, so a fallback can run Otari's tool where the first model ran its own.
 Function tools remain the caller's responsibility.
 
-In [hybrid mode](modes.md) each attempt the platform plans is decided the same
-way, except that none is skipped, because the control plane expects a report for
-every attempt it planned: a request one of whose attempts Otari's tool could
-not serve (the workspace has the tool off, say) is decided as a whole, as it was
-before: search and fetch run on Otari for every attempt if any attempt needs
-it, and code execution follows the first attempt, so a first model that runs
-the code itself keeps it. A refusal then refuses the request. A route with one attempt is dispatched as it
-always was, and the control plane's code-execution and Web Access policies are
-each asked once per request.
-
 ### Web-search interception
 
 Some clients can declare only provider-native search types: `web_search`,
@@ -155,7 +145,7 @@ acts on them. Changing any setting stays a deployment operator's to do.
 
 ## Pricing a gateway-run tool
 
-In standalone mode, gateway-run tools are priced per successful call:
+Gateway-run tools are priced per successful call:
 
 ```text
 otari:code_execution
@@ -422,8 +412,7 @@ provider is refused with a 400 whose detail reads `Container '…' has expired o
 does not exist.`, the phrasing clients of the provider APIs already treat as
 "drop the id and start over". A container id is bound to the user and workspace
 that leased it, and the refusal is the same for all four cases, so an id never
-reveals whether someone else's sandbox exists. The same 400 answers any
-container on a hybrid gateway, which has no local database to hold a lease in.
+reveals whether someone else's sandbox exists.
 
 A sandbox runs one request at a time. Naming a container another of your own
 requests is still using is a 409, not a 400: the id is good and a retry works,
@@ -452,8 +441,7 @@ it, so `Otari-Code-Execution: provider` and a workspace policy pinned to the
 provider both win, and the id is refused as above.
 
 `container: "auto"` is best-effort, unlike an id. A deployment that holds
-nothing, because an operator set the TTL to 0 or because it is a hybrid gateway
-with no local database to keep a lease in, serves the request exactly as it
+nothing, because an operator set the TTL to 0, serves the request exactly as it
 would have and reports no container. An id is a requirement rather than a wish,
 so the same deployment refuses it: the caller asked for specific files, and an
 empty sandbox in their place is the wrong answer.
@@ -491,7 +479,6 @@ from another provider) is skipped rather than refusing the whole request, and
 the request is refused only when no attempt can run. A
 request that also declares `otari_code_execution` decides every attempt alike
 instead, running the code on the sandbox unless every model runs it natively.
-[Hybrid mode](#who-runs-a-tool) skips no attempt.
 
 An `anthropic-beta` header travels only as far as it can be honored: against a
 model its provider serves with no Messages API of its own (any non-Claude model
@@ -554,11 +541,6 @@ the provider issued addresses the provider's container, not the sandbox; to keep
 Otari's sandbox across turns, see
 [Reusing a sandbox across requests](#reusing-a-sandbox-across-requests).
 
-In hybrid mode a workspace the control plane has not enabled still has a
-declaration its provider runs natively served by that provider. A route with a
-fallback that would need the sandbox is decided as a whole, by the first
-attempt (see [Who runs a tool](#who-runs-a-tool)).
-
 **Upgrading from 0.6.** A deployment with `sandbox_url` set that forwarded
 `code_interpreter`, `code_execution_<date>` or `code_execution` to a provider
 with no native tool for the model now runs it on the sandbox and bills it as a
@@ -587,11 +569,8 @@ The authenticating API key determines the workspace. A workspace with no policy
 gets what `code_execution_workspace_default` says: `true`, deployment defaults
 apply; `false`, code execution is off until a workspace owner or admin turns it
 on, and the request is refused as if a disabled policy were stored. Unset, it is
-`true` everywhere except a hosted control plane, where it is `false`. The
-Playground's tools menu and the policy endpoint's `default_enabled` field read
-the same setting. A hosted control plane also gives each workspace it creates
-an enabled policy, so a new workspace starts with code execution on there. In hybrid mode, the control plane resolves
-the policy instead.
+`true`. The Playground's tools menu and the policy endpoint's `default_enabled`
+field read the same setting.
 
 ## Web retrieval
 
@@ -788,30 +767,9 @@ Each complete `web_search` tool result is limited to 50 KiB of valid UTF-8,
 including any truncation notice. The existing 1,500-character per-result content
 limit still applies before this overall result limit.
 
-Where the search key must not sit on the machine serving traffic, a deployment
-can also serve the search itself at `GET /api/v1/web-search/search`. This is the
-hosted shape: the control plane holds the key and runs the query, and its
-**hybrid** data plane calls it by setting `web_search_url` to
-`{control-plane}/api/v1/web-search`. That address has to be under the gateway's
-`PLATFORM_BASE_URL`, because a gateway forwards its platform token only to its
-own control plane, and that token is what the route recognizes.
-
-Set `web_search_backend_token` on the serving process to the token its own
-gateway presents, which is that gateway's `OTARI_AI_TOKEN`. The two are one
-secret, so rotating the platform token stops web search for that data plane
-until both sides are updated. Without it the route is not mounted at all, since
-it spends the deployment's search quota and a control plane is reachable from
-the internet. A gateway someone else self-hosts presents a credential of its own and
-is refused, deliberately: that is the same boundary that keeps a deployment's
-provider keys off a foreign process. Such a gateway configures its own
-`web_search_provider` or `web_search_url` instead, and the per-workspace policy
-below still governs it.
-
 Migrating from the Brave or Tavily adapter container: on the process that holds
 the key, set `web_search_provider` and `web_search_provider_api_key` and unset
-`web_search_url`. A hybrid data plane holds no key, so it keeps a
-`web_search_url` and points it at its control plane's `/api/v1/web-search` instead.
-The adapters, and the `web-search-brave` and `web-search-tavily` compose
+`web_search_url`. The adapters, and the `web-search-brave` and `web-search-tavily` compose
 profiles that ran them, were removed. A `web_search_url` still pointing at one
 keeps the deployment looking configured while every search fails, so change both
 together.
@@ -840,16 +798,14 @@ remains available subject to deployment and workspace policy when no Search
 backend is configured.
 
 On direct search, the policy's switch and its `max_results` apply; its domain
-lists, purpose hint and provider options do not. In hybrid mode, the
-connected control plane supplies workspace search configuration.
+lists, purpose hint and provider options do not.
 
 A workspace with no policy gets what `web_search_workspace_default` says: `true`,
 nothing is narrowed; `false`, web access (all three doors above) is
 off until a workspace owner or admin turns it on, and a request is refused as if
 a disabled policy were stored, whatever search key the organization holds. The
 Playground's tools menu and the policy endpoint's `default_enabled` field read
-the same setting. Unset, it is `true` everywhere except a hosted control plane,
-where it is `false`, so there web access is something a workspace turns on.
+the same setting. Unset, it is `true`.
 
 ### Organization search keys
 
@@ -898,9 +854,7 @@ deployment's own configuration: `GET /api/v1/tools` and the Playground report
 web search only when the deployment can search, and a provider-native search
 declaration or the `Otari-Web-Search` header is handed to Otari only then, since
 that is decided before the workspace's policy is read. Elsewhere such a
-declaration goes to the model's provider. In hybrid mode the control plane
-chooses the search key and returns it with the workspace's policy; see
-[Web Access resolution](hybrid-mode-protocol.md#web-access-resolution).
+declaration goes to the model's provider.
 
 A key's calls are labeled `org:<provider>` and priced under `otari:web_search`
 or `otari:web_fetch`, at the cost the provider reported when it reports one (see
@@ -919,7 +873,7 @@ keys' `usable` field before upgrading.
 
 ## Direct search
 
-In standalone mode, `POST /api/v1/search` lets the caller submit a query directly
+`POST /api/v1/search` lets the caller submit a query directly
 instead of waiting for a model to request one. Configure its named providers
 through [`search_tools`](configuration.md#search-tools) or the Search tools API.
 

@@ -16,8 +16,8 @@ from gateway.core.config import API_ROOT
 
 RETIRED_ROOT = "/v1"
 
-# ``HEAD`` and ``OPTIONS`` listed for the reason ``hosted_mode`` gives: a 405
-# would report the path as served here with only the verb wrong.
+# ``HEAD`` and ``OPTIONS`` listed too: a 405 would report the path as served
+# here with only the verb wrong.
 _METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
 router = APIRouter(tags=["retired-root"], include_in_schema=False)

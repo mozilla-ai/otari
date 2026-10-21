@@ -21,10 +21,9 @@ import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,
-  HOSTED_SURFACES,
   organizationContext,
   pendingOrganizationInvitation,
-  STANDALONE_SURFACES,
+  SURFACES,
   seriesPoint,
   usageTotals,
   workspaceActivation,
@@ -282,7 +281,7 @@ function renderPageInWorkspace(
   )
 }
 
-const WITHOUT_HOSTED_PROVIDERS = STANDALONE_SURFACES.filter(
+const WITHOUT_HOSTED_PROVIDERS = SURFACES.filter(
   (surface) => surface !== "hosted_providers",
 )
 
@@ -1777,13 +1776,7 @@ describe("OverviewIndex for an identity with no organization", () => {
   } = {}) {
     return render(
       <QueryClientProvider client={client}>
-        <DeploymentProvider
-          value={bootstrap({
-            deployment_type: "hosted",
-            surfaces: HOSTED_SURFACES,
-            open_signup: openSignup,
-          })}
-        >
+        <DeploymentProvider value={bootstrap({ open_signup: openSignup })}>
           <OverviewIndex />
         </DeploymentProvider>
       </QueryClientProvider>,

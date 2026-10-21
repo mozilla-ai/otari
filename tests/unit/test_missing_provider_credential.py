@@ -9,7 +9,7 @@ import pytest
 from any_llm import LLMProvider
 from any_llm.exceptions import MissingApiKeyError
 
-from gateway.api.routes._platform import get_shared_rejection
+from gateway.api.routes._attempts import get_shared_rejection
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, PRICING_REQUIRED, PROVIDER_NOT_CONFIGURED
 from gateway.ports.model_provider_port import NO_ORGANIZATION

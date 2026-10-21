@@ -1,8 +1,6 @@
 """Where a deployment's MCP servers come from.
 
 A workspace stores the servers it may reach.
-One deployment holds those rows itself and another asks a peer that holds them for it.
-Both answer the same questions, so a caller resolves servers without knowing which answered.
 
 A caller connects to a resolved server directly.
 Nothing here proxies MCP traffic.
@@ -18,15 +16,9 @@ from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 
 @dataclass(frozen=True)
 class McpServerScope:
-    """Whose servers to resolve, in both the terms a deployment may name them by.
-
-    A workspace is named by its ID where this deployment holds the rows.
-    A peer holding them names it by the caller's token instead.
-    Neither field defaults, so a caller states both and cannot drop the one its deployment reads.
-    """
+    """Whose servers to resolve."""
 
     workspace_id: uuid.UUID | None
-    user_token: str | None
 
 
 class McpServerPort(Protocol):
@@ -40,7 +32,6 @@ class McpServerPort(Protocol):
         Raises:
             WorkspaceMcpServerNotFoundError: an ID names no server this scope reaches.
             McpServerResolutionFailedError: the answer could not be read.
-            ControlPlaneError: a peer that holds the servers refused or could not answer.
         """
         ...
 
@@ -51,7 +42,6 @@ class McpServerPort(Protocol):
 
         Raises:
             McpServerResolutionFailedError: the answer could not be read.
-            ControlPlaneError: a peer that holds the servers refused or could not answer.
         """
         ...
 

@@ -29,7 +29,7 @@ import {
   useUpdateToolSettings,
 } from "@/shared/api/tools"
 import { docsSourceHref } from "@/shared/helpers/docs"
-import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
+import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 // One settable field maps onto one key of the update request; cast at this one
 // boundary (the keys come from the backend's field list).
@@ -174,11 +174,6 @@ interface ServiceSpec {
   groups: GroupSpec[]
   /** Keys the backend reports that this page deliberately leaves to the API. */
   omit?: string[]
-  /**
-   * Run by the data plane, so a hosted control plane's own settings for it run
-   * nothing: the platform's do.
-   */
-  isDataPlane?: boolean
 }
 
 const SERVICES: ServiceSpec[] = [
@@ -227,7 +222,6 @@ const SERVICES: ServiceSpec[] = [
       },
     ],
     omit: ["web_search_purpose_hint"],
-    isDataPlane: true,
   },
   {
     key: "sandbox",
@@ -259,7 +253,6 @@ const SERVICES: ServiceSpec[] = [
       },
     ],
     omit: ["sandbox_purpose_hint"],
-    isDataPlane: true,
   },
   {
     key: "guardrails",
@@ -354,7 +347,6 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   const setPricing = useSetPricing()
   const update = useUpdateToolSettings()
   const serves = useSurfaces()
-  const isHosted = useDeployment().deployment_type === "hosted"
 
   // Latest rate per key. /api/v1/pricing is history-shaped (one row per
   // effective_at), and the newest row is the one in force. A gateway tool's
@@ -468,9 +460,6 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
             <Status
               key={tool.id}
               tool={tool}
-              // A hosted control plane never runs a tool itself, so its own
-              // config says nothing about whether the data plane can.
-              showsAvailability={!isHosted}
               docsHref={toolsDocs(spec.docsAnchor ?? service.docsAnchor)}
               help={spec.help}
               urlFieldKey={
@@ -498,16 +487,12 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
             {/* The tools and the switch most readers came for, as one card
                 above the one-time setup. */}
             {service.key === "sandbox" ? (
-              <WorkspaceCodeExecutionPolicyCard
-                isHosted={isHosted}
-                leading={leading}
-              />
+              <WorkspaceCodeExecutionPolicyCard leading={leading} />
             ) : service.key === "web_search" ? (
               <WorkspaceWebSearchCard
                 // Unknown until the tool list answers, and a failed read must
                 // not lock the switch over tools that may well run.
                 isAvailable={
-                  isHosted ||
                   managed.length === 0 ||
                   managed.some(({ tool }) => tool.available)
                 }
@@ -519,9 +504,6 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
 
             {service.groups.map((group) => {
               if (group.isOperatorOnly && !isOperator) return null
-              // A hosted control plane serves no inference, so its own tool
-              // settings run nothing: the platform's do.
-              if (service.isDataPlane && isHosted) return null
               const fields = [
                 ...fieldsFor(group.keys),
                 ...(group.catchAll ? unlisted : []),
@@ -595,9 +577,8 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
             {/* Last, because it configures the direct search API rather than
                 the model's tools. Below the backend, because a searxng search
                 tool with no URL of its own inherits the one set there.
-                Operator-only: its rows are the deployment's own credentials.
-                A hosted control plane serves no /api/v1/search at all. */}
-            {service.key === "web_search" && isOperator && !isHosted ? (
+                Operator-only: its rows are the deployment's own credentials. */}
+            {service.key === "web_search" && isOperator ? (
               <SearchToolsCard docsHref={toolsDocs("direct-search")} />
             ) : null}
             {service.key === "guardrails" &&

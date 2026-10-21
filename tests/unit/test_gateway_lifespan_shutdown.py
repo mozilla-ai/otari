@@ -101,7 +101,7 @@ async def test_stop_refreshers_bounds_multiple_stuck_tasks_together() -> None:
 
 @pytest.mark.asyncio
 async def test_stop_refreshers_allows_no_tasks() -> None:
-    """Hybrid mode has no local refreshers to stop."""
+    """A gateway with no refreshers running has nothing to stop."""
     await _stop_refreshers([])
 
 

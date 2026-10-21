@@ -2,8 +2,7 @@ name: Otari Dashboard Parity
 
 # The browser suite: boot a gateway serving the freshly built bundle (Playwright's
 # webServer, see web/playwright.config.ts), walk the multi-page flows a real
-# operator does, and assert on a second, hybrid gateway that a deployment whose
-# control plane is elsewhere shows a status page and nothing more.
+# operator does.
 #
 # In its own workflow rather than in otari-dashboard.yml because of the path
 # filter, which applies to a whole workflow and not to a job. These flows are
@@ -85,9 +84,8 @@ jobs:
       run: pnpm exec playwright install --with-deps chromium
 
     # `pnpm run e2e` builds the bundle first (see web/package.json), so a local run
-    # and CI serve the same freshly built dashboard. It boots two gateways, one
-    # standalone and one hybrid, and names every project it runs: a project left
-    # out of that list is silently dropped from the run.
+    # and CI serve the same freshly built dashboard. It names every project it
+    # runs: a project left out of that list is silently dropped from the run.
     - name: Run end-to-end tests
       working-directory: web
       run: pnpm run e2e

@@ -677,9 +677,6 @@ def _request_context(
         db=db,
         uow=UnitOfWork(db),
         log_writer=None,  # type: ignore[arg-type]
-        hybrid_mode=False,
-        route=None,
-        user_token=None,
         api_key_id="key-1",
         user_id="user-1",
         rate_limit_info=None,
@@ -732,7 +729,7 @@ async def test_prepare_gateway_tools_hands_the_tool_loop_the_workspaces_servers(
 
 
 async def test_prepare_gateway_tools_merges_stored_servers_after_inline_ones(async_db: AsyncSession) -> None:
-    """Same order the hybrid path uses: the caller's inline servers first, then the resolved ones."""
+    """The caller's inline servers come first, then the stored ones."""
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, organization, owner=owner)
@@ -881,7 +878,7 @@ async def test_prepare_gateway_tools_refuses_an_unknown_id(async_db: AsyncSessio
 
 
 async def test_the_anthropic_envelope_names_an_unknown_id_as_not_found(async_db: AsyncSession) -> None:
-    """A hybrid gateway answers `not_found_error` for this, so a caller moving between them sees one contract."""
+    """A Messages caller gets the Anthropic envelope's `not_found_error` for an unknown server id."""
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, organization, owner=owner)

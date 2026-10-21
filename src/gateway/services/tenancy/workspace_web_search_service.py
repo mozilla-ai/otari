@@ -10,8 +10,7 @@ Reading or writing a stored policy requires an owner or admin of the workspace o
 Reads are gated as well as writes, because the row is the workspace's posture and not one member's allowance.
 
 :func:`resolve_workspace_web_search_config` reads a stored row.
-:func:`read_web_search_policy` reads a control plane's answer.
-None of them takes an identity, because the workspace comes from the authenticated key.
+It takes no identity, because the workspace comes from the authenticated key.
 """
 
 from __future__ import annotations
@@ -221,37 +220,6 @@ async def resolve_workspace_web_search_config(
         allowed_domains=_stored_domains(config.allowed_domains),
         blocked_domains=_stored_domains(config.blocked_domains),
         provider_options=config.provider_options,
-        authorized_tools=None,
-    )
-
-
-def read_web_search_policy(answer: Mapping[str, Any]) -> ResolvedWebSearchConfig:
-    """Read the control plane's answer for one workspace's web search policy.
-
-    Raises ``ValueError`` when a recognized field is malformed, so a policy that cannot be read fails closed.
-    """
-    enabled = answer.get("enabled")
-    if not isinstance(enabled, bool):
-        raise ValueError("enabled must be a boolean")
-    max_results = answer.get("max_results")
-    if max_results is not None and (
-        not isinstance(max_results, int) or isinstance(max_results, bool) or max_results < 1
-    ):
-        raise ValueError("max_results must be an integer of at least 1")
-    purpose_hint = answer.get("purpose_hint")
-    if purpose_hint is not None and (not isinstance(purpose_hint, str) or len(purpose_hint) > _MAX_PURPOSE_HINT_LENGTH):
-        raise ValueError(f"purpose_hint must be a string of at most {_MAX_PURPOSE_HINT_LENGTH} characters")
-    provider_options = answer.get("provider_options")
-    if provider_options is not None and not isinstance(provider_options, dict):
-        raise ValueError("provider_options must be an object")
-    provider_options = _check_provider_options(provider_options)
-    return ResolvedWebSearchConfig(
-        enabled=enabled,
-        max_results=max_results,
-        purpose_hint=_blank_to_none(purpose_hint),
-        allowed_domains=read_domain_list(answer.get("allowed_domains")),
-        blocked_domains=read_domain_list(answer.get("blocked_domains")),
-        provider_options=provider_options,
         authorized_tools=None,
     )
 

@@ -1,4 +1,4 @@
-"""Workspaces and workspace membership (standalone mode only).
+"""Workspaces and workspace membership.
 
 Thin composition over `gateway.services.tenancy.workspace_service`. Every path
 resolves its workspace inside the caller's active organization, so a workspace id

@@ -129,7 +129,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Agent Telemetry Rows
-         * @description Delete agent_telemetry rows by explicit ids or by filter (standalone).
+         * @description Delete agent_telemetry rows by explicit ids or by filter.
          *
          *     Target either an explicit selection (`ids`) or everything matching a filter
          *     (`by_filter: true` plus optional `user_id` / `api_key_id` / `name` / date
@@ -151,7 +151,7 @@ export interface paths {
         };
         /**
          * Count Agent Telemetry
-         * @description Total agent_telemetry rows matching the given filters (standalone).
+         * @description Total agent_telemetry rows matching the given filters.
          *
          *     The filter set mirrors the purge endpoint's, so this sizes exactly what a
          *     "delete all N matching" would remove. Behavioral and metric rows are counted
@@ -175,7 +175,7 @@ export interface paths {
         };
         /**
          * Agent Telemetry Series
-         * @description Row volume over time, split by user or API key (standalone).
+         * @description Row volume over time, split by user or API key.
          *
          *     Mirrors `/api/v1/usage/series`: same window bounds and bucket-grid cap, the top
          *     groups as their own series with the remainder folded into a reconciling
@@ -200,7 +200,7 @@ export interface paths {
         };
         /**
          * Agent Telemetry Summary
-         * @description What the coding agent produced in a window, and what it cost (standalone).
+         * @description What the coding agent produced in a window, and what it cost.
          *
          *     Range-bounded like `/api/v1/usage/summary` (default last 30 days, hard-capped),
          *     so the aggregates stay served by the timestamp index. Returns the outcome
@@ -973,8 +973,7 @@ export interface paths {
          *
          *     The database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``
          *     marker, and the identity it names, to answer whether *that* identity holds a
-         *     password (#702). It runs only in standalone mode: a hybrid gateway has no session to describe,
-         *     and ``get_db_if_needed`` hands it no session to read one from.
+         *     password (#702).
          */
         get: operations["bootstrap-get_bootstrap"];
         put?: never;
@@ -2352,10 +2351,7 @@ export interface paths {
          * @description Anthropic Messages API-compatible endpoint.
          *
          *     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
-         *     web_search in both standalone mode and hybrid mode. Hybrid-mode requests
-         *     resolve credentials via the platform service and get multi-attempt
-         *     fallback across the resolved route, tool-loop requests included (fallback
-         *     applies up to the pre-lock-in point, same as chat).
+         *     web_search.
          */
         post: operations["messages-create_message"];
         delete?: never;
@@ -2379,9 +2375,8 @@ export interface paths {
          *
          *     Returns ``{"input_tokens": N}`` without contacting an upstream provider:
          *     counting is local, so there is no budget reservation, pricing, or usage
-         *     logging. Authentication mirrors :func:`create_message` — hybrid mode
-         *     resolves the caller's token against the platform, standalone mode validates
-         *     the API key — so the endpoint is not an open token-counting oracle.
+         *     logging. Authentication mirrors :func:`create_message`, validating the API
+         *     key, so the endpoint is not an open token-counting oracle.
          */
         post: operations["messages-count_message_tokens"];
         delete?: never;
@@ -4286,11 +4281,6 @@ export interface paths {
          *
          *     ``user`` in the body is the one field the pipeline will not read here: spend
          *     binds to the session's own attribution user, derived and never accepted.
-         *
-         *     On a hosted control plane there is no local pipeline to call, so the same
-         *     principal is forwarded to the data-plane gateway instead
-         *     (:func:`_dispatch_to_data_plane`). The request and the response are the same
-         *     either way.
          */
         post: operations["playground-playground_chat_completions"];
         delete?: never;
@@ -5085,10 +5075,7 @@ export interface paths {
          * @description OpenAI-compatible Responses endpoint.
          *
          *     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
-         *     web_search in both standalone mode and hybrid mode. Hybrid-mode requests
-         *     resolve credentials via the platform service and get multi-attempt
-         *     fallback across the resolved route, tool-loop requests included (fallback
-         *     applies up to the pre-lock-in point, same as chat).
+         *     web_search.
          */
         post: operations["responses-create_response"];
         delete?: never;
@@ -5774,7 +5761,7 @@ export interface paths {
          * @description Persist and apply tool/guardrail setting changes.
          *
          *     Uses ``model_fields_set`` so an explicit ``null`` clears a field while an
-         *     omitted field is left unchanged. Operator-gated and standalone-only.
+         *     omitted field is left unchanged. Operator-gated.
          */
         patch: operations["tool-settings-update_tool_settings"];
         trace?: never;
@@ -6053,7 +6040,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Usage Rows
-         * @description Delete imported usage rows by explicit ids or by filter (standalone).
+         * @description Delete imported usage rows by explicit ids or by filter.
          *
          *     Target either the current selection (``ids``) or everything matching a filter
          *     (``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /
@@ -6110,7 +6097,7 @@ export interface paths {
         put?: never;
         /**
          * Ingest External Usage
-         * @description Ingest a batch of externally-observed usage events (standalone).
+         * @description Ingest a batch of externally-observed usage events.
          *
          *     Authenticated with either an API key or the master key. Usage binds to the
          *     authenticated principal: an API key attributes to its own user (and stamps its
@@ -6168,7 +6155,7 @@ export interface paths {
         };
         /**
          * Get Request Settlement
-         * @description Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).
+         * @description Look up a request's settled cost by the ``Otari-Request-ID`` it was sent.
          *
          *     This is how a caller recovers the cost of a request whose response never
          *     carried one: a stream that failed or was disconnected mid-response, or a
@@ -6229,7 +6216,7 @@ export interface paths {
         put?: never;
         /**
          * Set Usage Price Rows
-         * @description Set the cost of imported usage rows from manual per-1M rates (standalone).
+         * @description Set the cost of imported usage rows from manual per-1M rates.
          *
          *     Target either the current selection (``ids``) or everything matching a filter
          *     (``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed
@@ -6357,32 +6344,6 @@ export interface paths {
          * @description Get usage history for a user in the caller's organization.
          */
         get: operations["users-get_user_usage"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/web-search/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Web Search
-         * @description Run one search through this deployment's configured search provider.
-         *
-         *     The declared query params are the ``provider_options`` keys the providers
-         *     understand. Everything else the caller sends, ``format`` and ``engines``
-         *     included, is ignored rather than forwarded: the bag is opaque to the gateway
-         *     that filled it, so passing it upstream unread would let a workspace set
-         *     provider request fields this deployment never chose.
-         */
-        get: operations["web-search-web_search"];
         put?: never;
         post?: never;
         delete?: never;
@@ -8922,7 +8883,7 @@ export interface components {
             service_tier?: string | null;
             /**
              * Session Label
-             * @description Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.
+             * @description Optional caller-supplied label for a run, experiment or conversation, which names the session the request's trace is grouped under. Stripped before the request is forwarded upstream to the provider.
              */
             session_label?: string | null;
             /** Stop */
@@ -9740,16 +9701,11 @@ export interface components {
          */
         DeploymentBootstrap: {
             /**
-             * Data Plane Url
-             * @description Where this deployment's inference traffic belongs, when it is not served here. The mirror of management_url: that one says where management lives when this deployment is not the control plane, this one says where the data plane is when this deployment is not it. Set only by a hosted control plane, which serves the dashboard but not inference (otari#822); null for standalone and hybrid, both of which serve inference at the address that reached this page. Not a human link target like management_url: it is the gateway's bare address, which the dashboard suffixes with the API root to build its request snippets. So it must carry no API root anywhere (a value ending in /api/v1, or a whole endpoint like /api/v1/chat/completions, renders that path twice) and no credential, since this response is unauthenticated. This gateway refuses both at startup; any deployment serving this contract should publish the same shape. Null on a hosted deployment means unconfigured, and the dashboard then shows no snippet rather than one naming this host.
-             */
-            data_plane_url: string | null;
-            /**
              * Deployment Type
-             * @description Which deployment serves this URL. 'standalone' owns its own data and serves one tenant; 'hosted' owns its own data and serves many (otari.ai, or any deployment run as a control plane), which is why its management surfaces are the per-organization ones; 'hybrid' is a gateway attached to otari.ai, which is data-plane only and holds no management surface of its own.
-             * @enum {string}
+             * @description Which kind of deployment serves this URL. Every Otari deployment answers 'standalone'.
+             * @constant
              */
-            deployment_type: "standalone" | "hosted" | "hybrid";
+            deployment_type: "standalone";
             /**
              * Docs Url
              * @description Where this deployment's documentation lives, when it is not docs.otari.ai. Set, the dashboard's Documentation links open it in a new tab; null, they open https://docs.otari.ai/. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
@@ -9762,37 +9718,32 @@ export interface components {
             feedback_enabled: boolean;
             /**
              * Mail Ready
-             * @description Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this control plane sends carries such a link, which is why this is one flag and not one per feature. False for a hybrid gateway, whose control plane is otari.ai and which sends no mail of its own.
+             * @description Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this deployment sends carries such a link, which is why this is one flag and not one per feature.
              */
             mail_ready: boolean;
             /**
              * Maintenance Mode
-             * @description Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the management API and the data plane are unaffected. False for a hybrid gateway, which issues no session.
+             * @description Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the API is unaffected.
              */
             maintenance_mode: boolean;
             /**
-             * Management Url
-             * @description Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.
-             */
-            management_url: string | null;
-            /**
              * Oauth Providers
-             * @description OAuth providers this deployment can sign somebody in with, sorted, one entry per provider with a client ID, a client secret and a public_base_url to build a redirect URI from. The sign-in screen renders a button per entry and none at all when the list is empty, so a provider nobody configured is absent rather than offered and then refused. Additive to sign_in_methods rather than part of it: an OAuth sign-in coexists with whichever typed credential is current, the way a passkey does. Empty for a hybrid gateway, which issues no session.
+             * @description OAuth providers this deployment can sign somebody in with, sorted, one entry per provider with a client ID, a client secret and a public_base_url to build a redirect URI from. The sign-in screen renders a button per entry and none at all when the list is empty, so a provider nobody configured is absent rather than offered and then refused. Additive to sign_in_methods rather than part of it: an OAuth sign-in coexists with whichever typed credential is current, the way a passkey does.
              */
             oauth_providers: string[];
             /**
              * Open Signup
-             * @description Whether POST /api/v1/auth/signup creates an account for an address nobody has added yet, each with an organization of its own, or only lets an address an admin already put on the roster set its password. The signup page reads as registration or as claiming an invitation accordingly, and the sign-in screen links to it with the wording that matches. False for a hybrid gateway, which holds no identities.
+             * @description Whether POST /api/v1/auth/signup creates an account for an address nobody has added yet, each with an organization of its own, or only lets an address an admin already put on the roster set its password. The signup page reads as registration or as claiming an invitation accordingly, and the sign-in screen links to it with the wording that matches.
              */
             open_signup: boolean;
             /**
              * Passkeys Enabled
-             * @description Whether this deployment offers passkeys at all (the passkeys_enabled setting). False means the passkey routes are not mounted and the dashboard hides its passkey page, which is a different answer from passkeys_ready: a deployment that merely has not configured a relying party is ready for nobody yet but still shows the page that says so. False for a hybrid gateway, which issues no session of its own.
+             * @description Whether this deployment offers passkeys at all (the passkeys_enabled setting). False means the passkey routes are not mounted and the dashboard hides its passkey page, which is a different answer from passkeys_ready: a deployment that merely has not configured a relying party is ready for nobody yet but still shows the page that says so.
              */
             passkeys_enabled: boolean;
             /**
              * Passkeys Ready
-             * @description Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them. False for a hybrid gateway, which issues no session of its own.
+             * @description Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them.
              */
             passkeys_ready: boolean;
             /**
@@ -9802,19 +9753,19 @@ export interface components {
             privacy_url: string | null;
             /**
              * Public Catalog
-             * @description Whether the model catalog is served to a visitor with no session: GET /api/v1/catalog/models answers anonymously and the dashboard renders Models ahead of sign-in. False for a hybrid gateway, which serves no catalog of its own.
+             * @description Whether the model catalog is served to a visitor with no session: GET /api/v1/catalog/models answers anonymously and the dashboard renders Models ahead of sign-in.
              * @default false
              */
             public_catalog: boolean;
             /**
              * Session Type
-             * @description The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone operator sign-in (see sign_in_methods for which credential it currently accepts), 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.
-             * @enum {string}
+             * @description The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is this deployment's own sign-in (see sign_in_methods for which credential it currently accepts).
+             * @constant
              */
-            session_type: "local_operator" | "hosted_user" | "none";
+            session_type: "local_operator";
             /**
              * Sign In Methods
-             * @description How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; past that it stays the credential for the management API but is no longer a dashboard login. 'password' is offered while any active identity holds one, which is not the same question and not always the later half of it: a member can hold a password on a deployment whose operator never claimed it, so both typed credentials can appear together. 'passkey' appears alongside either when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.
+             * @description How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; past that it stays the credential for the management API but is no longer a dashboard login. 'password' is offered while any active identity holds one, which is not the same question and not always the later half of it: a member can hold a password on a deployment whose operator never claimed it, so both typed credentials can appear together. 'passkey' appears alongside either when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. The login page renders from this rather than trying a credential to find out.
              */
             sign_in_methods: ("master_key" | "password" | "passkey")[];
             /**
@@ -9824,7 +9775,7 @@ export interface components {
             site_url: string | null;
             /**
              * Surfaces
-             * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis, and this is the deployment (topology) axis. Empty for a hybrid gateway.
+             * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis, and this is the deployment (topology) axis.
              */
             surfaces: string[];
             /**
@@ -10163,7 +10114,7 @@ export interface components {
             cost_usd?: string | null;
             /**
              * Pricing Source
-             * @description Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced
+             * @description Which rate priced the request: `organization`, `deployment` or `defaults`; absent when it was not priced
              */
             pricing_source?: string | null;
             /** Prompt Tokens */
@@ -10656,8 +10607,6 @@ export interface components {
              * @enum {string}
              */
             master_key_source: "configured" | "generated";
-            /** Mode */
-            mode: string;
             /** Model Discovery */
             model_discovery: boolean;
             /** Require Pricing */
@@ -12075,7 +12024,7 @@ export interface components {
             server_id: string;
             /**
              * Server Revision
-             * @description An opaque revision of the stored server's URL, credential, enabled state and allowlist. It detects Otari-side and platform-side configuration changes only: a remote server that changes its own catalog or a tool's behavior behind an unchanged URL will not move it.
+             * @description An opaque revision of the stored server's URL, credential, enabled state and allowlist. It detects Otari-side configuration changes only: a remote server that changes its own catalog or a tool's behavior behind an unchanged URL will not move it.
              */
             server_revision: string;
             /** Tools */
@@ -12220,7 +12169,7 @@ export interface components {
             service_tier?: string | null;
             /**
              * Session Label
-             * @description Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.
+             * @description Optional caller-supplied label for a run, experiment or conversation, which names the session the request's trace is grouped under. Stripped before the request is forwarded upstream to the provider.
              */
             session_label?: string | null;
             /** Stop Sequences */
@@ -15495,7 +15444,7 @@ export interface components {
             cost_usd?: string | null;
             /**
              * Pricing Source
-             * @description Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced
+             * @description Which rate priced the request: `organization`, `deployment` or `defaults`; absent when it was not priced
              */
             pricing_source?: string | null;
             /**
@@ -15657,7 +15606,7 @@ export interface components {
             service_tier?: string | null;
             /**
              * Session Label
-             * @description Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.
+             * @description Optional caller-supplied label for a run, experiment or conversation, which names the session the request's trace is grouped under. Stripped before the request is forwarded upstream to the provider.
              */
             session_label?: string | null;
             /** Store */
@@ -17900,42 +17849,6 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["WebAuthnCredentialPublic"][];
-        };
-        /**
-         * WebSearchBackendResponse
-         * @description A SearXNG-compatible ``/search`` body.
-         */
-        WebSearchBackendResponse: {
-            /** Results */
-            results: components["schemas"]["WebSearchBackendResult"][];
-        };
-        /**
-         * WebSearchBackendResult
-         * @description One hit, in the shape ``WebSearchBackend`` reads off a SearXNG response.
-         */
-        WebSearchBackendResult: {
-            /**
-             * Content
-             * @default
-             */
-            content: string;
-            /**
-             * Extracted Content
-             * @description The page's own text, when the provider returned it, so the caller can skip fetching the page.
-             */
-            extracted_content?: string | null;
-            /**
-             * Published Date
-             * @description The provider's own recency string for the page, forwarded unparsed. Declared so a search over this hop renders the same date an in-process one does.
-             */
-            published_date?: string | null;
-            /**
-             * Title
-             * @default
-             */
-            title: string;
-            /** Url */
-            url: string;
         };
         /**
          * WorkspaceActivationPublic
@@ -20281,7 +20194,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
                 /** @description Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider. */
                 "Otari-Tags"?: string | null;
@@ -22528,7 +22441,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
                 /** @description Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider. */
                 "Otari-Tags"?: string | null;
@@ -27237,7 +27150,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
                 /** @description Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider. */
                 "Otari-Tags"?: string | null;
@@ -29162,45 +29075,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageLogResponse"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "web-search-web_search": {
-        parameters: {
-            query: {
-                /** @description The search query. */
-                q: string;
-                max_results?: number | null;
-                search_depth?: string | null;
-                topic?: string | null;
-                time_range?: string | null;
-                include_answer?: boolean | null;
-            };
-            header?: {
-                "x-gateway-token"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebSearchBackendResponse"];
                 };
             };
             /** @description Validation Error */

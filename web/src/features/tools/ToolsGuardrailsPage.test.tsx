@@ -1070,67 +1070,6 @@ describe("ToolsGuardrailsPage by caller role", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("leaves availability off the code-execution tool on a hosted control plane", async () => {
-    // Its sandbox is the platform's, so this process's own config, which says
-    // unavailable in the fixture, would be the wrong answer.
-    mockApi({
-      settings: TENANT_RESPONSE,
-      context: organizationContext({
-        deployment_operator: false,
-        role: "member",
-      }),
-    })
-    renderWithClient(<ToolsGuardrailsPage only="sandbox" />, {
-      ...WITHOUT_ORGANIZATION_GUARDRAILS,
-      deployment_type: "hosted",
-    })
-
-    const card = await screen.findByRole("button", {
-      name: /otari_code_execution/,
-    })
-    expect(card).not.toHaveTextContent(/available/i)
-  })
-
-  it("leaves the control plane's own sandbox settings off a hosted page, even for an operator", async () => {
-    // It serves no inference, so they run nothing; the platform's sandbox does.
-    mockApi()
-    renderWithClient(<ToolsGuardrailsPage only="sandbox" />, {
-      ...WITHOUT_ORGANIZATION_GUARDRAILS,
-      deployment_type: "hosted",
-    })
-
-    await screen.findByRole("button", { name: /otari_code_execution/ })
-    expect(screen.queryByLabelText(SANDBOX_URL)).not.toBeInTheDocument()
-    expect(screen.queryByText("Self-hosted")).not.toBeInTheDocument()
-  })
-
-  it("leaves availability off every tool on a hosted control plane", async () => {
-    mockApi()
-    renderWithClient(<ToolsGuardrailsPage only="web_search" />, {
-      ...WITHOUT_ORGANIZATION_GUARDRAILS,
-      deployment_type: "hosted",
-    })
-
-    const card = await screen.findByRole("button", { name: /otari_web_search/ })
-    expect(card).not.toHaveTextContent(/available/i)
-  })
-
-  it("leaves the control plane's own search backend and search tools off a hosted page, even for an operator", async () => {
-    // Searches run on the data plane, and a hosted control plane serves no
-    // /api/v1/search for the search tools to configure.
-    mockApi()
-    renderWithClient(<ToolsGuardrailsPage only="web_search" />, {
-      ...WITHOUT_ORGANIZATION_GUARDRAILS,
-      deployment_type: "hosted",
-    })
-
-    await screen.findByRole("button", { name: /otari_web_search/ })
-    expect(screen.queryByLabelText(WEB_SEARCH_URL)).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole("heading", { name: "Search tools" }),
-    ).not.toBeInTheDocument()
-  })
-
   it("shows a non-operator no deployment sandbox settings at all", async () => {
     mockApi({
       settings: TENANT_RESPONSE,

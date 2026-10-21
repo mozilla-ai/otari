@@ -29,10 +29,3 @@ class RecommendationFailedError(Exception):
 
 class UnreadableRecommendationError(ValueError):
     """The recommender answered, but named no candidate."""
-
-
-class PolicyOnHybridGatewayError(Exception):
-    """A request named one of this gateway's routing policies, which a hybrid gateway does not apply.
-
-    The message says what to name instead.
-    """

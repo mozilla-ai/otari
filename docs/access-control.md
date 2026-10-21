@@ -191,12 +191,6 @@ key, and on the edit form), as `reject_user_mismatch` on `POST` or `PATCH`
 config.yml. The deployment-wide default is a runtime setting, changed on the
 Settings page or with `PATCH /api/v1/settings`.
 
-The check is a standalone one. A hybrid gateway, such as otari.ai's, does not
-compare the field with the key's owner, so a key there needs no setting: the
-value only feeds the
-[end-user identifier](hybrid-mode-protocol.md#end-user-identifier) sent to the
-provider.
-
 ## Service keys and end users
 
 A service key lets one application track spend per end user without sharing
@@ -419,8 +413,7 @@ key's list.
 End users are supported on the endpoints above. The other endpoints
 (embeddings, files, batches and the other pass-through
 routes) treat a service key as an ordinary key, so a `user` naming someone else
-is handled by the `reject_user_mismatch` setting there. Hybrid mode resolves
-users on the platform and does not support service keys.
+is handled by the `reject_user_mismatch` setting there.
 
 ## Budgets
 
@@ -545,7 +538,7 @@ sessions. A request whose session cookie no longer authenticates is refused
 with 401 "Your dashboard session has ended. Sign in again."
 
 A session authorizes the management API. It does not authorize
-`/api/v1/chat/completions` or any other data-plane path, which take an API key
+`/api/v1/chat/completions` or any other inference path, which take an API key
 or the master key and nothing else: a keyless request resolves to the
 deployment's default workspace, so honoring a cookie there would let any member
 of any organization spend that workspace's provider credential.

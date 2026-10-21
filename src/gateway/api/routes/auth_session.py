@@ -1,4 +1,4 @@
-"""Dashboard sign-in sessions (standalone mode only).
+"""Dashboard sign-in sessions.
 
 ``POST /api/v1/auth/session`` exchanges a credential for a server-issued session
 held in an HttpOnly cookie, so the dashboard never persists that credential in

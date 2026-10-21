@@ -56,9 +56,7 @@ router = APIRouter(
     dependencies=[Depends(verify_master_key), Depends(require_deployment_operator_or_absent)],
 )
 
-# Published by both topologies: a standalone deployment serves its own hosted
-# inference on these, and a hosted control plane holds them for the data plane
-# that resolves against it. The page is operator-only on either.
+# The deployment serves its own hosted inference on these. The page is operator-only.
 SURFACE = Surface("hosted_providers")
 
 _EVERY_ROW = DeploymentProviderMigrationRequest()

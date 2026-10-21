@@ -1,9 +1,9 @@
 """Unit tests for the OSS-edition smoke gate (scripts/oss_edition_smoke.py).
 
 The gate's own end-to-end proof is the CI job that runs it. What is worth pinning
-here is the part that decides *which edition* gets booted, plus the mock provider
-the run depends on: a scrub that stopped dropping the platform token would leave
-the job green while checking the hybrid build, which is the one failure this gate
+here is the part that decides *which build* gets booted, plus the mock provider
+the run depends on: a scrub that stopped dropping ``OTARI_BOOTSTRAP`` would leave
+the job green while checking an overlay build, which is the one failure this gate
 cannot detect by running.
 """
 
@@ -68,10 +68,9 @@ def test_the_gate_walks_the_root_the_app_actually_serves() -> None:
 @pytest.mark.parametrize(
     "name",
     [
-        "OTARI_MODE",  # selects hybrid mode outright
-        "OTARI_AI_TOKEN",  # a platform token selects hybrid mode when mode is unset
+        "OTARI_MODE",  # a removed runtime mode's selector
+        "OTARI_AI_TOKEN",  # a removed runtime mode's token
         "OTARI_BOOTSTRAP",  # the overlay selector, which would boot a build nobody chose
-        "OTARI_PLATFORM_BASE_URL",  # the platform block, which only hybrid reads
         "OTARI_DATABASE_URL",  # would smoke a database nobody chose
         # A name the scrub has never heard of, so a regression from the prefix
         # sweep to a fixed allowlist of the names above fails here.
@@ -109,7 +108,6 @@ def test_config_selects_no_other_edition() -> None:
         names=names,
     )
     assert "mode" not in config
-    assert "platform" not in config
     assert list(config["providers"]) == [names.failing_instance]
 
 

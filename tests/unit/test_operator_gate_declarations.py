@@ -131,7 +131,6 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "images.router": _DATA_PLANE,
     "mcp.router": _DATA_PLANE,
     "messages.router": _DATA_PLANE,
-    "models.hybrid_router": "the caller's key is forwarded to the control plane, which verifies it and scopes the list",
     "moderations.router": _DATA_PLANE,
     "otlp.router": _DATA_PLANE,
     "rerank.router": _DATA_PLANE,
@@ -145,11 +144,8 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "identity.router": _PUBLIC_AUTH,
     "invitations.router": "the invitation token is the credential, and the invitee has no account yet",
     "oauth.router": "the identity token in the body is the credential, verified in the token exchange",
-    "bootstrap.router": "unauthenticated on purpose: how a browser learns which mode it reached",
+    "bootstrap.router": "unauthenticated on purpose: read before a browser knows whether to sign in",
     "health.router": "unauthenticated liveness and readiness",
-    "web_search_backend.router": "its own X-Gateway-Token, checked in the handler",
-    "hosted_mode.router": "mode stub: a 404 naming why the prefix is absent on this deployment",
-    "hybrid_mode.router": "mode stub, as above",
     "retired_root.router": "a 404 naming the API root that replaced /v1; serves nothing",
 }
 

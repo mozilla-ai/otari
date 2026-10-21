@@ -1108,8 +1108,8 @@ async def test_loop_mixed_tools_executes_mcp_and_returns_only_foreign(
 
 # ---------- on_first_response lock-in signal ----------
 #
-# These tests pin the contract used by the hybrid-mode attempt loop in
-# chat.py to decide when a tool-loop attempt has "committed" to a provider.
+# These tests pin the contract the attempt walker uses to decide when a
+# tool-loop attempt has "committed" to a provider.
 # The route handler MUST be able to tell apart:
 #   * the first upstream acompletion raised → free to fall back to the next
 #     attempt with a clean conversation slate

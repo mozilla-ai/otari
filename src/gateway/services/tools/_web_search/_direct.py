@@ -205,8 +205,7 @@ def refuse_unpriced_direct_search(
     ``require_pricing`` is on and nothing priced it, even if the provider
     reports its own cost; a zero rate is a price. Two calls pass unpriced: one
     on a key exempt from budgets, which is never debited, and one with no rate
-    keys (a hybrid control plane's credential), which this gateway does not
-    settle. Raises :class:`DirectSearchPricingRequiredError`, whose message
+    keys, which this gateway does not settle. Raises :class:`DirectSearchPricingRequiredError`, whose message
     names the row to add.
     """
     rate_keys = search.resolved.rate_keys

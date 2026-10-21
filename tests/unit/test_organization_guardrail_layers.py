@@ -65,12 +65,9 @@ def _ctx(*policy_guardrails: GuardrailConfig) -> RequestContext:
         )
     return RequestContext(
         config=GatewayConfig(),
-        db=None,
-        uow=None,
+        db=cast(Any, object()),
+        uow=cast(Any, object()),
         log_writer=cast(Any, None),
-        hybrid_mode=False,
-        route=None,
-        user_token=None,
         api_key_id="key-1",
         user_id="user-1",
         rate_limit_info=None,

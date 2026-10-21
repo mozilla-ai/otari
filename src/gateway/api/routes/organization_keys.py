@@ -53,7 +53,6 @@ from gateway.api.deps import (
 from gateway.api.routes._helpers import database_error
 from gateway.api.routes.keys import (
     _KEY_EXCEEDS_USER_DETAIL,
-    NOT_INTERNAL,
     CreateKeyResponse,
     KeyInfo,
     _load_key_in_organization,
@@ -319,7 +318,6 @@ async def list_own_keys(
         .where(
             col(Workspace.organization_id) == organization_id,
             col(APIKey.user_id) == owner_user_id,
-            NOT_INTERNAL,
         )
     )
     if workspace_id is not None:

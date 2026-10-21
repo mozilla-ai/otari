@@ -466,8 +466,8 @@ function NavGroup({
  * because everything that reads the axis is inside the shell and because the
  * resolver a superset build swaps in issues a query: it belongs behind the auth
  * gate `App.tsx` puts the router behind, not in front of it. So the surfaces
- * that render instead of the shell (the sign-in screen, the public auth pages,
- * the hybrid landing) are deliberately outside it: none of them gates on a
+ * that render instead of the shell (the sign-in screen, the public auth pages)
+ * are deliberately outside it: none of them gates on a
  * capability, and a visitor without a session has nothing to resolve one from.
  *
  * `PostSignInGate` is the seam for anything that has to be shown once, in front

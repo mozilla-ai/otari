@@ -407,7 +407,7 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         config.bootstrap,
         config=config,
         membership_listener=get_membership_listener,
-        workspace_listener=functools.partial(get_workspace_listener, config=config),
+        workspace_listener=get_workspace_listener,
         search_keys=get_workspace_search_keys,
         code_execution_policies=get_workspace_code_execution_policies,
         hosted_provider_service=functools.partial(build_hosted_provider_service, config=config),

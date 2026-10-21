@@ -7,8 +7,7 @@ Search, in order:
    ``direct_credential``, the workspace's organization key for an unnamed
    call, is given: the key's provider, key and options then serve the call,
    and the instance keeps its name and timeout.
-2. Else the policy's credential: the workspace's organization key, or in
-   hybrid the control plane's.
+2. Else the policy's credential: the workspace's organization key.
 3. Else the in-loop default.
 4. Else nothing, which the caller turns into its refusal.
 
@@ -75,7 +74,6 @@ from gateway.models.tools import (
     WebFetchCredential,
     WebSearchCredential,
     WebToolCredential,
-    WebToolCredentialSource,
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 from gateway.services.tools._web_search._default import in_loop_default
@@ -501,19 +499,11 @@ def _check(credential: WebToolCredential, *, requires_key: bool, requires_base: 
 
 
 def _credential_layer(credential: WebToolCredential) -> str:
-    if credential.source == WebToolCredentialSource.HYBRID:
-        return "the control plane's credential"
     return "the organization's key"
 
 
 def _credential_billing(credential: WebToolCredential, fallback: str) -> tuple[str | None, tuple[RateKey, ...]]:
-    """The label and rate keys of a call a credential serves.
-
-    A hybrid data plane settles nothing itself, so the control plane's
-    credential carries neither.
-    """
-    if credential.source == WebToolCredentialSource.HYBRID:
-        return None, ()
+    """The label and rate keys of a call a credential serves."""
     return f"{ORGANIZATION_KEY_LABEL_PREFIX}{credential.provider}", (fallback,)
 
 

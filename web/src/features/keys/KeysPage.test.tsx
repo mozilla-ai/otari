@@ -589,60 +589,6 @@ describe("KeysPage", () => {
     expect(document.body.textContent).not.toContain(NEW_SECRET)
   })
 
-  /** Mint a key and open the one-time reveal, which is where the snippets live. */
-  async function revealANewKey(deployment?: DeploymentBootstrap) {
-    mockApi({ keys: [] })
-    const person = userEvent.setup()
-    renderPage(<KeysPage />, deployment)
-
-    await screen.findByText("No API keys yet")
-    await person.click(
-      screen.getByRole("button", { name: "Create your first key" }),
-    )
-    await person.type(screen.getByLabelText("Name"), "deploy-key")
-    await person.type(screen.getByPlaceholderText(/Pick a user/), "alice")
-    await person.keyboard("{Escape}")
-    await person.click(screen.getByRole("button", { name: "Create key" }))
-
-    return within(
-      await screen.findByRole("alert", {
-        name: /API key created|New secret for/,
-      }),
-    )
-  }
-
-  it("sends the snippet at the data plane a hosted deployment published", async () => {
-    // The control plane serves this dashboard and is deliberately not where
-    // inference belongs (otari#822), so the origin is the one address the
-    // snippet must not name.
-    const dialog = await revealANewKey(
-      bootstrap({
-        deployment_type: "hosted",
-        data_plane_url: "https://gateway.otari.ai",
-      }),
-    )
-
-    const curl = dialog.getByLabelText("curl") as HTMLTextAreaElement
-    expect(curl.value).toContain(
-      `https://gateway.otari.ai${API_ROOT}/chat/completions`,
-    )
-    expect(curl.value).not.toContain(window.location.origin)
-  })
-
-  it("shows no snippet when a hosted deployment published no data plane", async () => {
-    // Withheld rather than aimed at this host: a placeholder would be a URL
-    // nobody reading it could replace, and the origin would be the bug itself.
-    const dialog = await revealANewKey(
-      bootstrap({ deployment_type: "hosted", data_plane_url: null }),
-    )
-
-    expect(dialog.getByLabelText("Secret key")).toBeInTheDocument()
-    expect(dialog.queryByLabelText("curl")).not.toBeInTheDocument()
-    expect(
-      dialog.getByText(/has not published the gateway address/),
-    ).toBeInTheDocument()
-  })
-
   it("keeps the reveal up through a stray Escape; only the save button dismisses it", async () => {
     // The reveal is a strip on the page now rather than a modal, so there is no
     // Esc handler to suppress and no backdrop to click. What still has to hold

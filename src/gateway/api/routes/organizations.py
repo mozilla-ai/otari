@@ -1,4 +1,4 @@
-"""Organization context, membership, and switching (standalone mode only).
+"""Organization context, membership, and switching.
 
 Thin composition over `gateway.services.tenancy.organization_service`: resolve
 the caller's identity, call the service, return its typed result. The response

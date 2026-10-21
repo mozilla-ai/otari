@@ -2,14 +2,13 @@
 
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     HostedProviderServiceDep,
     RequestSessionModelProviderPortDep,
-    extract_credential_token,
     get_config,
     get_db,
     get_session_identity,
@@ -18,12 +17,10 @@ from gateway.api.deps import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
-from gateway.exceptions.control_plane_exceptions import ControlPlaneUnavailableError
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.catalog import apply_model_limits, load_catalog_metadata
-from gateway.services.control_plane import UNAVAILABLE_DETAIL, ResolveEndpoint, resolve
 from gateway.services.merged_catalog_service import (
     ModelObject,
     alias_model,
@@ -49,7 +46,6 @@ from gateway.services.model_catalog_service import (
     background_catalog_enabled,
     build_metadata_map,
     load_models_dev_catalog,
-    token_limit,
 )
 from gateway.services.model_discovery_service import (
     background_discovery_enabled,
@@ -76,11 +72,6 @@ catalog_router = APIRouter(
     tags=["models"],
     dependencies=[Depends(verify_catalog_reader)],
 )
-
-# A hybrid gateway owns no catalog, so its ``GET /models`` asks the control
-# plane which models the caller's key may use. Mounted on the data plane in
-# hybrid mode only; the routers above answer every other deployment.
-hybrid_router = APIRouter(tags=["models"])
 
 SURFACE = Surface("models")
 
@@ -433,40 +424,3 @@ async def _find_model(
     return mark_deployment_managed(
         config, obj, deployment_supplied_providers=scope.deployment_supplied_providers
     ), aliases
-
-
-def _model_from_platform(entry: object) -> ModelObject:
-    """One ``models`` entry from the control plane, or ``ControlPlaneUnavailableError`` when unreadable."""
-    if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or not entry["id"]:
-        raise ControlPlaneUnavailableError(UNAVAILABLE_DETAIL)
-    created = entry.get("created")
-    owned_by = entry.get("owned_by")
-    return ModelObject(
-        id=entry["id"],
-        created=created if isinstance(created, int) and not isinstance(created, bool) else 0,
-        owned_by=owned_by if isinstance(owned_by, str) and owned_by else owner_from_key(entry["id"]),
-        context_window=token_limit(entry.get("context_window")),
-        max_output_tokens=token_limit(entry.get("max_output_tokens")),
-    )
-
-
-@hybrid_router.get("/models", include_in_schema=False)
-async def list_models_hybrid(
-    request: Request,
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> ModelListResponse:
-    """List the models the caller's key may use, as the control plane reports them.
-
-    The control plane decides entitlement (managed versus BYO models and the
-    key's ``allowed_models``); the gateway relays the answer and adds nothing.
-    """
-    payload = await resolve(
-        config,
-        user_token=extract_credential_token(request),
-        endpoint=ResolveEndpoint.MODELS,
-        body={},
-    )
-    entries = payload.get("models") if isinstance(payload, dict) else None
-    if not isinstance(entries, list):
-        raise ControlPlaneUnavailableError(UNAVAILABLE_DETAIL)
-    return ModelListResponse(data=sorted((_model_from_platform(e) for e in entries), key=lambda m: m.id))

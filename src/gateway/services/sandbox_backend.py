@@ -259,7 +259,7 @@ class SandboxBackend:
         self._port = port
         # The lease this request resumes, or None for a fresh sandbox, and the
         # registry that holds the session past this request. Both None where
-        # reuse is off or there is no database to remember a lease in.
+        # reuse is off.
         self._resume = container
         self._containers = containers
         self._on_lease = on_lease
@@ -271,7 +271,7 @@ class SandboxBackend:
         # None outside a request (tests, direct use), which announces none.
         self.files_base_url = files_base_url
         # The request's file bridge, or None when it has no uploads to seed and
-        # nowhere to keep what a run produces (hybrid mode, tests, direct use).
+        # nowhere to keep what a run produces (tests, direct use).
         self._files = files
         # Per-request accounting, owned by the route and passed in. None when the
         # backend runs outside a billed request (tests, direct use).

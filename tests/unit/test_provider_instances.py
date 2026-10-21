@@ -21,11 +21,11 @@ from gateway.core.config import (
 )
 from gateway.log_config import logger as gateway_logger
 from gateway.services import provider_kwargs
-from gateway.services.bedrock_gateway_auth import BEDROCK_READ_TIMEOUT_SECONDS
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import (
     _KEYLESS_PLACEHOLDER_API_KEY,
     AMBIENT_CREDENTIAL_PROVIDERS,
+    BEDROCK_READ_TIMEOUT_SECONDS,
     get_provider_kwargs,
     keyless_placeholder_api_key,
     missing_declared_credential,
@@ -652,12 +652,9 @@ def test_candidate_model_keys_accepts_string_provider_from_any_llm(monkeypatch: 
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("mode", [None, "hybrid", "hosted"])
-def test_undeclared_provider_on_env_var_is_missing_a_credential(
-    mode: str | None, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_undeclared_provider_on_env_var_is_missing_a_credential(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
-    config = GatewayConfig(mode=mode, providers={}) if mode else GatewayConfig(providers={})
+    config = GatewayConfig(providers={})
     kwargs = get_provider_kwargs(config, LLMProvider.ANTHROPIC)
 
     missing = missing_declared_credential(config, "anthropic", LLMProvider.ANTHROPIC, kwargs)

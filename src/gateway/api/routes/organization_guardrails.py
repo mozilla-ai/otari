@@ -1,4 +1,4 @@
-"""The caller's organization's guardrails (standalone mode only).
+"""The caller's organization's guardrails.
 
 Thin composition over `gateway.services.tenancy.organization_guardrail_service`:
 resolve the caller's identity, call the service, return its typed result. The
@@ -52,10 +52,7 @@ router = APIRouter(
 # because one dashboard page shows both: a definition is what a check is and a
 # mandate is where it runs, and an admin fills them in together.
 # ``org_provider_keys`` declares one surface over two routers for the same
-# reason. Published by both editions, unlike ``providers``, which withholds
-# itself from a hosted deployment because ``provider_credentials`` is keyed on
-# the instance name alone and one row would serve every tenant. These rows are
-# keyed on the organization, so a control plane is exactly where they belong.
+# reason.
 SURFACE = Surface("organization_guardrails")
 
 

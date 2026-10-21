@@ -1,4 +1,4 @@
-"""The caller's organization's model rate overrides (standalone mode only).
+"""The caller's organization's model rate overrides.
 
 Thin composition over `gateway.services.organization_pricing_service`: resolve
 the caller's identity, call the service, return its typed result. The overlap

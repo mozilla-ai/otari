@@ -112,7 +112,7 @@ class FederationTokenExchange:
                 if rule is None or not rule_matches(rule, identity):
                     raise FederationRefusedError("federation_no_rule")
                 api_key = await self._keys.get(rule.api_key_id)
-                if api_key is None or api_key.internal_secret is not None:
+                if api_key is None:
                     raise FederationRefusedError("federation_no_rule")
                 key_organization_id = await self._organization_of_workspace(api_key.workspace_id)
                 if key_organization_id is None or not grant_names_key(

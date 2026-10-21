@@ -1,6 +1,6 @@
 # Quickstart
 
-This guide runs a persistent standalone Otari with Docker Compose. For an
+This guide runs a persistent Otari with Docker Compose. For an
 ephemeral, no-clone example, use the [README quickstart](../README.md#quickstart).
 
 ## Prerequisites

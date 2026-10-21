@@ -1,12 +1,11 @@
 # Deployment
 
 Otari publishes `mzdotai/otari` on Docker Hub. Use the
-[Quickstart](quickstart.md) for local setup; this page covers production choices
-and hybrid gateways.
+[Quickstart](quickstart.md) for local setup; this page covers production choices.
 
-## Standalone checklist
+## Production checklist
 
-A durable standalone deployment should:
+A durable deployment should:
 
 - use PostgreSQL and back it up
 - set a strong master key in a secret store
@@ -85,44 +84,6 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 That page owns its current image tag, variables, platform limits, and
 maintenance instructions.
 
-## Connect a gateway to otari.ai
-
-Create a gateway in otari.ai and copy its gateway token, then start Otari in
-hybrid mode. Put the token in a private environment file:
-
-```dotenv
-OTARI_AI_TOKEN=gw_your_gateway_token
-```
-
-```bash
-docker run --rm -p 8000:8000 \
-  --env-file .env \
-  mzdotai/otari:0.4.0 \
-  otari serve
-```
-
-Hybrid mode does not initialize a local management database or use local
-provider credentials. Clients send an otari.ai user token to the gateway:
-
-```bash
-curl http://localhost:8000/api/v1/chat/completions \
-  -H "Authorization: Bearer tk_your_user_token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "openai/gpt-4o",
-    "messages": [{"role": "user", "content": "Say hello."}]
-  }'
-```
-
-Verify both liveness and control-plane reachability:
-
-```bash
-curl http://localhost:8000/api/v1/health
-curl http://localhost:8000/api/v1/health/readiness
-```
-
-See [Runtime modes](modes.md) for the trust and credential model.
-
 ## Optional services
 
 Compose profiles start the bundled service backends:
@@ -144,6 +105,24 @@ services are optional; requests that require an unconfigured backend fail
 without affecting ordinary inference.
 
 See [Built-in tools](tools.md) and [Guardrails](guardrails.md).
+
+## Upgrading from a runtime mode
+
+Earlier releases had runtime modes. Every deployment now serves management and
+inference from its own database, as a standalone deployment did. On upgrade:
+
+- Unset `OTARI_MODE` and `OTARI_AI_TOKEN`, and remove `mode:` from
+  `config.yml`. Otari ignores each of them with a startup warning.
+- Unset `OTARI_DATA_PLANE_URL` and remove `data_plane_url`, which are ignored
+  with a startup warning.
+- Remove a leftover `platform:` block from `config.yml`, which is ignored with a
+  warning. The `PLATFORM_*` and `STREAMING_FALLBACK_*` variables are no longer
+  read.
+- A former hosted deployment now serves inference and the Playground as well.
+  Set `OTARI_PROVIDER_ACCOUNT_PEPPER` if
+  `files_provider_upload_enabled` is on, since startup now requires it there
+  too. `web_search_workspace_default` and `code_execution_workspace_default`
+  left unset now mean on; set them to `false` to keep the old default.
 
 ## Configuration
 

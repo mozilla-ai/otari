@@ -41,7 +41,7 @@ class SearchToolCredential(Base):
     search row's enrichment instance. The API key is held encrypted
     (``secret_box``) and is optional, because a ``searxng`` backend is normally
     keyless; ``last4`` is kept in clear only so the UI can show which key is set
-    without ever decrypting. Standalone mode only.
+    without ever decrypting.
     """
 
     __tablename__ = "search_tool_credentials"
@@ -88,8 +88,7 @@ class WorkspaceMcpServer(Base):
     """One MCP server a workspace has configured, referenced by id from a request.
 
     Ported from otari-ai's ``mcp_server`` table (otari#658). A request names
-    stored servers with ``mcp_server_ids``; hybrid mode resolves those ids
-    through the platform and standalone mode resolves them here, against the
+    stored servers with ``mcp_server_ids``, resolved here against the
     workspace the request's key belongs to. There is no deployment-wide MCP
     server list for these rows to narrow, which is why MCP is the stated
     exception to the "a workspace row never grants" rule in
@@ -208,8 +207,7 @@ class WorkspaceCodeExecutionPolicy(Base):
     credential are operator concerns and never move here, see
     ``src/gateway/AGENTS.md``); this row says who on that deployment may ask
     for it and within which limits. Resolved at admission by
-    ``prepare_gateway_tools`` and applied to the tool loop, the standalone
-    counterpart of the hybrid path's ``/gateway/code-execution/resolve``.
+    ``prepare_gateway_tools`` and applied to the tool loop.
 
     A row may only *narrow*: ``enabled=False`` refuses the tool for this
     workspace, and the two limits are floored against the values a request
@@ -294,9 +292,7 @@ class WorkspaceWebSearchConfig(Base):
     What the workspace searches with is the deployment's instance, or its
     organization's own key (:class:`OrgWebSearchKey`), which this row never
     holds; this row says whether the workspace may search and how its searches
-    are constrained. Resolved at admission
-    by ``prepare_gateway_tools``, the standalone counterpart of the hybrid
-    path's ``/gateway/web-search/resolve``.
+    are constrained. Resolved at admission by ``prepare_gateway_tools``.
 
     A row may only *narrow*: ``enabled=False`` refuses ``otari_web_search`` for
     the workspace, ``max_results`` is floored against what the request asked
@@ -478,8 +474,6 @@ class WebToolCredentialSource(StrEnum):
 
     # The organization's own key, read from this deployment's rows.
     ORG = "org"
-    # The control plane's answer to a hybrid data plane's resolve.
-    HYBRID = "hybrid"
 
 
 @dataclass(frozen=True)

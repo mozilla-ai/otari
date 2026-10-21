@@ -363,7 +363,7 @@ and is the remaining check.
 - **Split `tabs.test.tsx`** if its header docstring is ever separable per
   component.
 - **Move the remaining poll cadences out of `queryKeys.ts`.** `BUILD_POLL_MS`,
-  `HEALTH_POLL_MS`, `MAINTENANCE_MODE_POLL_MS`, `PROVIDER_HEALTH_REFRESH_MS` and
+  `MAINTENANCE_MODE_POLL_MS`, `PROVIDER_HEALTH_REFRESH_MS` and
   `NO_RETRY` are query *options*, not keys, and each is read by exactly one domain
   module. They stayed because the constant block moved whole, with its comments,
   and cutting it into 43 individually-bounded pieces was the one place where the

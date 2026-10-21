@@ -27,6 +27,7 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from any_llm import LLMProvider
@@ -75,6 +76,16 @@ _PROVIDER_ENV_VARS = (
 def _no_ambient_provider_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in _PROVIDER_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_pricing_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the unpriced-upstream warning off the session double, which holds no pricing rows."""
+
+    async def _skip(*_args: object) -> None:
+        return None
+
+    monkeypatch.setattr(pipeline, "_warn_if_hosted_upstream_is_unpriced", _skip)
 
 
 class RecordingPort:
@@ -143,12 +154,9 @@ def _ctx(
 ) -> pipeline.RequestContext:
     return pipeline.RequestContext(
         config=config or GatewayConfig(),
-        db=None,
-        uow=None,
+        db=cast(AsyncSession, AsyncMock()),
+        uow=cast(Any, AsyncMock()),
         log_writer=cast(Any, object()),
-        hybrid_mode=False,
-        route=None,
-        user_token=None,
         api_key_id=None,
         user_id="user-1",
         rate_limit_info=None,
@@ -927,15 +935,9 @@ async def test_an_admission_that_does_not_commit_becomes_a_503(monkeypatch: pyte
     async def _commit_failed(_session: object) -> bool:
         return False
 
-    async def _no_pricing_check(*_args: object) -> None:
-        return None
-
     monkeypatch.setattr(pipeline, "release_session", _commit_failed)
-    # A session would otherwise send the unpriced-upstream warning to the database.
-    monkeypatch.setattr(pipeline, "_warn_if_hosted_upstream_is_unpriced", _no_pricing_check)
     billing = RecordingBilling()
     ctx = _ctx(resolved_provider=_uncredentialed())
-    ctx.db = cast(AsyncSession, object())
 
     with pytest.raises(HTTPException) as exc_info:
         await _dispatch_billed(ctx, _hosted_port(), cast(BillingPort, billing))

@@ -19,16 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.adapters.agent_model_recommender_adapter import DecisionProviderRecommender
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
-from gateway.adapters.code_execution_policy_adapter import LocalCodeExecutionPolicy, RemoteCodeExecutionPolicy
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
-from gateway.adapters.mcp_server_adapter import LocalMcpServers, RemoteMcpServers
 from gateway.adapters.model_provider_adapter import HostedProviderModelProviderAdapter
 from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
-from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy, RemoteWebSearchPolicy
 from gateway.container import (
     BootstrapError,
     Container,
@@ -192,7 +189,7 @@ def test_the_recommender_refuses_a_container_built_without_config() -> None:
 
 
 def test_the_model_provider_answers_nothing_without_a_unit_of_work() -> None:
-    """The hybrid data plane has no database, and the boot-time shape check passes none either."""
+    """The boot-time shape check passes no Unit of Work."""
     container = build_container(membership_listener=_no_membership_listener, workspace_listener=None)
 
     adapter = container.resolve(ModelProviderPort, NO_SESSION)
@@ -295,50 +292,12 @@ def test_mcp_servers_refuse_a_deployment_that_holds_the_rows_and_has_no_session(
         container.resolve(McpServerPort, NO_SESSION)
 
 
-def test_mcp_servers_need_no_session_where_a_peer_holds_the_rows() -> None:
-    """A deployment with a peer reads no rows of its own, so it is built without one."""
-    container = build_container(
-        config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}),
-        workspace_listener=None,
-    )
-
-    assert isinstance(container.resolve(McpServerPort, NO_SESSION), RemoteMcpServers)
-
-
-def test_mcp_servers_are_chosen_once_when_the_container_is_built() -> None:
-    """A config change after the build does not move the port to another plane."""
-    config = GatewayConfig()
-    container = build_container(config=config, workspace_listener=None)
-    config.mode = "hybrid"
-
-    assert isinstance(container.resolve(McpServerPort, A_SESSION), LocalMcpServers)
-
-
 def test_web_search_policy_refuses_a_deployment_that_holds_the_rows_and_has_no_session() -> None:
     """A deployment reading its own policy rows cannot do so without the request's session."""
     container = build_container(config=GatewayConfig(), workspace_listener=None)
 
     with pytest.raises(ContainerError, match="a session is required"):
         container.resolve(WebSearchPolicyPort, NO_SESSION)
-
-
-def test_web_search_policy_needs_no_session_where_a_peer_holds_the_rows() -> None:
-    """A deployment with a peer reads no rows of its own, so it is built without one."""
-    container = build_container(
-        config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}),
-        workspace_listener=None,
-    )
-
-    assert isinstance(container.resolve(WebSearchPolicyPort, NO_SESSION), RemoteWebSearchPolicy)
-
-
-def test_web_search_policy_is_chosen_once_when_the_container_is_built() -> None:
-    """A config change after the build does not move the port to another plane."""
-    config = GatewayConfig()
-    container = build_container(config=config, search_keys=_no_search_keys, workspace_listener=None)
-    config.mode = "hybrid"
-
-    assert isinstance(container.resolve(WebSearchPolicyPort, A_SESSION), LocalWebSearchPolicy)
 
 
 def test_the_stored_web_search_policy_refuses_to_build_without_a_search_key_resolver() -> None:
@@ -371,27 +330,6 @@ def test_code_execution_policy_refuses_a_deployment_that_holds_the_rows_and_has_
         container.resolve(CodeExecutionPolicyPort, NO_SESSION)
 
 
-def test_code_execution_policy_needs_no_session_where_a_peer_holds_the_rows() -> None:
-    """A deployment with a peer reads no rows of its own, so it is built without one."""
-    container = build_container(
-        config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}),
-        workspace_listener=None,
-    )
-
-    assert isinstance(container.resolve(CodeExecutionPolicyPort, NO_SESSION), RemoteCodeExecutionPolicy)
-
-
-def test_code_execution_policy_is_chosen_once_when_the_container_is_built() -> None:
-    """A config change after the build does not move the port to another plane."""
-    config = GatewayConfig()
-    container = build_container(
-        config=config, workspace_listener=None, code_execution_policies=_no_code_execution_policies
-    )
-    config.mode = "hybrid"
-
-    assert isinstance(container.resolve(CodeExecutionPolicyPort, A_SESSION), LocalCodeExecutionPolicy)
-
-
 def test_the_stored_code_execution_policy_refuses_to_build_without_a_policy_reader() -> None:
     container = build_container(config=GatewayConfig(), workspace_listener=None)
 
@@ -414,19 +352,8 @@ def test_the_stored_code_execution_policy_builds_its_reader_on_the_requests_sess
 
 
 @pytest.mark.parametrize("port", [CodeExecutionPolicyPort, McpServerPort, WebSearchPolicyPort])
-def test_workspace_ports_share_one_adapter_where_a_peer_holds_the_rows(port: type[Any]) -> None:
-    """A deployment with a peer serves every request from the one adapter it built at startup."""
-    container = build_container(
-        config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}),
-        workspace_listener=None,
-    )
-
-    assert container.resolve(port, NO_SESSION) is container.resolve(port, NO_SESSION)
-
-
-@pytest.mark.parametrize("port", [CodeExecutionPolicyPort, McpServerPort, WebSearchPolicyPort])
 def test_workspace_ports_refuse_a_container_built_without_config(port: type[Any]) -> None:
-    """With no config there are no planes to choose by, so resolving says so."""
+    """With no config the adapters cannot be built, so resolving says so."""
     container = build_container(workspace_listener=None)
 
     with pytest.raises(ContainerError, match=port.__name__):

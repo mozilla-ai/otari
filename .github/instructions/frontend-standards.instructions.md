@@ -210,8 +210,8 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    via `useDeployment`), `capability` (the entitlement axis, via `useEntitlements`), and
    `operatorOnly` (the caller axis, via `useDeploymentAdminAccess`), composed as AND by
    `useNavVisibility`. Do not fold one into another, and do not reach past them: a page
-   component that reads the gateway's mode itself, or infers it from an endpoint's 404, is
-   the scattered mode check this replaced. A new base capability belongs in
+   component that decides for itself what the deployment serves, or infers it from an
+   endpoint's 404, is the scattered check this replaced. A new base capability belongs in
    `BASE_CAPABILITIES`; an overlay's belongs in neither. Hiding a surface client-side is a
    convenience, never an authorization; the server still has to enforce it.
    - The caller axis is the odd one and stays narrow. It is about *who is signed in* where

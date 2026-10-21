@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing, suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -26,36 +26,16 @@ from gateway.model_labeling import relabel_model
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
 
-A = TypeVar("A")  # Attempt-like, opaque to this module
 C = TypeVar("C")  # Chunk type emitted by the upstream stream
 S = TypeVar("S")  # Settlement type, opaque to this module
 T = TypeVar("T")
 
 
-DEFAULT_FIRST_CHUNK_TIMEOUT_SECONDS = 2.0
 # Most chunks held behind a designated cost carrier, the carrier included. The
 # real terminal suffix is short (a usage chunk, or ``message_delta`` plus
 # ``message_stop``); anything longer means the carrier was not terminal, and the
 # stream resumes rather than waiting on settlement to release the rest.
 _MAX_TERMINAL_BUFFER_CHUNKS = 4
-
-
-@dataclass(frozen=True)
-class StreamingAttemptFailure:
-    """The reason an attempt was abandoned before any bytes were flushed.
-
-    ``error_class`` is the fine-grained classifier label used for logging and
-    upstream reporting (``timeout``, ``conn_err``, ``http_503``, ...). ``reason``
-    is the coarse phase bucket for metrics: ``build_error`` when opening the
-    stream failed, ``timeout`` when the first-chunk wait elapsed, or
-    ``upstream_error`` when the upstream raised before yielding a chunk.
-    ``is_final_attempt`` is true when no later planned fallback will run.
-    """
-
-    error_class: str
-    exception: BaseException
-    reason: str
-    is_final_attempt: bool
 
 
 class IncompleteStreamError(Exception):
@@ -256,7 +236,7 @@ async def streaming_generator(
             produced nothing for this long, including while terminal settlement is
             pending. 0 disables.
         settle_before_done: Buffer the designated terminal suffix and settle usage
-            before emitting it. Standalone callers leave this false.
+            before emitting it. Left false, settlement runs after the done marker.
         is_cost_carrier: Identifies a provider object that can carry cost. The last
             match in the stream wins, so a predicate that also matches a non-terminal
             object costs no buffering beyond the chunks between that match and the
@@ -457,138 +437,6 @@ async def streaming_generator(
             # Iterating the source never closes it, so a stream the client abandoned
             # would hold the provider's connection until garbage collection.
             await close_stream_quietly(stream)
-
-
-async def iterate_streaming_attempts(
-    attempts: Sequence[A],
-    build_stream: Callable[[A], Awaitable[AsyncIterator[C]]],
-    classify_error: Callable[[BaseException], tuple[bool, str]],
-    on_attempt_failed: Callable[[A, StreamingAttemptFailure], Awaitable[None]],
-    first_chunk_timeout_seconds: float = DEFAULT_FIRST_CHUNK_TIMEOUT_SECONDS,
-    final_attempt_extra_seconds: float = 0.0,
-    first_chunk_timeouts: Callable[[A], tuple[float, float]] | None = None,
-) -> tuple[A, AsyncIterator[C]]:
-    """Iterate over ``attempts`` until one yields its first chunk; return that
-    attempt and an iterator that re-emits the chunk followed by the rest of
-    the stream.
-
-    For each attempt:
-
-    1. ``build_stream(attempt)`` is awaited — typically wraps ``acompletion``.
-       If it raises, the error is classified, ``on_attempt_failed`` is called
-       so the caller can record per-attempt failure metadata (regardless of
-       whether the error is retryable), then retryable errors continue to the
-       next attempt and non-retryable errors propagate.
-    2. The first chunk is awaited under a per-attempt cap. For non-final
-       attempts the cap is ``first_chunk_timeout_seconds``, a failover trigger
-       that abandons a slow attempt so the next one in the plan is tried. The
-       final (or sole) attempt has nothing to fall over to, so it gets
-       ``first_chunk_timeout_seconds + final_attempt_extra_seconds``: extra grace
-       on top of the failover budget so a slow-but-valid first token still
-       streams, while the wait stays bounded (a genuinely hung upstream still
-       times out). If the wait times out or the upstream raises before yielding,
-       the same classification + ``on_attempt_failed`` logic applies.
-    3. Once a first chunk is in hand, we commit — the function returns and
-       the caller flushes the response. Errors after this point reach the
-       client; they cannot be hidden without buffering the entire stream.
-
-    This is the streaming-mode analogue of the non-streaming retry loop in
-    ``chat.py``. The contract is identical: ``on_attempt_failed`` records every
-    failed attempt, retryable failures skip-and-continue, non-retryable
-    failures propagate immediately, and the last exception is raised if every
-    attempt is exhausted with retryable failures.
-
-    ``first_chunk_timeouts`` gives an attempt its own pair of those two values,
-    in place of the ones above.
-
-    Latency contract: zero added latency in the success case — we hold the
-    first chunk only long enough to call this function's caller. In the
-    failure case, each abandoned non-final attempt costs at most
-    ``first_chunk_timeout_seconds``; the final attempt costs at most
-    ``first_chunk_timeout_seconds + final_attempt_extra_seconds``.
-    """
-    last_exception: BaseException | None = None
-    final_index = len(attempts) - 1
-
-    for index, attempt in enumerate(attempts):
-        is_final_attempt = index == final_index
-        try:
-            stream = await build_stream(attempt)
-        except BaseException as exc:
-            retryable, error_class = classify_error(exc)
-            await on_attempt_failed(
-                attempt,
-                StreamingAttemptFailure(
-                    error_class,
-                    exc,
-                    reason="build_error",
-                    is_final_attempt=is_final_attempt or not retryable,
-                ),
-            )
-            last_exception = exc
-            if not retryable:
-                raise
-            continue
-
-        # The failover cap only buys something when a next attempt exists, so the
-        # sole/final attempt gets extra grace on top of it rather than being cut
-        # off with nothing to fall over to.
-        attempt_timeout, final_extra = (
-            first_chunk_timeouts(attempt)
-            if first_chunk_timeouts is not None
-            else (first_chunk_timeout_seconds, final_attempt_extra_seconds)
-        )
-        if is_final_attempt:
-            attempt_timeout += final_extra
-
-        first_chunk: C
-        try:
-            first_chunk = await asyncio.wait_for(
-                stream.__anext__(),
-                timeout=attempt_timeout,
-            )
-        except StopAsyncIteration:
-            # Stream completed without yielding. Unusual but valid — commit
-            # with an empty iterator so the caller still gets a clean SSE
-            # close sequence rather than another upstream attempt.
-            return attempt, _empty_async_iter()
-        except asyncio.TimeoutError as exc:
-            await on_attempt_failed(
-                attempt,
-                StreamingAttemptFailure(
-                    "timeout",
-                    exc,
-                    reason="timeout",
-                    is_final_attempt=is_final_attempt,
-                ),
-            )
-            await close_stream_quietly(stream)
-            last_exception = exc
-            continue
-        except BaseException as exc:
-            retryable, error_class = classify_error(exc)
-            await on_attempt_failed(
-                attempt,
-                StreamingAttemptFailure(
-                    error_class,
-                    exc,
-                    reason="upstream_error",
-                    is_final_attempt=is_final_attempt or not retryable,
-                ),
-            )
-            await close_stream_quietly(stream)
-            last_exception = exc
-            if not retryable:
-                raise
-            continue
-
-        first: asyncio.Future[C] = asyncio.get_running_loop().create_future()
-        first.set_result(first_chunk)
-        return attempt, _Prefetched(first, stream)
-
-    if last_exception is not None:
-        raise last_exception
-    raise RuntimeError("iterate_streaming_attempts: no attempts provided")
 
 
 async def hold_for_first_chunk(stream: AsyncIterator[C], config: "GatewayConfig") -> AsyncIterator[C]:

@@ -35,8 +35,6 @@ INHERITED_HEADERS = {
     "X-RateLimit-Remaining": "Rate-limit convention clients already parse.",
     "X-RateLimit-Reset": "Rate-limit convention clients already parse.",
     "X-Subscription-Token": "The Brave Search API's own header.",
-    "X-Gateway-Token": "Platform wire contract; the platform must accept a new name first.",
-    "X-User-Token": "Platform wire contract; the platform must accept a new name first.",
     "x-should-retry": "The OpenAI and Anthropic SDKs' retry override, read under this name only.",
 }
 

@@ -34,7 +34,7 @@ import {
   catalogModelSummary,
   catalogResponse,
   organizationContext,
-  STANDALONE_SURFACES,
+  SURFACES,
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
@@ -356,7 +356,7 @@ function mockStream(frames: string[]) {
 const delta = (content: string) =>
   JSON.stringify({ choices: [{ delta: { content } }] })
 
-function renderPage({ surfaces = [...STANDALONE_SURFACES] } = {}) {
+function renderPage({ surfaces = [...SURFACES] } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -460,9 +460,7 @@ describe("the Playground before the first question", () => {
   it("points an operator at the organization's providers where Hosted providers is not published", async () => {
     mockApi({ catalog: { ...CATALOG, models: [] } })
     renderPage({
-      surfaces: STANDALONE_SURFACES.filter(
-        (surface) => surface !== "hosted_providers",
-      ),
+      surfaces: SURFACES.filter((surface) => surface !== "hosted_providers"),
     })
 
     expect(
