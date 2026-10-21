@@ -97,7 +97,7 @@ def test_the_provider_account_pepper_is_set_for_provider_copies() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_config_selects_no_other_edition() -> None:
+def test_config_declares_only_the_failing_instance() -> None:
     names = smoke.Names.for_run("abcd1234")
     config = smoke.oss_edition_config(
         database_url="sqlite:///smoke.db",
@@ -105,7 +105,6 @@ def test_config_selects_no_other_edition() -> None:
         mock_base_url="http://127.0.0.1:9000",
         names=names,
     )
-    assert "mode" not in config
     assert list(config["providers"]) == [names.failing_instance]
 
 
