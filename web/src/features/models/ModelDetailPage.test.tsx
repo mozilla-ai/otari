@@ -209,6 +209,9 @@ describe("ModelDetailPage", () => {
     )
 
     const offerings = screen.getByRole("grid", { name: "Offerings of GLM-5.3" })
+    expect(
+      within(offerings).getByRole("columnheader", { name: "Price from" }),
+    ).toBeInTheDocument()
     const rows = within(offerings).getAllByRole("row").slice(1)
     expect(rows).toHaveLength(2)
     // Cheapest first: Fireworks' sub-cent rate keeps its digits (otari#700).

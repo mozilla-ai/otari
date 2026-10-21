@@ -177,6 +177,10 @@ describe("PublicCatalogPage", () => {
       name: "Offerings of GLM-5.3",
     })
     expect(within(grid).getAllByRole("row")).toHaveLength(3)
+    // Where a price comes from is the deployment's business, not a visitor's.
+    expect(
+      within(grid).queryByRole("columnheader", { name: "Price from" }),
+    ).toBeNull()
     expect(screen.queryByRole("link", { name: "Edit rate" })).toBeNull()
     expect(screen.queryByRole("link", { name: "Set your rate" })).toBeNull()
     expect(screen.queryByRole("link", { name: /route across/ })).toBeNull()
