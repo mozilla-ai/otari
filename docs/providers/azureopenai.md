@@ -9,7 +9,7 @@ An `azureopenai` entry in your `config.yml` that reads a key from `AZURE_OPENAI_
 ## Prerequisites
 
 - Otari running locally (see the [Quickstart](../quickstart.md))
-- An Azure OpenAI or Microsoft Foundry resource with at least one model deployment, and a key from that resource's Keys and Endpoint page. Microsoft's [chat completions quickstart](https://learn.microsoft.com/azure/ai-foundry/openai/chatgpt-quickstart) shows where the key and the resource endpoint are.
+- An Azure OpenAI or Microsoft Foundry resource with at least one model deployment, and a credential: either a resource key from that resource's Keys and Endpoint page, or a Microsoft Entra access token for the scope `https://ai.azure.com/.default` issued to an identity with the Cognitive Services OpenAI User role on the resource. Microsoft's [v1 API](https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle) names that role and scope. Microsoft's [chat completions quickstart](https://learn.microsoft.com/azure/ai-foundry/openai/chatgpt-quickstart) shows where the key and the resource endpoint are.
 
 ## Configure
 
