@@ -129,6 +129,55 @@ describe("useOrganizationContext for a caller with no organization", () => {
     const { result } = renderHook(() => useDeploymentOperator(), { wrapper })
     await waitFor(() => expect(result.current.answer).toBe("unavailable"))
   })
+
+  it("reports a failed reread as a failure, not as the 404 before it", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const statuses = [404, 500]
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ detail: "x" }, { status: statuses.shift() ?? 500 }),
+    )
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children)
+    const { result } = renderHook(
+      () => ({
+        context: useOrganizationContext(),
+        operator: useDeploymentOperator(),
+      }),
+      { wrapper },
+    )
+    await waitFor(() =>
+      expect(result.current.operator.answer).toBe("no-organization"),
+    )
+
+    await act(() => client.refetchQueries({ queryKey: ORGANIZATION_CONTEXT }))
+
+    await waitFor(() =>
+      expect(result.current.operator.answer).toBe("unavailable"),
+    )
+    expect(result.current.context.data).toBeUndefined()
+    expect(result.current.context.error).toBeInstanceOf(ApiError)
+    expect((result.current.context.error as ApiError).status).toBe(500)
+  })
+
+  it("answers a refetch the caller awaits the same way", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ detail: "Organization not found" }, { status: 404 }),
+    )
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children)
+    const { result } = renderHook(() => useOrganizationContext(), { wrapper })
+    await waitFor(() => expect(result.current.isFetched).toBe(true))
+
+    const refetched = await act(() => result.current.refetch())
+
+    expect(refetched.data).toBeUndefined()
+    expect(isNoOrganizationError(refetched.error)).toBe(true)
+  })
 })
 
 describe("useSwitchOrganization", () => {

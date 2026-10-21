@@ -93,11 +93,29 @@ export function useOrganizationContext(
     staleTime: 60_000,
     enabled,
   })
-  if (query.data !== null) {
-    return query as UseQueryResult<OrganizationContext>
+  return {
+    ...asContextResult(query),
+    refetch: (options) => query.refetch(options).then(asContextResult),
+  }
+}
+
+// The cached `null` as callers see it. A later failure wins over the 404 it
+// followed: React Query keeps the last data beside a refetch error, and that
+// outage is not an answer about membership.
+function asContextResult(
+  result: UseQueryResult<OrganizationContext | null>,
+): UseQueryResult<OrganizationContext> {
+  if (result.data !== null) {
+    return result as UseQueryResult<OrganizationContext>
+  }
+  if (result.isError) {
+    return {
+      ...result,
+      data: undefined,
+    } as unknown as UseQueryResult<OrganizationContext>
   }
   return {
-    ...query,
+    ...result,
     data: undefined,
     error: NO_ORGANIZATION,
     isError: true,
