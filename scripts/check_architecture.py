@@ -1000,7 +1000,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/web_retrieval_backend.py",
     "gateway/services/web_retrieval_network.py",
     "gateway/services/web_retrieval_policy.py",
-    "gateway/services/web_search_backend.py",
     "gateway/services/web_search_providers.py",
     "gateway/services/workspace_scope.py",
 )

@@ -202,7 +202,7 @@ async def test_search_calls_are_metered_priced_and_spent(
         # so patching it there is what intercepts every iteration.
         patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
         patch(
-            "gateway.services.web_search_backend.WebSearchBackend._search_tool",
+            "gateway.services.web_retrieval_backend.WebSearchBackend._search_tool",
             new=AsyncMock(return_value="search results for otari"),
         ),
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
@@ -260,7 +260,7 @@ async def test_failed_search_is_counted_but_never_billed(
     with (
         patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
         patch(
-            "gateway.services.web_search_backend.WebSearchBackend._search_tool",
+            "gateway.services.web_retrieval_backend.WebSearchBackend._search_tool",
             new=AsyncMock(return_value="[tool error] backend unreachable"),
         ),
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
@@ -297,7 +297,7 @@ async def test_a_search_with_no_hits_is_billed_at_the_rate(
 
     with (
         patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
-        patch("gateway.services.web_search_backend.WebSearchBackend._search", new=AsyncMock(return_value=[])),
+        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search", new=AsyncMock(return_value=[])),
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
     ):
         response = client.post(

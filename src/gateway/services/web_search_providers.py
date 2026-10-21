@@ -1,6 +1,6 @@
 """Commercial search APIs as first-party web-search backends.
 
-:mod:`gateway.services.web_search_backend` dispatches the in-loop
+:mod:`gateway.services.web_retrieval_backend` dispatches the in-loop
 ``otari_web_search`` tool to a SearXNG-shaped backend. Reaching a licensed API
 (Tavily, Brave) that way used to mean running a translating adapter container
 next to the gateway, one per provider, each holding the provider's key. This

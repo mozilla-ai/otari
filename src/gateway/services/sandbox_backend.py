@@ -162,7 +162,7 @@ def code_execution_tool_definition() -> dict[str, Any]:
     Module-level, and returning a fresh dict per call, so the ``/v1/tools``
     discovery endpoint can advertise the same schema the tool loop injects without
     constructing a backend. Mirrors
-    :func:`gateway.services.web_search_backend.web_search_tool_definition`.
+    :func:`gateway.services.web_retrieval_backend.web_search_tool_definition`.
     """
     return {
         "type": "function",
