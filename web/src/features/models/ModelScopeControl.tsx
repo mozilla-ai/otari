@@ -4,7 +4,7 @@ import {
   type AccessListCopy,
   type AccessOption,
 } from "@/features/models/AccessListControl"
-import { providerInstanceOf } from "@/features/models/modelKey"
+import { providerInstanceOf, providerModelId } from "@/features/models/modelKey"
 import { canManage } from "@/features/organization/roles"
 import { useModels } from "@/shared/api/models"
 import {
@@ -14,6 +14,7 @@ import {
 } from "@/shared/api/organizations"
 import { useDeploymentProviderNames } from "@/shared/api/providers"
 import { useAliases } from "@/shared/api/routing"
+import { providerDisplayName } from "@/shared/helpers/providers"
 
 // The control is reused for two layers of the same allow-list grammar: a user's
 // default and a key's (narrower) override. The wording differs between them, so
@@ -54,6 +55,9 @@ export function ModelScopeControl({
   // (discovery failed or unsupported, nothing priced). An organization owner or
   // admin likewise gets one for each of its own provider keys: a key nobody has
   // refreshed offers no models, so GET /models lists nothing for it.
+  // Each option is named for a reader (the model, or "All OpenAI models") and
+  // keeps the stored selector findable in its hint, since that is what a key's
+  // allow-list and the gateway's refusals spell.
   const catalog = useMemo<AccessOption[]>(() => {
     const ids = (models.data?.data ?? [])
       .map((model) => model.id)
@@ -68,15 +72,23 @@ export function ModelScopeControl({
         ...ids.map((id) => providerInstanceOf(id) as string),
       ]),
     ].sort((a, b) => a.localeCompare(b))
+    const providerOf = (id: string) =>
+      providerDisplayName(providerInstanceOf(id) ?? "")
     const candidates: AccessOption[] = [
       ...instances.map((instance) => ({
         id: `${instance}:*`,
-        label: `${instance}:*  ·  all ${instance} models`,
+        label: `All ${providerDisplayName(instance)} models`,
+        hint: `${instance}:* · includes models added later`,
       })),
-      ...ids.map((id) => ({ id, label: id })),
+      ...ids.map((id) => ({
+        id,
+        label: providerModelId(id),
+        hint: providerOf(id),
+      })),
       ...(aliases.data ?? []).map((alias) => ({
         id: alias.target,
-        label: `${alias.name}  ·  alias`,
+        label: alias.name,
+        hint: `Alias for ${providerModelId(alias.target)} · ${providerOf(alias.target)}`,
       })),
     ]
     // First label wins, so a model keeps its own name over the alias that
@@ -96,7 +108,7 @@ export function ModelScopeControl({
   const catalogHint = models.isError
     ? "Could not load the model catalog. Reload to try again."
     : !models.isPending && catalog.length === 0
-      ? "No providers or models discovered yet. Configure a provider first, then scope this key."
+      ? "No providers or models discovered yet. Add a provider first."
       : null
 
   const copy: AccessListCopy = {
@@ -108,8 +120,8 @@ export function ModelScopeControl({
         <strong>every</strong> model until you change this access.
       </>
     ),
-    pickPrompt: "Pick at least one model below, or choose “Block all”.",
-    inputLabel: "Add a model",
+    pickPrompt: "Pick at least one model, or choose “Block all”.",
+    inputLabel: "Allowed models",
     placeholder: "Search providers, models, aliases…",
   }
 
@@ -125,10 +137,7 @@ export function ModelScopeControl({
       copy={copy}
       catalog={catalog}
       hint={catalogHint}
-      loadingMessage={
-        catalog.length === 0 ? "Loading the model catalog…" : null
-      }
-      showPicker={catalog.length > 0 || models.isPending}
+      loadingMessage={models.isPending ? "Loading the model catalog…" : null}
     />
   )
 }

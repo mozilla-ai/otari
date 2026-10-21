@@ -100,30 +100,33 @@ describe("ModelScopeControl", () => {
     const onChange = renderControl()
 
     // Every entry here has an "a" in it, so the filter keeps them all.
-    await user.type(screen.getByLabelText("Add a model"), "a")
-    // The stored entry is not offered again.
+    await user.type(
+      screen.getByRole("combobox", { name: "Allowed models" }),
+      "a",
+    )
+    // The stored entry stays listed, checked.
     expect(
-      screen.queryByRole("option", { name: "byok-openai:gpt-4o" }),
-    ).not.toBeInTheDocument()
+      screen.getByRole("option", { name: "gpt-4o (byok-openai)" }),
+    ).toHaveAttribute("aria-selected", "true")
     for (const name of [
-      "byok-anthropic:* · all byok-anthropic models",
-      "byok-openai:* · all byok-openai models",
-      "mzai:* · all mzai models",
-      "byok-anthropic:claude-haiku-4-5",
-      "byok-openai:gpt-4o-mini",
-      "mzai:llama-4",
+      "All byok-anthropic models (byok-anthropic:* · includes models added later)",
+      "All byok-openai models (byok-openai:* · includes models added later)",
+      "All Mozilla AI models (mzai:* · includes models added later)",
+      "claude-haiku-4-5 (byok-anthropic)",
+      "gpt-4o-mini (byok-openai)",
+      "llama-4 (Mozilla AI)",
     ]) {
       expect(await screen.findByRole("option", { name })).toBeInTheDocument()
     }
+    // A bare name is no selector, and the alias resolves to a model already
+    // listed, which keeps its own name.
     expect(
-      screen.queryByRole("option", { name: "fast" }),
-    ).not.toBeInTheDocument()
-    // The alias resolves to a model already listed, which keeps its own name.
-    expect(
-      screen.queryByRole("option", { name: "fast · alias" }),
+      screen.queryByRole("option", { name: /^fast/ }),
     ).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole("option", { name: "mzai:llama-4" }))
+    await user.click(
+      screen.getByRole("option", { name: "llama-4 (Mozilla AI)" }),
+    )
     expect(onChange).toHaveBeenLastCalledWith(
       ["byok-openai:gpt-4o", "mzai:llama-4"],
       true,
@@ -144,10 +147,13 @@ describe("ModelScopeControl", () => {
     const user = userEvent.setup()
     renderControl()
 
-    await user.type(screen.getByLabelText("Add a model"), "l")
+    await user.type(
+      screen.getByRole("combobox", { name: "Allowed models" }),
+      "l",
+    )
     expect(
       await screen.findByRole("option", {
-        name: "local-vllm:* · all local-vllm models",
+        name: /^All local-vllm models/,
       }),
     ).toBeInTheDocument()
     expect(urls.some((url) => url.endsWith(`${API_ROOT}/providers`))).toBe(true)
@@ -162,10 +168,13 @@ describe("ModelScopeControl", () => {
     const user = userEvent.setup()
     renderControl()
 
-    await user.type(screen.getByLabelText("Add a model"), "m")
+    await user.type(
+      screen.getByRole("combobox", { name: "Allowed models" }),
+      "m",
+    )
     expect(
       await screen.findByRole("option", {
-        name: "my-vllm:* · all my-vllm models",
+        name: /^All my-vllm models/,
       }),
     ).toBeInTheDocument()
   })
@@ -203,9 +212,14 @@ describe("ModelScopeControl", () => {
       await screen.findByText(/Could not load the model catalog/),
     ).toBeInTheDocument()
     // What did load stays pickable.
-    await user.type(await screen.findByLabelText("Add a model"), "fast")
+    await user.type(
+      await screen.findByRole("combobox", { name: "Allowed models" }),
+      "fast",
+    )
     expect(
-      await screen.findByRole("option", { name: "fast · alias" }),
+      await screen.findByRole("option", {
+        name: "fast (Alias for gpt-4o-mini · byok-openai)",
+      }),
     ).toBeInTheDocument()
   })
 
@@ -225,18 +239,19 @@ describe("ModelScopeControl", () => {
     const user = userEvent.setup()
     const onChange = renderControl()
 
-    await user.type(await screen.findByLabelText("Add a model"), "i")
+    await user.type(
+      await screen.findByRole("combobox", { name: "Allowed models" }),
+      "i",
+    )
     await user.click(
-      await screen.findByRole("option", {
-        name: "openai:* · all openai models",
-      }),
+      await screen.findByRole("option", { name: /^All OpenAI models/ }),
     )
     expect(onChange).toHaveBeenLastCalledWith(
       ["byok-openai:gpt-4o", "openai:*"],
       true,
     )
     expect(
-      screen.queryByRole("option", { name: /mistral/ }),
+      screen.queryByRole("option", { name: /Mistral/ }),
     ).not.toBeInTheDocument()
   })
 
@@ -250,11 +265,12 @@ describe("ModelScopeControl", () => {
     const user = userEvent.setup()
     renderControl()
 
-    await user.type(await screen.findByLabelText("Add a model"), "openai:*")
+    await user.type(
+      await screen.findByRole("combobox", { name: "Allowed models" }),
+      "openai:*",
+    )
     expect(
-      await screen.findAllByRole("option", {
-        name: "openai:* · all openai models",
-      }),
+      await screen.findAllByRole("option", { name: /^All OpenAI models/ }),
     ).toHaveLength(1)
   })
 
