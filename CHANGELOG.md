@@ -4,6 +4,16 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.31.1](https://github.com/mozilla-ai/otari/releases/tag/v0.31.1) - 2026-10-21
+
+
+
+### Bug Fixes
+
+- **passthrough:** Send the request id and record it on the usage rows, as completions do in [#2539](https://github.com/mozilla-ai/otari/pull/2539) by [@daavoo](https://github.com/daavoo) ([`2d13731`](https://github.com/mozilla-ai/otari/commit/2d1373162de028af71f4fb67b2bcbd905159cc3a))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.31.0...v0.31.1
 ## [0.31.0](https://github.com/mozilla-ai/otari/releases/tag/v0.31.0) - 2026-10-21
 
 
@@ -23,6 +33,7 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 - **BREAKING:** **messages:** Answer every Messages error in Anthropic's envelope in [#2505](https://github.com/mozilla-ai/otari/pull/2505) by [@hasangzl](https://github.com/hasangzl) ([`b5a3e56`](https://github.com/mozilla-ai/otari/commit/b5a3e56aabc668863a397dc95807a10b8bef0e83))
 - **dashboard:** Trim pricing provenance from the model catalog pages in [#2518](https://github.com/mozilla-ai/otari/pull/2518) by [@tbille](https://github.com/tbille) ([`5ce3fde`](https://github.com/mozilla-ai/otari/commit/5ce3fde7983cbfa83f2280b14fecaae6f4868fc3))
 - **dashboard:** Let a page scroll clear of a control fixed to the corner in [#2526](https://github.com/mozilla-ai/otari/pull/2526) by [@tbille](https://github.com/tbille) ([`6a8205d`](https://github.com/mozilla-ai/otari/commit/6a8205d55ca0875c1cd4915a3fff8a4f15a97234))
+- **health-checks:** Redact probe errors with the shared upstream redactor in [#2524](https://github.com/mozilla-ai/otari/pull/2524) by [@claude[bot]](https://github.com/claude[bot]) ([`0f8fac1`](https://github.com/mozilla-ai/otari/commit/0f8fac1921ef64d9f0fe4d787ca7604ff31bdc0b))
 
 
 ### Features
