@@ -88,6 +88,11 @@ Otari need it to stand alone? Yes puts it in the core, and no in an overlay.
   with no bootstrap configured.
 - Flag a concrete adapter named anywhere but the composition root,
   `container.py`.
+- Flag overlay code that sees customer content (prompts, completions, tool
+  inputs and outputs, search queries, sandbox code, file bytes, captured
+  agent telemetry) outside an Otari port, and a change that removes or stubs
+  out the core's working adapter for such a port. An overlay may replace that
+  adapter; the core must keep one that works.
 
 ## Table writers
 
