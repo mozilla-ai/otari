@@ -152,9 +152,20 @@ gateway process rather than to any organization on it:
   automatically at startup. Any that could not be moved are listed in a banner
   with the reason: once the cause is fixed, move it from there, or Discard it,
   since a row left behind serves nothing.
+- Web search pricing and Code execution pricing, what the deployment charges
+  per successful call of a tool it runs itself. Web search pricing lists the
+  `otari:web_search` and `otari:web_fetch` rates and each search and fetch
+  instance's own rate, saying which rate an instance with none of its own falls
+  back to. Code execution pricing lists `otari:code_execution`. Edit sets a
+  rate in dollars per call, in force from the moment it is saved, and 0 prices a
+  tool as free. An instance whose rate comes from `price_per_call` in
+  `config.yml` is marked and changed there. With `require_pricing` on, the page
+  warns while a tool it lists has no rate, because a request that would run it
+  is refused. See [Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool).
 
 Accounts and Hosted providers are listed only for a deployment operator, and
-answer anyone else that they are not available to them.
+answer anyone else that they are not available to them. The two pricing pages
+are listed for one too, and say the same to anyone else who opens them.
 
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the

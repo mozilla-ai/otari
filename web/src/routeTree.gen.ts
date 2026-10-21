@@ -29,7 +29,9 @@ import { Route as ToolsRouteImport } from './routes/tools'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
+import { Route as AdminCodeExecutionRouteImport } from './routes/admin.code-execution'
 import { Route as AdminHostedProvidersRouteImport } from './routes/admin.hosted-providers'
+import { Route as AdminWebSearchRouteImport } from './routes/admin.web-search'
 import { Route as ModelsIndexRouteImport } from './routes/models.index'
 import { Route as ModelsSplatRouteImport } from './routes/models.$'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
@@ -147,9 +149,19 @@ const AdminAccountsRoute = AdminAccountsRouteImport.update({
   path: '/admin/accounts',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminCodeExecutionRoute = AdminCodeExecutionRouteImport.update({
+  id: '/admin/code-execution',
+  path: '/admin/code-execution',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminHostedProvidersRoute = AdminHostedProvidersRouteImport.update({
   id: '/admin/hosted-providers',
   path: '/admin/hosted-providers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminWebSearchRoute = AdminWebSearchRouteImport.update({
+  id: '/admin/web-search',
+  path: '/admin/web-search',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ModelsIndexRoute = ModelsIndexRouteImport.update({
@@ -255,7 +267,9 @@ export interface FileRoutesByFullPath {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
+  '/admin/web-search': typeof AdminWebSearchRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -290,7 +304,9 @@ export interface FileRoutesByTo {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
+  '/admin/web-search': typeof AdminWebSearchRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -330,7 +346,9 @@ export interface FileRoutesById {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
+  '/admin/web-search': typeof AdminWebSearchRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -371,7 +389,9 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/admin/code-execution'
     | '/admin/hosted-providers'
+    | '/admin/web-search'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -406,7 +426,9 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/admin/code-execution'
     | '/admin/hosted-providers'
+    | '/admin/web-search'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -445,7 +467,9 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/admin/code-execution'
     | '/admin/hosted-providers'
+    | '/admin/web-search'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -485,7 +509,9 @@ export interface RootRouteChildren {
   UsageRoute: typeof UsageRoute
   WorkspacesRoute: typeof WorkspacesRoute
   AdminAccountsRoute: typeof AdminAccountsRoute
+  AdminCodeExecutionRoute: typeof AdminCodeExecutionRoute
   AdminHostedProvidersRoute: typeof AdminHostedProvidersRoute
+  AdminWebSearchRoute: typeof AdminWebSearchRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -630,11 +656,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAccountsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/code-execution': {
+      id: '/admin/code-execution'
+      path: '/admin/code-execution'
+      fullPath: '/admin/code-execution'
+      preLoaderRoute: typeof AdminCodeExecutionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/hosted-providers': {
       id: '/admin/hosted-providers'
       path: '/admin/hosted-providers'
       fullPath: '/admin/hosted-providers'
       preLoaderRoute: typeof AdminHostedProvidersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/web-search': {
+      id: '/admin/web-search'
+      path: '/admin/web-search'
+      fullPath: '/admin/web-search'
+      preLoaderRoute: typeof AdminWebSearchRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/models/': {
@@ -841,7 +881,9 @@ const rootRouteChildren: RootRouteChildren = {
   UsageRoute: UsageRoute,
   WorkspacesRoute: WorkspacesRoute,
   AdminAccountsRoute: AdminAccountsRoute,
+  AdminCodeExecutionRoute: AdminCodeExecutionRoute,
   AdminHostedProvidersRoute: AdminHostedProvidersRoute,
+  AdminWebSearchRoute: AdminWebSearchRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

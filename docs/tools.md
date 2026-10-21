@@ -153,7 +153,9 @@ otari:web_search
 otari:web_fetch
 ```
 
-The dashboard accepts dollars per call. The pricing API stores the value in
+The dashboard's Web search pricing and Code execution pricing pages, in the
+deployment view, set these rates and each search or fetch instance's own, in
+dollars per call. The pricing API stores the value in
 `input_price_per_million`, so one cent per call is `10000`.
 
 With `require_pricing: true`, a gateway-run tool whose calls no row would price
@@ -273,9 +275,9 @@ Set the rate at about what one search costs: it is what a search holds against
 the caller's budget before it runs, and it is billed when the provider reports
 no charge of its own. A provider's reported charge still comes first. A zero
 rate is valid too and bills as before, but holds nothing. A row written as
-`exa:exa-search` before tools had a kind still counts. The dashboard cannot
-price a tool yet, so use the configuration file or the API; `otari:web_search`
-can also be set on the dashboard's Tools & Guardrails screen.
+`exa:exa-search` before tools had a kind still counts. The dashboard's Web
+search pricing page sets a tool's rate too, except one written from
+`price_per_call`, which the configuration file restores on every start.
 `require_pricing: false` serves unpriced searches again, and unpriced models with
 them. And whether `require_pricing` is on or not, an organization's own pricing
 override no longer prices a search on one of the deployment's tools.

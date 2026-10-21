@@ -374,7 +374,7 @@ const ORGANIZATION_NAV_SECTIONS = [
  * separate it from, and a heading inside a context already named Deployment
  * would read as "Deployment, Deployment, Settings".
  *
- * Both rows keep the refusal they declare, which is the axis the server
+ * Every row keeps the refusal it declares, which is the axis the server
  * enforces and not a property of which rail draws them.
  */
 const DEPLOYMENT_SECTIONS = [
@@ -404,6 +404,23 @@ const DEPLOYMENT_SECTIONS = [
         surface: "hosted_providers",
         operatorOnly: "unlisted",
         icon: FiCpu,
+      },
+      // What the deployment charges per call of the tools it runs itself, as
+      // Hosted providers is for its models. Refused rather than unlisted:
+      // `/pricing` answers a non-operator 403.
+      {
+        to: "/admin/web-search",
+        label: "Web search pricing",
+        surface: "pricing",
+        operatorOnly: "refused",
+        icon: FiGlobe,
+      },
+      {
+        to: "/admin/code-execution",
+        label: "Code execution pricing",
+        surface: "pricing",
+        operatorOnly: "refused",
+        icon: FiCode,
       },
       {
         to: "/health-checks",

@@ -90,6 +90,8 @@ describe("nav registry", () => {
       "Settings",
       "Accounts",
       "Hosted providers",
+      "Web search pricing",
+      "Code execution pricing",
       "Health",
     ])
   })
@@ -131,6 +133,8 @@ describe("nav registry", () => {
       "/settings",
       "/admin/accounts",
       "/admin/hosted-providers",
+      "/admin/web-search",
+      "/admin/code-execution",
       "/health-checks",
     ])
   })
@@ -151,6 +155,8 @@ describe("nav registry", () => {
       "/settings",
       "/admin/accounts",
       "/admin/hosted-providers",
+      "/admin/web-search",
+      "/admin/code-execution",
       "/health-checks",
     ])
     // And on neither of the others. A destination drawn on two rails would
@@ -161,6 +167,8 @@ describe("nav registry", () => {
     expect(others).not.toContain("/settings")
     expect(others).not.toContain("/admin/accounts")
     expect(others).not.toContain("/admin/hosted-providers")
+    expect(others).not.toContain("/admin/web-search")
+    expect(others).not.toContain("/admin/code-execution")
     expect(others).not.toContain("/health-checks")
   })
 
@@ -175,6 +183,8 @@ describe("nav registry", () => {
       ["/settings", "settings", "refused"],
       ["/admin/accounts", "admin", "unlisted"],
       ["/admin/hosted-providers", "hosted_providers", "unlisted"],
+      ["/admin/web-search", "pricing", "refused"],
+      ["/admin/code-execution", "pricing", "refused"],
       ["/health-checks", "health_checks", "refused"],
     ] as const) {
       const item = navItemForPath(to)

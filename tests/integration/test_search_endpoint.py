@@ -1346,8 +1346,8 @@ def test_an_unpriced_search_is_refused_with_402_naming_its_row(
     assert "no price the deployment's operator set" in detail
     assert len(detail) <= 400
     assert f"POST {API_ROOT}/pricing" in detail
-    # The dashboard can set only otari:web_search, not an instance's row.
-    assert "Tools & Guardrails" not in detail
+    # The dashboard prices an instance's own row too.
+    assert "Web search pricing page" in detail
     run.assert_not_called()
     (row,) = _search_rows(strict_client, master_key_header, "unpriced-search")
     assert (row["status"], row["status_code"], row["error_message"]) == ("error", 402, detail)
@@ -1513,7 +1513,7 @@ def test_a_search_the_workspaces_own_key_serves_needs_the_web_search_row(
     assert refused.status_code == 402, refused.text
     detail = refused.json()["detail"]
     assert "'otari:web_search'" in detail
-    assert "Tools & Guardrails" in detail
+    assert "Web search pricing page" in detail
     assert served.status_code == 200, served.text
     keyed.assert_awaited_once()
 

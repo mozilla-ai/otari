@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 
 from gateway.core.config import GatewayConfig
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tools import (
     NO_WEB_TOOLS,
     WEB_FETCH_TOOL_NAME,
@@ -119,4 +120,12 @@ def test_the_refusal_names_the_row_that_prices_any_of_the_tools_calls() -> None:
 
     assert "'web_search' has no pricing" in detail
     assert "model_key 'otari:web_search'" in detail
+    assert "Web search pricing page" in detail
     assert "require_pricing" in detail
+
+
+def test_the_code_execution_refusal_names_its_own_dashboard_page() -> None:
+    detail = unpriced_tool_detail(CODE_EXECUTION_TOOL_NAME)
+
+    assert "model_key 'otari:code_execution'" in detail
+    assert "Code execution pricing page" in detail

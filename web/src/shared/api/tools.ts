@@ -86,11 +86,19 @@ export function useUpdateToolSettings() {
 
 // Search tools served by POST /v1/search: the editable rows plus the read-only
 // config-file entries, so the page can show every tool a caller could name.
-export function useSearchTools() {
+// `fetch` lists the fetch instances instead, `builtin_fetch` among them.
+export function useSearchTools(
+  kind: "search" | "fetch" = "search",
+  enabled = true,
+) {
   return useQuery({
-    queryKey: [SEARCH_TOOLS],
-    queryFn: () => apiFetch<SearchToolsResponse>("/search-tools"),
+    queryKey: [SEARCH_TOOLS, kind],
+    queryFn: () =>
+      apiFetch<SearchToolsResponse>(
+        kind === "search" ? "/search-tools" : "/search-tools?kind=fetch",
+      ),
     staleTime: 60_000,
+    enabled,
   })
 }
 

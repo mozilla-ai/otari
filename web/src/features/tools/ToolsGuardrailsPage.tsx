@@ -13,7 +13,7 @@ import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { AdvancedRows } from "@/features/tools/AdvancedRows"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
 import type { FieldCopy } from "@/features/tools/ToolSettingRows"
-import { ToolPriceRow, ToolSettingRow } from "@/features/tools/ToolSettingRows"
+import { ToolSettingRow } from "@/features/tools/ToolSettingRows"
 import {
   ToolStatusGroup,
   ToolStatusRow,
@@ -22,7 +22,6 @@ import { WorkspaceCodeExecutionPolicyCard } from "@/features/tools/WorkspaceCode
 import { WorkspaceMcpServersCard } from "@/features/tools/WorkspaceMcpServersCard"
 import { WorkspaceWebSearchCard } from "@/features/tools/WorkspaceWebSearchCard"
 import { useDeploymentOperator } from "@/shared/api/organizations"
-import { usePricing, useSetPricing } from "@/shared/api/pricing"
 import {
   useToolSettings,
   useTools,
@@ -131,7 +130,6 @@ function copyFor(field: ToolSettingField): FieldCopy & {
 
 interface ManagedToolSpec {
   toolId: string
-  pricingKey: string
   /**
    * Whether the service's backend URL is what this tool waits on. A tool gated
    * on anything else must not be sent to that field, which would not turn it on.
@@ -153,8 +151,8 @@ interface GroupSpec {
   /** A heading in `docs/tools.md`. */
   docsAnchor: string
   keys: string[]
-  /** The group the tool's own per-call price belongs in. */
-  isPriced?: boolean
+  /** Where the service's per-call prices are set, linked from this group. */
+  pricingPage?: "/admin/web-search" | "/admin/code-execution"
   /** Where a key the backend added but this page has not been told about goes. */
   catchAll?: boolean
   /** Keys collapsed under an Advanced row at the end of the group. */
@@ -184,13 +182,11 @@ const SERVICES: ServiceSpec[] = [
     managedTools: [
       {
         toolId: "otari_web_search",
-        pricingKey: "otari:web_search",
         urlBacked: true,
         help: "Lets the model search the web for current information.",
       },
       {
         toolId: "otari_web_fetch",
-        pricingKey: "otari:web_fetch",
         // Fetch has no backend of its own, so the default "no backend" reason
         // would send an operator to a URL field that cannot turn it on. It is
         // off unless the deployment says otherwise, and the switch is
@@ -215,7 +211,7 @@ const SERVICES: ServiceSpec[] = [
           "web_search_extract",
           "web_search_intercept",
         ],
-        isPriced: true,
+        pricingPage: "/admin/web-search",
         catchAll: true,
         isOperatorOnly: true,
       },
@@ -231,7 +227,6 @@ const SERVICES: ServiceSpec[] = [
     managedTools: [
       {
         toolId: "otari_code_execution",
-        pricingKey: "otari:code_execution",
         urlBacked: true,
         unavailableSummary: "Unavailable · no sandbox",
         unavailableHelp:
@@ -246,7 +241,7 @@ const SERVICES: ServiceSpec[] = [
         docsAnchor: "code-execution",
         keys: ["sandbox_url"],
         advanced: ["sandbox_session_image", "code_execution_executor"],
-        isPriced: true,
+        pricingPage: "/admin/code-execution",
         catchAll: true,
         isOperatorOnly: true,
       },
@@ -294,6 +289,27 @@ function SandboxProviderRow({ provider }: { provider: "protocol" | "e2b" }) {
   )
 }
 
+/** Where the service's tools are priced: the deployment's page, not this one. */
+function PricingLinkRow({
+  to,
+}: {
+  to: "/admin/web-search" | "/admin/code-execution"
+}) {
+  return (
+    <SettingRow
+      label="Price per call"
+      help="Set for the whole deployment, beside its other tool rates."
+      control={
+        <Link to={to} className="font-medium text-link hover:text-link-hover">
+          {to === "/admin/web-search"
+            ? "Web search pricing"
+            : "Code execution pricing"}
+        </Link>
+      }
+    />
+  )
+}
+
 /** The frames, at the real row height, so settings arriving does not move the page. */
 function LoadingGroups() {
   return (
@@ -336,28 +352,13 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   // below. Of the deployment-wide reads above them, the tool settings answer a
   // tenant without the service endpoints in them (otari-ai#1969), and the tool
   // list is a catalog read any session may make, so both are asked
-  // unconditionally. The pricing rows
-  // and the /api/v1/search tools stay operator-only on the server, so they are
-  // still gated on the same answer the sidebar uses rather than fired into a 403.
+  // unconditionally. The /api/v1/search tools stay operator-only on the
+  // server, so they are still gated on the same answer the sidebar uses rather
+  // than fired into a 403.
   const { isOperator } = useDeploymentOperator()
   const query = useToolSettings()
   const tools = useTools()
-  const pricing = usePricing(isOperator)
-  const setPricing = useSetPricing()
   const update = useUpdateToolSettings()
-
-  // Latest rate per key. /api/v1/pricing is history-shaped (one row per
-  // effective_at), and the newest row is the one in force. A gateway tool's
-  // rate is a model-kind row; a search tool's own is priced on its card.
-  const currentRates = (pricing.data ?? [])
-    .filter((row) => row.kind === "model")
-    .reduce(
-      (rates, row) =>
-        rates.has(row.model_key)
-          ? rates
-          : rates.set(row.model_key, row.input_price_per_million),
-      new Map<string, number>(),
-    )
 
   const data = query.data
   const disabled = !data
@@ -507,12 +508,12 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                 ...(group.catchAll ? unlisted : []),
               ]
               const advanced = fieldsFor(group.advanced ?? [])
-              // Operator-only inside a group a member also sees: the rate
-              // comes from /api/v1/pricing, whose read is still operator-gated, so
-              // a member would get an editable "unpriced" row that can only
-              // fail on save.
-              const pricedTools =
-                group.isPriced && isOperator ? (service.managedTools ?? []) : []
+              // Operator-only inside a group a member also sees: the page it
+              // links to is the deployment's, which refuses anyone else.
+              const pricingRow =
+                group.pricingPage && isOperator ? (
+                  <PricingLinkRow to={group.pricingPage} />
+                ) : null
               const providerRow =
                 service.key === "sandbox" && sandboxProvider ? (
                   <SandboxProviderRow provider={sandboxProvider} />
@@ -520,7 +521,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
               if (
                 fields.length === 0 &&
                 advanced.length === 0 &&
-                pricedTools.length === 0 &&
+                !pricingRow &&
                 !providerRow
               )
                 return null
@@ -539,32 +540,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                 >
                   {providerRow}
                   {fields.map(renderField)}
-                  {pricedTools.map(({ pricingKey }) => (
-                    <ToolPriceRow
-                      key={pricingKey}
-                      pricingKey={pricingKey}
-                      configured={currentRates.get(pricingKey) ?? null}
-                      commit={(perMillion) =>
-                        setPricing.mutateAsync({
-                          model_key: pricingKey,
-                          input_price_per_million: perMillion,
-                          // A tool call is one unit; there is no output side
-                          // of it to price.
-                          output_price_per_million: 0,
-                          unit: "requests",
-                        })
-                      }
-                      // Also disabled when the load failed: an errored query
-                      // leaves the rate unknown, and a blur would overwrite a
-                      // price nobody can see.
-                      disabled={pricing.isLoading || Boolean(pricing.error)}
-                      loadError={
-                        pricing.error
-                          ? "Could not read the current price. Reload before editing."
-                          : undefined
-                      }
-                    />
-                  ))}
+                  {pricingRow}
                   {advanced.length > 0 ? (
                     <AdvancedRows>{advanced.map(renderField)}</AdvancedRows>
                   ) : null}

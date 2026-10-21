@@ -89,9 +89,10 @@ def configured_tools_to_price(config: GatewayConfig) -> list[PricedTool]:
 def unpriced_tool_detail(name: str) -> str:
     """The refusal of a request that would run ``name`` with no price, naming the row that prices any of its calls."""
     key = gateway_tool_pricing_key(name)
+    page = "Code execution pricing" if name == CODE_EXECUTION_TOOL_NAME else "Web search pricing"
     return (
         f"The gateway tool '{name}' has no pricing, and this gateway runs with "
         "require_pricing enabled, so it will not run work it cannot bill. Set a "
         f"per-request price for model_key '{key}' (POST {API_ROOT}/pricing, or the dashboard's "
-        "Tools & Guardrails screen), or set require_pricing to false to serve it unpriced."
+        f"{page} page), or set require_pricing to false to serve it unpriced."
     )
