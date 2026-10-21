@@ -8911,6 +8911,11 @@ export interface components {
             response_format?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Safety Identifier
+             * @description A stable id for the end user, as OpenAI defines it. Wins over `user` as the tag the provider's end-user identifier is derived from, and never reaches the provider as sent.
+             */
+            safety_identifier?: string | null;
             /** Seed */
             seed?: number | null;
             /** Service Tier */

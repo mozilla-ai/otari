@@ -834,7 +834,7 @@ def test_a_completion_cannot_be_billed_to_a_workspace_that_is_not_the_caller_s(
 
 
 def test_a_body_user_cannot_choose_the_provider_end_user_identifier(client: TestClient, world: _World) -> None:
-    """The identifier is the caller's own, whatever ``user`` the body names.
+    """The identifier is the caller's own, whatever ``user`` or ``safety_identifier`` the body names.
 
     An API key may name an end user, so a member who could do the same here
     could take on the identifier a key's end user is known by upstream.
@@ -851,6 +851,7 @@ def test_a_body_user_cannot_choose_the_provider_end_user_identifier(client: Test
                 "model": "openai:gpt-4o-mini",
                 "messages": [{"role": "user", "content": "hi"}],
                 "user": "shared-tag-alpha",
+                "safety_identifier": "shared-tag-beta",
             },
             params=_ws(world),
         )

@@ -120,6 +120,41 @@ def test_a_user_tag_replaces_the_resolved_user(make_client: ClientFactory, captu
     assert captured[0]["user"] == upstream_user_identifier(workspace, "end-user-7", None)
 
 
+def test_each_safety_identifier_on_one_key_gets_its_own_identifier(
+    make_client: ClientFactory, captured: list[dict[str, Any]]
+) -> None:
+    """End users behind one key are told apart upstream, and neither names a user to bill."""
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers, safety_identifier="a")
+    _chat(client, headers, safety_identifier="b")
+
+    assert captured[0]["user"] == upstream_user_identifier(workspace, "a", None)
+    assert captured[1]["user"] == upstream_user_identifier(workspace, "b", None)
+    assert "safety_identifier" not in captured[0]
+
+
+def test_a_safety_identifier_wins_over_user(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers, user="alice", safety_identifier="end-user-7")
+
+    assert captured[0]["user"] == upstream_user_identifier(workspace, "end-user-7", None)
+
+
+def test_meta_never_gets_the_callers_safety_identifier(
+    make_client: ClientFactory, captured: list[dict[str, Any]]
+) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers, model="meta:Llama-4-Maverick-17B-128E-Instruct-FP8", safety_identifier="end-user-7")
+
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "end-user-7", None)
+
+
 def test_echoing_your_own_user_gives_the_same_identifier(
     make_client: ClientFactory, captured: list[dict[str, Any]]
 ) -> None:
@@ -219,9 +254,9 @@ def test_turned_off_nothing_is_sent(make_client: ClientFactory, captured: list[d
     client = make_client(provider_user_identifier_enabled=False)
     headers, _ = _keyed_user(client)
 
-    _chat(client, headers, user="alice")
+    _chat(client, headers, user="alice", safety_identifier="alice")
 
-    assert not {"user", UPSTREAM_USER_FIELD} & set(captured[0])
+    assert not {"user", "safety_identifier", UPSTREAM_USER_FIELD} & set(captured[0])
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +350,18 @@ def test_hybrid_prefers_the_callers_tag(
     assert hybrid_captured[0]["user"] == upstream_user_identifier("ws-1", "end-user-7", None)
 
 
+def test_hybrid_prefers_the_callers_safety_identifier(
+    hybrid_client: Callable[..., TestClient],
+    control_plane_transport: InstallControlPlane,
+    hybrid_captured: list[dict[str, Any]],
+) -> None:
+    _platform(control_plane_transport, workspace_id="ws-1", user_id="platform-user")
+
+    _chat(hybrid_client(), _TOKEN, model="gpt-4o-mini", user="end-user-7", safety_identifier="end-user-8")
+
+    assert hybrid_captured[0]["user"] == upstream_user_identifier("ws-1", "end-user-8", None)
+
+
 @pytest.mark.parametrize(
     ("identity", "body"),
     [({"user_id": "platform-user"}, {"user": "end-user-7"}), ({"workspace_id": "ws-1"}, {}), ({}, {})],
@@ -381,10 +428,23 @@ def test_responses_sends_openai_a_safety_identifier_and_no_user(
     client = make_client()
     headers, workspace = _keyed_user(client)
 
-    _respond(client, headers, user="alice", safety_identifier="caller-chosen")
+    _respond(client, headers, user="alice")
 
     assert responses_captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
     assert not {"user", UPSTREAM_USER_FIELD} & set(responses_captured[0])
+
+
+def test_responses_digests_the_callers_safety_identifier_over_user(
+    make_client: ClientFactory, responses_captured: list[dict[str, Any]]
+) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _respond(client, headers, user="alice", safety_identifier="a")
+    _respond(client, headers, user="alice", safety_identifier="b")
+
+    assert responses_captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "a", None)
+    assert responses_captured[1]["safety_identifier"] == upstream_user_identifier(workspace, "b", None)
 
 
 def test_responses_to_anthropic_sends_metadata_user_id_and_never_user(
