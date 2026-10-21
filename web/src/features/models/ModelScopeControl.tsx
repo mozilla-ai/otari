@@ -1,14 +1,21 @@
-import { ComboBox, Input, ListBox, ListBoxItem } from "@heroui/react"
 import { type ReactNode, useMemo, useState } from "react"
-import { ComboBoxEmpty } from "@/design-system/forms/ComboBoxEmpty"
 import { ControlField } from "@/design-system/forms/FieldMessages"
-import { DismissChip } from "@/design-system/indicators/DismissChip"
+import {
+  MultiSelect,
+  type MultiSelectOption,
+} from "@/design-system/forms/MultiSelect"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
-import { providerInstanceOf } from "@/features/models/modelKey"
+import { providerInstanceOf, providerModelId } from "@/features/models/modelKey"
+import { canManage } from "@/features/organization/roles"
 import { useModels } from "@/shared/api/models"
-import { useDeploymentOperator } from "@/shared/api/organizations"
+import {
+  useDeploymentOperator,
+  useOrganizationContext,
+  useOrgProviderKeys,
+} from "@/shared/api/organizations"
 import { useDeploymentProviderNames } from "@/shared/api/providers"
 import { useAliases } from "@/shared/api/routing"
+import { providerDisplayName } from "@/shared/helpers/providers"
 
 // The per-key model access-list is a tri-state:
 //   undefined -> "any"   (unrestricted, the default; `null` on the wire)
@@ -23,15 +30,6 @@ function modeOf(allowedModels: string[] | undefined): Mode {
   if (!allowedModels) return "any"
   return allowedModels.length === 0 ? "block" : "only"
 }
-
-interface CatalogOption {
-  // The canonical value stored on the allow-list (instance:model or instance:*).
-  id: string
-  // What the operator sees in the dropdown.
-  label: string
-}
-
-const MAX_VISIBLE = 50
 
 // The control is reused for two layers of the same allow-list grammar: a user's
 // default and a key's (narrower) override. The wording differs between them, so
@@ -56,10 +54,11 @@ export function ModelScopeControl({
   const { isOperator, isSettled } = useDeploymentOperator()
   // Operator-only: an organization admin is refused it.
   const providers = useDeploymentProviderNames(isSettled && isOperator)
+  // Owner/admin-only, like the operator read above.
+  const orgKeys = useOrgProviderKeys(canManage(useOrganizationContext().data))
   const aliases = useAliases()
   const [mode, setMode] = useState<Mode>(modeOf(initial))
   const [entries, setEntries] = useState<string[]>(initial ?? [])
-  const [query, setQuery] = useState("")
 
   // The pickable catalog: a wildcard per provider instance, every model, and
   // each alias resolved to its target. It comes from GET /models, which is
@@ -70,8 +69,13 @@ export function ModelScopeControl({
   // a canonical selector the backend will accept, so names that resolve through
   // no instance are left out. An operator also gets a wildcard for every
   // configured provider, which covers one whose models GET /models cannot list
-  // (discovery failed or unsupported, nothing priced).
-  const catalog = useMemo<CatalogOption[]>(() => {
+  // (discovery failed or unsupported, nothing priced). An organization owner or
+  // admin likewise gets one for each of its own provider keys: a key nobody has
+  // refreshed offers no models, so GET /models lists nothing for it.
+  // Each option is named for a reader (the model, or "All OpenAI models") and
+  // keeps the stored selector findable in its hint, since that is what a key's
+  // allow-list and the gateway's refusals spell.
+  const catalog = useMemo<MultiSelectOption[]>(() => {
     const ids = (models.data?.data ?? [])
       .map((model) => model.id)
       .filter((id) => providerInstanceOf(id) !== undefined)
@@ -79,18 +83,29 @@ export function ModelScopeControl({
     const instances = [
       ...new Set([
         ...providers,
+        ...(orgKeys.data ?? [])
+          .filter((key) => !key.archived_at)
+          .map((key) => key.provider),
         ...ids.map((id) => providerInstanceOf(id) as string),
       ]),
     ].sort((a, b) => a.localeCompare(b))
-    const candidates: CatalogOption[] = [
+    const providerOf = (id: string) =>
+      providerDisplayName(providerInstanceOf(id) ?? "")
+    const candidates: MultiSelectOption[] = [
       ...instances.map((instance) => ({
         id: `${instance}:*`,
-        label: `${instance}:*  ·  all ${instance} models`,
+        label: `All ${providerDisplayName(instance)} models`,
+        hint: `${instance}:* · includes models added later`,
       })),
-      ...ids.map((id) => ({ id, label: id })),
+      ...ids.map((id) => ({
+        id,
+        label: providerModelId(id),
+        hint: providerOf(id),
+      })),
       ...(aliases.data ?? []).map((alias) => ({
         id: alias.target,
-        label: `${alias.name}  ·  alias`,
+        label: alias.name,
+        hint: `Alias for ${providerModelId(alias.target)} · ${providerOf(alias.target)}`,
       })),
     ]
     // First label wins, so a model keeps its own name over the alias that
@@ -101,20 +116,7 @@ export function ModelScopeControl({
       seen.add(option.id)
       return true
     })
-  }, [models.data, providers, aliases.data])
-
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return catalog
-      .filter((option) => !entries.includes(option.id))
-      .filter(
-        (option) =>
-          !q ||
-          option.id.toLowerCase().includes(q) ||
-          option.label.toLowerCase().includes(q),
-      )
-      .slice(0, MAX_VISIBLE)
-  }, [catalog, entries, query])
+  }, [models.data, providers, orgKeys.data, aliases.data])
 
   const emit = (nextMode: Mode, nextEntries: string[]) => {
     if (nextMode === "any") onChange(undefined, true)
@@ -127,15 +129,7 @@ export function ModelScopeControl({
     emit(next, entries)
   }
 
-  const addEntry = (id: string) => {
-    const next = entries.includes(id) ? entries : [...entries, id]
-    setEntries(next)
-    setQuery("")
-    emit("only", next)
-  }
-
-  const removeEntry = (id: string) => {
-    const next = entries.filter((entry) => entry !== id)
+  const pick = (next: string[]) => {
     setEntries(next)
     emit("only", next)
   }
@@ -160,9 +154,8 @@ export function ModelScopeControl({
   const catalogHint = models.isError
     ? "Could not load the model catalog. Reload to try again."
     : !models.isPending && catalog.length === 0
-      ? "No providers or models discovered yet. Configure a provider first, then scope this key."
+      ? "No providers or models discovered yet. Add a provider first."
       : null
-  const showPicker = catalog.length > 0 || models.isPending
 
   return (
     <div className="flex flex-col gap-3">
@@ -189,76 +182,22 @@ export function ModelScopeControl({
       ) : null}
 
       {mode === "only" ? (
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap gap-1.5">
-            {entries.length === 0 ? (
-              <span className="text-caption">
-                Pick at least one model below, or choose “Block all”.
-              </span>
-            ) : (
-              entries.map((entry) => (
-                <DismissChip
-                  key={entry}
-                  value={entry}
-                  onDismiss={() => removeEntry(entry)}
-                  dismissLabel={`Remove ${entry}`}
-                />
-              ))
-            )}
-          </div>
-          {catalogHint ? (
-            <span className="text-caption">{catalogHint}</span>
-          ) : null}
-          {showPicker ? (
-            <ComboBox.Root
-              allowsEmptyCollection
-              menuTrigger="input"
-              inputValue={query}
-              onInputChange={setQuery}
-              selectedKey={null}
-              onSelectionChange={(key) => {
-                if (key != null) addEntry(String(key))
-              }}
-              // Cap the width so the field and its dropdown trigger stay within
-              // easy reach instead of stretching across a wide form.
-              className="flex max-w-md flex-col gap-1"
-            >
-              <ComboBox.InputGroup>
-                <Input
-                  aria-label="Add a model"
-                  placeholder="Search providers, models, aliases…"
-                  autoComplete="off"
-                />
-                <ComboBox.Trigger />
-              </ComboBox.InputGroup>
-              <ComboBox.Popover>
-                <ListBox
-                  items={visible}
-                  className="max-h-72 overflow-auto"
-                  renderEmptyState={() => (
-                    <ComboBoxEmpty
-                      isSourceEmpty={catalog.every((option) =>
-                        entries.includes(option.id),
-                      )}
-                      emptyMessage={
-                        catalog.length === 0
-                          ? "Loading the model catalog…"
-                          : "Everything available is already on the list."
-                      }
-                      noMatchesMessage="Nothing matches what you typed."
-                    />
-                  )}
-                >
-                  {(option: CatalogOption) => (
-                    <ListBoxItem id={option.id} textValue={option.label}>
-                      {option.label}
-                    </ListBoxItem>
-                  )}
-                </ListBox>
-              </ComboBox.Popover>
-            </ComboBox.Root>
-          ) : null}
-        </div>
+        <MultiSelect
+          label="Allowed models"
+          options={catalog}
+          value={entries}
+          onChange={pick}
+          description={
+            catalogHint ??
+            (entries.length === 0
+              ? "Pick at least one model, or choose “Block all”."
+              : undefined)
+          }
+          searchPlaceholder="Search providers, models, aliases…"
+          emptyMessage={
+            models.isPending ? "Loading the model catalog…" : catalogHint
+          }
+        />
       ) : null}
     </div>
   )
