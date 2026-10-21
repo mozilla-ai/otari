@@ -74,6 +74,10 @@ class APIKey(Base):
     # this column stays unrestricted), [] = deny all, a list = canonical
     # instance:model entries (with instance:* / instance:prefix* wildcards).
     allowed_models: Mapped[list[str] | None] = mapped_column(JSON)
+    # Per-key search tool allow-list: NULL = inherit the user's, then the tools
+    # allowed_models names the deprecated way (see services/model_access.py),
+    # [] = no tool, a list = tool names, '*' for every search tool.
+    allowed_tools: Mapped[list[str] | None] = mapped_column(JSON)
     # A service key may name end users in a request's ``user`` field. Each one is
     # a ``users`` row owned by this key's user (``users.parent_user_id``), created
     # on first use, so a key can only ever bill end users in its owner's scope.
@@ -131,6 +135,7 @@ class APIKey(Base):
             "reject_user_mismatch": self.reject_user_mismatch,
             "capture_agent_telemetry": self.capture_agent_telemetry,
             "allowed_models": self.allowed_models,
+            "allowed_tools": self.allowed_tools,
             "is_service_key": self.is_service_key,
             "end_user_budget_id": self.end_user_budget_id,
             "end_user_budget_ids": self.assignable_end_user_budgets(),

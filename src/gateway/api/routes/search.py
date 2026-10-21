@@ -61,6 +61,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     WebProviderClientDep,
     WorkspaceWebSearchPoliciesDep,
+    get_api_key_service,
     get_budget_service,
     get_config,
     get_db,
@@ -102,6 +103,7 @@ from gateway.models.tools import WebTool
 from gateway.models.usage import UsageLog
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit
 from gateway.schemas.tools import SearchRequest, SearchResponse
+from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import (
     BudgetScopeRequest,
     BudgetService,
@@ -110,7 +112,6 @@ from gateway.services.budgets import (
     reserve_budget,
 )
 from gateway.services.log_writer import LogWriter
-from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.pricing_service import resolve_tool_rate
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
 from gateway.services.tools import (
@@ -141,6 +142,7 @@ async def create_search(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     budget_service: Annotated[BudgetService, Depends(get_budget_service)],
+    api_keys: Annotated[ApiKeyService, Depends(get_api_key_service)],
     web_search_policy: WorkspaceWebSearchPoliciesDep,
     web_provider_client: WebProviderClientDep,
 ) -> SearchResponse:
@@ -173,6 +175,7 @@ async def create_search(
         config=config,
         log_writer=log_writer,
         budget_service=budget_service,
+        api_keys=api_keys,
         web_search_policy=web_search_policy,
         web_provider_client=web_provider_client,
     )
@@ -189,6 +192,7 @@ async def create_search_for_tool(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     budget_service: Annotated[BudgetService, Depends(get_budget_service)],
+    api_keys: Annotated[ApiKeyService, Depends(get_api_key_service)],
     web_search_policy: WorkspaceWebSearchPoliciesDep,
     web_provider_client: WebProviderClientDep,
 ) -> SearchResponse:
@@ -220,6 +224,7 @@ async def create_search_for_tool(
         config=config,
         log_writer=log_writer,
         budget_service=budget_service,
+        api_keys=api_keys,
         web_search_policy=web_search_policy,
         web_provider_client=web_provider_client,
     )
@@ -236,6 +241,7 @@ async def _dispatch_search(
     config: GatewayConfig,
     log_writer: LogWriter,
     budget_service: BudgetService,
+    api_keys: ApiKeyService,
     web_search_policy: WorkspaceWebSearchPolicies,
     web_provider_client: httpx.AsyncClient,
 ) -> SearchResponse:
@@ -360,15 +366,11 @@ async def _dispatch_search(
         detail = PASSTHROUGH_PROVIDER_ERROR_DETAIL if exc.status_code >= 500 else exc.message
         raise HTTPException(status_code=exc.status_code, detail=detail) from exc
 
-    tool_key = f"{tool.provider}:{tool.name}"
-
-    # Model access control (per-key), keyed on the same <provider>:<tool> string
-    # pricing uses. A key with no list of its own inherits its user's default, so
-    # an unrestricted key is unaffected; a restricted one must name the search
-    # tool, which is the fail-closed side to be on for a brand-new spend surface.
-    key_allowlist = await resolve_request_allowlist(db, api_key)
-    if key_allowlist is not None and not is_model_allowed(key_allowlist, tool_key):
-        not_allowed_detail = model_not_allowed_detail(tool_key)
+    # Tool access control (per-key), by the tool's name. A key with no list of its
+    # own inherits its user's, and a key restricted to models must be granted the
+    # tool, which is the fail-closed side to be on for a spend surface.
+    not_allowed_detail = await api_keys.search_tool_refusal(config, api_key, provider=tool.provider, tool=tool.name)
+    if not_allowed_detail is not None:
         await log_rejection(
             not_allowed_detail,
             row_model=tool.name,

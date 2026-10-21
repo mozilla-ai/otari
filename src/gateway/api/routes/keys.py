@@ -30,15 +30,16 @@ from gateway.repositories.users_repository import get_or_create_default_user, ow
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
 from gateway.services.budgets import BudgetService, check_path_external_id
-from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
-from gateway.services.workspace_scope import organization_default_workspace_id
-
-# A key inherits its user's default allow-list and may narrow it, never broaden
-# it, so a key list that is not a subset of the user's is rejected on write.
-_KEY_EXCEEDS_USER_DETAIL = (
-    "This key's allowed_models exceeds its user's default; a key can only narrow "
-    "the user's model access, not broaden it."
+from gateway.services.model_access import (
+    KEY_MODELS_EXCEED_USER_DETAIL,
+    KEY_TOOLS_EXCEED_USER_DETAIL,
+    is_allowlist_subset,
+    tools_within_user,
+    validate_allowed_models,
+    validate_allowed_tools,
 )
+from gateway.services.organizations import AccessLists
+from gateway.services.workspace_scope import organization_default_workspace_id
 
 router = APIRouter(
     prefix="/keys",
@@ -102,6 +103,11 @@ class CreateKeyRequest(BaseModel):
         default=None,
         description="Model allow-list: null = any model, [] = deny all, or canonical "
         "instance:model entries (with instance:* / instance:prefix* wildcards).",
+    )
+    allowed_tools: list[str] | None = Field(
+        default=None,
+        description="Search tool allow-list for POST /api/v1/search: null = inherit the user's, [] = no tool, "
+        "or search tool names ('*' for every search tool). A model wildcard never grants a tool.",
     )
     exclude_from_budget: bool = Field(
         default=False,
@@ -172,6 +178,7 @@ class CreateKeyResponse(BaseModel):
     expires_at: str | None
     is_active: bool
     allowed_models: list[str] | None
+    allowed_tools: list[str] | None
     exclude_from_budget: bool
     reject_user_mismatch: bool | None
     capture_agent_telemetry: bool | None
@@ -198,6 +205,7 @@ class KeyInfo(BaseModel):
     expires_at: str | None
     is_active: bool
     allowed_models: list[str] | None
+    allowed_tools: list[str] | None
     exclude_from_budget: bool
     reject_user_mismatch: bool | None
     capture_agent_telemetry: bool | None
@@ -227,6 +235,7 @@ class KeyInfo(BaseModel):
             expires_at=key.expires_at.isoformat() if key.expires_at else None,
             is_active=bool(key.is_active),
             allowed_models=list(key.allowed_models) if key.allowed_models is not None else None,
+            allowed_tools=list(key.allowed_tools) if key.allowed_tools is not None else None,
             exclude_from_budget=bool(key.exclude_from_budget),
             reject_user_mismatch=None if key.reject_user_mismatch is None else bool(key.reject_user_mismatch),
             capture_agent_telemetry=(
@@ -260,6 +269,8 @@ class UpdateKeyRequest(BaseModel):
     # unrestricted, [] = deny all, list = restrict. A plain default cannot tell
     # "absent" from "explicit null", so the handler checks model_fields_set.
     allowed_models: list[str] | None = None
+    # Tri-state the same way: null = inherit the user's search tool access.
+    allowed_tools: list[str] | None = None
     is_service_key: bool | None = None
     # Tri-state via model_fields_set: absent = unchanged, null = end users this
     # key creates from now on are uncapped. End users already created keep theirs.
@@ -296,6 +307,7 @@ async def create_key(
     """
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)
+        allowed_tools = validate_allowed_tools(config, request.allowed_tools)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     # Before anything is staged: the check runs in a Unit of Work block, and the
@@ -342,8 +354,10 @@ async def create_key(
 
     # A key must not grant more than its user's default (a freshly created user
     # has no default, so this only bites when attaching to a restricted user).
-    if not is_allowlist_subset(allowed_models, user.allowed_models):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
+    if not is_allowlist_subset(allowed_models, user.allowed_models, tool_keys=config.legacy_search_tool_keys()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=KEY_MODELS_EXCEED_USER_DETAIL)
+    if not tools_within_user(config, allowed_tools, user_tools=user.allowed_tools, user_models=user.allowed_models):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=KEY_TOOLS_EXCEED_USER_DETAIL)
 
     # Checked rather than left to the foreign key: an id naming no workspace is
     # a bad request, and letting it reach the constraint answered 500 "Database
@@ -385,6 +399,7 @@ async def create_key(
         user_id=user_id,
         expires_at=request.expires_at,
         allowed_models=allowed_models,
+        allowed_tools=allowed_tools,
         exclude_from_budget=request.exclude_from_budget,
         reject_user_mismatch=request.reject_user_mismatch,
         capture_agent_telemetry=request.capture_agent_telemetry,
@@ -460,6 +475,7 @@ async def update_key(
     config: Annotated[GatewayConfig, Depends(get_config)],
     organization_id: CallerOrganization,
     budgets: BudgetServiceDep,
+    api_keys: ApiKeyServiceDep,
 ) -> KeyInfo:
     """Update an API key in the caller's organization.
 
@@ -476,7 +492,23 @@ async def update_key(
         check_list="end_user_budget_ids" in fields,
     )
 
-    # Tri-state via model_fields_set, like allowed_models below: both columns
+    # The access lists the same way. A supplied null clears (models: unrestricted;
+    # tools: inherit the user's); [] denies all; a list restricts.
+    stored = AccessLists(key.allowed_models, key.allowed_tools)
+    try:
+        access = await api_keys.check_access_lists(
+            config,
+            AccessLists(
+                request.allowed_models if "allowed_models" in fields else stored.models,
+                request.allowed_tools if "allowed_tools" in fields else stored.tools,
+            ),
+            stored=stored,
+            owner_id=key.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    # Tri-state via model_fields_set, like the lists above: both columns
     # are nullable and the dashboard's edit form sends null to clear them
     # ("Blank clears the expiry"), which an ``is not None`` guard silently
     # dropped. ``is_active`` and ``exclude_from_budget`` are not nullable, so
@@ -493,21 +525,8 @@ async def update_key(
         key.reject_user_mismatch = request.reject_user_mismatch
     if "capture_agent_telemetry" in request.model_fields_set:
         key.capture_agent_telemetry = request.capture_agent_telemetry
-    # Tri-state: only touch the allow-list when the field was supplied. A supplied
-    # null clears to unrestricted; [] denies all; a list restricts.
-    if "allowed_models" in request.model_fields_set:
-        try:
-            new_allowed = validate_allowed_models(config, request.allowed_models)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        # Enforce narrow-only against the key's user default (see create_key).
-        if key.user_id is not None:
-            user_default = (
-                await db.execute(select(User.allowed_models).where(User.user_id == key.user_id))
-            ).scalar_one_or_none()
-            if not is_allowlist_subset(new_allowed, user_default):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
-        key.allowed_models = new_allowed
+    key.allowed_models = access.models
+    key.allowed_tools = access.tools
     if request.is_service_key is not None:
         key.is_service_key = request.is_service_key
     if "end_user_budget_id" in request.model_fields_set:

@@ -9,10 +9,10 @@ from typing import Any, TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.api.deps import get_api_key_service
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import Budget
 from gateway.models.tenancy import Organization, User, Workspace
-from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -21,7 +21,6 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
 from gateway.services.organizations import InvitationMailLimit
 from gateway.services.tenancy.authorization import WorkspaceAccess
@@ -66,7 +65,7 @@ def budget_service(db: AsyncSession) -> BudgetService:
         uow,
         BudgetRepositories.on(uow),
         organizations,
-        ApiKeyService(uow, ApiKeyRepositories.on(uow)),
+        get_api_key_service(uow),
         WorkspaceAccess(db, organizations),
     )
 

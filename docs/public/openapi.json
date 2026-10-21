@@ -4742,6 +4742,21 @@
             "description": "Model allow-list: null = any model, [] = deny all, or canonical instance:model entries (with instance:* / instance:prefix* wildcards).",
             "title": "Allowed Models"
           },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Search tool allow-list for POST /api/v1/search: null = inherit the user's, [] = no tool, or search tool names ('*' for every search tool). A model wildcard never grants a tool.",
+            "title": "Allowed Tools"
+          },
           "capture_agent_telemetry": {
             "anyOf": [
               {
@@ -4896,6 +4911,20 @@
             ],
             "title": "Allowed Models"
           },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
+          },
           "capture_agent_telemetry": {
             "anyOf": [
               {
@@ -5043,6 +5072,7 @@
           "expires_at",
           "is_active",
           "allowed_models",
+          "allowed_tools",
           "exclude_from_budget",
           "reject_user_mismatch",
           "capture_agent_telemetry",
@@ -5072,6 +5102,21 @@
             ],
             "description": "Model allow-list: null = any model your user default allows, [] = deny all, or canonical instance:model entries. A key can only narrow your own model access, never broaden it.",
             "title": "Allowed Models"
+          },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Search tool allow-list for POST /api/v1/search: null = inherit your own, [] = no tool, or search tool names ('*' for every search tool). A key can only narrow your own tool access.",
+            "title": "Allowed Tools"
           },
           "capture_agent_telemetry": {
             "anyOf": [
@@ -5390,6 +5435,21 @@
             ],
             "description": "Default model access-list this user's keys inherit; null = unrestricted, [] = deny all",
             "title": "Allowed Models"
+          },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Default search tool access-list this user's keys inherit: null = the tools allowed_models grants, [] = no tool, or search tool names ('*' for every search tool).",
+            "title": "Allowed Tools"
           },
           "blocked": {
             "default": false,
@@ -9813,6 +9873,20 @@
             ],
             "title": "Allowed Models"
           },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
+          },
           "capture_agent_telemetry": {
             "anyOf": [
               {
@@ -9983,6 +10057,7 @@
           "expires_at",
           "is_active",
           "allowed_models",
+          "allowed_tools",
           "exclude_from_budget",
           "reject_user_mismatch",
           "capture_agent_telemetry",
@@ -10536,6 +10611,20 @@
               }
             ],
             "title": "Allowed Models"
+          },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
           },
           "blocked": {
             "title": "Blocked",
@@ -20810,6 +20899,20 @@
             ],
             "title": "Allowed Models"
           },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
+          },
           "capture_agent_telemetry": {
             "anyOf": [
               {
@@ -20973,6 +21076,20 @@
               }
             ],
             "title": "Allowed Models"
+          },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
           },
           "capture_agent_telemetry": {
             "anyOf": [
@@ -21620,6 +21737,20 @@
               }
             ],
             "title": "Allowed Models"
+          },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
           },
           "blocked": {
             "anyOf": [
@@ -23177,6 +23308,20 @@
             ],
             "title": "Allowed Models"
           },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
+          },
           "blocked": {
             "title": "Blocked",
             "type": "boolean"
@@ -23289,6 +23434,7 @@
           "reserved_requests",
           "budget_id",
           "allowed_models",
+          "allowed_tools",
           "budget_started_at",
           "next_budget_reset_at",
           "blocked",

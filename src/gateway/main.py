@@ -27,6 +27,7 @@ from gateway.api.deps import (
     build_hosted_provider_service,
     build_inference_service,
     build_trace_service,
+    get_api_key_service,
     get_membership_listener,
     set_config,
 )
@@ -288,6 +289,16 @@ def _start_container_sweeper(config: GatewayConfig, _container: Container) -> Co
     if not config.sandbox_configured() or config.sandbox_container_idle_ttl_sec <= 0:
         return None
     return run_sandbox_container_sweeper()
+
+
+async def _warn_about_legacy_tool_grants(config: GatewayConfig) -> None:
+    """Log the keys and users still granted search tools through ``allowed_models``, on a Unit of Work of its own."""
+    try:
+        async with create_unit_of_work() as uow:
+            await get_api_key_service(uow).warn_about_legacy_tool_grants(config)
+    except Exception as exc:
+        # Advisory only, like the hosted providers report below.
+        logger.warning("Could not check for deprecated search tool grants: %s", describe_database_error(exc))
 
 
 async def _report_hosted_providers_config(config: GatewayConfig) -> None:
@@ -875,6 +886,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         await load_hosted_names_at_startup(config)
         # On a Unit of Work of its own, after the session above has closed.
         await _report_hosted_providers_config(config)
+        await _warn_about_legacy_tool_grants(config)
         container: Container = app.state.container
         log_writer = create_log_writer(config.log_writer_strategy, container.resolve(UsageSignalPort, None))
         # The retention sweep below resolves this same port, so both it and

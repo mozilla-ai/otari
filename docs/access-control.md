@@ -117,6 +117,33 @@ A user's `allowed_models` is inherited by newly created keys unless the key
 defines its own list. A missing list allows any model, an empty list allows none,
 and entries may use provider wildcards such as `openai:*`.
 
+Search tools have a list of their own, `allowed_tools`, which governs
+`POST /api/v1/search`; the in-loop `otari_web_search` tool, which runs on the same
+search tools, does not read it. Its entries are search tool names, as `search_tools` or the
+dashboard names them, or `*` for every search tool, and no wildcard in
+`allowed_models` reaches a tool: a search provider can share its name with a model
+provider, as DeepSeek does, and `deepseek:*` is for DeepSeek's models. A key's own
+`allowed_tools` wins over its user's, and a key may narrow its user's list but never
+broaden it. An empty list allows no tool.
+
+With no `allowed_tools` on the key or its user, the search tools are read off the
+model list as before: a key unrestricted for models may run any search tool, and a
+key restricted for models may run only the tools its `allowed_models` names whole
+as `<provider>:<tool>`, such as `exa:exa-search`, and that its user's model list
+grants too. That form is deprecated: startup counts the keys and users that still
+rely on it, names the tools some reached only through a wildcard, which no longer
+grants them, and a later release removes it. A model list no longer takes a
+wildcard or another name under a provider that serves only search tools, such as
+`exa:*`; it takes that provider's exact `<provider>:<tool>` keys alone.
+
+When a user is first given `allowed_tools`, each of their keys that has a model
+list of its own and no `allowed_tools` is set to the tools it could run before
+that are also on the user's new list, so moving a user off the deprecated form
+never widens a key that had narrowed its search away. A list sent back unchanged,
+as the dashboard's edit forms do, is not checked again, so a key or user naming
+a tool deleted since still saves an unrelated change. No search tool may be
+named `*`.
+
 Deleting or deactivating a user prevents future access but preserves historical
 usage.
 

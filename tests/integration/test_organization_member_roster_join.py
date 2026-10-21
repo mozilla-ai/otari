@@ -364,3 +364,5 @@ def test_an_operator_is_given_the_spend_figures(
     # operator has spent, and the point is that the field is not withheld.
     assert all("attribution" in row for row in rows)
     assert any(row["attribution"] is not None for row in rows)
+    # Both access defaults ride along, so the member editor can seed its pickers.
+    assert all({"allowed_models", "allowed_tools"} <= row["attribution"].keys() for row in rows if row["attribution"])

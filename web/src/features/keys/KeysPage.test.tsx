@@ -43,6 +43,7 @@ function user(overrides: Partial<User> = {}): User {
     reserved_requests: 0,
     budget_id: null,
     allowed_models: null,
+    allowed_tools: null,
     budget_started_at: null,
     next_budget_reset_at: null,
     blocked: false,
@@ -1655,6 +1656,65 @@ describe("KeysPage", () => {
         (init?.method ?? "") === "POST",
     )
     expect(JSON.parse(String(post?.[1]?.body)).allowed_models).toEqual([])
+  })
+
+  it("posts the search tool access apart from the model access", async () => {
+    const fetchMock = mockApi({ keys: [] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "No tool" }))
+    await user.click(screen.getByRole("button", { name: "Create key" }))
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) =>
+        String(u).endsWith(`${API_ROOT}/keys`) &&
+        (init?.method ?? "") === "POST",
+    )
+    const body = JSON.parse(String(post?.[1]?.body))
+    expect(body.allowed_tools).toEqual([])
+    expect(body.allowed_models).toBeNull()
+  })
+
+  it("shows the access it will send after Advanced is hidden and reopened", async () => {
+    const fetchMock = mockApi({ keys: [] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "No tool" }))
+    await user.click(screen.getByRole("button", { name: "Block all" }))
+    await user.click(screen.getByRole("button", { name: "Hide advanced" }))
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+
+    expect(
+      screen.getByText(/search tool on \/v1\/search until you change/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/model until you change this access/),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Create key" }))
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) =>
+        String(u).endsWith(`${API_ROOT}/keys`) &&
+        (init?.method ?? "") === "POST",
+    )
+    const body = JSON.parse(String(post?.[1]?.body))
+    expect(body.allowed_tools).toEqual([])
+    expect(body.allowed_models).toEqual([])
   })
 
   it("disables Create when 'Only selected' has no models (never a silent deny-all)", async () => {

@@ -134,6 +134,7 @@ function mockApi(opts: {
                 reserved: row.reserved,
                 blocked: row.blocked,
                 allowed_models: row.allowed_models,
+                allowed_tools: row.allowed_tools,
               }
             : null
         })()
@@ -1176,7 +1177,10 @@ describe("OrganizationMembersPage", () => {
     const access = requests.find(
       (r) => r.method === "PATCH" && r.url.includes(`${API_ROOT}/users/`),
     )
-    expect(access?.body).toEqual({ allowed_models: ANALYST_ACCESS })
+    expect(access?.body).toEqual({
+      allowed_models: ANALYST_ACCESS,
+      allowed_tools: null,
+    })
 
     const join = requests.find(
       (r) =>
@@ -1196,6 +1200,65 @@ describe("OrganizationMembersPage", () => {
     // so a workspace just joined has no id to name until the server answers.
     // Asserting the sequence is the point of testing the two together.
     expect(requests.indexOf(join!)).toBeLessThan(requests.indexOf(ceiling!))
+  })
+
+  it("keeps a member's search tools through an edit that changes only a budget", async () => {
+    // Every save resends the member's lists, so an editor that lost the tool
+    // list on the way in would clear the grant without anyone touching it.
+    const requests = mockApi({
+      members: [OWNER, ANALYST],
+      users: [
+        user({
+          user_id: ANALYST.attribution_user_id as string,
+          allowed_models: ANALYST_ACCESS,
+          allowed_tools: ["exa-search"],
+        }),
+      ],
+      workspaces: [workspace()],
+      workspaceMembers: {
+        "44444444-4444-4444-4444-444444444444": [
+          workspaceMember({
+            id: "membership-1",
+            user_id: ANALYST.user_id as string,
+            role: "member",
+          }),
+        ],
+      },
+      budgets: [
+        budget({ budget_id: "bud-small", name: "Small", max_budget: 50 }),
+        budget({ budget_id: "bud-large", name: "Large", max_budget: 125 }),
+      ],
+      scopedBudgets: [
+        scopedBudget({
+          id: "ceiling-1",
+          scope_type: "workspace_member",
+          scope_id: "membership-1",
+          budget_id: "bud-small",
+          max_budget: 50,
+        }),
+      ],
+    })
+    const actor = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    await actor.click(
+      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
+    )
+    await screen.findByText("Workspace access")
+    await pickOption(actor, "Budget in Default Workspace", "Large")
+    await actor.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(
+        requests.find(
+          (r) => r.method === "PATCH" && r.url.includes(`${API_ROOT}/users/`),
+        )?.body,
+      ).toEqual({
+        allowed_models: ANALYST_ACCESS,
+        allowed_tools: ["exa-search"],
+      }),
+    )
   })
 })
 
@@ -1429,6 +1492,30 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
 
     expect(screen.getByText(/Model access/)).toBeInTheDocument()
     expect(screen.getByText(/pick a different budget here/)).toBeInTheDocument()
+  })
+
+  it("keeps Save off while the tool access names no tool to select", async () => {
+    // Save would otherwise stay on and do nothing: the save itself refuses an
+    // unfinished tool list.
+    mockApi({
+      members: [OWNER, ANALYST],
+      users: [user({ user_id: ANALYST.attribution_user_id as string })],
+      workspaces: [workspace()],
+      context: organizationContext({ deployment_operator: true }),
+    })
+    const actor = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    await actor.click(
+      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
+    )
+    await screen.findByText("Workspace access")
+
+    await actor.click(screen.getByRole("button", { name: "No tool" }))
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+    await actor.click(screen.getByRole("button", { name: "Selected tools" }))
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
   })
 
   it("still shows the columns to an operator, so the case above is not vacuous", async () => {

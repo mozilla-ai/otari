@@ -51,6 +51,7 @@ from botocore.config import Config as BotocoreConfig
 
 from gateway.auth.vertex_auth import setup_vertex_environment
 from gateway.core.config import (
+    API_ROOT,
     KEYLESS_SELF_HOSTED_PROVIDERS,
     PROVIDER_TYPE_ALIASES,
     RESERVED_PROVIDER_INSTANCE_NAMES,
@@ -462,20 +463,22 @@ def prune_uncredentialed_providers(config: GatewayConfig) -> dict[str, tuple[str
 
 
 def warn_about_ignored_provider_variables(config: GatewayConfig) -> None:
-    """Warn once that a provider's own key variable is set and no ``providers:`` entry reads it.
+    """Warn once that a provider's own key variable is set and no entry reads it.
 
     Such a variable serves no request, which an operator upgrading from a release
     that fell back to it would otherwise learn only from refused requests. An
     entry reads it when its ``api_key`` holds the variable's value, which is what
     ``${VAR}`` interpolation leaves behind. It is a match on values, because the
     loader keeps no record of which variable filled an entry, so the same key
-    pasted in literally also counts as read. Only the ``<PROVIDER>_API_KEY``
-    spelling is checked, because confirming any other name means importing every
-    provider's SDK. Names only, never values.
+    pasted in literally also counts as read. A search or fetch tool's entry
+    counts too: DeepSeek's search reads the ``DEEPSEEK_API_KEY`` its models do.
+    Only the ``<PROVIDER>_API_KEY`` spelling is checked, because confirming any
+    other name means importing every provider's SDK. Names only, never values.
     """
     keys_in_use = {
         entry.get("api_key")
-        for entry in config.providers.values()
+        for entries in (config.providers, config.search_tools, config.fetch_tools)
+        for entry in entries.values()
         if isinstance(entry, Mapping) and entry.get("api_key")
     }
     ignored: list[tuple[str, str]] = []
@@ -489,9 +492,10 @@ def warn_about_ignored_provider_variables(config: GatewayConfig) -> None:
         return
     name, variable = ignored[0]
     logger.warning(
-        "Ignoring %s: no providers: entry reads it, and a provider's own environment variable serves nothing "
-        "on its own. Name it in the entry that should use it (providers: {%s: {api_key: ${%s}}}) or store the "
-        "key on the dashboard's Providers page.",
+        "Ignoring %s: no entry in providers, search_tools or fetch_tools reads it, and a provider's own "
+        "environment variable serves nothing on its own. Add %s as a hosted provider with that key (the "
+        f"Hosted providers page, or POST {API_ROOT}/hosted-providers), or name it in the search or fetch "
+        "tool that should use it (api_key: ${%s}).",
         # codeql[py/clear-text-logging-sensitive-data]
         ", ".join(variable for _, variable in ignored),
         name,

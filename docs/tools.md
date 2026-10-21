@@ -893,9 +893,10 @@ pricing keys.
 A direct search that names no tool runs on the workspace's usable
 [organization search key](#organization-search-keys), if it has one, in place of
 the deployment's default tool. That tool must still be configured, and the request
-is still allowlisted, rate-limited and timed out as that tool and logged under its
-name, while the search is priced under `otari:web_search`. A search that names a
-tool, in the path or in `search_tool_name`, runs on that tool with its own key. A
+is still checked against the key's `allowed_tools`, rate-limited and timed out
+as that tool and logged under its name, while the search is priced under
+`otari:web_search`. A search that names a tool, in the path or in
+`search_tool_name`, runs on that tool with its own key. A
 Brave key localizes results to the request's `country`; Tavily takes a country by
 its full name, so a Tavily key does not.
 

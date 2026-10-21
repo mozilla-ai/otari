@@ -1015,6 +1015,7 @@ class OrganizationService:
                 reserved=float(row.reserved),
                 blocked=row.blocked,
                 allowed_models=row.allowed_models,
+                allowed_tools=row.allowed_tools,
             )
             for user_id, row in spend_rows.items()
         }

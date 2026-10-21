@@ -23,13 +23,20 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from gateway.api.deps import get_web_provider_client, get_workspace_web_search_policies
+from gateway.api.deps import (
+    get_api_key_service,
+    get_unit_of_work,
+    get_web_provider_client,
+    get_workspace_web_search_policies,
+)
 from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig, RateLimitRule
 from gateway.core.settings.pricing import PricingConfig
 from gateway.exceptions.tools_exceptions import SearchToolNotFoundError
 from gateway.inflight import InFlightRegistry
+from gateway.log_config import logger as gateway_logger
 from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, OrganizationModelPricing
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool, WebToolCredentialSource
 from gateway.schemas.tools import SearchResponse
@@ -478,6 +485,320 @@ def test_search_honors_the_keys_model_allowlist(
     )
     allowed = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
     assert allowed.status_code == 200
+
+
+def _key_with(client: TestClient, master_key_header: dict[str, str], user: dict[str, Any], **lists: Any) -> Any:
+    """A key on a fresh user, the user and the key each carrying the lists given."""
+    assert client.post(f"{API_ROOT}/users", json=user, headers=master_key_header).status_code == 200
+    return client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": user["user_id"], "user_id": user["user_id"], **lists},
+        headers=master_key_header,
+    )
+
+
+def _search_as(client: TestClient, key: Any, tool: str = "fake-search") -> Any:
+    headers = {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
+    return client.post(f"{API_ROOT}/search/{tool}", json=SEARCH_PAYLOAD, headers=headers)
+
+
+def test_allowed_tools_grants_a_tool_to_a_key_restricted_to_models(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    key = _key_with(
+        client,
+        master_key_header,
+        {"user_id": "tools-user"},
+        allowed_models=["openai:gpt-4o"],
+        allowed_tools=["fake-search"],
+    )
+    assert key.status_code == 200, key.text
+    assert key.json()["allowed_tools"] == ["fake-search"]
+
+    assert _search_as(client, key).status_code == 200
+    refused = _search_as(client, key, "fake-fast")
+    assert refused.status_code == 403
+    assert "Search tool 'fake-fast' is not permitted" in refused.json()["detail"]
+
+
+def test_an_empty_tool_list_refuses_every_tool_to_a_key_unrestricted_for_models(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    key = _key_with(client, master_key_header, {"user_id": "no-tools"}, allowed_tools=[])
+    assert key.status_code == 200, key.text
+    assert _search_as(client, key).status_code == 403
+
+
+def test_a_key_inherits_its_users_tools_over_its_own_model_list(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    key = _key_with(
+        client,
+        master_key_header,
+        {"user_id": "star-user", "allowed_tools": ["*"]},
+        allowed_models=["openai:gpt-4o"],
+    )
+    assert key.status_code == 200, key.text
+    assert key.json()["allowed_tools"] is None
+    assert _search_as(client, key, "fake-fast").status_code == 200
+
+
+@pytest.fixture
+def models_client(test_config: GatewayConfig) -> Generator[TestClient]:
+    """A model instance named like the fake tools' provider, as DeepSeek's models are named like its search."""
+    yield from _client_on(test_config, providers={"fake": {"provider": "openai", "api_key": "sk-test-key"}})
+
+
+def test_a_model_wildcard_grants_no_tool_and_the_refusal_says_so(
+    models_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """DeepSeek searches and serves models under one prefix, so ``deepseek:*`` grants its models alone."""
+    key = _key_with(models_client, master_key_header, {"user_id": "glob-user"}, allowed_models=["fake:*"])
+    assert key.status_code == 200, key.text
+
+    denied = _search_as(models_client, key)
+    assert denied.status_code == 403
+    assert "A wildcard in allowed_models allows models only" in denied.json()["detail"]
+
+
+def test_a_model_list_refuses_a_wildcard_that_can_grant_neither_a_model_nor_a_tool(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """``fake`` names search tools and no model instance, so ``fake:*`` would grant nothing."""
+    for entry in ("fake:*", "fake:fake-*", "fake:nope"):
+        refused = _key_with(client, master_key_header, {"user_id": f"refused-{entry}"}, allowed_models=[entry])
+        assert refused.status_code == 400, entry
+        assert "name tools in allowed_tools" in refused.json()["detail"]
+    # The deprecated grant is still written.
+    legacy = _key_with(client, master_key_header, {"user_id": "legacy-entry"}, allowed_models=["fake:fake-search"])
+    assert legacy.status_code == 200, legacy.text
+
+
+def test_a_key_narrows_its_users_tools(client: TestClient, master_key_header: dict[str, str]) -> None:
+    capped = {"user_id": "tool-capped", "allowed_tools": ["fake-search"]}
+    assert _key_with(client, master_key_header, capped, allowed_tools=["*"]).status_code == 400
+    assert (
+        client.post(
+            f"{API_ROOT}/keys",
+            json={"key_name": "narrow", "user_id": "tool-capped", "allowed_tools": ["fake-search"]},
+            headers=master_key_header,
+        ).status_code
+        == 200
+    )
+
+    # A user restricted to models grants no tool, so a key cannot name one either.
+    models_only = {"user_id": "models-only", "allowed_models": ["openai:gpt-4o"]}
+    widened = _key_with(client, master_key_header, models_only, allowed_tools=["fake-search"])
+    assert widened.status_code == 400
+    assert "allowed_tools exceeds its user's" in widened.json()["detail"]
+
+
+def test_a_key_naming_a_tool_the_deprecated_way_is_refused_under_a_users_model_wildcard(
+    models_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    key = _key_with(
+        models_client,
+        master_key_header,
+        {"user_id": "glob-capped", "allowed_models": ["fake:*"]},
+        allowed_models=["fake:fake-search"],
+    )
+    assert key.status_code == 400
+    assert "can only narrow" in key.json()["detail"]
+
+
+def test_a_users_first_tool_list_keeps_its_narrowed_keys_where_they_were(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A key with a model list of its own read its tools off it; the user's new list must not widen it."""
+    user = {"user_id": "migrating", "allowed_models": ["openai:*", "fake:fake-search"]}
+    narrowed = _key_with(client, master_key_header, user, allowed_models=["openai:gpt-4o"])
+    assert narrowed.status_code == 200, narrowed.text
+
+    def key(name: str, **lists: Any) -> Any:
+        created = client.post(
+            f"{API_ROOT}/keys", json={"key_name": name, "user_id": "migrating", **lists}, headers=master_key_header
+        )
+        assert created.status_code == 200, created.text
+        return created
+
+    granted = key("granted", allowed_models=["openai:*", "fake:fake-search"])
+    inheriting = key("inheriting")
+    assert _search_as(client, narrowed).status_code == 403
+    assert _search_as(client, granted).status_code == 200
+
+    patched = client.patch(
+        f"{API_ROOT}/users/migrating", json={"allowed_tools": ["fake-search", "fake-fast"]}, headers=master_key_header
+    )
+    assert patched.status_code == 200, patched.text
+
+    def tools_of(created: Any) -> Any:
+        return client.get(f"{API_ROOT}/keys/{created.json()['id']}", headers=master_key_header).json()["allowed_tools"]
+
+    assert tools_of(narrowed) == []
+    assert _search_as(client, narrowed).status_code == 403
+    assert tools_of(granted) == ["fake-search"]
+    assert _search_as(client, granted, "fake-fast").status_code == 403
+    # A key with no list of its own follows its user, as it always did.
+    assert tools_of(inheriting) is None
+    assert _search_as(client, inheriting, "fake-fast").status_code == 200
+
+
+def test_a_revived_users_first_tool_list_keeps_its_old_keys_where_they_were(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A deleted user's keys come back with it, so recreating it with a tool list pins them as an edit does."""
+    narrowed = _key_with(client, master_key_header, {"user_id": "revived"}, allowed_models=["openai:gpt-4o"])
+    assert narrowed.status_code == 200, narrowed.text
+    assert client.delete(f"{API_ROOT}/users/revived", headers=master_key_header).status_code == 204
+
+    revived = client.post(
+        f"{API_ROOT}/users", json={"user_id": "revived", "allowed_tools": ["*"]}, headers=master_key_header
+    )
+    assert revived.status_code == 200, revived.text
+    reactivated = client.patch(
+        f"{API_ROOT}/keys/{narrowed.json()['id']}", json={"is_active": True}, headers=master_key_header
+    )
+    assert reactivated.status_code == 200, reactivated.text
+    assert reactivated.json()["allowed_tools"] == []
+    assert _search_as(client, narrowed).status_code == 403
+
+
+def test_an_unrelated_edit_resends_a_tool_list_naming_a_deleted_tool(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The edit forms send every list back; one unchanged grants nothing new and is not checked again."""
+    user = {"user_id": "stale-tools", "allowed_tools": ["fake-fast"]}
+    key = _key_with(client, master_key_header, user, allowed_tools=["fake-fast"])
+    assert key.status_code == 200, key.text
+    config: GatewayConfig = client.app.state.config  # type: ignore[attr-defined]
+    monkeypatch.delitem(config.search_tools, "fake-fast")
+
+    renamed = client.patch(
+        f"{API_ROOT}/keys/{key.json()['id']}",
+        json={"key_name": "renamed", "allowed_tools": ["fake-fast"]},
+        headers=master_key_header,
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["key_name"] == "renamed"
+    user_edit = client.patch(
+        f"{API_ROOT}/users/stale-tools",
+        json={"alias": "Stale", "allowed_tools": ["fake-fast"]},
+        headers=master_key_header,
+    )
+    assert user_edit.status_code == 200, user_edit.text
+    # A changed list is checked as ever.
+    changed = client.patch(
+        f"{API_ROOT}/keys/{key.json()['id']}",
+        json={"allowed_tools": ["fake-fast", "fake-search"]},
+        headers=master_key_header,
+    )
+    assert changed.status_code == 400
+
+
+def test_a_tool_list_names_a_configured_tool(client: TestClient, master_key_header: dict[str, str]) -> None:
+    unknown = _key_with(client, master_key_header, {"user_id": "typo-user"}, allowed_tools=["fake-serch"])
+    assert unknown.status_code == 400
+    assert "'fake-serch' is not a search tool" in unknown.json()["detail"]
+    user = client.post(
+        f"{API_ROOT}/users", json={"user_id": "typo-default", "allowed_tools": ["nope"]}, headers=master_key_header
+    )
+    assert user.status_code == 400
+
+
+def test_a_patch_sets_and_clears_the_tool_lists(client: TestClient, master_key_header: dict[str, str]) -> None:
+    key = _key_with(client, master_key_header, {"user_id": "patch-user"}, allowed_models=["openai:gpt-4o"])
+    assert _search_as(client, key).status_code == 403
+
+    patched = client.patch(
+        f"{API_ROOT}/keys/{key.json()['id']}", json={"allowed_tools": ["fake-search"]}, headers=master_key_header
+    )
+    assert patched.status_code == 200, patched.text
+    assert _search_as(client, key).status_code == 200
+
+    # Null goes back to inheriting, here the deprecated read of the key's model list.
+    cleared = client.patch(
+        f"{API_ROOT}/keys/{key.json()['id']}", json={"allowed_tools": None}, headers=master_key_header
+    )
+    assert cleared.json()["allowed_tools"] is None
+    assert _search_as(client, key).status_code == 403
+
+    # The user's first tool list pins this key, which had narrowed search away with its own model list.
+    user = client.patch(f"{API_ROOT}/users/patch-user", json={"allowed_tools": ["*"]}, headers=master_key_header)
+    assert user.status_code == 200, user.text
+    assert user.json()["allowed_tools"] == ["*"]
+    assert _search_as(client, key).status_code == 403
+    # Cleared, the key's list follows its user's.
+    client.patch(f"{API_ROOT}/keys/{key.json()['id']}", json={"allowed_tools": None}, headers=master_key_header)
+    assert _search_as(client, key).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_startup_counts_the_grants_still_read_the_deprecated_way(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    async_db: AsyncSession,
+    test_config: GatewayConfig,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A key or user naming a tool in allowed_models, with no allowed_tools of its own, is counted."""
+    _key_with(client, master_key_header, {"user_id": "legacy-key"}, allowed_models=["fake:fake-search"])
+    legacy_user = {"user_id": "legacy-user", "allowed_models": ["fake:fake-fast"]}
+    assert client.post(f"{API_ROOT}/users", json=legacy_user, headers=master_key_header).status_code == 200
+    moved = _key_with(
+        client,
+        master_key_header,
+        {"user_id": "moved-key"},
+        allowed_models=["fake:fake-search"],
+        allowed_tools=["fake-search"],
+    )
+    assert moved.status_code == 200, moved.text
+    # Not counted either: a key whose user has a tool list, and a revoked key.
+    under_tools = _key_with(
+        client,
+        master_key_header,
+        {"user_id": "user-tools", "allowed_tools": ["*"]},
+        allowed_models=["fake:fake-search"],
+    )
+    assert under_tools.status_code == 200, under_tools.text
+    revoked = _key_with(client, master_key_header, {"user_id": "revoked-key"}, allowed_models=["fake:fake-search"])
+    deactivated = client.patch(
+        f"{API_ROOT}/keys/{revoked.json()['id']}", json={"is_active": False}, headers=master_key_header
+    )
+    assert deactivated.status_code == 200, deactivated.text
+
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        await get_api_key_service(get_unit_of_work(async_db)).warn_about_legacy_tool_grants(test_config)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    [message] = [record.getMessage() for record in caplog.records if "allowed_models entries" in record.getMessage()]
+    assert message.startswith("1 API key(s) and 1 user(s) grant search tools")
+    assert "(fake:fake-fast, fake:fake-search)" in message
+    assert "wildcard" not in message
+
+
+@pytest.mark.asyncio
+async def test_startup_names_the_tools_a_wildcard_no_longer_grants(
+    models_client: TestClient,
+    master_key_header: dict[str, str],
+    async_db: AsyncSession,
+    test_config: GatewayConfig,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _key_with(models_client, master_key_header, {"user_id": "wildcard-key"}, allowed_models=["fake:*"])
+
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        await get_api_key_service(get_unit_of_work(async_db)).warn_about_legacy_tool_grants(test_config)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    [message] = [record.getMessage() for record in caplog.records if "wildcard" in record.getMessage()]
+    assert "API key(s)" not in message
+    assert "only through an allowed_models wildcard (fake:fake-fast, fake:fake-search)" in message
 
 
 def test_search_logs_an_unknown_tool_refusal(

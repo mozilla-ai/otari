@@ -9181,6 +9181,11 @@ export interface components {
              */
             allowed_models?: string[] | null;
             /**
+             * Allowed Tools
+             * @description Search tool allow-list for POST /api/v1/search: null = inherit the user's, [] = no tool, or search tool names ('*' for every search tool). A model wildcard never grants a tool.
+             */
+            allowed_tools?: string[] | null;
+            /**
              * Capture Agent Telemetry
              * @description Per-key override of the deployment-wide capture_agent_telemetry setting: null (default) inherits it, true always stores this key's coding-agent telemetry, false always discards it. Covers both behavioral events (tool_result, tool_decision, user_prompt, api_error) from POST /otlp/v1/logs and outcome-metric data points (lines of code, commits, pull requests, active time) from POST /otlp/v1/metrics. Usage capture and billing are unaffected either way.
              */
@@ -9252,6 +9257,8 @@ export interface components {
         CreateKeyResponse: {
             /** Allowed Models */
             allowed_models: string[] | null;
+            /** Allowed Tools */
+            allowed_tools: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry: boolean | null;
             /** Created At */
@@ -9303,6 +9310,11 @@ export interface components {
              * @description Model allow-list: null = any model your user default allows, [] = deny all, or canonical instance:model entries. A key can only narrow your own model access, never broaden it.
              */
             allowed_models?: string[] | null;
+            /**
+             * Allowed Tools
+             * @description Search tool allow-list for POST /api/v1/search: null = inherit your own, [] = no tool, or search tool names ('*' for every search tool). A key can only narrow your own tool access.
+             */
+            allowed_tools?: string[] | null;
             /**
              * Capture Agent Telemetry
              * @description Per-key override of the deployment-wide capture_agent_telemetry setting: null (default) inherits it, true always stores this key's coding-agent telemetry, false always discards it.
@@ -9472,6 +9484,11 @@ export interface components {
              * @description Default model access-list this user's keys inherit; null = unrestricted, [] = deny all
              */
             allowed_models?: string[] | null;
+            /**
+             * Allowed Tools
+             * @description Default search tool access-list this user's keys inherit: null = the tools allowed_models grants, [] = no tool, or search tool names ('*' for every search tool).
+             */
+            allowed_tools?: string[] | null;
             /**
              * Blocked
              * @description Whether user is blocked
@@ -11625,6 +11642,8 @@ export interface components {
         KeyInfo: {
             /** Allowed Models */
             allowed_models: string[] | null;
+            /** Allowed Tools */
+            allowed_tools: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry: boolean | null;
             /** Config Name */
@@ -12031,6 +12050,8 @@ export interface components {
         MemberAttributionPublic: {
             /** Allowed Models */
             allowed_models?: string[] | null;
+            /** Allowed Tools */
+            allowed_tools?: string[] | null;
             /** Blocked */
             blocked: boolean;
             /** Reserved */
@@ -16927,6 +16948,8 @@ export interface components {
         UpdateKeyRequest: {
             /** Allowed Models */
             allowed_models?: string[] | null;
+            /** Allowed Tools */
+            allowed_tools?: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry?: boolean | null;
             /** End User Budget Id */
@@ -16975,6 +16998,8 @@ export interface components {
         UpdateOwnKeyRequest: {
             /** Allowed Models */
             allowed_models?: string[] | null;
+            /** Allowed Tools */
+            allowed_tools?: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry?: boolean | null;
             /** Expires At */
@@ -17147,6 +17172,8 @@ export interface components {
             alias?: string | null;
             /** Allowed Models */
             allowed_models?: string[] | null;
+            /** Allowed Tools */
+            allowed_tools?: string[] | null;
             /** Blocked */
             blocked?: boolean | null;
             /** Budget Id */
@@ -17680,6 +17707,8 @@ export interface components {
             alias: string | null;
             /** Allowed Models */
             allowed_models: string[] | null;
+            /** Allowed Tools */
+            allowed_tools: string[] | null;
             /** Blocked */
             blocked: boolean;
             /** Budget Id */

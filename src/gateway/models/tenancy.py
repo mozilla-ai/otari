@@ -651,6 +651,7 @@ class MemberAttributionPublic(SQLModel):
     reserved: float
     blocked: bool
     allowed_models: list[str] | None = None
+    allowed_tools: list[str] | None = None
 
 
 class ActiveOrganizationMemberPublic(SQLModel):

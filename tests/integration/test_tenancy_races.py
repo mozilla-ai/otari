@@ -24,6 +24,7 @@ from sqlmodel import col
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
+from gateway.api.deps import get_api_key_service
 from gateway.api.routes.scoped_budgets import create_scoped_budget
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
@@ -64,7 +65,6 @@ from gateway.models.tenancy import (
     WorkspacePublic,
 )
 from gateway.models.users import User as BillingUser
-from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.budgets import BudgetRepositories, EndUserRepository
 from gateway.repositories.tenancy import (
     InvitationRepository,
@@ -81,7 +81,6 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetPublic,
     WorkspaceMemberBudgetPolicyCreate,
 )
-from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService
 from gateway.services.password_service import (
     hash_password_async,
@@ -625,7 +624,7 @@ def _budget_service(db: AsyncSession, organizations: OrganizationService | None 
         uow,
         BudgetRepositories.on(uow),
         organizations,
-        ApiKeyService(uow, ApiKeyRepositories.on(uow)),
+        get_api_key_service(uow),
         WorkspaceAccess(db, organizations),
     )
 

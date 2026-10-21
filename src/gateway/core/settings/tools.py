@@ -67,9 +67,11 @@ BUILTIN_FETCH_PROVIDER = "builtin"
 # The value of ``web_search_default_tool`` that turns the deployment's own in-loop search off, in any
 # case: YAML reads ``None`` as a string, and an operator who writes it means this.
 NO_SEARCH_DEFAULT = "none"
+# The ``allowed_tools`` entry that grants every search tool.
+ALL_SEARCH_TOOLS = "*"
 # Names no instance may take, in any case: each already means something to a
-# default setting.
-RESERVED_INSTANCE_NAMES = frozenset({BUILTIN_FETCH, NO_SEARCH_DEFAULT})
+# default setting or an access list.
+RESERVED_INSTANCE_NAMES = frozenset({BUILTIN_FETCH, NO_SEARCH_DEFAULT, ALL_SEARCH_TOOLS})
 
 DEFAULT_WEB_SEARCH_MAX_CALLS = 10
 # The engines the old in-loop backend asks a SearXNG service for when
@@ -507,9 +509,9 @@ class ToolSettings(BaseModel):
     def search_tool_providers(self) -> set[str]:
         """The distinct providers backing the configured search tools.
 
-        These are prefixes of the ``<provider>:<tool>`` keys that search pricing,
-        usage, and per-key access lists are written against, so the allow-list
-        writer has to accept them alongside real provider instances.
+        An ``allowed_models`` entry under one of them that is not also a model
+        provider names no model, so the allow-list writer refuses it unless it is
+        a tool's exact deprecated ``<provider>:<tool>`` grant.
         """
         return {str(entry.get("provider") or name) for name, entry in self.search_tools.items()}
 
@@ -519,9 +521,15 @@ class ToolSettings(BaseModel):
         Read only to honor a price row or allow-list entry written before tools
         had a namespace of their own, and matched whole, never by prefix: a
         search provider can share its name with a model provider, as DeepSeek
-        does, whose models' keys then carry the same prefix.
+        does, whose models' keys then carry the same prefix. A name that breaks
+        the name rules, which an entry from before them keeps, has none: named
+        ``*``, it would read as every search tool.
         """
-        return {f"{entry.get('provider') or name}:{name}" for name, entry in self.search_tools.items()}
+        return {
+            f"{entry.get('provider') or name}:{name}"
+            for name, entry in self.search_tools.items()
+            if not instance_name_problems(name)
+        }
 
     def legacy_fetch_tool_keys(self) -> set[str]:
         """The ``<provider>:<instance>`` keys the fetch instances were priced under, ``builtin:builtin_fetch`` included.

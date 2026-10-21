@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.api.deps import get_api_key_service
 from gateway.core.config import API_ROOT
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyValidationError
@@ -44,7 +45,6 @@ from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.users import User as ApiUser
-from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -59,7 +59,6 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetCreate,
     OrganizationScopedBudgetUpdate,
 )
-from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -551,7 +550,7 @@ def _service(async_db: AsyncSession) -> BudgetService:
         uow,
         BudgetRepositories.on(uow),
         OrganizationService(async_db, membership_listener=None),
-        ApiKeyService(uow, ApiKeyRepositories.on(uow)),
+        get_api_key_service(uow),
         WorkspaceAccess(
             async_db,
             OrganizationService(async_db, membership_listener=None),

@@ -421,8 +421,13 @@ for it works against Otari with its base URL changed. `include_raw` and
 the only configured tool. A call that names no tool runs on the workspace's
 [organization search key](tools.md#organization-search-keys) when it has a usable
 one; a named call runs on that tool with its own key. Either way the tool decides
-the key allow-list entry (`<provider>:<tool>`), the `rate_limits` rules, the
-timeout and the usage row's model and provider.
+the access check, the `rate_limits` rules, the timeout and the usage row's model
+and provider. The access check reads the key's `allowed_tools`, else its user's,
+for the tool's name or `*`. With neither set, it follows the key's model access,
+or its user's when the key has none: unrestricted model access runs every search
+tool, and restricted model access runs only a tool named by its deprecated
+`<provider>:<tool>` entry in `allowed_models`
+([access control](access-control.md#users-and-identities)).
 
 **Request.**
 
@@ -491,7 +496,7 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 | The master key without a `user` | 400 | |
 | The body fails schema validation, such as an `include_raw` that is not a boolean | 422 | `invalid_request` |
 | The workspace turned web search off | 403 | |
-| The key's allow-list does not name `<provider>:<tool>` | 403 | |
+| The key's `allowed_tools`, or the deprecated `<provider>:<tool>` entry in `allowed_models`, does not grant the tool | 403 | |
 | A `user` naming another user, where the key rejects a mismatch | 403 | |
 | A service key's `Otari-End-User-Budget` is not one it may use | 403 | `end_user_budget_not_allowed` |
 | A budget refuses the search | 403 | `budget_exceeded` |

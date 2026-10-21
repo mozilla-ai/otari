@@ -798,6 +798,24 @@ def test_startup_warns_about_a_variable_a_bare_entry_does_not_read(
     assert "Ignoring ANTHROPIC_API_KEY" in ignored_variable_warnings.text
 
 
+def test_startup_warns_nothing_about_a_variable_a_tool_reads(
+    monkeypatch: pytest.MonkeyPatch, ignored_variable_warnings: pytest.LogCaptureFixture
+) -> None:
+    """DeepSeek's search and fetch read the DEEPSEEK_API_KEY its models do, with no ``providers:`` entry."""
+    for provider in LLMProvider:
+        monkeypatch.delenv(f"{provider.value.upper()}_API_KEY", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek-test")
+    warn_about_ignored_provider_variables(GatewayConfig())
+    assert "Ignoring DEEPSEEK_API_KEY" in ignored_variable_warnings.text
+    ignored_variable_warnings.clear()
+
+    entry = {"provider": "deepseek", "api_key": "sk-deepseek-test"}
+    warn_about_ignored_provider_variables(GatewayConfig(search_tools={"deepseek": entry}))
+    warn_about_ignored_provider_variables(GatewayConfig(fetch_tools={"deepseek-fetch": entry}))
+
+    assert "Ignoring" not in ignored_variable_warnings.text
+
+
 # ---------------------------------------------------------------------------
 # A providers: entry that declares no credential is ignored, not shadowing
 # ---------------------------------------------------------------------------

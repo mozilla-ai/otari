@@ -47,6 +47,7 @@ import {
   useCurrentOwnerId,
   useMemberAttributionLabels,
 } from "@/features/organization/attribution"
+import { ToolScopeControl } from "@/features/tools/ToolScopeControl"
 import { organizationUsers } from "@/features/users/organizationUsers"
 import { UserComboBox } from "@/features/users/UserComboBox"
 import { isVirtualUser } from "@/features/users/userOptions"
@@ -442,6 +443,10 @@ function CreateKeyDialog({
   const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
     undefined,
   )
+  const [allowedTools, setAllowedTools] = useState<string[] | undefined>(
+    undefined,
+  )
+  const [toolScopeValid, setToolScopeValid] = useState(true)
   const [excludeFromBudget, setExcludeFromBudget] = useState(false)
   const [serviceKey, setServiceKey] = useState(NO_SERVICE_KEY)
   const [rejectUserMismatch, setRejectUserMismatch] =
@@ -488,6 +493,7 @@ function CreateKeyDialog({
     !excludeFromBudget && keyBudgetIncomplete(budgetDraft)
   const isBlocked =
     !scopeValid ||
+    !toolScopeValid ||
     !serviceKeyReady ||
     ownerMissing ||
     workspaceUnresolved ||
@@ -508,10 +514,12 @@ function CreateKeyDialog({
     expiresAt,
     pickedOwner,
     allowedModels,
+    allowedTools,
     excludeFromBudget,
     serviceKey,
     rejectUserMismatch,
     scopeValid,
+    toolScopeValid,
     budgetDraft,
   })
 
@@ -521,6 +529,8 @@ function CreateKeyDialog({
     setShowAdvanced(false)
     setPickedOwner(undefined)
     setAllowedModels(undefined)
+    setAllowedTools(undefined)
+    setToolScopeValid(true)
     setExcludeFromBudget(false)
     setServiceKey(NO_SERVICE_KEY)
     setRejectUserMismatch("inherit")
@@ -554,6 +564,7 @@ function CreateKeyDialog({
       workspace_id: workspace?.workspace_id,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       allowed_models: allowedModels ?? null,
+      allowed_tools: allowedTools ?? null,
       reject_user_mismatch: storedUserMismatch(rejectUserMismatch),
     }
     // The member surface derives the owner and refuses a budget exemption, so
@@ -717,10 +728,26 @@ function CreateKeyDialog({
             anyLabel={
               isDeploymentWide ? "Inherit owner access" : "Inherit your access"
             }
-            initial={undefined}
+            initial={allowedModels}
             onChange={(value, isValid) => {
               setAllowedModels(value)
               setScopeValid(isValid)
+            }}
+          />
+          <ToolScopeControl
+            title="Restrict this key's search tools"
+            description={
+              isDeploymentWide
+                ? "Which search tools this key may run on /v1/search. Left on Inherit, it takes its owner's list. With no list on either, it follows its model access, or its owner's when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). A key can never exceed its owner's."
+                : "Which search tools this key may run on /v1/search. Left on Inherit, it takes your list. With no list on either, it follows its model access, or yours when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). A key can never exceed yours."
+            }
+            inheritLabel={
+              isDeploymentWide ? "Inherit owner's tools" : "Inherit your tools"
+            }
+            initial={allowedTools}
+            onChange={(value, isValid) => {
+              setAllowedTools(value)
+              setToolScopeValid(isValid)
             }}
           />
           {/* Exempting a key from a budget is the deployment operator's call,
@@ -818,6 +845,10 @@ function EditKeyForm({
   const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
     apiKey.allowed_models ?? undefined,
   )
+  const [allowedTools, setAllowedTools] = useState<string[] | undefined>(
+    apiKey.allowed_tools ?? undefined,
+  )
+  const [toolScopeValid, setToolScopeValid] = useState(true)
   const [excludeFromBudget, setExcludeFromBudget] = useState(
     apiKey.exclude_from_budget,
   )
@@ -835,10 +866,12 @@ function EditKeyForm({
     keyName,
     expiresAt,
     allowedModels,
+    allowedTools,
     excludeFromBudget,
     serviceKey,
     rejectUserMismatch,
     scopeValid,
+    toolScopeValid,
     budgetDraft,
   })
   // Ceilings that land after the form opened are part of its seed, not an edit.
@@ -852,10 +885,12 @@ function EditKeyForm({
       keyName: apiKey.key_name ?? "",
       expiresAt: toDatetimeLocal(apiKey.expires_at),
       allowedModels: apiKey.allowed_models ?? undefined,
+      allowedTools: apiKey.allowed_tools ?? undefined,
       excludeFromBudget: apiKey.exclude_from_budget,
       serviceKey: serviceKeyChoice(apiKey),
       rejectUserMismatch: userMismatchChoice(apiKey.reject_user_mismatch),
       scopeValid: true,
+      toolScopeValid: true,
       budgetDraft: seeded,
     })
   }
@@ -867,6 +902,7 @@ function EditKeyForm({
     budgetDraft.choice !== initialBudget?.choice
   const isBlocked =
     !scopeValid ||
+    !toolScopeValid ||
     !serviceKeyReady ||
     (budgetChanged && keyBudgetIncomplete(budgetDraft))
   const isSaving = update.isPending || keyBudgets.isApplying
@@ -877,6 +913,7 @@ function EditKeyForm({
       key_name: keyName.trim() || null,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       allowed_models: allowedModels ?? null,
+      allowed_tools: allowedTools ?? null,
       reject_user_mismatch: storedUserMismatch(rejectUserMismatch),
     }
     // The member surface has no budget exemption to send (see CreateKeyDialog).
@@ -971,6 +1008,22 @@ function EditKeyForm({
         onChange={(value, isValid) => {
           setAllowedModels(value)
           setScopeValid(isValid)
+        }}
+      />
+      <ToolScopeControl
+        title="Restrict this key's search tools"
+        description={
+          isDeploymentWide
+            ? "Which search tools this key may run on /v1/search. Left on Inherit, it takes its owner's list. With no list on either, it follows its model access, or its owner's when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). It can never exceed its owner's."
+            : "Which search tools this key may run on /v1/search. Left on Inherit, it takes your list. With no list on either, it follows its model access, or yours when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). It can never exceed yours."
+        }
+        inheritLabel={
+          isDeploymentWide ? "Inherit owner's tools" : "Inherit your tools"
+        }
+        initial={apiKey.allowed_tools ?? undefined}
+        onChange={(value, isValid) => {
+          setAllowedTools(value)
+          setToolScopeValid(isValid)
         }}
       />
       {/* Operator-only, as on the create form: a member editing their own key

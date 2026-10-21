@@ -9,6 +9,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    ApiKeyServiceDep,
     CallerOrganization,
     TelemetryStoragePortDep,
     TraceServiceDep,
@@ -27,7 +28,8 @@ from gateway.models.usage import UsageLog
 from gateway.models.users import User
 from gateway.repositories.users_repository import UserFilter, count_users, in_organization, page_users
 from gateway.services.budgets import budget_window
-from gateway.services.model_access import validate_allowed_models
+from gateway.services.model_access import validate_allowed_models, validate_allowed_tools
+from gateway.services.organizations import AccessLists
 
 router = APIRouter(
     prefix="/users",
@@ -49,6 +51,11 @@ class CreateUserRequest(BaseModel):
         default=None,
         description="Default model access-list this user's keys inherit; null = unrestricted, [] = deny all",
     )
+    allowed_tools: list[str] | None = Field(
+        default=None,
+        description="Default search tool access-list this user's keys inherit: null = the tools allowed_models "
+        "grants, [] = no tool, or search tool names ('*' for every search tool).",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
 
@@ -68,6 +75,7 @@ class UserResponse(BaseModel):
     reserved_requests: int
     budget_id: str | None
     allowed_models: list[str] | None
+    allowed_tools: list[str] | None
     budget_started_at: str | None
     next_budget_reset_at: str | None
     blocked: bool
@@ -94,6 +102,7 @@ class UserResponse(BaseModel):
             reserved_requests=user.reserved_requests,
             budget_id=user.budget_id,
             allowed_models=list(user.allowed_models) if user.allowed_models is not None else None,
+            allowed_tools=list(user.allowed_tools) if user.allowed_tools is not None else None,
             budget_started_at=user.budget_started_at.isoformat() if user.budget_started_at else None,
             next_budget_reset_at=user.next_budget_reset_at.isoformat() if user.next_budget_reset_at else None,
             blocked=bool(user.blocked),
@@ -112,6 +121,7 @@ class UpdateUserRequest(BaseModel):
     budget_id: str | None = None
     blocked: bool | None = None
     allowed_models: list[str] | None = None
+    allowed_tools: list[str] | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -205,10 +215,12 @@ async def create_user(
     request: CreateUserRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    api_keys: ApiKeyServiceDep,
 ) -> UserResponse:
     """Create a new user."""
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)
+        allowed_tools = validate_allowed_tools(config, request.allowed_tools)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -226,6 +238,17 @@ async def create_user(
         budget = _require_assignable_budget(budget_result.scalar_one_or_none(), request.budget_id)
 
     if existing_user and existing_user.deleted_at is not None:
+        # The deleted user's keys come back with it, so they are pinned as in
+        # update_user, before anything is staged.
+        try:
+            await api_keys.pin_before_user_grant(
+                config,
+                existing_user.user_id,
+                before=AccessLists(existing_user.allowed_models, existing_user.allowed_tools),
+                user_tools=allowed_tools,
+            )
+        except DATABASE_ERRORS as exc:
+            raise database_error("create user", exc) from None
         user = existing_user
         user.deleted_at = None
         # Every axis, or the recreated user inherits a cap the deleted one had
@@ -237,6 +260,7 @@ async def create_user(
         user.budget_id = request.budget_id
         user.blocked = request.blocked
         user.allowed_models = allowed_models
+        user.allowed_tools = allowed_tools
         user.metadata_ = request.metadata
         user.budget_started_at = None
         user.next_budget_reset_at = None
@@ -247,6 +271,7 @@ async def create_user(
             budget_id=request.budget_id,
             blocked=request.blocked,
             allowed_models=allowed_models,
+            allowed_tools=allowed_tools,
             metadata_=request.metadata,
         )
         db.add(user)
@@ -324,6 +349,7 @@ async def update_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     organization_id: CallerOrganization,
+    api_keys: ApiKeyServiceDep,
 ) -> UserResponse:
     """Update a user in the caller's organization."""
     user = await _load_user_in_organization(db, user_id, organization_id)
@@ -332,12 +358,36 @@ async def update_user(
     # clears to unrestricted, [] denies all, a list restricts. Note this default
     # caps a key only at key-write time; changing it does not retroactively
     # re-validate existing keys (see keys.py, validate-subset-on-write).
-    if "allowed_models" in request.model_fields_set:
-        try:
-            user.allowed_models = validate_allowed_models(config, request.allowed_models)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    fields = request.model_fields_set
+    stored = AccessLists(user.allowed_models, user.allowed_tools)
+    try:
+        access = await api_keys.check_access_lists(
+            config,
+            AccessLists(
+                request.allowed_models if "allowed_models" in fields else stored.models,
+                request.allowed_tools if "allowed_tools" in fields else stored.tools,
+            ),
+            stored=stored,
+            owner_id=None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    budget: Budget | None = None
+    if "budget_id" in fields and request.budget_id is not None:
+        budget_result = await db.execute(select(Budget).where(Budget.budget_id == request.budget_id))
+        budget = _require_assignable_budget(budget_result.scalar_one_or_none(), request.budget_id)
 
+    # Everything that can refuse the request has run, so the user's keys are pinned
+    # now, in a save of their own just before the user's. A pin never widens a key:
+    # should the user's save then fail, the keys stay pinned to what both lists
+    # allow, and sending the request again completes the change.
+    try:
+        await api_keys.pin_before_user_grant(config, user.user_id, before=stored, user_tools=access.tools)
+    except DATABASE_ERRORS as exc:
+        raise database_error("update user", exc) from None
+
+    user.allowed_models = access.models
+    user.allowed_tools = access.tools
     if request.alias is not None:
         user.alias = request.alias
     # Tri-state like ``allowed_models`` above, keyed on ``model_fields_set``
@@ -345,15 +395,12 @@ async def update_user(
     # and an explicit null detaches. Testing ``is not None`` made a budget
     # assignable and never removable, which is the state the budgets page's
     # deselect writes and reported as saved.
-    if "budget_id" in request.model_fields_set:
-        if request.budget_id is None:
+    if "budget_id" in fields:
+        if budget is None:
             user.budget_id = None
             user.budget_started_at = None
             user.next_budget_reset_at = None
         else:
-            budget_result = await db.execute(select(Budget).where(Budget.budget_id == request.budget_id))
-            budget = _require_assignable_budget(budget_result.scalar_one_or_none(), request.budget_id)
-
             user.budget_id = request.budget_id
             now = datetime.now(UTC)
             window = budget_window(now, budget)
