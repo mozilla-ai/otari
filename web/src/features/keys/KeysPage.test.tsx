@@ -1115,9 +1115,12 @@ describe("KeysPage", () => {
     await user.click(screen.getByRole("button", { name: "Only selected" }))
     // The scope picker is a catalog combobox, not free text: type to filter, then
     // pick the discovered model.
-    await user.type(screen.getByLabelText("Add a model"), "gpt-4o")
+    await user.type(
+      screen.getByRole("combobox", { name: "Allowed models" }),
+      "gpt-4o",
+    )
     await user.click(
-      await screen.findByRole("option", { name: "openai:gpt-4o" }),
+      await screen.findByRole("option", { name: "gpt-4o (OpenAI)" }),
     )
     // Close the combobox popover, which otherwise aria-hides the submit button.
     await user.keyboard("{Escape}")
