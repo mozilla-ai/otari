@@ -74,7 +74,7 @@ OpenAI-compatible client also works), using an `openai:<model>` selector:
 ```python
 from otari import OtariClient
 
-client = OtariClient(api_base="http://localhost:8000", api_key="gw-...")
+client = OtariClient(api_base="http://localhost:8000", api_key="tk-...")
 resp = client.completion(
     model="openai:gpt-4o-mini",
     messages=[{"role": "user", "content": "Say hello in five words."}],
@@ -97,7 +97,7 @@ Hello, nice to meet you!
 | HTTP 502 `The upstream provider account is out of credit or over its billing limit.` | The provider rejected the call because the account Otari billed has no credit left or has hit its billing limit (for example OpenAI's "billing hard limit reached", or Anthropic's "credit balance is too low", which arrives as a 400). Top up the provider account, or point the model at a provider that has credit. The usage log keeps the status the provider actually returned, so these stay countable. |
 | HTTP 502 `The provider failed the request with HTTP 5xx`, `The provider closed the connection before answering`, or `The gateway could not connect to the provider` | OpenAI failed on its side or the connection to it broke. These are retryable. `LLM provider error` is the same answer for a failure Otari could not place. |
 | HTTP 402 `No pricing configured for model ...` | Otari could not resolve pricing for that model and `require_pricing` rejected the request. Add a `pricing:` entry, enable `default_pricing: true` for bundled fallback pricing, or use a model that already has pricing coverage. |
-| HTTP 401 `Invalid master key` on `/api/v1/keys` | You passed a client (`gw-...`) key, or the wrong master key, instead of the configured master key. |
+| HTTP 401 `Invalid master key` on `/api/v1/keys` | You passed a client (`tk-...`) key, or the wrong master key, instead of the configured master key. |
 
 ## Pricing (optional)
 
