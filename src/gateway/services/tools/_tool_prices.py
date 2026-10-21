@@ -16,7 +16,7 @@ from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tools._registry import BUILTIN_TOOLS
 from gateway.services.tools._web_admission import AdmittedWebTools
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
-from gateway.services.tools._web_search import InLoopSearch, resolve_fetch, resolve_in_loop_search
+from gateway.services.tools._web_search import InLoopSearch, ResolvedFetch, resolve_fetch, resolve_in_loop_search
 from gateway.types.tool_charges import RateKey, gateway_tool_pricing_key
 
 
@@ -41,6 +41,11 @@ def _priced_search(in_loop: InLoopSearch | None) -> PricedTool:
     return PricedTool(WEB_SEARCH_TOOL_NAME, in_loop.search.label, in_loop.search.rate_keys)
 
 
+def _priced_fetch(fetch: ResolvedFetch) -> PricedTool:
+    """The fetch tool under its instance's label and rows."""
+    return PricedTool(WEB_FETCH_TOOL_NAME, fetch.label, fetch.rate_keys)
+
+
 def tools_to_price(
     *, code_execution: bool, web: AdmittedWebTools, require_pricing: bool, budget_exempt: bool
 ) -> list[PricedTool]:
@@ -62,7 +67,7 @@ def tools_to_price(
     if web.search_tool_entry is not None:
         used[WEB_SEARCH_TOOL_NAME] = _priced_search(web.in_loop_search)
     if web.fetch is not None:
-        used[WEB_FETCH_TOOL_NAME] = PricedTool(WEB_FETCH_TOOL_NAME, web.fetch.label, web.fetch.rate_keys)
+        used[WEB_FETCH_TOOL_NAME] = _priced_fetch(web.fetch)
     return [used[tool.name] for tool in BUILTIN_TOOLS if tool.name in used and used[tool.name].rate_keys]
 
 
@@ -79,8 +84,7 @@ def configured_tools_to_price(config: GatewayConfig) -> list[PricedTool]:
         if tool.name == WEB_SEARCH_TOOL_NAME:
             priced.append(_priced_search(resolve_in_loop_search(config, None)))
         elif tool.name == WEB_FETCH_TOOL_NAME:
-            fetch = resolve_fetch(config, None, requested=None, for_search=None)
-            priced.append(PricedTool(tool.name, fetch.label, fetch.rate_keys))
+            priced.append(_priced_fetch(resolve_fetch(config, None, requested=None, for_search=None)))
         else:
             priced.append(_on_its_own_row(tool.name))
     return priced
