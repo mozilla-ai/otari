@@ -25197,7 +25197,7 @@
   "info": {
     "description": "Otari, an OpenAI-compatible LLM gateway with API key management",
     "title": "otari",
-    "version": "0.31.0"
+    "version": "0.31.1"
   },
   "openapi": "3.1.0",
   "paths": {

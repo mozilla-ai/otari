@@ -2,8 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.31.0/docs/public/openapi.json) and
-[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.31.0/docs/public/otari.postman_collection.json). Those generated
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.31.1/docs/public/openapi.json) and
+[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.31.1/docs/public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
 The default server address is `http://localhost:8000`. The API is mounted at
@@ -115,9 +115,15 @@ no way to send them back.
 
 ### Request ID and inline cost
 
-Every Chat, Messages, and Responses response carries an `Otari-Request-ID`
-header, streaming or not. In hybrid mode it is the platform's id for the
-request; a standalone gateway mints its own. A standalone gateway also names the
+Chat, Messages, and Responses responses carry an `Otari-Request-ID` header,
+streaming or not, and so do the responses of the embeddings, rerank, images,
+audio, moderations, decisions and search endpoints. The exception is a request
+rejected before the gateway handles it: a failed authentication (`401`) or a
+body that does not validate (`422`) carries none. In hybrid mode it is the
+platform's id for the request; a standalone gateway mints its own, sends it on
+its own refusals as well, and records it on the request's usage rows, so
+[`GET /api/v1/usage/requests/{request_id}`](#cost-of-a-failed-or-interrupted-request)
+finds the request's cost by it. A standalone gateway also names the
 provider instance and model that served the request, whether a fallback did, and
 how long it took, in `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`,
 `Otari-Fallback` and `Otari-Response-Duration-Ms`; see
