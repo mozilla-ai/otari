@@ -437,6 +437,27 @@ describe("SettingsPage", () => {
     expect(new Headers(patch?.[1]?.headers).get("Authorization")).toBeNull()
   })
 
+  it("closes the regenerate confirm with its X, and offers none on the one-time reveal", async () => {
+    mockApi()
+    const user = userEvent.setup()
+
+    renderWithClient(<SettingsPage />)
+    await screen.findByText(/Version 1.2.3/)
+
+    await user.click(screen.getByRole("button", { name: "Regenerate" }))
+    await user.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
+    )
+
+    await user.click(screen.getByRole("button", { name: "Regenerate" }))
+    await user.click(screen.getByRole("button", { name: "Regenerate key" }))
+    await screen.findByRole("alertdialog", { name: "Master key regenerated" })
+    expect(
+      screen.queryByRole("button", { name: "Close" }),
+    ).not.toBeInTheDocument()
+  })
+
   it("explains when a master key is managed in configuration", async () => {
     mockApi({ ...SETTINGS, master_key_source: "configured" })
 

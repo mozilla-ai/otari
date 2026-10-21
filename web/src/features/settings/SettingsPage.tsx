@@ -2,6 +2,7 @@ import { AlertDialog, Button, buttonVariants, Input } from "@heroui/react"
 import { Fragment, useEffect, useRef, useState } from "react"
 import type { ConfigField, UpdateSettingsRequest } from "@/client"
 import { CONCEALED_SECRET, CopyField } from "@/design-system/actions/CopyField"
+import { DialogClose } from "@/design-system/feedback/Dialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
@@ -378,11 +379,18 @@ function MasterKeyRotationDialog({
       <AlertDialog.Container placement="center" size="lg">
         <AlertDialog.Dialog>
           <AlertDialog.Header>
-            <AlertDialog.Heading>
-              {masterKey !== undefined
-                ? "Master key regenerated"
-                : "Regenerate master key?"}
-            </AlertDialog.Heading>
+            <div className="flex items-start justify-between gap-4">
+              <AlertDialog.Heading>
+                {masterKey !== undefined
+                  ? "Master key regenerated"
+                  : "Regenerate master key?"}
+              </AlertDialog.Heading>
+              {/* Not on the reveal: the key is shown once, so the
+                  acknowledgement is the only way out. */}
+              {masterKey === undefined ? (
+                <DialogClose isDisabled={isPending} onPress={onClose} />
+              ) : null}
+            </div>
           </AlertDialog.Header>
           <AlertDialog.Body className="flex flex-col gap-4">
             {masterKey !== undefined ? (

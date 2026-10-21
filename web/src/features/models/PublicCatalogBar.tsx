@@ -1,7 +1,8 @@
-import { Button, buttonVariants, Drawer } from "@heroui/react"
+import { buttonVariants, Drawer } from "@heroui/react"
 import { useState } from "react"
 import { FaGithub } from "react-icons/fa"
-import { FiMenu } from "react-icons/fi"
+import { FiMenu, FiX } from "react-icons/fi"
+import { IconButton } from "@/design-system/actions/IconButton"
 import {
   publicCatalogHref,
   siteHomeHref,
@@ -96,13 +97,13 @@ export function PublicCatalogBar({ onList }: { onList: boolean }) {
                 <Drawer.Header className="border-b border-border px-4 py-3">
                   <div className="flex items-center justify-between gap-3">
                     <Drawer.Heading className="text-title">Menu</Drawer.Heading>
-                    <Button
-                      size="sm"
-                      variant="ghost"
+                    <IconButton
+                      label="Close"
+                      isIconOnly
                       onPress={() => setMenuOpen(false)}
                     >
-                      Close
-                    </Button>
+                      <FiX aria-hidden className="size-4" />
+                    </IconButton>
                   </div>
                 </Drawer.Header>
                 <Drawer.Body className="flex flex-col gap-1 px-2 py-3">

@@ -1,9 +1,11 @@
-import { Button, Drawer } from "@heroui/react"
+import { Drawer } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
+import { FiX } from "react-icons/fi"
 
 import type { CatalogModelDetail, CatalogOffering } from "@/client"
 import { CopyField } from "@/design-system/actions/CopyField"
+import { IconButton } from "@/design-system/actions/IconButton"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { formatRate } from "@/shared/helpers/format"
@@ -95,13 +97,14 @@ export function UseModelDrawer({
                     <code className="text-mono-caption">model</code>.
                   </p>
                 </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
+                <IconButton
+                  label="Close"
+                  isIconOnly
+                  className="shrink-0"
                   onPress={() => onOpenChange(false)}
                 >
-                  Close
-                </Button>
+                  <FiX aria-hidden className="size-4" />
+                </IconButton>
               </div>
             </Drawer.Header>
             <Drawer.Body className="flex flex-col gap-6 overflow-y-auto px-6 py-5">
