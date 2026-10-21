@@ -39,17 +39,11 @@ from gateway.core.env import otari_env
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 
-# Search providers the standalone POST /api/v1/search endpoint's own clients can
-# dispatch to. Declared here rather than in the adapter module so the config
-# layer never imports the service layer.
-# Which providers a ``search_tools`` entry may name is wider: see
-# :func:`supported_search_providers`.
-SEARCH_PROVIDERS = ("exa", "searxng")
 # Licensed search APIs the in-loop ``otari_web_search`` backend can call
 # directly, as an alternative to pointing ``web_search_url`` at a SearXNG-shaped
-# service. Declared here for the same reason as SEARCH_PROVIDERS above: startup
-# validation rejects an unknown ``web_search_provider`` without the config layer
-# importing `gateway.services.web_search_providers`, which imports this name.
+# service. Declared here so startup validation rejects an unknown
+# ``web_search_provider`` without the config layer importing
+# `gateway.services.web_search_providers`, which imports this name.
 WEB_SEARCH_PROVIDERS = ("tavily", "brave")
 # Providers that authenticate with an API key, for the direct endpoint's own
 # clients and the catalog's entries for providers without an adapter. Validation

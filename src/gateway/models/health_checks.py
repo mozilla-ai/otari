@@ -10,9 +10,6 @@ from gateway.models.base import Base, UtcDateTime
 
 SETTINGS_ROW_ID = 1
 
-# The closed vocabulary of ``health_check_results.status``.
-RESULT_STATUSES = ("pass", "fail", "skip")
-
 
 class HealthCheckSettings(Base):
     """The one row that says whether, how often and how the checks run.
