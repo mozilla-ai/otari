@@ -134,12 +134,6 @@ key, and on the edit form), as `reject_user_mismatch` on `POST` or `PATCH`
 config.yml. The deployment-wide default is a runtime setting, changed on the
 Settings page or with `PATCH /api/v1/settings`.
 
-The check is a standalone one. A hybrid gateway, such as otari.ai's, does not
-compare the field with the key's owner, so a key there needs no setting: the
-value only feeds the
-[end-user identifier](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/protocols-and-sdks/hybrid-mode-protocol#end-user-identifier) sent to the
-provider.
-
 ## Service keys and end users
 
 A service key lets one application attribute spend to the people it serves
@@ -150,8 +144,7 @@ use, with a budget copied onto it from the key's settings. The key's own
 ceiling pools every end user behind it, and the key's user's rate limit and
 model allow-list still apply to all of them. Because end users belong to the
 key's user, a key can never reach another user's end users. Only a deployment
-operator can mark a key as a service key, and hybrid mode does not support
-them.
+operator can mark a key as a service key.
 
 For the steps, the rules and the end-user routes, see
 [Track spend per end user](end-users.md).
@@ -333,7 +326,7 @@ sessions. A request whose session cookie no longer authenticates is refused
 with 401 "Your dashboard session has ended. Sign in again."
 
 A session authorizes the management API. It does not authorize
-`/api/v1/chat/completions` or any other data-plane path, which take an API key
+`/api/v1/chat/completions` or any other inference path, which take an API key
 or the master key and nothing else: a keyless request resolves to the
 deployment's default workspace, so honoring a cookie there would let any member
 of any organization spend that workspace's provider credential.

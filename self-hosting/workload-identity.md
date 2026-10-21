@@ -13,9 +13,7 @@ authenticates as that key. Everything the key carries still applies: its
 active flag and expiry, its user being blocked, its model allow-list, its
 budgets and ceilings, and whether it is a service key.
 
-Workload identity is available in standalone and hosted modes. A hybrid
-gateway verifies no keys of its own and refuses the setting at startup. It also
-needs `OTARI_SECRET_KEY`, which signs the access tokens of the
+Workload identity needs `OTARI_SECRET_KEY`, which signs the access tokens of the
 [token exchange](#claude-code-and-the-anthropic-sdks): with `federation_issuers`
 set and no `OTARI_SECRET_KEY`, the gateway refuses to start.
 
@@ -75,8 +73,8 @@ The routes, all under `/api/v1/keys/{key_id}/federation-rules`:
 | `DELETE /api/v1/keys/{key_id}/federation-rules/{rule_id}` | Removes a rule, effective with the next request. |
 
 Deleting the key deletes its rules. These routes need the deployment operator's
-standing, like the rest of `/api/v1/keys`, so on a hosted gateway the operator
-manages rules on a tenant's behalf; a tenant's own admins cannot yet.
+standing, like the rest of `/api/v1/keys`, so the operator
+manages rules on an organization's behalf; its own admins cannot yet.
 
 ### Signing keys
 

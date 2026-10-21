@@ -4,12 +4,9 @@ Otari serves its dashboard at the gateway root. The dashboard uses the same
 management API available to scripts, so access and behavior are determined by the
 server rather than duplicated in the frontend.
 
-## Deployment modes
-
-What the dashboard offers depends on the [deployment mode](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/modes#comparison).
-It reads `GET /api/v1/bootstrap` before rendering. That response controls the
-available sign-in methods and navigation surfaces, so a page that is not
-available in the current mode is not offered.
+The dashboard reads `GET /api/v1/bootstrap` before rendering. That response
+controls the available sign-in methods and navigation surfaces, so a page the
+deployment does not serve is not offered.
 
 ## Sign-in and secrets
 
@@ -20,7 +17,7 @@ The master key and `OTARI_SECRET_KEY` are different credentials:
 | Master key | Authorizes deployment management and signs in the first operator |
 | `OTARI_SECRET_KEY` | Encrypts provider and search-tool credentials stored in the database |
 
-If `OTARI_MASTER_KEY` is unset on a new standalone database, Otari generates a
+If `OTARI_MASTER_KEY` is unset on a new database, Otari generates a
 master key and prints it once. The dashboard exchanges it for an HttpOnly session
 cookie; it does not store the master key in browser storage.
 
@@ -56,7 +53,7 @@ organization, so the account menu names you even before you join one.
 
 ## First-run walkthrough
 
-1. Start Otari in standalone mode.
+1. Start Otari.
 2. Open the gateway root, usually `http://localhost:8000/`.
 3. Sign in with the configured or generated master key.
 4. Add a provider. If storing its credential in the dashboard, configure
@@ -80,7 +77,7 @@ created. Set `activation_guide: false` to disable the flow for the deployment.
 
 ## Navigation
 
-Exact page names and availability can change with deployment mode and installed
+Exact page names and availability can change with configuration and installed
 extensions. The running dashboard is the source of truth.
 
 The workspace view contains day-to-day gateway operations:
@@ -166,10 +163,9 @@ is in [Browsing the grouped catalog](https://mozilla-ai.gitbook.io/otari-preview
 Routing lists each policy with its main model, its backups in order, and who it
 applies to; the empty list offers a fallback directly. In the policy forms,
 models are chosen by model and then by provider. How to create and edit a policy
-there is in [Failover](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing#failover). A hybrid or hosted deployment says
-that its policies are not where a request's attempt plan comes from.
+there is in [Failover](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing#failover).
 
-On a standalone gateway, Routing's **Automatic fallback** section, read from
+Routing's **Automatic fallback** section, read from
 `GET /api/v1/organizations/me/automatic-fallbacks`, lists every model your
 organization sent requests to in the last 30 days, most requested first, with
 its offerings in the order a request sent by catalog id tries them for your
@@ -224,16 +220,14 @@ given their extracted text. When comparing, both models get the same files. A
 saved conversation remembers which files each question carried. Removing a
 chip takes the file off that question and keeps the upload: the Files dialog
 lists everything you uploaded in the workspace, to attach again or to delete.
-These controls appear only where the deployment stores files: not when file
-uploads are off, and not on a hosted control plane.
+These controls do not appear when file uploads are off.
 
 The Tools menu attaches web search, code execution and any number of MCP
 servers to the next message, in any mix: the model is offered all of them in one
 tool loop. A tool the gateway runs shows in the transcript above the reply as a
 collapsed row with its status, opening to the arguments the model sent and what
 the tool returned (a long result is shortened for display). This activity is
-shown in the Playground only (not on a hosted control plane, whose requests run
-on the data plane) and is not saved with a conversation; a request
+shown in the Playground only and is not saved with a conversation; a request
 made through the API still returns just the final message, as
 [What clients receive](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/tools#what-clients-receive) describes.
 
@@ -252,14 +246,12 @@ comparison prompts once for content retention, and the flags are per person and
 revocable; withdrawing one blocks new saves and deletes nothing. Saved
 transcripts, recorded comparisons and pinned models are visible only to the
 person who created them, even to colleagues in the same workspace, and each can
-be deleted from the page. Hosted control planes serve no inference, so they do
-not offer the page at all.
+be deleted from the page.
 
 ## Observability
 
 Activity is the per-request log. Sessions lists [agent sessions](traces.md)
-where the deployment records traces (`trace_capture_enabled`, on by default; a
-hybrid gateway records none), and has no entry where it does not. Its chart
+where the deployment records traces (`trace_capture_enabled`, on by default), and has no entry where it does not. Its chart
 counts sessions per hour or day as succeeded or failed, and its Levels column
 counts each session's errors, tools' errors included; a tool's error alone does
 not fail a session (see [Sessions and failures](traces.md#sessions-and-failures)). A session

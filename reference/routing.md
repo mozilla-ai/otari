@@ -6,9 +6,6 @@ spill-over past a rate limit, learned selection, or guardrails the caller cannot
 remove. Use an
 [alias](models.md#model-aliases) when one name always maps to one target.
 
-Policies are a standalone feature. Hybrid gateways receive their attempt plan
-from the connected control plane.
-
 ## Failover
 
 ```yaml
@@ -35,7 +32,7 @@ the policy moves on to the next; a provider nothing declares has none, keyless
 local backends included, and an entry that names no key has none, whatever the
 provider's own environment variable holds. A candidate nothing declares that one of the
 deployment's hosted providers serves is sent on the deployment's own credential, as a single model is
-([hosted providers](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#deployment-paid-credentials-in-standalone)). When no candidate has a credential, the request is
+([hosted providers](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#deployment-paid-credentials)). When no candidate has a credential, the request is
 refused with `424 provider_not_configured`. A candidate whose provider rejects
 the configured credential (401, or a 403 that does not reject the request itself) moves on too; when every candidate
 either lacks a credential or had it rejected, and at least one was rejected, the
@@ -249,7 +246,7 @@ talks to its provider directly can still ask Otari which model a new subagent
 should run on, through `POST /api/v1/routing/recommend`, at the moment it spawns
 the subagent, before the subagent has a prompt cache to lose.
 
-A standalone deployment puts one choice question to the decision model
+A gateway you run puts one choice question to the decision model
 `agent_recommender_model` names (TypeSafe's Jev by default, or a local one):
 given the harness, the subagent type, the parent's model, the task description
 and the task, which is the cheapest candidate that would complete the task well
@@ -274,7 +271,7 @@ plugin that asks is in
 
 ## Managing policies at runtime
 
-Config-file policies apply to every workspace. Standalone operators can also
+Config-file policies apply to every workspace. Operators can also
 manage stored policies through the Routing page or `/api/v1/routing/policies`.
 Stored policies belong to one workspace and can optionally be scoped to one
 user. The operator's list, like `/api/v1/aliases`, shows the stored entries of
@@ -347,8 +344,7 @@ carry the same values: failover happens before the stream opens, so the serving
 candidate and the attempt count are already known when the headers are sent. A
 failure later in the stream is reported in the stream and changes neither. The
 request's cost is `usage.cost_usd` in the body, as described in the
-[API reference](api-reference.md#request-id-and-inline-cost). These headers are
-sent by a standalone gateway.
+[API reference](api-reference.md#request-id-and-inline-cost).
 
 Built-in tool charges settle on the final row. Candidate price and remaining budget, including a budget narrowed to that candidate's provider, are checked before each attempt, so a fallback cannot silently bypass pricing or spend limits. A fallback is skipped when a budget narrowed to its provider has no room, and the next candidate is tried. A budget on every provider that cannot cover a pricier fallback stops the chain instead. What a fallback spends counts against its own provider's budgets.
 

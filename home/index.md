@@ -21,10 +21,12 @@ On the way through, it:
 
 ## Two ways to run it
 
-You can use the hosted gateway at [otari.ai](https://otari.ai), or run Otari
-yourself with your own database and provider keys. The two differ in who runs
-the gateway and where its data lives, not in the API your applications call.
-[Runtime modes](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/modes) compares them.
+You can use the gateway mozilla.ai runs at [otari.ai](https://otari.ai), or
+run Otari yourself with your own database and provider keys. The two differ in
+who runs the gateway, its base URL, where its data lives and who bills you, not
+in the API your applications call. The [Quickstart](quickstart.md) starts on
+otari.ai, and the [Self-hosted quickstart](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting) runs your
+own gateway.
 
 ## Where to go next
 
@@ -45,6 +47,6 @@ Point an agent or a framework at Otari:
 
 ### For contributors
 
-- [Architecture](https://github.com/mozilla-ai/otari/blob/main/ARCHITECTURE.md): the two-plane model and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
+- [Architecture](https://github.com/mozilla-ai/otari/blob/main/ARCHITECTURE.md): one process over one database, and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
 - [Backend domains](https://github.com/mozilla-ai/otari/blob/main/DOMAINS.md): what each backend domain owns, and the layer shape each domain moves toward.
 - [Load test](https://github.com/mozilla-ai/otari/blob/main/loadtest/README.md): compares two builds under load on one machine, route by route, and fails when the second got slower or runs more database statements per request. CI runs it on a PR against its base.

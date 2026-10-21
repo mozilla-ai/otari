@@ -3,8 +3,11 @@
 Every provider call is made on one credential. This page describes where that
 credential comes from: the deployment's own configuration, an organization's
 own provider key (bring your own key, BYO), or one of the deployment's
-**hosted providers**, a credential the deployment owns and pays for. For the
-modes these apply in, see [Runtime modes](modes.md).
+**hosted providers**, a credential the deployment owns and pays for. The
+upstream bill follows the credential: an organization's own key bills that
+organization's provider account, while the deployment settles a hosted
+provider's bill, which is why a hosted model's rate belongs to the deployment
+price list rather than to any one organization.
 
 ## The credential ladder
 
@@ -66,7 +69,7 @@ organization, gets the same `404` that `/api/v1/admin` gives, and an API key
 gets `401`. Organization owners and admins manage their own organization's
 provider keys, never these.
 
-A standalone or hosted deployment configures hosted providers in three places:
+A deployment configures hosted providers in three places:
 
 - the Hosted providers page (see [The Hosted providers page](#the-hosted-providers-page)),
 - `/api/v1/hosted-providers`,
@@ -74,8 +77,7 @@ A standalone or hosted deployment configures hosted providers in three places:
   [The `hosted_providers:` block](#the-hosted_providers-block)).
 
 A provider stored through the page or the API wins over a `config.yml` entry of
-the same name. A hybrid gateway ignores the block and holds no hosted providers
-of its own.
+the same name.
 
 Storing a hosted provider's key requires `OTARI_SECRET_KEY`; see
 [Runtime provider management](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/configuration#runtime-provider-management)
@@ -176,7 +178,7 @@ shown a priced model only where something would serve it; see
 
 ## The `hosted_providers:` block
 
-A standalone or hosted deployment can declare hosted providers in
+A deployment can declare hosted providers in
 `config.yml`, keyed by name, with the fields the `/api/v1/hosted-providers`
 body takes:
 
@@ -325,7 +327,7 @@ menu, and is listed only for a deployment operator.
   are listed in a banner with the reason; see
   [Move config.yml providers to hosted providers](migrate-providers.md#providers-from-the-deployment-providers-page).
 
-## Deployment-paid credentials in standalone
+## Deployment-paid credentials
 
 Once an organization's own key and `config.yml` have both missed, the core
 serves a model on one of the deployment's hosted providers, and a build may
@@ -351,11 +353,3 @@ moderations) and batches. A routing policy asks for each candidate as it
 reaches it, so the one that serves is the one that settles, and one the
 organization cannot fund is skipped. A batch is admitted when it is created and
 charged when its results are accounted.
-
-## In hybrid mode
-
-A hybrid gateway holds no hosted providers or organization keys of its own: the
-control plane resolves each attempt's credential. Which kinds of credential it
-can receive, and who is billed for each, is described in
-[Hosted providers and BYO credentials](modes.md#hosted-providers-and-byo-credentials)
-on the Runtime modes page.
