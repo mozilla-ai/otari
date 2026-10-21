@@ -48,7 +48,7 @@ import {
 // menu repeated it under an avatar the trigger already draws, so that block is
 // gone and /account is where an identity is actually read.
 //
-// Three of these are real in a standalone gateway. Appearance drives the dark
+// Three of these are real in this build. Appearance drives the dark
 // token block globals.css has carried since the design foundation was rehomed,
 // logging out ends the session, and Account settings opens the page that owns
 // the credential it was minted from (otari#653): a session is per-identity

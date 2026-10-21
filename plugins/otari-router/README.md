@@ -52,7 +52,7 @@ Each spawn leaves a dim transcript line such as
 
 ## Requirements
 
-- An Otari gateway. A standalone one needs a
+- An Otari gateway. A self-hosted one needs a
   [decision provider](../../docs/configuration.md#decision-providers)
   configured, and the recommendation is one decision-model call billed to the
   key above; on otari.ai a managed recommender answers, with nothing to

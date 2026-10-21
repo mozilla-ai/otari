@@ -29,7 +29,7 @@ describe("useDeployment", () => {
 
   it("throws outside a provider rather than guessing a deployment", () => {
     // A tree with no bootstrap has not been told what it is running against.
-    // Defaulting to standalone here would put the failure somewhere else.
+    // Defaulting to an empty one here would put the failure somewhere else.
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 
     expect(() => renderHook(() => useDeployment())).toThrow(

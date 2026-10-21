@@ -4,8 +4,8 @@
  *
  * The server can only make it absolute when it knows its public address; without
  * one it answers `/#/...`. That is resolved against the page the operator is on
- * rather than against the origin, because a hosted bundle is served under a path
- * prefix, and every dashboard route lives in the hash.
+ * rather than against the origin, because the dashboard may be served under a
+ * path prefix, and every dashboard route lives in the hash.
  */
 export function absoluteDashboardLink(
   link: string,

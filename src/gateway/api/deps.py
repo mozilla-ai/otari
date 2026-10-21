@@ -126,7 +126,6 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
 )
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
 from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
 from gateway.services.tenancy.workspace_service import WorkspaceService
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies, WorkspaceWebSearchService
@@ -1000,17 +999,6 @@ def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
 MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_listener)]
 
 
-def get_workspace_listener(uow: UnitOfWorkDep) -> WorkspaceListener:  # noqa: ARG001
-    """Return what sets up a workspace this request creates: nothing, since a new workspace needs no rows of its own.
-
-    Takes the Unit of Work because the container builds a listener from one.
-    """
-    return NullWorkspaceListener()
-
-
-WorkspaceListenerDep = Annotated[WorkspaceListener, Depends(get_workspace_listener)]
-
-
 def get_workspace_code_execution_policy_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
@@ -1026,9 +1014,7 @@ def get_workspace_code_execution_policy_service(
     return WorkspaceCodeExecutionPolicyService(
         uow,
         WorkspaceCodeExecutionPolicyRepository(uow),
-        WorkspaceAccess(
-            db, OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
-        ),
+        WorkspaceAccess(db, OrganizationService(db, membership_listener=None)),
         sandbox_configured=config.sandbox_configured(),
         default_enabled=config.code_execution_workspace_default,
         allowed_images=config.pinnable_sandbox_images(),
@@ -1091,7 +1077,6 @@ async def get_current_identity(
     _master_key: Annotated[str | None, Depends(verify_master_key)],
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
-    workspace_listener: WorkspaceListenerDep,
 ) -> TenancyUser:
     """Resolve the tenancy identity acting on this request.
 
@@ -1105,8 +1090,8 @@ async def get_current_identity(
     bootstrap operator, provisioned on first use (otari-ai#1716 option A, see
     `gateway.services.tenancy.provisioning_service`). That is also the identity
     master-key sign-in binds a session to, so both credentials resolve to the
-    same operator on a standalone deployment; the difference matters once the
-    per-user sign-in flows mint sessions for other identities.
+    same operator; the difference matters once the per-user sign-in flows mint
+    sessions for other identities.
 
     Depending on ``verify_master_key`` keeps the credential check exactly where
     the rest of the management API has it, and keeps a request with no credential
@@ -1118,7 +1103,6 @@ async def get_current_identity(
         db,
         uow=uow,
         membership_listener=membership_listener,
-        workspace_listener=workspace_listener,
     )
 
 
@@ -1311,7 +1295,6 @@ def get_overview_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
-    workspace_listener: WorkspaceListenerDep,
 ) -> OverviewService:
     """Build the dashboard overview's summary service on the request's session.
 
@@ -1320,11 +1303,11 @@ def get_overview_service(
     """
     return OverviewService(
         OverviewRepository(db),
-        OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+        OrganizationService(db, membership_listener=None),
         DeploymentUserService(db),
         # The listener is for writes; this service only reads, and the same
         # pairing is what `routes/workspaces.py` builds.
-        WorkspaceService(db, uow=uow, membership_listener=membership_listener, workspace_listener=workspace_listener),
+        WorkspaceService(db, uow=uow, membership_listener=membership_listener),
     )
 
 
@@ -1336,7 +1319,7 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
 
     It reads only. A membership write needs the listener this pairing leaves unset.
     """
-    return OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    return OrganizationService(db, membership_listener=None)
 
 
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
@@ -1346,12 +1329,9 @@ def get_membership_organization_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
-    workspace_listener: WorkspaceListenerDep,
 ) -> OrganizationService:
     """Build the request's organization service for writing memberships and creating workspaces."""
-    return OrganizationService(
-        db, membership_listener=membership_listener, uow=uow, workspace_listener=workspace_listener
-    )
+    return OrganizationService(db, membership_listener=membership_listener, uow=uow)
 
 
 MembershipOrganizationServiceDep = Annotated[OrganizationService, Depends(get_membership_organization_service)]
@@ -1440,7 +1420,7 @@ def get_budget_service(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> BudgetService:
     """Build the request's budget service on the request's Unit of Work."""
-    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    organizations = OrganizationService(db, membership_listener=None)
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
@@ -1480,7 +1460,7 @@ def get_organization_guardrail_definition_service(
     """
     return OrganizationGuardrailDefinitionService(
         definitions=OrganizationGuardrailDefinitionRepository(uow),
-        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+        organizations=OrganizationService(db, membership_listener=None),
         uow=uow,
         build_state=organization_guardrail_runner.build_state,
         rebuild=organization_guardrail_runner.rebuild_definition,
@@ -1543,7 +1523,7 @@ def get_org_provider_model_service(
     return OrgProviderModelService(
         uow,
         config=config,
-        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+        organizations=OrganizationService(db, membership_listener=None),
         provider_keys=OrgProviderKeyService(db),
         org_pricing=OrganizationPricingService(db, config, model_provider=model_provider),
         models=OrgProviderKeyModelRepository(uow),
@@ -1592,7 +1572,7 @@ def get_web_search_key_service(
 
     The config tells a workspace without a key of a kind what its calls run on.
     """
-    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    organizations = OrganizationService(db, membership_listener=None)
     return WebSearchKeyService(
         uow,
         keys=OrgWebSearchKeyRepository(uow),
@@ -1739,7 +1719,7 @@ async def get_visible_workspaces(
     owner or an admin reads every workspace in the organization, anyone else the
     ones they actively belong to. Never taken from the request.
     """
-    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    organizations = OrganizationService(db, membership_listener=None)
     scope = await resolve_visible_workspace_scope(db, user=identity, organizations=organizations)
     workspace_ids = (
         await WorkspaceRepository(db).get_ids_by_organization(scope.organization.id)
@@ -1888,11 +1868,7 @@ async def _caller_organization_id(
     so an operator running several organizations behind one gateway works in the
     one they are currently in rather than across all of them (otari#817).
     """
-    return (
-        await OrganizationService(
-            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-        ).get_active_organization_for_user(identity)
-    ).id
+    return (await OrganizationService(db, membership_listener=None).get_active_organization_for_user(identity)).id
 
 
 CallerOrganization = Annotated[uuid.UUID, Depends(_caller_organization_id)]

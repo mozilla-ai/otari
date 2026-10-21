@@ -33,7 +33,6 @@ if "gateway" in sys.modules:
 from gateway.api.deps import (
     build_hosted_provider_service,
     get_membership_listener,
-    get_workspace_listener,
     set_config,
 )
 from gateway.container import build_container
@@ -405,7 +404,6 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         config.bootstrap,
         config=config,
         membership_listener=get_membership_listener,
-        workspace_listener=get_workspace_listener,
         hosted_provider_service=functools.partial(build_hosted_provider_service, config=config),
     )
     install_rate_limits(app, config)

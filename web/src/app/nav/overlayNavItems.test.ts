@@ -14,8 +14,7 @@ import type { NavSection } from "./types"
  * hold whether or not the registry applies the contributions at all. Unwiring
  * `composeNavItems` from any rail leaves that suite green and turns this file
  * red, which is the point of it, and the organization rail is the one that
- * matters most: Billing and Gateways are why the seam exists and both land
- * there.
+ * matters most: Billing is why the seam exists and lands there.
  *
  * `to` borrows a base path on purpose. The real destinations are paths only the
  * composed build has a route for, and `NavPath` resolves against *this* build's
@@ -28,19 +27,14 @@ vi.mock("./overlayNavItems", () => ({
       sectionId: "org-money",
       items: [{ to: "/organization", label: "Billing", icon: FiCreditCard }],
     },
-    {
-      sectionId: "org-gateway",
-      items: [{ to: "/organization", label: "Gateways", icon: FiServer }],
-    },
     // The workspace rail, contributed from the same list the organization rail
     // reads: one module for both is what a unique section id buys.
     {
       sectionId: "observe",
       items: [{ to: "/usage", label: "Reports", icon: FiServer }],
     },
-    // And the deployment rail, from that same list. A hosted edition
-    // administers the process every tenant is served by, which is neither a
-    // workspace's scope nor a tenant's.
+    // And the deployment rail, from that same list: the process every tenant
+    // is served by, which is neither a workspace's scope nor a tenant's.
     {
       sectionId: "deployment-general",
       items: [{ to: "/settings", label: "Credit grants", icon: FiCpu }],
@@ -56,14 +50,6 @@ describe("a build that replaces the nav-item module", () => {
     expect(
       section(ORG_NAV_SECTIONS, "org-money")?.items.map((item) => item.label),
     ).toEqual(["Spend & budgets", "Billing"])
-  })
-
-  it("appends into a second organization section from the same list", () => {
-    // A section the base leaves empty still takes a row, which is why Gateway
-    // stays declared with nothing in it.
-    expect(
-      section(ORG_NAV_SECTIONS, "org-gateway")?.items.map((item) => item.label),
-    ).toEqual(["Gateways"])
   })
 
   it("appends into the workspace rail from that same list", () => {

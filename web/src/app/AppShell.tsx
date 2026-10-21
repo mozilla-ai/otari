@@ -471,7 +471,7 @@ function NavGroup({
  * capability, and a visitor without a session has nothing to resolve one from.
  *
  * `PostSignInGate` is the seam for anything that has to be shown once, in front
- * of the whole app, after a session exists (otari#789): a hosted signup's
+ * of the whole app, after a session exists (otari#789): otari.ai's signup
  * profile questions, in the build that has a signup. It is mounted here rather
  * than anywhere else because its position *is* its contract, all three
  * boundaries of it, and the module docstring is where that lives. The base
@@ -548,11 +548,9 @@ function AppShellChrome() {
   const inDeployment = navContext === "deployment"
   const organization = useOrganizationContext()
   const { selected: selectedWorkspace } = useSelectedWorkspace()
-  // Always true in a standalone deployment, where the one session is the local
-  // operator and it owns the organization the gateway provisioned for itself.
-  // Written anyway because it becomes load-bearing the moment per-user sign-in
-  // lands (otari-ai#1716), and because an overlay build can already be reached
-  // by someone who is not an admin.
+  // True for the local operator, who owns the organization the gateway
+  // provisioned for itself, and load-bearing for every account that signs in
+  // without managing it (otari-ai#1716).
   // Fails open when the context errors rather than resolving false: Users,
   // budgets and settings are reachable only through this entry, the routes still
   // work by URL, and the server authorizes every request behind it regardless.

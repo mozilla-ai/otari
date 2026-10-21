@@ -163,7 +163,7 @@ export function useDeployment(): DeploymentBootstrap {
 export function useSurfaces(): (surface: string) => boolean {
   const { surfaces } = useDeployment()
   return useMemo(() => {
-    const hosted = new Set(surfaces)
-    return (surface: string) => hosted.has(surface)
+    const published = new Set(surfaces)
+    return (surface: string) => published.has(surface)
   }, [surfaces])
 }

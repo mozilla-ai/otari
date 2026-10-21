@@ -753,42 +753,6 @@ def test_a_config_read_that_fails_releases_the_budget_reservation(
     assert float(reserved) == 0.0, "the admission failure left the estimate debited"
 
 
-def test_an_unresolvable_workspace_refuses_rather_than_searching(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The veto's defensive arm fails closed.
-
-    Unreachable today: `resolve_workspace_id` always answers, falling back to the default
-    workspace. It is pinned anyway because the arm guards a veto, so falling
-    through would hand web search to a workspace whose row refuses it, with
-    nothing to notice.
-    """
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
-
-    async def no_workspace(*_args: Any, **_kwargs: Any) -> None:
-        return None
-
-    monkeypatch.setattr("gateway.api.routes._pipeline.resolve_workspace_id", no_workspace)
-    # The organization-guardrail resolve (otari#654) fails closed on the same
-    # condition and runs first, so without this the request would be refused
-    # before the arm under test. Neutralized rather than asserted around,
-    # because this case is about the web-search veto; the guardrail gate has its
-    # own coverage in `test_organization_guardrail_enforcement.py`.
-    monkeypatch.setattr(
-        "gateway.api.routes._pipeline._resolve_organization_guardrails",
-        AsyncMock(return_value=[]),
-    )
-
-    response, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
-
-    assert response.status_code == 500
-    detail = response.json()
-    assert detail["error"]["message"] == "Web search configuration could not be resolved for this request"
-    assert seen.ran is False
-
-
 def _stored_search_tool(client: TestClient, master_key_header: dict[str, str], name: str) -> None:
     """Add a runtime search tool, the way an operator without a config file does.
 

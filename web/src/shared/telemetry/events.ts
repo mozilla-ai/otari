@@ -43,7 +43,7 @@ export const TELEMETRY_EVENTS = {
    * The post-sign-in setup guide shown to a new account.
    *
    * Named here and fired by nobody in this build, for the same reason as
-   * `CHECKOUT_CANCELLED` below: the guide is a hosted surface an overlay
+   * `CHECKOUT_CANCELLED` below: the guide is a surface otari.ai's overlay
    * contributes, and no base page shows it. Naming the step here is what keeps
    * the activation funnel in one piece. `SIGNUP_STARTED` through
    * `LOGIN_SUCCESS` are recorded from Otari's own auth pages and the first

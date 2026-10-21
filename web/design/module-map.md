@@ -77,7 +77,7 @@ shared/components/
 ├── data/         ← design/data.md
 ├── navigation/   ← design/navigation.md
 ├── indicators/   coined here: the status marks from design/colors.md
-├── access/       coined here: deployment and entitlement states, no topic
+├── access/       coined here: entitlement states, no topic
 ├── deprecated/   the review-blocked set, made mechanical
 └── ProductMark.tsx
 ```
@@ -101,9 +101,8 @@ adds vocabulary rather than borrowing it:
 
 - `indicators/` holds the small status marks (`Dot`, `Badge`, `DismissChip`).
   `colors.md` describes the status roles they wear but documents no component.
-- `access/` holds what renders in place of a page the deployment does not serve or
-  the caller is not entitled to (`EntitlementGate`, `UnavailableHere`). This is
-  the surface and entitlement axes reaching the UI, described in web/AGENTS.md and ARCHITECTURE.md rather than in a design
+- `access/` holds what renders in place of a page the deployment is not entitled
+  to (`EntitlementGate`). This is the entitlement axis reaching the UI, described in web/AGENTS.md and ARCHITECTURE.md rather than in a design
   topic, because it is a deployment fact and not a visual one.
 
 If either name is unwanted, the fallback is `indicators/` into `metrics/` and
@@ -158,7 +157,6 @@ among the band components. `Tab` ships with `TabRow` and `RowActionRow` with
 | `FilterSelect` | `navigation/FilterSelect.tsx` |
 | `FilterMultiComboBox` | `navigation/FilterMultiComboBox.tsx` |
 | `Badge` | `indicators/Badge.tsx` |
-| `UnavailableHere` | `access/UnavailableHere.tsx` |
 | `StatCard`, `StatStatus` | `deprecated/StatCard.tsx` |
 
 `errorMessage` and `INPUT_CLASS` take `.ts`, not `.tsx`: naming-conventions.md

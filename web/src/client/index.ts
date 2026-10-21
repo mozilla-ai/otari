@@ -441,7 +441,7 @@ export type UpdateSearchToolRequest = Schemas["UpdateSearchToolRequest"]
 // Tenancy: organizations, workspaces, and the memberships joining them
 //
 // Rehomed from the platform with their shapes intact, which is the point: the
-// pages built on them here are the ones otari.ai's control plane brings across
+// pages built on them here are the ones otari.ai brings across
 // at M5, so a renamed field would have to be reconciled twice.
 // ---------------------------------------------------------------------------
 // One organization is provisioned at first boot and that is what most

@@ -15,7 +15,6 @@ from gateway.api.deps import (
     CurrentIdentity,
     MembershipListenerDep,
     UnitOfWorkDep,
-    WorkspaceListenerDep,
     get_db,
     verify_master_key,
 )
@@ -50,10 +49,9 @@ def get_workspace_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
-    workspace_listener: WorkspaceListenerDep,
 ) -> WorkspaceService:
     """Build the workspace service on the request's session."""
-    return WorkspaceService(db, uow=uow, membership_listener=membership_listener, workspace_listener=workspace_listener)
+    return WorkspaceService(db, uow=uow, membership_listener=membership_listener)
 
 
 WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]

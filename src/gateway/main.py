@@ -28,7 +28,6 @@ from gateway.api.deps import (
     build_inference_service,
     build_trace_service,
     get_membership_listener,
-    get_workspace_listener,
     set_config,
 )
 from gateway.api.error_body import BodyHTTPException
@@ -267,8 +266,8 @@ def _start_idempotency_sweeper(config: GatewayConfig, _container: Container) -> 
     )
 
 
-def _records_traces(config: GatewayConfig, enabled_features: tuple[CoreFeature, ...]) -> bool:
-    """Whether this deployment records agent traces: where the traces feature is on and it holds a database."""
+def _records_traces(enabled_features: tuple[CoreFeature, ...]) -> bool:
+    """Whether this deployment records agent traces: where the traces feature is on."""
     return any(feature.name == "traces" for feature in enabled_features)
 
 
@@ -902,9 +901,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         trace_writer_started = False
         try:
             # First inside the try, after every step that can refuse to start, so a
-            # refused start never leaves one open. One per app, on every plane: the
-            # direct search endpoint, the hop route and the connection tests call
-            # their providers through it (decision 55).
+            # refused start never leaves one open. One per app: web tools, the search
+            # endpoint and the connection tests call their providers through it.
             app.state.web_provider_client = build_web_provider_client()
             # Inside the try, so a failure here still stops the workers started above.
             # Wired only where create_app set up trace capture, which a bare app has not.
@@ -1267,7 +1265,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # in-flight entry is dropped there: it is the one place every request passes once.
     app.state.request_traces = None
     app.state.trace_writer = None
-    if _records_traces(config, app.state.enabled_features):
+    if _records_traces(app.state.enabled_features):
         app.state.request_traces = RequestTraces()
         app.add_middleware(TraceCaptureMiddleware, traces=app.state.request_traces)
     app.add_middleware(RateLimitGrantMiddleware)
@@ -1307,7 +1305,6 @@ def create_app(config: GatewayConfig) -> FastAPI:
         config.bootstrap,
         config=config,
         membership_listener=get_membership_listener,
-        workspace_listener=get_workspace_listener,
         hosted_provider_service=functools.partial(build_hosted_provider_service, config=config),
     )
     install_rate_limits(app, config)

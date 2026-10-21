@@ -12,8 +12,8 @@ say different things. A definition is *what* a check is, and one of them can be
 mandated under several profiles; a mandate is *where* a check runs and how hard
 it bites. The keys differ with them, which is why the tables do.
 
-Scoped to ``/me`` for the reason the mandates next door are: a standalone
-deployment has one organization and the caller's identity already points at it,
+Scoped to ``/me`` for the reason the mandates next door are: a deployment with
+no overlay has one organization and the caller's identity already points at it,
 so a request cannot name one.
 """
 

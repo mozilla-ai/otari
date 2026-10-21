@@ -79,6 +79,7 @@ Mind the base URL: Anthropic's SDK appends `/v1` itself, so it takes
 
 ```python
 from anthropic import Anthropic
+
 client = Anthropic(base_url="http://localhost:8000/api", api_key="<your-api-key>")
 meta = client.files.upload(file=("report.pdf", open("report.pdf", "rb"), "application/pdf"))
 client.files.download(meta.id)  # Otari serves every stored file's bytes back

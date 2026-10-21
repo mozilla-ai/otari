@@ -595,8 +595,8 @@ async def catalog_scope(
         if await DeploymentUserService(db).has_administration_access(session_identity):
             # Unrestricted, and still carrying its *own* organization's offered
             # models. Not every organization's, which would cross the tenant line
-            # the rest of this function draws, and not none: on a standalone
-            # deployment the operator is also the single organization's owner, so
+            # the rest of this function draws, and not none: on a deployment with
+            # one organization the operator is also its owner, so
             # an empty set would hide the model they just adopted on Providers
             # from the catalog they were told it joined.
             organization_id: uuid.UUID | None = session_identity.active_organization_id

@@ -6,6 +6,7 @@ response. The tests pin that boundary, ordering, and exhausted-plan status.
 """
 
 import asyncio
+import uuid
 from typing import Any, Literal, cast
 
 import httpx
@@ -470,6 +471,7 @@ def _request_context(plan: Any) -> Any:
         rate_limit_info=None,
         reservation=None,
         started_at=time.monotonic(),
+        workspace_id=uuid.uuid4(),
         plan=plan,
     )
 

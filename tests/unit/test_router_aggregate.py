@@ -52,7 +52,7 @@ def _mounted_on(aggregate: APIRouter) -> Operations:
     """Mount the gateway onto ``aggregate`` and report the operations that reach an app."""
     config = _gateway_config()
     _register_core_routers(aggregate, config, ())
-    _register_contributed_routers(aggregate, build_container(config.bootstrap, workspace_listener=None))
+    _register_contributed_routers(aggregate, build_container(config.bootstrap))
 
     app = FastAPI()
     app.include_router(aggregate)
@@ -69,7 +69,7 @@ def test_a_prefix_on_the_aggregate_moves_every_route() -> None:
 
 def test_register_routers_hands_the_app_the_aggregate_and_its_siblings() -> None:
     app = FastAPI()
-    app.state.container = build_container(None, workspace_listener=None)
+    app.state.container = build_container(None)
     app.state.enabled_features = ()
 
     register_routers(app, _gateway_config())
@@ -83,7 +83,7 @@ def test_register_routers_hands_the_app_the_aggregate_and_its_siblings() -> None
 def _mount_order(config: GatewayConfig) -> list[str]:
     """Every operation the app serves, in the order Starlette will try to match it."""
     app = FastAPI()
-    app.state.container = build_container(config.bootstrap, workspace_listener=None)
+    app.state.container = build_container(config.bootstrap)
     app.state.enabled_features = ()
     register_routers(app, config)
     return [path for path, _ in _api_routes(app)]

@@ -697,10 +697,6 @@ describe("AppShell surface gating", () => {
       ),
     ).toBeNull()
     expect(screen.getByText("General")).toBeInTheDocument()
-    // Guardrails sits in General, so the Gateway group holds nothing in this
-    // build and is not drawn. It stays declared for an overlay's Gateways, a
-    // row this registry does not declare at all (otari#737).
-    expect(screen.queryByText("Gateway")).toBeNull()
   })
 
   it("sends the organization's own Providers row to its provider keys", async () => {
@@ -1262,7 +1258,7 @@ describe("AppShell entitlement gating", () => {
     mockMatchMedia(false)
     await renderShell()
 
-    // Standalone provisions one organization and most deployments keep exactly
+    // First boot provisions one organization and most deployments keep exactly
     // that, so naming it on every page is a segment that never disambiguates
     // anything; the scope switcher names the active one where it matters.
     const crumb = await screen.findByLabelText("Breadcrumb")

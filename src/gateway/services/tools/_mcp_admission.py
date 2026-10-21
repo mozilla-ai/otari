@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
 
 MCP_SERVER_TOKEN_UNREADABLE_DETAIL = "A configured MCP server's authorization token could not be read"
-MCP_SERVERS_UNRESOLVABLE_DETAIL = "MCP servers could not be resolved for this request"
 MCP_SERVER_URL_UNSAFE_DETAIL = "A configured MCP server's URL failed its safety check"
 MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL = (
     "A request-supplied MCP server name collides with one of this workspace's stored servers"
@@ -90,16 +89,13 @@ async def admit_mcp_servers(
     server_ids: list[uuid.UUID] | None,
     *,
     servers: WorkspaceMcpServers,
-    workspace_id: uuid.UUID | None,
+    workspace_id: uuid.UUID,
 ) -> list[McpServerConfig] | None:
     """The MCP servers the request may reach: its own, then the stored ones its IDs name.
 
-    Every deployment refuses an unknown ID with a 404, so the status a caller
-    sees does not change with the deployment it reached.
-
     Raises:
         McpServerDeclarationError: the request's own servers cannot be reached as declared.
-        McpServerConfigurationError: the stored servers cannot be used, or the request named no workspace.
+        McpServerConfigurationError: the stored servers cannot be used.
         WorkspaceMcpServerNotFoundError: an ID names no server this workspace holds.
     """
     mcp_servers = inline_servers
@@ -114,9 +110,6 @@ async def admit_mcp_servers(
             inline_names.add(server.name)
         await _validate_mcp_server_urls(mcp_servers)
     if server_ids:
-        # NOTE: every request path names a workspace; refuse rather than read no row as no server.
-        if workspace_id is None:
-            raise McpServerConfigurationError(MCP_SERVERS_UNRESOLVABLE_DETAIL)
         try:
             stored_servers = await servers.resolve_many(workspace_id, server_ids)
         except (SecretBoxUnavailableError, SecretDecryptionError) as exc:

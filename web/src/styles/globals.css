@@ -79,7 +79,7 @@
  * architecture charter settles as the canonical design
  * foundation for the converged dashboard. Keep the token names,
  * their values, and the reasoning comments recognizably the
- * same as that file: the control-plane pages come here at M5 and
+ * same as that file: otari.ai's own pages come here at M5 and
  * have to land on this palette without a reconciliation pass.
  *
  * Components consume these via Tailwind utilities (bg-background,
@@ -95,7 +95,7 @@
  * What deliberately did NOT come across: the marketing type roles
  * (text-hero, text-marketing-*), the pre-login gradient, the
  * activation-modal and border-beam tokens, and the HubSpot form
- * patch. Those dress otari.ai's public site and its hosted signup,
+ * patch. Those dress otari.ai's public site and its signup,
  * neither of which exists here; a token with no consumer is a
  * token nobody maintains. They stay in otari-ai.
  * ============================================================= */

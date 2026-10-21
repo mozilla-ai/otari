@@ -12,7 +12,6 @@ import itertools
 import sys
 from collections.abc import Generator
 from pathlib import Path
-from types import ModuleType
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 

@@ -7,7 +7,7 @@ their own statuses (see `gateway.exceptions.guardrails_exceptions`), so nothing
 here catches them.
 
 Scoped to ``/me`` for the reason `routes/organization_pricing.py` and
-`routes/organizations.py` are: a standalone deployment has exactly one
+`routes/organizations.py` are: a deployment with no overlay has exactly one
 organization and the caller's identity already points at it, so a request cannot
 name one. Multi-organization administration is the overlay's to contribute.
 

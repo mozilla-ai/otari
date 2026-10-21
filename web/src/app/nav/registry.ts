@@ -233,18 +233,15 @@ const BASE_NAV_SECTIONS = [
  *
  * Every row is gated on a surface the bootstrap publishes (`SURFACES` in
  * `src/gateway/api/routes/bootstrap.py`), and a group whose every row a
- * deployment gates off drops entirely, heading included. Gateway holds nothing
- * in this build and drops; it stays declared for an overlay's Gateways.
+ * deployment gates off drops entirely, heading included.
  *
  * The organization's guardrails are in General, under Providers.
  *
- * The design draws two more, Billing and Gateways, and neither is declared here
- * at all, because neither is this build's to declare: Billing is
- * ARCHITECTURE.md's canonical overlay-only capability, and the attached-gateway
- * surface behind Gateways is hosted depth (otari-ai#1779), so an overlay owns
- * both rows together with the pages under them and contributes them through
- * `overlayNavItems.ts`. Declaring either here would be worse than redundant: a
- * base route file at a path the overlay also serves is not shadowed by the
+ * The design draws one more, Billing, and it is not declared here at all,
+ * because it is not this build's to declare: Billing is ARCHITECTURE.md's
+ * canonical overlay-only capability, so an overlay owns the row together with
+ * the page under it and contributes it through `overlayNavItems.ts`. Declaring
+ * it here would be worse than redundant: a base route file at a path the overlay also serves is not shadowed by the
  * overlay's, it collides with it. The generator refuses the pair ("Conflicting
  * configuration paths were found") instead of choosing between them, so the
  * composed tree is never written: the Vite plugin logs that error and keeps
@@ -330,15 +327,6 @@ const ORGANIZATION_NAV_SECTIONS = [
         icon: FiDollarSign,
       },
     ],
-  },
-  {
-    id: "org-gateway",
-    label: "Gateway",
-    // Empty in this build, so the rail drops it, heading included. Declared
-    // anyway because it is an overlay seam: an overlay contributes Gateways into
-    // this section by its id (`overlayNavItems.ts`), and a section that is not
-    // declared has nothing for that row to join.
-    items: [],
   },
   {
     id: "org-general",
@@ -546,9 +534,9 @@ export const NAV_SECTIONS: readonly NavSection[] = composeNavSections(
  * and it belongs on this rail, so an overlay that could only contribute to the
  * workspace one would have to edit this file to register it, which is what
  * cardinal rule 6 rules out. Both rails need the row seam as well as the section
- * one, and this rail is why: Billing lands inside "Cost & billing" and Gateways
- * inside "Gateway", among rows the base declares, so appending a section could
- * only put a second heading of the same name below the first. This build appends
+ * one, and this rail is why: Billing lands inside "Cost & billing", among rows
+ * the base declares, so appending a section could only put a second heading of
+ * the same name below the first. This build appends
  * nothing.
  *
  * Label overrides and row contributions come from the same lists the workspace
@@ -571,7 +559,7 @@ export const ORG_NAV_SECTIONS: readonly NavSection[] = composeNavSections(
  * The composed deployment sidebar.
  *
  * Composed through the same three seams as the other two rails, because the
- * distinction this rail draws is one an overlay can land on: a hosted edition
+ * distinction this rail draws is one an overlay can land on: otari.ai
  * administers the process every tenant is served by, and those destinations
  * belong here rather than beside a tenant's own settings. Reached through the
  * row seam, since the rail declares one headingless section and a contributed

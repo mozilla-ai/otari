@@ -143,7 +143,9 @@ Shape of a resolution:
 def _billing_adapter(session: AsyncSession | None) -> BillingPort:
     return NullBillingAdapter(session)
 
+
 container.bind(BillingPort, _billing_adapter)
+
 
 # dependency (src/gateway/api/deps.py): names the port and the container, never an adapter
 def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort:

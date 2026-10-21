@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { DeploymentBootstrap, OrganizationMember, User } from "@/client"
+import type { OrganizationMember, User } from "@/client"
 import { UserComboBox } from "@/features/users/UserComboBox"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
@@ -47,15 +47,12 @@ function mockRoster(members: OrganizationMember[], status = 200) {
   })
 }
 
-function renderBox(
-  ui: ReactElement,
-  deployment: DeploymentBootstrap = bootstrap(),
-) {
+function renderBox(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <DeploymentProvider value={deployment}>
+    <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>{ui}</QueryClientProvider>
     </DeploymentProvider>,
   )
@@ -189,21 +186,6 @@ describe("UserComboBox", () => {
     expect(
       await screen.findByRole("option", { name: UUID }),
     ).toBeInTheDocument()
-  })
-
-  it("asks for no roster on a deployment that hosts none", async () => {
-    const fetchMock = mockRoster([member(UUID, "Alice Example")])
-    renderBox(
-      <UserComboBox value="" onChange={() => {}} users={[user(UUID)]} />,
-      bootstrap({ surfaces: [] }),
-    )
-
-    await userEvent.click(screen.getByRole("combobox"))
-
-    expect(
-      await screen.findByRole("option", { name: UUID }),
-    ).toBeInTheDocument()
-    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it("sorts members ahead of the ids nobody named", async () => {

@@ -19,8 +19,8 @@ than a simplification:
   for it. Nothing to backfill, and nothing that can disagree with the Activity
   page.
 - **Nothing is per-viewer.** The platform keys its state on the user, because
-  activation there is a person's first request on a hosted account. A
-  standalone deployment's guide is about the workspace, so the state is one row
+  activation there is a person's first request on a hosted account. This
+  guide is about the workspace, so the state is one row
   per workspace and dismissing it says "this workspace is set up" for everyone
   who can manage it.
 - **No profile survey, and no analytics.** The platform's success screen
@@ -61,7 +61,6 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 # What the guide calls the key it mints, as the Keys page shows it. One name for
 # every deployment, so an operator who finds it there can tell where it came
@@ -214,9 +213,7 @@ class WorkspaceActivationService:
         self.db = db
         self.config = config
         self.key_format = key_format
-        self.organizations = OrganizationService(
-            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-        )
+        self.organizations = OrganizationService(db, membership_listener=None)
 
     # ------------------------------------------------------------------
     # Reads

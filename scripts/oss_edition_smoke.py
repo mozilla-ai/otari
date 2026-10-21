@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Boot Otari as the OSS edition and smoke it end to end.
 
-ARCHITECTURE.md promises that every milestone ships a standalone OSS edition:
-Otari must boot with only its own adapters bound and no overlay bootstrap,
+ARCHITECTURE.md promises that Otari stands alone:
+it must boot with only its own adapters bound and no overlay bootstrap,
 and still serve a real request. Without one automated check that
 proves it, the promise is an assertion, and the first change that quietly makes
 an OSS path depend on an enterprise adapter merges green and breaks self-hosting.
@@ -745,7 +745,7 @@ def run_completion(base_url: str, key: str, provider: _MockProviderServer, names
 
 
 def check_usage_recorded(base_url: str, admin: dict[str, str], names: Names) -> None:
-    """Assert the completion was recorded, which is the OSS control plane's own job."""
+    """Assert the completion left a usage row."""
     status, rows = _request("GET", f"{base_url}{API_ROOT}/usage?limit=10", headers=admin)
     _expect(status, 200, f"GET {API_ROOT}/usage", rows)
     if not isinstance(rows, list) or not rows:

@@ -102,7 +102,6 @@ from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
     WorkspaceActivationService,
 )
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 from .tenancy_helpers import (
     NO_MAIL_LIMIT,
@@ -535,7 +534,6 @@ def _pausing(session: AsyncSession, let_the_writer_run: Callable[[], Awaitable[N
     return {
         "uow": writes["uow"],
         "membership_listener": _PausingListener(writes["membership_listener"], let_the_writer_run),
-        "workspace_listener": writes["workspace_listener"],
     }
 
 
@@ -622,9 +620,7 @@ async def test_a_join_during_a_workspace_delete_leaves_no_orphaned_ceiling(
 
 def _budget_service(db: AsyncSession, organizations: OrganizationService | None = None) -> BudgetService:
     uow = UnitOfWork(db)
-    organizations = organizations or OrganizationService(
-        db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-    )
+    organizations = organizations or OrganizationService(db, membership_listener=None)
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
@@ -777,7 +773,7 @@ async def test_a_deployment_ceiling_created_during_a_workspace_delete_leaves_no_
         return await create_scoped_budget(
             CreateScopedBudgetRequest(scope_type=scope_type, scope_id=scope_id, budget_id=budget_id),
             session,
-            OrganizationService(session, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+            OrganizationService(session, membership_listener=None),
         )
 
     race = await _race_a_workspace_delete(
@@ -820,9 +816,7 @@ async def test_a_workspace_delete_sweeps_a_ceiling_that_won_the_lock(
         async with sessions() as session:
             actor = await UserRepository(session).get(owner.id)
             assert actor is not None
-            organizations = OrganizationService(
-                session, membership_listener=None, workspace_listener=NullWorkspaceListener()
-            )
+            organizations = OrganizationService(session, membership_listener=None)
             creator = _budget_service(session, organizations)
             take_lock = organizations.lock_workspace
 
@@ -1201,7 +1195,7 @@ async def test_a_revocation_waits_for_the_transaction_a_live_membership_check_ad
             ).revoke_organization_member_invitation_for_user(user=user, invitation_id=invited.invitation_id)
 
     async with sessions() as checking:
-        reader = OrganizationService(checking, membership_listener=None, workspace_listener=NullWorkspaceListener())
+        reader = OrganizationService(checking, membership_listener=None)
         assert await reader.has_live_membership(invitee_id)
         revocation = asyncio.create_task(revoke())
         done, _ = await asyncio.wait({revocation}, timeout=_WRITER_WINDOW)
@@ -1210,7 +1204,7 @@ async def test_a_revocation_waits_for_the_transaction_a_live_membership_check_ad
     await revocation
 
     async with sessions() as after:
-        reader = OrganizationService(after, membership_listener=None, workspace_listener=NullWorkspaceListener())
+        reader = OrganizationService(after, membership_listener=None)
         assert not await reader.has_live_membership(invitee_id)
 
 

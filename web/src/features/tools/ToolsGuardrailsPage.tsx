@@ -29,7 +29,6 @@ import {
   useUpdateToolSettings,
 } from "@/shared/api/tools"
 import { docsSourceHref } from "@/shared/helpers/docs"
-import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 // One settable field maps onto one key of the update request; cast at this one
 // boundary (the keys come from the backend's field list).
@@ -346,7 +345,6 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   const pricing = usePricing(isOperator)
   const setPricing = useSetPricing()
   const update = useUpdateToolSettings()
-  const serves = useSurfaces()
 
   // Latest rate per key. /api/v1/pricing is history-shaped (one row per
   // effective_at), and the newest row is the one in force. A gateway tool's
@@ -581,8 +579,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
             {service.key === "web_search" && isOperator ? (
               <SearchToolsCard docsHref={toolsDocs("direct-search")} />
             ) : null}
-            {service.key === "guardrails" &&
-            serves("organization_guardrails") ? (
+            {service.key === "guardrails" ? (
               // The organization's own guardrails moved to a page of their own;
               // this rail keeps the deployment's service and says where they went.
               <p className="text-sm text-muted">

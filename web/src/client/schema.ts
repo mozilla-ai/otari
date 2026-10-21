@@ -5214,9 +5214,9 @@ export interface paths {
          *     session and the spawning tool call, the subagent type, the task, the
          *     parent's model and the model the caller asked for, if any. The recommender
          *     this build binds picks one of the candidate models and the answer names it.
-         *     A standalone deployment asks the decision model `agent_recommender_model`
+         *     By default the deployment asks the decision model `agent_recommender_model`
          *     names to choose among `agent_recommender_candidates` for Claude Code and
-         *     among the request's own `candidates` for pi; a hosted build may bind a
+         *     among the request's own `candidates` for pi; a bootstrap may bind a
          *     recommender of its own, which the caller never configures. Where
          *     the recommender reports them, the answer also carries a one-line reason
          *     and its probability for each candidate.
@@ -5842,10 +5842,10 @@ export interface paths {
          *     caller-supplied and fetching it here would make this a way to have the
          *     gateway request an address of the caller's choosing.
          *
-         *     Not on ``verify_catalog_reader``, despite being a catalog read: that plane is
-         *     the three deployment-describing reads a data-plane key may also make, and
-         *     admitting a key here would let any workspace credential dial the deployment's
-         *     guardrails service. This is a management read, so it takes the router's own gate.
+         *     Not on ``verify_catalog_reader``, despite being a catalog read: that gate
+         *     admits any API key to the deployment-describing reads, and admitting a key
+         *     here would let any workspace credential dial the deployment's guardrails
+         *     service. This is a management read, so it takes the router's own gate.
          */
         get: operations["tool-settings-list_guardrail_profiles"];
         put?: never;
@@ -9763,7 +9763,7 @@ export interface components {
             site_url: string | null;
             /**
              * Surfaces
-             * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis, and this is the deployment (topology) axis.
+             * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on: a fixed set plus one for each enabled feature. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis.
              */
             surfaces: string[];
             /**
@@ -13605,11 +13605,6 @@ export interface components {
          *     and what the caller may do there.
          */
         OrganizationMembershipContextPublic: {
-            /**
-             * Byo Provider Keys Allowed
-             * @default false
-             */
-            byo_provider_keys_allowed: boolean;
             caller?: components["schemas"]["CallerIdentityPublic"] | null;
             /**
              * Deployment Operator

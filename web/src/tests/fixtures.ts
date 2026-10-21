@@ -235,7 +235,7 @@ export function organizationContext(
 ): OrganizationContext {
   return {
     organization_member_id: "22222222-2222-2222-2222-222222222222",
-    // The identity a standalone first boot provisions: a name (OPERATOR_FULL_NAME
+    // The identity first boot provisions: a name (OPERATOR_FULL_NAME
     // in provisioning_service.py) and no address, since the master key is what
     // signs it in. A test about a rostered member overrides it.
     caller: {
@@ -253,8 +253,7 @@ export function organizationContext(
     // omits the field entirely for a caller in no workspace, which is why the
     // shell treats absent and empty the same way.
     workspace_memberships: [],
-    byo_provider_keys_allowed: true,
-    // True by default because the fixture models the standalone deployment whose
+    // True by default because the fixture models a fresh deployment whose
     // one identity is both its operator and its organization's owner, which is
     // what most tests here are about. A test about a tenant who is *not* an
     // operator says so, and that is the case that reads the organization-scoped
@@ -319,8 +318,8 @@ export function organizationMember(
     // other one passes null.
     attribution_user_id: "33333333-3333-3333-3333-333333333333",
     invitation_id: null,
-    // A standalone operator identity has no sign-in address; a ported platform
-    // row does. Both shapes have to render, so the builder ships neither and a
+    // The local operator identity has no sign-in address; a member who signed
+    // up does. Both shapes have to render, so the builder ships neither and a
     // test names the one it is about.
     email: null,
     full_name: "Operator",

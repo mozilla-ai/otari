@@ -21,7 +21,6 @@ import {
   useReencryptHostedProviders,
 } from "@/shared/api/hostedProviders"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
-import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.
@@ -520,8 +519,7 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
 }
 
 function SecretKeyRow() {
-  const hostsHosted = useSurfaces()("hosted_providers")
-  const hostedProviders = useHostedProviders(hostsHosted)
+  const hostedProviders = useHostedProviders()
   const reencrypt = useReencryptHostedProviders()
   // A configured hosted provider holds no ciphertext, so only stored ones count.
   const storedHosted = (hostedProviders.data?.data ?? []).filter(

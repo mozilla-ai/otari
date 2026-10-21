@@ -525,7 +525,7 @@ class ResolvedCodeExecutionPolicy:
 
 
 class WebTool(StrEnum):
-    """A managed web tool a request can declare, named as the model and the control plane see it."""
+    """A managed web tool a request can declare, named as the model sees it."""
 
     SEARCH = "web_search"
     FETCH = "web_fetch"

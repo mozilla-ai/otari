@@ -1,7 +1,7 @@
 """Search pass-through endpoint: a direct, billed search request.
 
 ``otari_web_search`` answers a model's tool call mid-completion. This endpoint
-is the standalone counterpart: the caller asks, the gateway asks the search
+is its direct counterpart: the caller asks, the gateway asks the search
 provider, and the result comes straight back, having gone through the same
 auth, rate limit, budget reservation, and usage log as a completion. It exists
 so a client that proxies a search API can keep one gateway on the billing path

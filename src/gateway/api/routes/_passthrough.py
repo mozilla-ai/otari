@@ -540,9 +540,7 @@ async def run_passthrough(
             enforce_require_pricing
             and not budget_exempt
             and config.require_pricing
-            and not can_price(
-                pricing, meter=billing.meter, reports_tokens=billing.reports_tokens, legacy_unit_reading=True
-            )
+            and not can_price(pricing, meter=billing.meter, reports_tokens=billing.reports_tokens)
         ):
             await refund_reservation(db, reservation)
             unpriced = await unpriced_model_refusal(
@@ -633,9 +631,7 @@ async def run_passthrough(
                 enforce_require_pricing
                 and not budget_exempt
                 and config.require_pricing
-                and not can_price(
-                    pricing, meter=billing.meter, reports_tokens=billing.reports_tokens, legacy_unit_reading=True
-                )
+                and not can_price(pricing, meter=billing.meter, reports_tokens=billing.reports_tokens)
             ):
                 raise await _refuse(
                     reservation,
@@ -724,7 +720,7 @@ async def run_passthrough(
             total_tokens=reported.total_tokens,
         )
 
-        charge = price_usage(pricing, tokens=_billable_tokens(reported), units=reported.units, legacy_unit_reading=True)
+        charge = price_usage(pricing, tokens=_billable_tokens(reported), units=reported.units)
         if charge is None and billing.unpriced_is_free:
             charge = UsageCharge(Decimal(0), {}, [])
         cost = charge.cost if charge is not None else None

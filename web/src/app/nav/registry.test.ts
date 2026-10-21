@@ -58,12 +58,11 @@ describe("nav registry", () => {
       "org-observe",
       "org-people",
       "org-money",
-      "org-gateway",
       "org-general",
     ])
   })
 
-  it("declares every destination the standalone dashboard serves", () => {
+  it("declares every destination the dashboard serves", () => {
     // The whole list, not a sample: the registry is now the only place a
     // destination exists, so an entry dropped in a refactor is a page that
     // silently stops being reachable.
@@ -330,7 +329,7 @@ describe("nav registry", () => {
     // Vacuous while the assertion above holds, and deliberately kept: it arms
     // itself the moment someone adds the first tag. A base entry gated on a
     // capability the base build does not grant disappears from the sidebar of
-    // every standalone gateway, and the two lists are maintained in different
+    // every gateway, and the two lists are maintained in different
     // files, which is exactly the pair a single commit forgets to update.
     for (const item of NAV_ITEMS) {
       if (item.capability === undefined) continue
@@ -376,21 +375,19 @@ describe("nav registry", () => {
   })
 
   it("declares no destination an overlay owns", () => {
-    // Billing and Gateways are the two rows the design draws that this registry
-    // deliberately does not declare: Billing is ARCHITECTURE.md's overlay-only
-    // capability, and the attached-gateway surface behind Gateways is hosted
-    // depth (otari-ai#1779). Declaring either back is not the harmless
+    // Billing is the row the design draws that this registry deliberately does
+    // not declare: it is ARCHITECTURE.md's overlay-only capability. Declaring
+    // it back is not the harmless
     // redundancy it looks like. The route file a nav entry needs would sit at a
     // path the overlay's own route file also claims, and the generator refuses
     // that pair ("Conflicting configuration paths were found") rather than
     // letting the overlay shadow the base, so the composed build gets no route
-    // tree for the overlay's page. An overlay contributes both through
+    // tree for the overlay's page. An overlay contributes it through
     // `OVERLAY_NAV_ITEMS`.
-    const paths = NAV_ITEMS.map((item) => item.to)
-    expect(paths).not.toContain("/organization/billing")
-    expect(paths).not.toContain("/organization/gateways")
+    expect(NAV_ITEMS.map((item) => item.to)).not.toContain(
+      "/organization/billing",
+    )
     expect(NAV_ITEMS.map((item) => item.surface)).not.toContain("billing")
-    expect(NAV_ITEMS.map((item) => item.surface)).not.toContain("gateways")
   })
 
   it("appends overlay sections after the base sections", () => {

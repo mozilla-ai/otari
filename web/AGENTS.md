@@ -27,12 +27,11 @@ A gateway older than a bootstrap field does not send it, whatever the generated
 type promises, so `App` completes the payload once through
 `shared/helpers/bootstrap.ts` before anything below reads a field. Add a field
 to the bootstrap and that module stops compiling until it is given a default.
-The two fields naming the deployment take none, for the reason above.
 
 The bootstrap publishes:
 
 - sign-in methods and configured OAuth providers
-- management surfaces hosted by this process
+- management surfaces this gateway serves
 - documentation, mail, passkey, and maintenance state
 
 Features read this through `useDeployment()` and `useSurfaces()`. A surface

@@ -1,5 +1,6 @@
 """Tests for authenticated prompt-cache routing namespaces."""
 
+import uuid
 from typing import Any, cast
 
 from gateway.api.routes._pipeline import RequestContext, scope_prompt_cache_key
@@ -17,6 +18,7 @@ def _context(*, user_id: str | None = "user-a") -> RequestContext:
         rate_limit_info=None,
         reservation=None,
         started_at=0.0,
+        workspace_id=uuid.uuid4(),
     )
 
 

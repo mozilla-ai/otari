@@ -461,12 +461,7 @@ PROVIDER_ACCOUNT_QUOTA_DETAIL = (
 PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
 
 
-ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
-ALL_PROVIDERS_TIMED_OUT_DETAIL = "All upstream providers timed out"
-ALL_PROVIDERS_RATE_LIMITED_DETAIL = "All upstream providers rate-limited this request"
 ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not be resolved for this request"
-WEB_SEARCH_POLICY_UNRESOLVABLE_DETAIL = "Web search configuration could not be resolved for this request"
-CODE_EXECUTION_POLICY_UNRESOLVABLE_DETAIL = "Code execution policy could not be resolved for this request"
 ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL = (
     "A configured organization guardrail's credential could not be read"
 )
@@ -1189,7 +1184,7 @@ class RequestContext:
         rate_limit_info: RateLimitInfo | None,
         reservation: ReservationHandle | None,
         started_at: float,
-        workspace_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID,
         resolved_provider: ResolvedProvider | None = None,
         plan: CompiledPlan | None = None,
         estimate_inputs: EstimateInputs | None = None,
@@ -2292,7 +2287,7 @@ async def _compile_request_plan(
     endpoint: str,
     started_at: float,
     routing_signal: Callable[[], RoutingSignal] | None = None,
-    workspace_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID,
     request_id: str | None = None,
     tags: dict[str, str] | None = None,
 ) -> CompiledPlan | None:
@@ -2506,10 +2501,10 @@ async def _budget_minute_limits(
 
 
 def _session_trace_id(
-    session: SessionRef | None, workspace_id: uuid.UUID | None, user_id: str | None, api_key_id: str | None
+    session: SessionRef | None, workspace_id: uuid.UUID, user_id: str | None, api_key_id: str | None
 ) -> str | None:
-    """The trace id the request's session is recorded under, or None without a session or a local workspace."""
-    if session is None or workspace_id is None:
+    """The trace id the request's session is recorded under, or None without a session."""
+    if session is None:
         return None
     return session.trace_id(workspace_id, user_id, api_key_id)
 
@@ -2580,7 +2575,7 @@ async def resolve_request_context(
     user_id: str | None = None
     # The budget of the end user a service key named, echoed in ``Otari-End-User-Budget``.
     end_user_budget_id: str | None = None
-    workspace_id: uuid.UUID | None = None
+    workspace_id: uuid.UUID
     code_execution_policy: ResolvedCodeExecutionPolicy | None = None
     code_execution_policy_loaded = False
     rate_limit_info: RateLimitInfo | None = None
@@ -2980,7 +2975,7 @@ async def resolve_request_context(
     # who runs the code. Only a request declaring code execution on a
     # deployment with a sandbox has anything to decide. The estimate is
     # already reserved, so a read that fails releases it before propagating.
-    if workspace_id is not None and config.sandbox_configured() and declares_code_execution(tools):
+    if config.sandbox_configured() and declares_code_execution(tools):
         try:
             code_execution_policy = await code_execution_policies.for_request(workspace_id)
         except Exception:
@@ -3003,7 +2998,6 @@ async def resolve_request_context(
                     model=gate_model,
                     instance=gate_instance,
                     file_workspace_id=_caller_workspace_id(api_key, session_principal),
-                    credential_workspace_id=workspace_id,
                     workspace_executor=(code_execution_policy.executor if code_execution_policy is not None else None),
                     candidate_providers=(
                         tuple(attempt.provider for attempt in plan.attempts) if plan is not None else (gate_impl,)
@@ -3092,10 +3086,9 @@ async def resolve_request_context(
     )
 
     # Opened beside the in-flight entry, for the same requests, and closed by the
-    # trace middleware once the response is sent. A request with no workspace
-    # records nothing here.
+    # trace middleware once the response is sent.
     trace: RequestTrace | None = None
-    if config.trace_capture_enabled and workspace_id is not None:
+    if config.trace_capture_enabled:
         trace = RequestTrace(
             session=session,
             harness=harness_of(raw_request.headers),
@@ -3629,18 +3622,13 @@ async def _resolve_organization_guardrails(
     be a mandate. The cost is one indexed query on a table an organization edits
     by hand.
 
-    Both preconditions fail closed together. ``workspace.organization_id`` is
-    not nullable, so ``organization_for_workspace_id`` answers ``None`` only when the workspace
-    row itself is missing; such a request still carries a non-``None``
-    ``ctx.workspace_id``, so treating that case as "no organization plane to
+    A missing organization fails closed. ``workspace.organization_id`` is not
+    nullable, so ``organization_for_workspace_id`` answers ``None`` only when the
+    workspace row itself is missing, and treating that as "no organization to
     consult" would skip every mandate silently on the one input that proves the
-    tenancy could not be resolved. Both are invariants today, which is why
-    they refuse rather than fall through: what this guards is an *enforcement*
-    decision, and the day one of them stops holding is the day a request its
-    organization requires a blocking guardrail on would otherwise be served
-    unchecked.
+    tenancy could not be resolved.
     """
-    if ctx.workspace_id is None or ctx.organization_id is None:
+    if ctx.organization_id is None:
         raise adapter.error(500, ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL, ErrorKind.API)
     try:
         return await resolve_organization_guardrails(
@@ -3930,10 +3918,6 @@ async def _admit_claims(
     return _AdmittedTools(code=admitted, web=web, web_access=web_access)
 
 
-class _WorkspaceUnresolvedError(Exception):
-    """The request named no workspace, so the policy that vetoes its web tools cannot be read."""
-
-
 class _RequestWebPolicy:
     """The workspace's web search policy, read at most once per request.
 
@@ -3942,7 +3926,7 @@ class _RequestWebPolicy:
     often, as one that decides them all alike.
     """
 
-    def __init__(self, policies: WorkspaceWebSearchPolicies, workspace_id: uuid.UUID | None) -> None:
+    def __init__(self, policies: WorkspaceWebSearchPolicies, workspace_id: uuid.UUID) -> None:
         self._policies = policies
         self._workspace_id = workspace_id
         self._read = False
@@ -3954,10 +3938,7 @@ class _RequestWebPolicy:
 
         Raises:
             WebSearchPolicyResolutionFailedError: the policy could not be resolved.
-            _WorkspaceUnresolvedError: the request named no workspace.
         """
-        if self._workspace_id is None:
-            raise _WorkspaceUnresolvedError
         if not self._read:
             try:
                 self._policy = await self._policies.resolve(self._workspace_id, requested_tools)
@@ -4084,8 +4065,6 @@ async def _admit_web_access(
         return NO_WEB_TOOLS
     try:
         admitted = admit_web_access(web, policy=await web_policy.read(requested), config=ctx.config)
-    except _WorkspaceUnresolvedError as exc:
-        raise adapter.error(500, WEB_SEARCH_POLICY_UNRESOLVABLE_DETAIL, ErrorKind.API) from exc
     except WebSearchPolicyResolutionFailedError as exc:
         raise adapter.error(status.HTTP_503_SERVICE_UNAVAILABLE, exc.message, ErrorKind.API) from exc
     except (WebAccessRefusedError, WorkspaceWebSearchDomainsExcludedError) as exc:
@@ -4152,9 +4131,6 @@ async def _resolve_code_execution_policy(
     """The workspace's code execution policy: the preamble's read where it made one, else a fresh one."""
     if ctx.code_execution_policy_loaded:
         return ctx.code_execution_policy
-    # NOTE: a missing workspace fails closed, because the policy is a veto and no answer must not read as no limit.
-    if ctx.workspace_id is None:
-        raise adapter.error(500, CODE_EXECUTION_POLICY_UNRESOLVABLE_DETAIL, ErrorKind.API)
     return await policies.for_request(ctx.workspace_id)
 
 
@@ -6022,15 +5998,10 @@ async def _write_absorbed_row(
 ) -> None:
     """Write an absorbed row beside the next attempt rather than before it.
 
-    The row's write needs the request's session only to look up a workspace the
-    request did not resolve, so with the workspace known it runs on its own, and
-    the walk awaits it before the request answers: the row is there when the
-    response is. Without one it is written inline, so the session is never used
-    by two tasks at once.
+    The row carries the request's workspace, so its write needs none of the
+    request's session and runs on its own. The walk awaits it before the
+    request answers, so the row is there when the response is.
     """
-    if ctx.workspace_id is None:
-        await write
-        return
     task = asyncio.create_task(write)
     _ABSORBED_ROW_WRITES.add(task)
     task.add_done_callback(_ABSORBED_ROW_WRITES.discard)

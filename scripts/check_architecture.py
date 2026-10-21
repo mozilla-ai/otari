@@ -67,7 +67,7 @@ Enforces:
 23. Listener defaults: no parameter or class field typed as a listener has a default,
     so a caller cannot skip a listener by leaving it out.
     A listener type is one whose name contains Listener.
-    Containing it, rather than ending in it, also catches an alias such as WorkspaceListenerDep.
+    Containing it, rather than ending in it, also catches an alias such as MembershipListenerDep.
     A name in a Callable's parameter list or in Annotated's metadata is not the parameter's type, so it is skipped.
     A FastAPI dependency declares a listener as Annotated[Listener, Depends(...)], since a Depends(...) default counts.
     A field kept out of the constructor, such as field(init=False), is not a parameter, so the rule skips it.
@@ -1094,7 +1094,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
         "verification_email.py",
         "webauthn_service.py",
         "workspace_activation_service.py",
-        "workspace_listener.py",
         "workspace_mcp_server_service.py",
         "workspace_service.py",
         "workspace_web_search_service.py",

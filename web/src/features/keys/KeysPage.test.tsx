@@ -13,7 +13,6 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type {
   ApiKey,
   Budget,
-  DeploymentBootstrap,
   MembershipRole,
   OrganizationBudget,
   ScopedBudget,
@@ -21,10 +20,8 @@ import type {
 } from "@/client"
 import { KeysPage } from "@/features/keys/KeysPage"
 import { API_ROOT } from "@/shared/api/client"
-import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   apiKey,
-  bootstrap,
   budget,
   organizationMember,
   scopedBudget,
@@ -269,7 +266,6 @@ function mockApi(
             created_at: "2026-01-01T00:00:00+00:00",
             updated_at: null,
           },
-          byo_provider_keys_allowed: true,
           deployment_operator: opts.deploymentOperator ?? true,
           provider_key_encryption_available: true,
           workspace_memberships: [],
@@ -291,20 +287,14 @@ function mockApi(
     })
 }
 
-function renderPage(
-  ui: ReactElement,
-  deployment: DeploymentBootstrap = bootstrap(),
-) {
+function renderPage(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  // The page reads the deployment's surfaces to decide whether it may name key
-  // owners from the organization roster, and links to the pages that own a key's
-  // budget, so it needs both the deployment context and a router around it.
+  // The page links to the pages that own a key's budget, so it needs a router
+  // around it.
   return renderWithRouter(
-    <QueryClientProvider client={client}>
-      <DeploymentProvider value={deployment}>{ui}</DeploymentProvider>
-    </QueryClientProvider>,
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
   )
 }
 

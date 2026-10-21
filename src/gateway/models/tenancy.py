@@ -23,7 +23,7 @@ Three deliberate departures from the platform's models, applied on arrival:
   ships by default, so on that engine the departure would have been a comment
   rather than a behavior. ``tests/unit/test_tenancy_timestamps.py`` is what
   keeps it one.
-- **``email`` is a plain nullable string, not ``EmailStr``.** A standalone
+- **``email`` is a plain nullable string, not ``EmailStr``.** An
   operator identity is a label, not a sign-in address ("local identities have no
   email"), and every reader here must already tolerate its absence, so
   the annotation says so rather than being widened at each call site.
@@ -177,7 +177,7 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # (`gateway.services.tenancy.user_service`). The other three land ahead of
     # the flows that read them (otari-ai#1716) so the re-parenting migration
     # (otari-ai#1644) has one target schema rather than one per edition. A row
-    # with every one of them null is the normal standalone state, not an
+    # with every one of them null is the normal state, not an
     # unmigrated one: it is a deployment nobody has claimed yet, and the master
     # key remains the API credential either way.
     #
@@ -476,17 +476,10 @@ class OrganizationMembershipContextPublic(SQLModel):
     organization: OrganizationPublic
     workspace_memberships: list[CallerWorkspaceMembershipPublic] = Field(default_factory=list)
     # Who is signed in, which every other field here describes the authority of
-    # rather than the person holding it. Optional like the fields below it, and
-    # for the same reason: a shell reading a deployment that predates this (or a
-    # platform serving this contract without it) falls back to naming nobody,
-    # rather than failing to parse the context the rest of the chrome needs.
+    # rather than the person holding it. Optional, so a shell reading a
+    # deployment that predates it falls back to naming nobody rather than
+    # failing to parse the context the rest of the chrome needs.
     caller: CallerIdentityPublic | None = None
-    # Whether the dashboard may offer the BYO provider-keys surface. The
-    # platform answers "does this org have a self-hosted gateway attached", which
-    # in a standalone deployment is always yes: the deployment reading this *is*
-    # that gateway. Kept on the contract, rather than dropped as a constant, so
-    # the ported page reads the same field in both editions.
-    byo_provider_keys_allowed: bool = False
     # Whether this caller also operates the deployment, which is the *other*
     # authority a signed-in identity can hold and the one no organization role
     # confers (mozilla-ai/otari#838). Carried here, on a read the shell already

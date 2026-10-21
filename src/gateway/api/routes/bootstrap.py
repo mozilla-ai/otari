@@ -49,7 +49,7 @@ from gateway.services.tenancy.webauthn_service import has_any_credential
 router = APIRouter(prefix="/bootstrap", tags=["bootstrap"])
 
 # How a caller may sign in to this deployment. ``master_key`` is the first-boot
-# credential and ``password`` the steady-state one, and a standalone gateway
+# credential and ``password`` the steady-state one, and a gateway
 # offers exactly one of them: the master key until the operator claims the
 # deployment with a password, and the password from then on
 # (mozilla-ai/otari-ai#1716). A list rather than a single value because #651 and
@@ -101,8 +101,8 @@ class DeploymentBootstrap(BaseModel):
     surfaces: list[str] = Field(
         description=(
             "Management API groups this deployment serves, sorted, which is what its dashboard "
-            "pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for "
-            "the entitlement (licensing) axis, and this is the deployment (topology) axis."
+            "pages gate on: a fixed set plus one for each enabled feature. Named surfaces, not "
+            "capabilities: capability is otari.ai's word for the entitlement (licensing) axis."
         )
     )
     docs_url: str | None = Field(

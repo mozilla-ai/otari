@@ -34,7 +34,6 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 
 async def _organization(db: AsyncSession, *, slug: str) -> Organization:
@@ -66,7 +65,7 @@ async def _workspace(db: AsyncSession, organization: Organization, *, name: str,
 
 
 def _service(db: AsyncSession) -> OrganizationService:
-    return OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    return OrganizationService(db, membership_listener=None)
 
 
 async def _roster(db: AsyncSession, caller: User) -> ActiveOrganizationMembersPublic:

@@ -76,12 +76,8 @@ export function useDeploymentAdminAccess() {
       ),
     staleTime: 60_000,
     // No `enabled` parameter: both callers sit behind routes whose surfaces
-    // (`admin`, `hosted_providers`) are published on the same deployments, so
-    // one that does not host `/admin` never renders either, and the 404 never
-    // becomes a second reading of `surfaces`.
-    // Deliberately not inferred from a 404 here either, which is the scattered
-    // mode check the surface axis replaced; the ordinary retry policy applies,
-    // and a failure is a failure.
+    // (`admin`, `hosted_providers`) every gateway publishes. Not inferred from a
+    // 404 either: the ordinary retry policy applies, and a failure is a failure.
   })
 }
 

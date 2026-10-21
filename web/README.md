@@ -29,7 +29,7 @@ scripts cannot read the cookie.
 
 `client/` is generated from the OpenAPI spec, `main.tsx` is the entry, and
 `styles/globals.css` is the one stylesheet. This is `otari-ai/frontend/src`'s
-layout, because that control-plane UI moves into this repo at M5.
+layout, because otari.ai's own pages move into this repo at M5.
 
 `pnpm run lint` fails a PR that has a feature importing `app/`, or `shared/`
 importing either of the layers above it. No layer may import an overlay's tree,

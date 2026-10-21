@@ -51,7 +51,6 @@ from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.tools import WorkspaceCodeExecutionPolicies, web_search_configured
 from gateway.services.workspace_scope import organization_default_workspace_id
 from gateway.types.session_principal import SessionPrincipal
@@ -90,7 +89,7 @@ async def resolve_playground_workspace(
     Every Playground route resolves through here, reads included, so a read and a
     completion can never disagree about which workspace a caller reached.
     """
-    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    organizations = OrganizationService(db, membership_listener=None)
     organization = await organizations.get_active_organization_for_user(identity)
 
     resolved = workspace_id

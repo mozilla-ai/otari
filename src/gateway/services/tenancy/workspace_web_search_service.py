@@ -31,7 +31,6 @@ from gateway.models.tenancy import User, Workspace
 from gateway.models.tools import ResolvedWebSearchConfig, WebTool, WorkspaceWebSearchConfig
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.web_retrieval_policy import read_domain_list
 
 if TYPE_CHECKING:
@@ -297,9 +296,7 @@ class WorkspaceWebSearchService:
         self, db: AsyncSession, *, web_search_configured: bool, default_enabled: bool, has_search_key: HasSearchKey
     ):
         self.db = db
-        self.organizations = OrganizationService(
-            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-        )
+        self.organizations = OrganizationService(db, membership_listener=None)
         # Passed in rather than read here: whether a backend is configured is a
         # question about the running deployment's config, which the route layer
         # already holds and a service has no business reaching for.

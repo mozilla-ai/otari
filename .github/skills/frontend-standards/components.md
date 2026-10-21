@@ -159,7 +159,7 @@ topic file in `web/design/` that documents each one. A new primitive is a file o
 the topic it belongs to, and it owes a `.stories.tsx` beside it.
 
 `shared/components/` keeps the two directories that are not primitives: `access/`, which
-renders what a deployment does not serve, and `deprecated/`, the three that must not be used
+renders what a deployment is not entitled to, and `deprecated/`, the three that must not be used
 in new code. The split is the extraction contract in DESIGN.md: `design-system/` may import
 nothing else under `src/`, so anything reading the transport, the deployment or a generated
 type lives on the other side of that line.

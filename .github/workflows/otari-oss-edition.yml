@@ -1,7 +1,7 @@
 name: Otari OSS Edition
 
-# The gate behind ARCHITECTURE.md's central promise: every milestone ships a
-# standalone OSS edition. It builds the distribution, boots it with only Otari's
+# The gate behind ARCHITECTURE.md's central promise that Otari stands alone.
+# It builds the distribution, boots it with only Otari's
 # own adapters bound (no overlay bootstrap), and runs the
 # smoke suite in scripts/oss_edition_smoke.py, which walks a self-hoster's day
 # one: health probes, an admin user and API key, a BYO provider credential stored

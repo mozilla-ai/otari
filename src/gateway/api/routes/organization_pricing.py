@@ -8,7 +8,7 @@ own statuses (see `gateway.exceptions.pricing_exceptions`), so nothing here
 catches them.
 
 Scoped to ``/me`` for the same reason `routes/organizations.py` is: a request
-cannot name an organization at all, because a standalone deployment has exactly
+cannot name an organization at all, because a deployment with no overlay has exactly
 one and the caller's identity already points at it. Multi-organization
 administration is the overlay's to contribute.
 

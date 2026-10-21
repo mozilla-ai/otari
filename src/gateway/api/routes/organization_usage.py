@@ -95,7 +95,6 @@ from gateway.services.tenancy.authorization import (
     resolve_visible_workspace_scope,
     resolve_workspace_in_organization,
 )
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 router = APIRouter(
     prefix="/organizations/me/usage",
@@ -123,7 +122,7 @@ async def _scope_condition(
     suspended or a role changed between two requests, and the cheaper answer is
     the one that goes stale in the unsafe direction.
     """
-    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    organizations = OrganizationService(db, membership_listener=None)
 
     if workspace_id is not None:
         # Only the organization is resolved on this branch. The full scope would

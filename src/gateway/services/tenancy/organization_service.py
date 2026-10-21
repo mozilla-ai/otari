@@ -123,7 +123,6 @@ from gateway.services.tenancy.provisioning_service import (
     DEFAULT_WORKSPACE_NAME,
     password_claims_deployment,
 )
-from gateway.services.tenancy.workspace_listener import WorkspaceListener
 
 
 def _validated_organization_name(name: str | None) -> str:
@@ -323,16 +322,13 @@ class OrganizationService:
         *,
         membership_listener: MembershipListener | None,
         uow: UnitOfWork | None = None,
-        workspace_listener: WorkspaceListener,
     ):
         """Build the service on a session.
 
         A service that changes workspace membership needs a listener and a Unit of Work over the same session,
         because the listener writes through that Unit of Work's open block. A read-only service needs neither.
-        ``workspace_listener`` sets up each workspace this service creates, inside the same transaction.
         """
         self.db = db
-        self._workspace_listener = workspace_listener
         self._membership_listener = membership_listener
         self._uow = uow
         self.organizations = OrganizationRepository(db)
@@ -341,10 +337,6 @@ class OrganizationService:
         self.workspaces = WorkspaceMemberRepository(db)
         self.workspace_rows = WorkspaceRepository(db)
         self.invitations = InvitationRepository(db)
-
-    async def _start_new_workspace(self, workspace_id: uuid.UUID) -> None:
-        """Stage what a workspace this service just created starts with, inside the open transaction."""
-        await self._workspace_listener.workspace_created(workspace_id)
 
     # ------------------------------------------------------------------
     # Context resolution and authorization
@@ -523,10 +515,6 @@ class OrganizationService:
                 has_password=user.hashed_password is not None,
                 claims_deployment=await password_claims_deployment(self.db, user),
             ),
-            # The platform answers "does this org have a self-hosted gateway
-            # attached". A standalone deployment reading this *is* that gateway,
-            # so its own provider credentials are always available to it.
-            byo_provider_keys_allowed=True,
             deployment_operator=await DeploymentUserService(self.db).has_administration_access(user),
             provider_key_encryption_available=secret_box_configured(),
         )
@@ -661,7 +649,6 @@ class OrganizationService:
                     organization_id=organization.id,
                     created_by_user_id=user.id,
                 )
-                await self._start_new_workspace(workspace.id)
                 # Through the assignment path rather than a bare
                 # ``WorkspaceMemberRepository.create``, so this is the same
                 # create-member-then-materialize-defaults step every other
@@ -790,7 +777,6 @@ class OrganizationService:
             organization_id=organization.id,
             created_by_user_id=identity.id,
         )
-        await self._start_new_workspace(workspace.id)
         await self._apply_workspace_assignments(
             user_id=identity.id,
             assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="owner")],

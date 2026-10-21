@@ -94,11 +94,7 @@ membership change without organizations importing budgets. The listener writes
 through the caller's Unit of Work, so a service that changes membership is built
 with one and makes the change inside its block.
 
-It also defines `WorkspaceListener`, the interface another domain implements to
-set up a workspace in the transaction that creates it. Every service that
-creates a workspace takes one, with no default. The core binds
-`NullWorkspaceListener`, and a build may bind another. It also owns
-`models/users.py`, `repositories/users_repository.py` and
+It also owns `models/users.py`, `repositories/users_repository.py` and
 `services/workspace_scope.py`.
 
 ### api-keys
@@ -152,8 +148,8 @@ model a coding agent's subagent should start on.
 It owns `ports/agent_model_recommender_port.py` and its adapter in
 `adapters/`, and `exceptions/routing_exceptions.py`. The port names who
 answers a subagent model recommendation and at what price. The core asks the
-decision model the deployment configured, which may be a local one, and a
-hosted build binds a recommender of its own, so the composition root binds
+decision model the deployment configured, which may be a local one, and an
+overlay may bind a recommender of its own, so the composition root binds
 the implementation and no caller chooses between them. Neither implementation meters
 the call; the decisions scaffold does.
 

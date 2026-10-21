@@ -15,8 +15,7 @@ Declared on the router so a route added later inherits both.
 once. A hosted provider is known by its name, its implementation and the last
 four characters of its key, and that is all a client ever learns about it. The key is read in
 one place, the ``ModelProviderPort`` adapter, which hands it to the upstream
-SDK inside this process and never over the wire. There is deliberately no
-resolve endpoint here.
+SDK inside this process and never over the wire.
 
 Every route addresses a provider by its name rather than a row id, because a
 hosted provider may also be declared in configuration with no row of its own,

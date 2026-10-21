@@ -63,7 +63,6 @@ from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 _BUDGETS = f"{API_ROOT}/organizations/me/budgets"
 _CEILINGS = f"{API_ROOT}/organizations/me/spend-ceilings"
@@ -551,11 +550,11 @@ def _service(async_db: AsyncSession) -> BudgetService:
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
-        OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+        OrganizationService(async_db, membership_listener=None),
         ApiKeyService(uow, ApiKeyRepositories.on(uow)),
         WorkspaceAccess(
             async_db,
-            OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+            OrganizationService(async_db, membership_listener=None),
         ),
     )
 

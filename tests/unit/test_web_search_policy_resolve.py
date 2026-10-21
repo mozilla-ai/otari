@@ -69,9 +69,7 @@ async def test_a_search_carries_the_workspaces_fetch_key_too_for_its_enrichment(
 ) -> None:
     fetch_credential = WebFetchCredential(provider="tabstack", source=WebToolCredentialSource.ORG, api_key="tbs")
 
-    policy = await _local(_SearchKeys(None, fetch_credential), monkeypatch).resolve(
-        uuid.uuid4(), [WebTool.SEARCH]
-    )
+    policy = await _local(_SearchKeys(None, fetch_credential), monkeypatch).resolve(uuid.uuid4(), [WebTool.SEARCH])
 
     assert policy is not None
     assert policy.credential is None
@@ -86,9 +84,7 @@ async def test_a_fetch_alone_reads_only_the_fetch_key(monkeypatch: pytest.Monkey
         WebSearchCredential(provider="brave", source=WebToolCredentialSource.ORG, api_key="brv-own"), fetch_credential
     )
 
-    policy = await _local(search_keys, monkeypatch).resolve(
-        workspace_id, [WebTool.FETCH]
-    )
+    policy = await _local(search_keys, monkeypatch).resolve(workspace_id, [WebTool.FETCH])
 
     assert policy is not None
     assert policy.credential is None

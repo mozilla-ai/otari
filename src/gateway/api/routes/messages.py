@@ -1100,7 +1100,7 @@ async def create_message(
     prepare_kwargs = None
     if container_inputs:
         pepper = config.provider_account_pepper
-        if files is None or ctx.workspace_id is None or pepper is None:
+        if files is None or pepper is None:
             # The blocks still name Otari's files, which no provider account holds.
             await release_reservation(ctx)
             raise domain_error(adapter, ProviderUploadFailedError())

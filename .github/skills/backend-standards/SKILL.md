@@ -36,7 +36,7 @@ count = (await db.execute(select(func.count()).select_from(ModelPricing))).scala
 - A request's session comes from the `get_db` dependency, and non-request code uses
   `create_session()` (`core/database.py`). Don't open ad-hoc engines.
 
-## The SQLModel half: the reconciled control plane's tables
+## The SQLModel half: the tenancy tables
 
 `models/tenancy.py` (organizations, workspaces, identities, memberships) is SQLModel rather
 than the declarative `Base` style of the other domain modules, because its `Create`/`Update`/`Public` schemas are the

@@ -117,9 +117,7 @@ async def _normalize_with_vision(target: NormalizationTarget) -> tuple[int, Comp
 
 
 async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
-    app = SimpleNamespace(
-        state=SimpleNamespace(container=build_container(config=GatewayConfig(), workspace_listener=None))
-    )
+    app = SimpleNamespace(state=SimpleNamespace(container=build_container(config=GatewayConfig())))
     request = Request(
         {
             "type": "http",

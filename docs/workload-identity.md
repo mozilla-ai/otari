@@ -180,9 +180,7 @@ def otari() -> OpenAI:
     return OpenAI(base_url=f"{AUDIENCE}/api/v1", api_key=credentials.token)
 
 
-reply = otari().chat.completions.create(
-    model="openai:gpt-4o", messages=[{"role": "user", "content": "Hello"}]
-)
+reply = otari().chat.completions.create(model="openai:gpt-4o", messages=[{"role": "user", "content": "Hello"}])
 ```
 
 ## Claude Code and the Anthropic SDKs

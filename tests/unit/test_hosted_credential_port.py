@@ -136,19 +136,19 @@ class RecordingPort:
 
 def _plain_build_port() -> ModelProviderPort:
     """The adapter a build with no overlay actually runs, via the composition root."""
-    return build_container(workspace_listener=None).resolve(ModelProviderPort, None)
+    return build_container().resolve(ModelProviderPort, None)
 
 
 def _plain_build_billing() -> BillingPort:
     """The billing adapter a build with no overlay runs, via the composition root."""
-    return build_container(workspace_listener=None).resolve(BillingPort, None)
+    return build_container().resolve(BillingPort, None)
 
 
 def _ctx(
     *,
     resolved_provider: ResolvedProvider | None,
     organization_id: uuid.UUID | None = ORGANIZATION_ID,
-    workspace_id: uuid.UUID | None = WORKSPACE_ID,
+    workspace_id: uuid.UUID = WORKSPACE_ID,
     plan: Any = None,
     config: GatewayConfig | None = None,
 ) -> pipeline.RequestContext:
@@ -465,7 +465,7 @@ async def test_client_args_alone_does_not_shadow_a_real_key() -> None:
 async def test_request_without_an_organization_is_asked_as_one_no_restriction_names() -> None:
     """Served on what is restricted to no organization, so the port is asked for exactly that."""
     port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
-    ctx = _ctx(resolved_provider=_uncredentialed(), organization_id=None, workspace_id=None)
+    ctx = _ctx(resolved_provider=_uncredentialed(), organization_id=None)
 
     result = await _dispatch(ctx, port)
 

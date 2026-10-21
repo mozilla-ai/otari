@@ -1,4 +1,4 @@
-# Minimal standalone Otari configuration.
+# Minimal Otari configuration.
 # See docs/configuration.md for sources, precedence, and advanced settings.
 
 # Docker Compose provides this PostgreSQL service. For a local process without

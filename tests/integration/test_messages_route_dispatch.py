@@ -1129,7 +1129,6 @@ def test_echoed_gateway_activity_is_removed_before_prompt_estimation(
                 model="model",
                 instance=None,
                 file_workspace_id=None,
-                credential_workspace_id=None,
                 workspace_executor=None,
                 candidate_providers=(None,),
             )

@@ -14,8 +14,8 @@ const RENAMED_WORKSPACE = "parity-workspace-renamed"
 const GUARDRAIL = "parity-lakera"
 const PROFILE = "parity-injection"
 // What provisioning names the bootstrap identity (OPERATOR_FULL_NAME in
-// provisioning_service.py). It has no email address, which is the point: a
-// standalone operator is a label, not a sign-in.
+// provisioning_service.py). It has no email address, which is the point: the
+// local operator is a label, not a sign-in.
 const OPERATOR = "Operator"
 
 async function openPage(
@@ -67,7 +67,7 @@ function workspaceRow(page: Page, name: string): Locator {
   })
 }
 
-test.describe("standalone tenancy", () => {
+test.describe("tenancy", () => {
   test("shows the organization a first boot provisioned, and renames it back", async ({
     page,
   }) => {
@@ -250,7 +250,7 @@ test.describe("standalone tenancy", () => {
     await login(page)
     await nav(page).getByRole("link", { name: "Members", exact: true }).click()
 
-    // A workspace's members are a subset of the organization's, and a standalone
+    // A workspace's members are a subset of the organization's, and a fresh
     // deployment has exactly one identity, which owns every workspace it made.
     await expect(page.getByText(/Members of /)).toBeVisible()
     // Said inside the dialog now rather than by a form under the roster. The

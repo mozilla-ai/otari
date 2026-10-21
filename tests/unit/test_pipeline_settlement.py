@@ -168,7 +168,7 @@ def _ctx(
         rate_limit_info=rate_limit_info,
         reservation=reservation,
         started_at=time.monotonic(),
-        workspace_id=workspace_id,
+        workspace_id=workspace_id or uuid.uuid4(),
         organization_id=organization_id,
     )
 
@@ -712,8 +712,6 @@ def test_a_usage_row_names_its_session_by_the_trace_id_it_is_traced_under() -> N
         workspace_id, "user-1", "key-1"
     )
     assert pipeline._session_trace_id(None, workspace_id, "user-1", "key-1") is None
-    # A request with no workspace has no trace to name.
-    assert pipeline._session_trace_id(session, None, "user-1", "key-1") is None
 
 
 @pytest.mark.asyncio
@@ -1727,30 +1725,6 @@ async def test_a_policy_naming_its_tools_must_name_fetch(combined: bool, authori
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == WebAccessToolNotAuthorizedError().message
-
-
-@pytest.mark.asyncio
-async def test_a_request_without_a_workspace_is_refused_before_any_tool_resolves(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Standalone tool resolution needs a workspace; with none the request is refused, not served.
-
-    Every gate in this block fails closed on a context carrying no workspace,
-    and the organization-guardrail resolve is the first of them (otari#654), so
-    it is the one that answers: a 500, because an unresolvable tenancy is a
-    server invariant rather than something the caller sent wrong. What the case
-    is really about is that the request is refused rather than served with its
-    tool configuration silently dropped, and that the hold does not survive it.
-    """
-    settlement = _Settlement()
-    settlement.install(monkeypatch)
-
-    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation())
-    with pytest.raises(HTTPException) as exc_info:
-        await _call_prepare_gateway_tools(ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")])
-
-    assert exc_info.value.status_code == 500
-    assert settlement.refunded == 1
 
 
 @pytest.mark.asyncio
