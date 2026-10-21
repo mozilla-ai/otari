@@ -45,6 +45,7 @@ from gateway.repositories.health_checks import (
 )
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.inference import InferenceRepositories
+from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
 from gateway.repositories.providers import (
@@ -70,7 +71,7 @@ from gateway.repositories.tools import (
 )
 from gateway.repositories.traces import TracesRepositories
 from gateway.repositories.usage_and_telemetry import UsageLogRepository
-from gateway.repositories.users_repository import UserAccessRepository, get_active_user
+from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import (
     ApiKeyService,
     FederatedTokenVerifier,
@@ -1376,8 +1377,8 @@ InvitationMailLimitDep = Annotated[InvitationMailLimit, Depends(get_invitation_m
 
 
 def get_user_access(uow: Annotated[UnitOfWork, Depends(get_unit_of_work)]) -> UserAccess:
-    """Build the organizations domain's read of users' access lists, on its users repository over the Unit of Work."""
-    return UserAccess(UserAccessRepository(uow))
+    """Build the organizations domain's read of users' access lists on the request's Unit of Work."""
+    return UserAccess(OrganizationRepositories.on(uow))
 
 
 def get_api_key_service(uow: Annotated[UnitOfWork, Depends(get_unit_of_work)]) -> ApiKeyService:
