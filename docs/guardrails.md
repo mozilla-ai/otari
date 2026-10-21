@@ -239,10 +239,6 @@ A new workspace inherits the entries marked `applies_to_all_workspaces` and
 nothing else. A workspace cannot opt out of an entry scoped to it: the scope is
 the organization's to set.
 
-Organization guardrails are managed by standalone and hosted control planes.
-They do not currently apply on a [hybrid gateway](modes.md), because the
-platform does not expose a guardrail-resolution endpoint to the gateway.
-
 ## Definition fields
 
 Entries under `/api/v1/organizations/me/guardrail-definitions` (master key, and

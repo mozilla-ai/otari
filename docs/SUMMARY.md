@@ -48,7 +48,6 @@
 
 * [Self-hosted quickstart](self-hosted-quickstart.md)
 * [Deployment](deployment.md)
-* [Runtime modes](modes.md)
 
 ## Providers
 
@@ -84,5 +83,4 @@
 ## Protocols and SDKs
 
 * [SDK compatibility](sdk-compatibility.md)
-* [Hybrid-mode protocol](hybrid-mode-protocol.md)
 * [Code-execution protocol](code-execution-protocol.md)

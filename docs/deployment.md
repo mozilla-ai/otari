@@ -1,12 +1,11 @@
 # Deployment
 
 Otari publishes `mzdotai/otari` on Docker Hub. Use the
-[Self-hosted quickstart](self-hosted-quickstart.md) for local setup; this page covers production choices
-and hybrid gateways.
+[Self-hosted quickstart](self-hosted-quickstart.md) for local setup; this page covers production choices.
 
-## Standalone checklist
+## Production checklist
 
-A durable standalone deployment should:
+A durable deployment should:
 
 - use PostgreSQL and back it up
 - set a strong master key in a secret store
@@ -73,35 +72,6 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 That page owns its current image tag, variables, platform limits, and
 maintenance instructions.
 
-## Connect a gateway to otari.ai
-
-Create a gateway in otari.ai and copy its gateway token. Put the token in a
-private environment file:
-
-```dotenv
-OTARI_AI_TOKEN=gw_your_gateway_token
-```
-
-Start the container with it, pinning the image version you deploy:
-
-```bash
-docker run --rm -p 8000:8000 \
-  --env-file .env \
-  mzdotai/otari:<version> \
-  otari serve
-```
-
-Verify both liveness and control-plane reachability:
-
-```bash
-curl http://localhost:8000/api/v1/health
-curl http://localhost:8000/api/v1/health/readiness
-```
-
-Clients then call the gateway with an otari.ai user token. What a hybrid
-gateway serves and which credentials it uses are in
-[Hybrid, connected to otari.ai](modes.md#hybrid-connected-to-otariai).
-
 ## Optional services
 
 Compose profiles start the bundled service backends:
@@ -123,6 +93,19 @@ services are optional; requests that require an unconfigured backend fail
 without affecting ordinary inference.
 
 See [Built-in tools](tools.md) and [Guardrails](guardrails.md).
+
+## Upgrading from hosted or hybrid mode
+
+A deployment that ran in hosted mode serves inference and the Playground as
+well as management. Set `OTARI_PROVIDER_ACCOUNT_PEPPER` if
+`files_provider_upload_enabled` is on, since startup requires it.
+`web_search_workspace_default` and `code_execution_workspace_default` default
+to `true`; set them to `false` to keep web access and code execution off for a
+workspace with no policy of its own.
+
+A gateway that ran in hybrid mode serves from its own database too: leftover
+`OTARI_MODE`, `OTARI_AI_TOKEN` and `OTARI_DATA_PLANE_URL` are ignored, so
+declare its providers and create its keys and budgets as a new deployment does.
 
 ## Configuration
 

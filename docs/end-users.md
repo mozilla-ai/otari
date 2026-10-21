@@ -7,9 +7,7 @@ requests name an end user. For how service keys fit with users, keys and
 budgets, see [Access control](access-control.md#service-keys-and-end-users).
 
 This guide uses a service called `mlpa` with two features, each carrying its
-own per-user limit. You need the master key (or an operator session), and a
-standalone or hosted deployment: hybrid mode resolves users on the platform and
-does not support service keys.
+own per-user limit. You need the master key (or an operator session).
 
 ## 1. Create the end-user budgets
 
@@ -232,5 +230,4 @@ End users are supported on `/v1/chat/completions`, `/v1/responses`,
 batches and the other pass-through routes) treat a service key as an ordinary
 key, so a `user` naming someone else is handled by the key's
 [`reject_user_mismatch`](access-control.md#mismatched-user-fields) setting
-there. Hybrid mode resolves users on the platform and does not support service
-keys.
+there.
