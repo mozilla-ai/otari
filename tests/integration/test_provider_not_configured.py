@@ -55,17 +55,17 @@ def client(postgres_url: str) -> Generator[TestClient]:
     )
 
 
-def _assert_provider_not_configured(response: Any, provider: str, env_var: str) -> None:
+def _assert_provider_not_configured(response: Any, provider: str) -> None:
     assert response.status_code == 424, response.text
     assert response.headers[ERROR_CODE_HEADER] == PROVIDER_NOT_CONFIGURED
     body = response.json()
     assert body["code"] == PROVIDER_NOT_CONFIGURED
     assert f"'{provider}'" in body["detail"]
-    assert env_var in body["detail"]
+    assert "hosted provider" in body["detail"]
     assert _ANY_LLM_WORDING not in body["detail"]
 
 
-def test_chat_names_the_provider_and_the_variable(
+def test_chat_names_the_provider_and_what_to_configure(
     client: TestClient,
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
@@ -77,7 +77,7 @@ def test_chat_names_the_provider_and_the_variable(
         json={"model": "anthropic:claude-sonnet-4-5", "messages": [{"role": "user", "content": "Hello"}]},
         headers=api_key_header,
     )
-    _assert_provider_not_configured(response, "anthropic", "ANTHROPIC_API_KEY")
+    _assert_provider_not_configured(response, "anthropic")
 
     # Recorded as the refusal it is, so the error rate can tell it from a provider outage.
     row = db_session.query(UsageLog).filter(UsageLog.api_key_id == api_key_obj["id"]).one()
@@ -99,7 +99,7 @@ def test_a_streaming_request_is_refused_before_the_stream_opens(
         },
         headers=api_key_header,
     )
-    _assert_provider_not_configured(response, "anthropic", "ANTHROPIC_API_KEY")
+    _assert_provider_not_configured(response, "anthropic")
     assert response.headers["content-type"].startswith("application/json")
 
 
@@ -113,7 +113,7 @@ def test_a_passthrough_route_answers_the_same_way(
         json={"model": "cohere:embed-english-v3.0", "input": "hello"},
         headers=api_key_header,
     )
-    _assert_provider_not_configured(response, "cohere", "COHERE_API_KEY")
+    _assert_provider_not_configured(response, "cohere")
 
 
 def test_the_messages_route_answers_in_its_own_envelope(
@@ -134,7 +134,7 @@ def test_the_messages_route_answers_in_its_own_envelope(
     assert response.headers[ERROR_CODE_HEADER] == PROVIDER_NOT_CONFIGURED
     message = response.json()["error"]["message"]
     assert "'anthropic'" in message
-    assert "ANTHROPIC_API_KEY" in message
+    assert "hosted provider" in message
     assert _ANY_LLM_WORDING not in message
 
 
@@ -264,7 +264,7 @@ def test_an_undeclared_provider_is_refused_although_its_variable_is_set(
             json={"model": "anthropic:claude-sonnet-4-5", "messages": [{"role": "user", "content": "Hello"}]},
             headers=api_key_header,
         )
-    _assert_provider_not_configured(response, "anthropic", "ANTHROPIC_API_KEY")
+    _assert_provider_not_configured(response, "anthropic")
     assert "sk-ant-from-the-environment" not in response.text
     mock.assert_not_awaited()
     row = db_session.query(UsageLog).filter(UsageLog.api_key_id == api_key_obj["id"]).one()
@@ -316,7 +316,7 @@ def test_an_undeclared_passthrough_provider_is_refused_although_its_variable_is_
             json={"model": "cohere:embed-english-v3.0", "input": "hello"},
             headers=api_key_header,
         )
-    _assert_provider_not_configured(response, "cohere", "COHERE_API_KEY")
+    _assert_provider_not_configured(response, "cohere")
     mock.assert_not_awaited()
 
 
@@ -328,7 +328,7 @@ def test_an_undeclared_batch_provider_is_refused_although_its_variable_is_set(
 ) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-from-the-environment")
     response = client.get(f"{API_ROOT}/batches?provider=anthropic", headers=api_key_header)
-    _assert_provider_not_configured(response, "anthropic", "ANTHROPIC_API_KEY")
+    _assert_provider_not_configured(response, "anthropic")
 
 
 def test_an_undeclared_keyless_local_provider_is_refused(
@@ -392,7 +392,7 @@ def test_a_declared_entry_naming_no_key_is_refused_although_its_variable_is_set(
         assert bare_client.post(f"{API_ROOT}/users", json={"user_id": "test-user"}, headers=_MASTER).status_code == 200
         with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=AssertionError)) as mock:
             response = _chat(bare_client, "anthropic:claude-sonnet-4-5")
-        _assert_provider_not_configured(response, "anthropic", "ANTHROPIC_API_KEY")
+        _assert_provider_not_configured(response, "anthropic")
         assert "sk-ant-from-the-environment" not in response.text
         mock.assert_not_awaited()
 

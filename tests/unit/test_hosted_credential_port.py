@@ -203,7 +203,7 @@ def _assert_refused_as_unconfigured(
 ) -> None:
     assert exc_info.value.status_code == 424
     assert (exc_info.value.headers or {}).get(ERROR_CODE_HEADER) == PROVIDER_NOT_CONFIGURED
-    assert "${OPENAI_API_KEY}" in str(exc_info.value.detail)
+    assert "'openai'" in str(exc_info.value.detail)
     assert len(released) == 1
     assert [(row["status_code"], row["provider"], row["model"]) for row in rejections] == [(424, "openai", "gpt-4o")]
 

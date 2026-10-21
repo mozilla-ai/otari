@@ -85,13 +85,12 @@ async def test_the_environment_variable_never_serves_a_declared_entry_naming_no_
 
 
 @pytest.mark.asyncio
-async def test_the_refusal_names_how_to_declare_the_provider() -> None:
+async def test_the_refusal_names_what_a_caller_can_configure() -> None:
     missing = await missing_provider_credential(_CONFIG, _cohere({}), hosted=None, organization_id=_ORG)
     assert missing is not None
-    assert "providers:" in missing.detail
-    assert "${COHERE_API_KEY}" in missing.detail
-    assert "Hosted providers page" in missing.detail
-    assert "organization provider key" in missing.detail
+    assert "hosted provider" in missing.detail
+    assert "its own provider key" in missing.detail
+    assert "providers:" not in missing.detail
 
 
 @pytest.mark.asyncio

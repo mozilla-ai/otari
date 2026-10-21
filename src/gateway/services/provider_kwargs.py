@@ -1024,15 +1024,20 @@ def is_deployment_instance_key(config: GatewayConfig, model_key: str) -> bool:
     return split is not None and split[0] in config.providers
 
 
+# What a caller can do about a missing credential, in words that name no setting a caller cannot reach.
+_CONFIGURE_A_CREDENTIAL = (
+    "An operator can add the provider as a hosted provider, or the organization can add its own provider key."
+)
+
+
 @dataclass(frozen=True)
 class MissingCredential:
     """A call any-llm refused locally because no credential resolved for its provider.
 
     Nothing reached the provider, so the failure is the deployment's
     configuration rather than the provider's, and it is named in Otari's terms.
-    The variable is a name, never a value, so it is safe to show. A request that
-    named an alias is told the ``alias`` instead of the provider and its
-    variable, both of which give away the target the alias hides.
+    A request that named an alias is told the ``alias`` instead of the provider,
+    which would give away the target the alias hides.
 
     Answered with a 424 rather than a 502: clients retry a 5xx, and no retry can
     supply a key. ``code`` lets a caller tell it from a provider's own 424.
@@ -1054,21 +1059,10 @@ class MissingCredential:
 
     @property
     def detail(self) -> str:
-        if self.alias is not None:
-            return (
-                f"No credential is configured for the provider behind model '{self.alias}'. "
-                "Declare it under providers: in config.yml, add it on the Hosted providers page, "
-                "or add an organization provider key."
-            )
-        # The variable is offered as what a declaration reads its key from: set
-        # alone, it serves nothing.
-        variable = self.env_var.split("/")[0] if self.env_var else None
-        declare = f" (api_key: ${{{variable}}})" if variable else ""
-        return (
-            f"No credential is configured for provider '{self.provider}'. "
-            f"Declare it under providers: in config.yml{declare}, add it on the Hosted providers page, "
-            "or add an organization provider key."
+        subject = (
+            f"the provider behind model '{self.alias}'" if self.alias is not None else f"provider '{self.provider}'"
         )
+        return f"No credential is configured for {subject}. {_CONFIGURE_A_CREDENTIAL}"
 
 
 def missing_credential(exc: BaseException) -> MissingCredential | None:
@@ -1088,5 +1082,5 @@ def no_candidate_configured_detail(missing: Sequence[MissingCredential]) -> str:
     names = ", ".join(sorted({entry.provider for entry in missing})) or "unknown"
     return (
         f"No credential is configured for any provider this request could use ({len(missing)} attempts: {names}). "
-        "Add one in config.yml or through the dashboard."
+        f"{_CONFIGURE_A_CREDENTIAL}"
     )

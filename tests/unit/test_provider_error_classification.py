@@ -398,15 +398,14 @@ def test_terminal_exc_falls_back_to_generic() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_missing_credential_maps_to_424_naming_the_provider_and_its_variable() -> None:
+def test_missing_credential_maps_to_424_naming_the_provider() -> None:
     """Nothing went upstream, so the answer is the deployment's to fix: a client
-    error that names the provider and the variable, in the gateway's own words."""
+    error that names the provider, in the gateway's own words."""
     mapping = classify_provider_error(MissingApiKeyError("anthropic", "ANTHROPIC_API_KEY"))
     assert mapping is not None
     assert mapping.status_code == 424
     assert mapping.detail == MissingCredential("anthropic", "ANTHROPIC_API_KEY").detail
     assert "'anthropic'" in mapping.detail
-    assert "ANTHROPIC_API_KEY" in mapping.detail
     assert "Please provide it in the config" not in mapping.detail
 
 
@@ -475,10 +474,13 @@ def test_terminal_exc_for_a_missing_credential_is_a_424() -> None:
     assert (exc.headers or {}).get("Otari-Error-Code") == PROVIDER_NOT_CONFIGURED
 
 
-def test_missing_credential_detail_without_a_variable() -> None:
-    detail = MissingCredential("vertexai", None).detail
-    assert "config.yml, add it on the Hosted providers page" in detail
-    assert "${" not in detail
+@pytest.mark.parametrize("alias", [None, "fast"])
+def test_missing_credential_detail_names_only_what_a_caller_can_configure(alias: str | None) -> None:
+    detail = MissingCredential("vertexai", "VERTEXAI_API_KEY", alias=alias).detail
+    assert "hosted provider" in detail
+    assert "its own provider key" in detail
+    assert "config.yml" not in detail
+    assert "VERTEXAI_API_KEY" not in detail
 
 
 # ---------------------------------------------------------------------------
