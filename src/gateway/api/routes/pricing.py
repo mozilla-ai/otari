@@ -89,14 +89,17 @@ async def _withheld_providers(
 WithheldProviders = Annotated[frozenset[str], Depends(_withheld_providers)]
 
 
+def _pricing_not_found(model_key: str) -> HTTPException:
+    """The 404 for a key nothing prices, which a withheld provider's key answers too."""
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pricing for model '{model_key}' not found")
+
+
 def _refuse_if_withheld(model_key: str, candidates: list[str], withheld: frozenset[str]) -> None:
     """Answer a withheld provider's key as unknown, the way a key with no price answers."""
     for candidate in candidates:
         split = split_selector(candidate)
         if split is not None and provider_key(split[0]) in withheld:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=f"Pricing for model '{model_key}' not found"
-            )
+            raise _pricing_not_found(model_key)
 
 
 _PENDING_CHANGED_DETAIL = "The pending models.dev refresh changed since it was previewed"
@@ -647,10 +650,7 @@ async def get_pricing_history(
     candidates = _candidates(model_key, kind, withheld)
     pricings = await price_history(db, candidates, kind)
     if not pricings:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Pricing for model '{model_key}' not found",
-        )
+        raise _pricing_not_found(model_key)
 
     return [PricingResponse.from_model(pricing) for pricing in pricings]
 
@@ -680,10 +680,7 @@ async def get_pricing(
     pricing = await price_in_effect(db, candidates, normalize_effective_at(as_of), kind)
 
     if not pricing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Pricing for model '{model_key}' not found",
-        )
+        raise _pricing_not_found(model_key)
 
     return PricingResponse.from_model(pricing)
 
@@ -719,10 +716,7 @@ async def delete_pricing(
     else:
         targets = await price_history(db, candidates, kind)
         if not targets:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Pricing for model '{model_key}' not found",
-            )
+            raise _pricing_not_found(model_key)
 
     for pricing in targets:
         await db.delete(pricing)
