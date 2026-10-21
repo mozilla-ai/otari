@@ -16,6 +16,7 @@ import { CountryDatabaseCard } from "@/features/settings/CountryDatabaseCard"
 import { MailDeliveryCard } from "@/features/settings/MailDeliveryCard"
 import { MaintenanceModeCard } from "@/features/settings/MaintenanceModeCard"
 import { RateLimitsCard } from "@/features/settings/RateLimitsCard"
+import { UpdateCheckCard } from "@/features/settings/UpdateCheckCard"
 import { useRotateMasterKey } from "@/shared/api/auth"
 import {
   useHostedProviders,
@@ -733,6 +734,7 @@ export function SettingsPage() {
       <MaintenanceModeCard />
 
       <CountryDatabaseCard />
+      <UpdateCheckCard />
 
       {data ? (
         <p className="pt-6 text-xs text-subtle">

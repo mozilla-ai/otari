@@ -59,6 +59,9 @@ _DEPLOYMENT_WIDE_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/health-checks"),
     # A run spends the deployment's provider credit.
     ("POST", f"{API_ROOT}/health-checks/run"),
+    ("GET", f"{API_ROOT}/update-check"),
+    # Turns on a daily request from the deployment to otari.ai.
+    ("PUT", f"{API_ROOT}/update-check"),
     ("POST", f"{API_ROOT}/pricing"),
 ]
 
