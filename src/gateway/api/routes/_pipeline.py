@@ -148,6 +148,7 @@ from gateway.exceptions.tools_exceptions import (
     CodeExecutionContainerBusyError,
     CodeExecutionDeclarationError,
     CodeExecutionRefusedError,
+    ContainerOnManagedCredentialError,
     GatewayToolPricingRequiredError,
     McpServerConfigurationError,
     McpServerDeclarationError,
@@ -206,6 +207,7 @@ from gateway.services.budgets import (
 from gateway.services.code_execution import (
     ContainerLease,
     SandboxContainerRegistry,
+    names_provider_container,
 )
 from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for
 from gateway.services.guardrails import InProcessGuardrail
@@ -1251,6 +1253,9 @@ class RequestContext:
         # Set once a deployment-paid request passes its funding gate, and ``None``
         # on every other request: settlement charges the organization through it.
         self.deployment_charge: DeploymentCharge | None = None
+        # Whether the provider ``resolve_dispatch_provider`` returned is served on
+        # a credential the deployment owns. A walk's candidates carry their own.
+        self.deployment_paid = False
         # Monotonic clock reading taken at the very start of the handler
         # preamble; used to compute the usage log's latency_ms at settlement.
         self.started_at = started_at
@@ -1467,6 +1472,7 @@ async def _prepare_for_dispatch(
         client_args = {"http_client": owned_endpoint_http_client()}
         return replace(resolved, kwargs={**resolved.kwargs, "client_args": client_args})
     served = await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=port)
+    ctx.deployment_paid = served.deployment_paid
     if served.deployment_paid:
         await _hold_at_deployment_paid_rate(ctx, served, adapter=adapter)
     await _admit_or_refuse(ctx, served, adapter=adapter, billing=billing)
@@ -5611,12 +5617,31 @@ def _candidate_admission(ctx: RequestContext) -> AdmitAttempt:
     return _admit
 
 
+def refuse_container_on_deployment_credential(
+    adapter: FormatAdapter[Any, Any], call_kwargs: dict[str, Any], *, deployment_paid: bool
+) -> None:
+    """Refuse to send a caller-chosen provider ``container`` on a credential the deployment owns.
+
+    A provider container id addresses an execution environment and its files on
+    the provider account that minted it, not on an Otari workspace. The
+    deployment's own account is shared by every organization it serves, so
+    forwarding an id the caller picked would let one workspace resume another's
+    container. The id cannot be namespaced, so the candidate is refused.
+
+    Raises:
+        CandidateCannotServe: ``deployment_paid`` and ``call_kwargs`` names a provider container.
+    """
+    if deployment_paid and names_provider_container(call_kwargs):
+        raise CandidateCannotServe(domain_error(adapter, ContainerOnManagedCredentialError()))
+
+
 def _failover_kwargs(
     adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext, ctx: RequestContext
 ) -> Callable[[Attempt, dict[str, Any]], dict[str, Any]]:
     """Builds each candidate's kwargs for a plan that can fall over, from the request fields its tools need.
 
     Raising :class:`CandidateCannotServe` for a candidate whose built-in tools were refused,
+    or that would carry a caller's provider container on the deployment's credential,
     so the walk skips it before admitting it, and any-llm's ``MissingApiKeyError`` for a
     candidate nothing declares a credential for, so the walk passes it over as it does
     any candidate missing a key.
@@ -5626,7 +5651,9 @@ def _failover_kwargs(
     def _build(attempt: Attempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
         require_declared_credential(config, attempt.instance, attempt.provider, attempt.kwargs)
         fields = tool_ctx.request_fields_for(attempt.provider.value, attempt.model, base_request_fields)
-        return with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
+        call_kwargs = with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
+        refuse_container_on_deployment_credential(adapter, call_kwargs, deployment_paid=attempt.deployment_paid)
+        return call_kwargs
 
     return _build
 
@@ -5668,6 +5695,10 @@ async def _admitted_and_prepared(
         # A policy's target is not the caller's to see; a model the caller named is.
         hold = await ctx.rate_limit_grant.admit_model(instance, model, name_model=ctx.plan is None)
     try:
+        try:
+            refuse_container_on_deployment_credential(adapter, call_kwargs, deployment_paid=ctx.deployment_paid)
+        except CandidateCannotServe as exc:
+            raise exc.refusal from exc
         return await _prepared(adapter, prepare_kwargs, instance, call_kwargs)
     except BaseException:
         if hold is not None:

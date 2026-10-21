@@ -440,6 +440,13 @@ this; `auto` names no sandbox. Anything that outranks a request still outranks
 it, so `Otari-Code-Execution: provider` and a workspace policy pinned to the
 provider both win, and the id is refused as above.
 
+The provider's own id is never forwarded on the deployment's provider key, the
+one a hosted provider serves a model on, because every organization the
+deployment serves shares that account and a container id addresses state on it
+rather than on a workspace. Such a request is refused with a 400, and a routing
+policy passes over that candidate for one on a key of your own. Asking the
+provider for a new container (OpenAI's `{"type": "auto"}`) still passes.
+
 `container: "auto"` is best-effort, unlike an id. A deployment that holds
 nothing, because an operator set the TTL to 0, serves the request exactly as it
 would have and reports no container. An id is a requirement rather than a wish,
