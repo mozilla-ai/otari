@@ -120,7 +120,9 @@ gateway process rather than to any organization on it:
   Adding a provider offers every model it lists on the key; each model carries a
   serving switch and a price, set per million tokens or per 1,000 requests or
   images, and a model nothing prices arrives switched off. Refresh models asks
-  one provider again, and Refresh and purge asks every provider and then removes
+  one provider again. Update catalog fetches the latest models.dev prices and
+  then asks every provider what it lists, showing the price changes and each
+  provider's new models before applying them; its optional cleanup also removes
   priced models nothing on the deployment serves, along with the model lists of
   providers nothing configures any more, listing them before anything is
   removed. A provider kept to one organization shows which; that restriction
@@ -195,8 +197,8 @@ rate the operator set for this organization, never from one the organization
 wrote itself, even one written while its own key still covered the model. A rate
 the operator set for an organization is listed beside the organization's own,
 and only the operator may change or remove it. The models.dev defaults are
-likewise kept current through `/api/v1/pricing/refresh` rather than from the
-dashboard.
+kept current by Update catalog on the Hosted providers page, or on a schedule
+under `pricing_refresh`.
 
 A rate is per million tokens, per request, or per image, and the rate form asks
 which. A request or image rate is entered per 1,000, the way providers publish

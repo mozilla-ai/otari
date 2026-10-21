@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    HostedCatalogUpdateDep,
     RequestSessionModelProviderPortDep,
     get_config,
     get_db,
@@ -315,12 +316,15 @@ def _candidates(model_key: str, kind: PricingKind, withheld: frozenset[str] = fr
     return candidates
 
 
-@operator_router.post("/refresh", response_model=PricingRefreshPreviewResponse)
+@operator_router.post("/refresh", response_model=PricingRefreshPreviewResponse, deprecated=True)
 async def preview_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> PricingRefreshPreviewResponse:
-    """Fetch the latest defaults and hold them for operator review."""
+    """Fetch the latest defaults and hold them for operator review.
+
+    Deprecated: ``POST /hosted-providers/catalog-update/preview``.
+    """
 
     try:
         preview = await prepare_price_refresh(db, config)
@@ -411,15 +415,19 @@ async def list_pricing_drift(
     return rows
 
 
-@operator_router.post("/refresh/confirm", response_model=PricingRefreshConfirmationResponse)
+@operator_router.post("/refresh/confirm", response_model=PricingRefreshConfirmationResponse, deprecated=True)
 async def confirm_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
+    catalog: HostedCatalogUpdateDep,
     digest: Annotated[
         str | None,
         Query(description="The `digest` of the previewed snapshot; 409 when the pending one differs."),
     ] = None,
 ) -> PricingRefreshConfirmationResponse:
-    """Activate the latest reviewed default-price snapshot."""
+    """Activate the latest reviewed default-price snapshot, then refresh every hosted provider's models.
+
+    Deprecated: ``POST /hosted-providers/catalog-update`` with the ``digest``.
+    """
 
     try:
         applied = await confirm_price_refresh(db, digest=digest)
@@ -432,6 +440,7 @@ async def confirm_pricing_refresh(
         ) from None
     if not applied:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending models.dev refresh to apply")
+    await catalog.apply(digest=None, cleanup=False)
     return PricingRefreshConfirmationResponse()
 
 

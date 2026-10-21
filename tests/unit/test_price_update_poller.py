@@ -98,3 +98,24 @@ def test_a_reserved_instance_name_is_refused(name: str) -> None:
     config = GatewayConfig(master_key="k", providers={name: {"api_key": "x"}})
     with pytest.raises(ValueError, match="reserved"):
         config.validate_provider_instances()
+
+
+@pytest.mark.asyncio
+async def test_a_catalog_update_preview_of_unchanged_prices_holds_nothing(stubs: dict[str, AsyncMock]) -> None:
+    stubs["prepare"].return_value = _preview(changed=0)
+    session = AsyncMock(spec=AsyncSession)
+
+    assert await refresh.SessionPriceUpdates(session, GatewayConfig()).fetch() is None
+
+    stubs["reject"].assert_awaited_once_with(session, digest="abc")
+
+
+@pytest.mark.asyncio
+async def test_a_catalog_update_preview_of_changed_prices_holds_them(stubs: dict[str, AsyncMock]) -> None:
+    session = AsyncMock(spec=AsyncSession)
+
+    preview = await refresh.SessionPriceUpdates(session, GatewayConfig()).fetch()
+
+    assert preview is not None
+    assert preview.digest == "abc"
+    stubs["reject"].assert_not_awaited()

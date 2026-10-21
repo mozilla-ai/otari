@@ -131,6 +131,8 @@ DELETE /api/v1/provider-endpoints/{endpoint_id}     # not yet wrapped
 # Hosted providers (the deployment's own upstream credentials, operator-only)
 GET /api/v1/hosted-providers                        # dashboard-only
 POST /api/v1/hosted-providers                       # dashboard-only
+POST /api/v1/hosted-providers/catalog-update/preview  # dashboard-only
+POST /api/v1/hosted-providers/catalog-update        # dashboard-only
 GET /api/v1/hosted-providers/refresh/preview        # dashboard-only
 POST /api/v1/hosted-providers/refresh               # dashboard-only
 POST /api/v1/hosted-providers/test                  # dashboard-only
