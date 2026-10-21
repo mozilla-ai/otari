@@ -1346,7 +1346,6 @@ def test_an_unpriced_search_is_refused_with_402_naming_its_row(
     assert "no price the deployment's operator set" in detail
     assert len(detail) <= 400
     assert f"POST {API_ROOT}/pricing" in detail
-    # The dashboard prices an instance's own row too.
     assert "Web search pricing page" in detail
     assert "Tools & Guardrails" not in detail
     run.assert_not_called()
