@@ -135,6 +135,18 @@ describe("pairWithRates", () => {
     expect(hasUnpricedRow([entries[0], entries[2]])).toBe(false)
   })
 
+  it("does not call an instance unpriced while the rate it inherits is unread", () => {
+    const pending: RateRead = { isPending: true, isError: false }
+    const failed: RateRead = { isPending: false, isError: true }
+    for (const fallbackRead of [pending, failed]) {
+      const entries = pairWithRates(
+        [search, ...instances],
+        [fallbackRead, unpriced],
+      )
+      expect(hasUnpricedRow([entries[1]])).toBe(false)
+    }
+  })
+
   it("does not call a row unpriced before its rate is read", () => {
     const pending: RateRead = { isPending: true, isError: false }
     expect(hasUnpricedRow(pairWithRates([search], [pending]))).toBe(false)

@@ -86,6 +86,10 @@ function mockApi(
     operator?: boolean
     /** The rates in force, keyed `kind:model_key`; anything else answers 404. */
     rates?: Record<string, PricingResponse>
+    /** Keys, as `kind:model_key`, whose read answers 500. */
+    failingReads?: string[]
+    /** Answers a price write with this refusal. */
+    writeRefusal?: string
     requirePricing?: boolean
   } = {},
 ) {
@@ -111,12 +115,20 @@ function mockApi(
       )
     }
     if (url.includes(`${API_ROOT}/pricing`)) {
-      if (method === "POST") return jsonResponse(body, 201)
+      if (method === "POST") {
+        return opts.writeRefusal
+          ? jsonResponse({ detail: opts.writeRefusal }, 422)
+          : jsonResponse(body, 201)
+      }
       const parsed = new URL(url, "http://localhost")
       const key = decodeURIComponent(
         parsed.pathname.slice(`${API_ROOT}/pricing/`.length),
       )
-      const rate = rates[`${parsed.searchParams.get("kind")}:${key}`]
+      const id = `${parsed.searchParams.get("kind")}:${key}`
+      if (opts.failingReads?.includes(id)) {
+        return jsonResponse({ detail: "Database unavailable" }, 500)
+      }
+      const rate = rates[id]
       return rate
         ? jsonResponse(rate)
         : jsonResponse({ detail: "Not found" }, 404)
@@ -240,6 +252,36 @@ describe("ToolPricingPage", () => {
       expect(requests.some((request) => request.method === "POST")).toBe(false)
     },
   )
+
+  it("calls an instance unreadable, not unpriced, when the rate it inherits could not be read", async () => {
+    mockApi({ failingReads: ["model:otari:web_search"], requirePricing: true })
+    await renderPage("web_search")
+
+    const exa = await findRow("exa")
+    expect(await within(exa).findByText("Could not read")).toBeInTheDocument()
+    expect(within(exa).queryByText("Unpriced")).toBeNull()
+  })
+
+  it("drops a refused save's error once the price is edited", async () => {
+    mockApi({ writeRefusal: "Price rejected by the server." })
+    const user = userEvent.setup()
+    await renderPage("code_execution")
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Edit the price of Code execution",
+      }),
+    )
+    const price = await screen.findByLabelText(/Price per call, USD/)
+    await user.type(price, "0.02")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    expect(
+      await screen.findByText("Price rejected by the server."),
+    ).toBeInTheDocument()
+
+    await user.type(price, "5")
+    expect(screen.queryByText("Price rejected by the server.")).toBeNull()
+  })
 
   it("leaves a rate config.yml sets to config.yml", async () => {
     mockApi({

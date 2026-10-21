@@ -185,12 +185,15 @@ export function findBilledRate({
   )
 }
 
-/** Whether a row whose rate has been read is billed at none. */
+const isSettled = (read: RateRead | undefined) =>
+  !read || (!read.isPending && !read.isError)
+
+/** Whether a row whose rate, and the rate it would fall back to, have been read is billed at none. */
 export function hasUnpricedRow(entries: readonly PricedRow[]): boolean {
   return entries.some(
     (entry) =>
-      !entry.price.isPending &&
-      !entry.price.isError &&
+      isSettled(entry.price) &&
+      isSettled(entry.fallback) &&
       findBilledRate(entry) === undefined,
   )
 }

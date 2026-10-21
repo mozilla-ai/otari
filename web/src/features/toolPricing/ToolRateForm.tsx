@@ -68,7 +68,11 @@ export function ToolRateForm({
       <Field
         label="Price per call, USD"
         value={price}
-        onChange={setPrice}
+        onChange={(next) => {
+          setPrice(next)
+          // The failure was about the value it was sent with, not this one.
+          if (setPricing.isError) setPricing.reset()
+        }}
         inputMode="decimal"
         placeholder="0.00"
         autoFocus

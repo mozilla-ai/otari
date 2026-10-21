@@ -25,5 +25,8 @@ export function ToolRateCell({ entry }: { entry: PricedRow }) {
       </span>
     )
   }
+  // Not "Unpriced" until the rate it would inherit is known to be absent too.
+  if (fallback?.isError) return <Badge tone="warn">Could not read</Badge>
+  if (fallback?.isPending) return <span className="text-muted">…</span>
   return <Badge tone="warn">Unpriced</Badge>
 }
