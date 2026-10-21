@@ -400,7 +400,8 @@ export function TraceTimelineView({
 
       <div ref={measure} className="min-h-0 flex-1 overflow-auto">
         <div style={{ width: gutter + lanePx }} className="relative min-h-full">
-          <div className="sticky top-0 z-20 flex h-[1.125rem] border-b border-border bg-surface">
+          {/* Two lines: tick labels on top, idle spans below, so neither covers the other. */}
+          <div className="sticky top-0 z-20 flex h-9 border-b border-border bg-surface">
             <div
               style={{ width: gutter }}
               className="sticky left-0 z-10 shrink-0 bg-surface"
@@ -412,7 +413,7 @@ export function TraceTimelineView({
                   style={{ left: x(t) }}
                   className="absolute inset-y-0 border-l border-border-strong"
                 >
-                  <span className="absolute left-1 text-mono-micro leading-[1.125rem] whitespace-nowrap text-subtle">
+                  <span className="absolute top-0 left-1 text-mono-micro leading-[1.125rem] whitespace-nowrap text-subtle">
                     {formatLatency(t)}
                   </span>
                 </span>
@@ -425,9 +426,11 @@ export function TraceTimelineView({
                       left: x(gap.start),
                       width: x(gap.end) - x(gap.start),
                     }}
-                    className="absolute bottom-0 truncate text-center text-mono-micro text-subtle"
+                    className="absolute bottom-0 flex justify-center"
                   >
-                    {formatLatency(gap.end - gap.start)} idle
+                    <span className="min-w-0 truncate bg-surface px-1 text-mono-micro leading-[1.125rem] text-subtle">
+                      {formatLatency(gap.end - gap.start)} idle
+                    </span>
                   </span>
                 ) : null,
               )}
@@ -437,7 +440,7 @@ export function TraceTimelineView({
           <div
             aria-hidden="true"
             style={{ left: gutter, width: lanePx }}
-            className="pointer-events-none absolute top-[1.125rem] bottom-0"
+            className="pointer-events-none absolute top-9 bottom-0"
           >
             {ticks.map((t) => (
               <span
