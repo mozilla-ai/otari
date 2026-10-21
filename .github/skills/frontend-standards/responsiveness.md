@@ -31,8 +31,8 @@ Write mobile-first: the unprefixed classes are the phone layout, and `md:` / `lg
 assumes a sidebar next to it should assume it only from `md:` up.
 
 The screenshot matrix (`web/e2e/screenshots/`) captures every page at 1920, 1280, and 390 in
-both themes, so a layout that breaks at one of those widths fails CI rather than reaching an
-operator. See [testing.md](./testing.md).
+both themes, so a layout that breaks at one of those widths shows in its captures. It runs on
+demand, not on every PR, so run it before merging a layout change. See [testing.md](./testing.md).
 
 ## Rules
 
@@ -64,15 +64,8 @@ Tables are the dashboard's main content type and the thing that does not shrink.
 acceptable answers, both better than a table clipped at the viewport edge:
 
 ```tsx
-// Card list below md, table from md up
-<div className="hidden md:block">
-  <DataTable … />
-</div>
-<div className="md:hidden flex flex-col gap-3">
-  {rows.map((row) => (
-    <RowCard key={row.id} row={row} />
-  ))}
-</div>
+// One card per row below md, the table from md up; selection, row actions and details carry over
+<DataTable mobileLayout="cards" … />
 ```
 
 ```tsx

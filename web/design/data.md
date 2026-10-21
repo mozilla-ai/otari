@@ -54,7 +54,7 @@ the rows it labels.
     selectionMode="multiple"
     selectedKeys={selected}
     onSelectionChange={setSelected}
-    isLoading={query.isLoading}
+    isLoading={query.isPending && !query.data}
     emptyContent={<EmptyMessage>No keys match this filter.</EmptyMessage>}
     detailKey={openRow}
     renderDetail={(row) => <KeyDetail row={row} />}
