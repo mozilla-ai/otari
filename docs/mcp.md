@@ -245,7 +245,7 @@ exception text.
 | Stored server revision changed | 409 | `mcp_server_changed` | `not_started` |
 | Tool absent from stored allowlist | 403 | `mcp_tool_not_allowed` | `not_started` |
 | Unsafe resolved URL | 400 | `unsafe_mcp_url` | `not_started` |
-| Stored-server resolution unavailable | 502 | `mcp_resolution_failed` | `not_started` |
+| Authentication refused for any other reason | 502 | `mcp_resolution_failed` | `not_started` |
 | Stored credential unavailable | 500 | `mcp_credentials_unavailable` | `not_started` |
 | Discovery bound or pagination failure | 502 | `mcp_discovery_limit_exceeded` | `not_started` |
 | Discovery admission deadline exceeded | 503 | `mcp_discovery_capacity_unavailable` | `not_started` |

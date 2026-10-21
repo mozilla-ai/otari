@@ -214,7 +214,7 @@ def test_passkeys_stay_on_by_default_and_mounted(tmp_path: Path) -> None:
 def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Path) -> None:
     """What the dashboard gates a mail-dependent affordance on.
 
-    A transport alone is not enough: every message the control plane sends
+    A transport alone is not enough: every message the gateway sends
     carries a link back into this deployment, and it needs its own address to
     build one.
     """

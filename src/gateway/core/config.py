@@ -1565,7 +1565,7 @@ class GatewayConfig(
     def mail_ready(self) -> bool:
         """Whether this deployment can send a message that links back to itself.
 
-        ``mail_enabled`` alone is not enough: every message the control plane
+        ``mail_enabled`` alone is not enough: every message the gateway
         sends carries a link into this deployment (an invitation's accept link,
         and the verification and password-reset links to come), and a deployment
         is the only one that knows its own address, so ``public_base_url`` has to

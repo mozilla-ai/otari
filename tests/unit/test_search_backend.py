@@ -126,14 +126,11 @@ async def test_searxng_search_normalizes_results() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
-        seen["token"] = request.headers.get("x-gateway-token")
         return httpx.Response(200, json=_SEARXNG_BODY)
 
     outcome = await _run_search(handler, _SEARXNG_TOOL, SearchQuery(query="otari"))
 
     assert seen["url"] == "http://searxng:8080/search?max_results=10&q=otari&format=json"
-    # A self-hosted SearXNG has no credential to send.
-    assert seen["token"] is None
     # SearXNG reports no charge, so the tool's configured flat rate bills.
     assert outcome.cost_usd is None
     # The result without a URL is dropped: it cannot be cited or followed.

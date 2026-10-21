@@ -11,7 +11,7 @@ from gateway.api import main as api_main
 from gateway.core.config import GatewayConfig
 
 # Inference paths that read management state too.
-_DATA_PLANE_NEEDING_CONTROL = {
+_INFERENCE_READING_MANAGEMENT = {
     "/batches",
     "/decisions",
     "/files",
@@ -49,7 +49,7 @@ def test_the_gateway_serves_inference_and_management() -> None:
     assert "/chat/completions" in served
     assert "/messages" in served
     assert "/keys" in served
-    assert _DATA_PLANE_NEEDING_CONTROL | _PASSTHROUGH <= served
+    assert _INFERENCE_READING_MANAGEMENT | _PASSTHROUGH <= served
 
 
 def test_the_passkey_routes_are_absent_where_passkeys_are_off() -> None:
