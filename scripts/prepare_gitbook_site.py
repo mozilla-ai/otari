@@ -4,23 +4,23 @@ The site holds the pages that docs/SUMMARY.md lists, and every page under docs/ 
 Each `#` heading of the menu is one entry of the site's top bar and one GitBook space: the space is
 written to the directory docs/gitbook-docs.yaml gives it, with the entries under the heading as its own
 SUMMARY.md, and its first page as its landing page. A page keeps its path under docs/ inside its space,
-so a link between pages of one space needs no rewriting and a link to another space gets the relative
-path between the two directories. A relative link to any other file in the repository becomes a GitHub
-link at the published ref.
+so a link between pages of one space needs no rewriting. GitBook does not resolve a relative link
+into another space, so such a link becomes the page's absolute URL on the site, built the way GitBook
+builds it: the space's path, the page's `##` group and parent pages, and its file name. A relative
+link to any other file in the repository becomes a GitHub link at the published ref.
 The site also carries the OpenAPI specification and a generated endpoint page per tag under the API reference.
 GitBook renders each operation on those pages from the specification registered in it under SPEC_NAME.
 
 Standard library only, so the publish workflow runs it without installing the project.
 
 Usage:
-    python scripts/prepare_gitbook_site.py [--ref REF] [--out DIR]
+    python scripts/prepare_gitbook_site.py [--ref REF] [--out DIR] [--site-url URL]
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import posixpath
 import re
 import shutil
 import sys
@@ -32,6 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCS_DIR = REPO_ROOT / "docs"
 REPO = "mozilla-ai/otari"
 REPO_URL = f"https://github.com/{REPO}"
+SITE_URL = "https://docs.otari.ai"
 SUMMARY = "SUMMARY.md"
 SITE_CONFIG = "gitbook-docs.yaml"
 SPEC = "public/openapi.json"
@@ -48,6 +49,7 @@ BRANCH_FILES = {
 
 _SUMMARY_ENTRY = re.compile(r"^\s*[*-]\s+\[[^\]]*\]\(([^)\s]+)\)")
 _SPACE_HEADING = re.compile(r"^# (.+?)\s*$")
+_GROUP_HEADING = re.compile(r"^## (.+?)\s*$")
 _SPACE_DIRECTORY = re.compile(r"^\s*directory:\s*\./(\S+?)/?\s*$", re.M)
 # NOTE: A code span and a link are one alternation, so a code span inside a link label stays part of the link.
 _CODE_OR_LINK = re.compile(r"(?P<code>`+[^`]*`+)|(?P<label>\[[^\]]*\])\((?P<target>[^)\s]+)(?P<title>\s+\"[^\"]*\")?\)")
@@ -78,6 +80,34 @@ class Space:
     def pages(self) -> list[str]:
         return summary_pages(self.menu)
 
+    def page_paths(self) -> dict[str, str]:
+        """Return the path GitBook gives each page inside the space, keyed by the page's file.
+
+        The first page is the space's landing page, at its root. Every other page is its `##` group,
+        then its parent pages, then its file name without the extension, each as a slug.
+        """
+        paths: dict[str, str] = {}
+        group = ""
+        parents: list[tuple[int, str]] = []
+        for line in self.menu.splitlines():
+            if heading := _GROUP_HEADING.match(line):
+                group, parents = _slug(heading.group(1)), []
+            elif match := _SUMMARY_ENTRY.match(line):
+                depth = len(line) - len(line.lstrip())
+                while parents and parents[-1][0] >= depth:
+                    parents.pop()
+                page = match.group(1)
+                prefix = parents[-1][1] if parents else group
+                path = "/".join(part for part in (prefix, _slug(PurePosixPath(page).stem)) if part)
+                paths[page] = path
+                parents.append((depth, path))
+        paths[self.pages[0]] = ""
+        return paths
+
+
+def _slug(text: str) -> str:
+    return _NOT_A_SLUG.sub("-", text.lower()).strip("-")
+
 
 def summary_spaces(summary: str) -> list[Space]:
     """Return the spaces a menu declares, one per `#` heading, in menu order."""
@@ -91,7 +121,7 @@ def summary_spaces(summary: str) -> list[Space]:
             raise ValueError(f"{SUMMARY} lists {line.strip()!r} before its first `#` heading")
     result = []
     for title, lines in spaces:
-        space = Space(title, _NOT_A_SLUG.sub("-", title.lower()).strip("-"), "\n".join(lines).strip("\n") + "\n")
+        space = Space(title, _slug(title), "\n".join(lines).strip("\n") + "\n")
         if not space.pages:
             raise ValueError(f"{SUMMARY} heading {title!r} lists no page")
         result.append(space)
@@ -159,17 +189,18 @@ def nest_endpoint_pages(summary: str, pages: list[str]) -> str:
 
 @dataclass(frozen=True)
 class Site:
-    """The spaces of one GitBook site build and the ref its outbound links point at."""
+    """The spaces of one GitBook site build, the ref its outbound links point at, and the site's URL."""
 
     docs_dir: Path
     spaces: tuple[Space, ...]
     ref: str
+    site_url: str = SITE_URL
 
     @classmethod
-    def from_summary(cls, docs_dir: Path, ref: str) -> Site:
+    def from_summary(cls, docs_dir: Path, ref: str, site_url: str = SITE_URL) -> Site:
         """Read the spaces from the SUMMARY.md in docs_dir."""
         spaces = summary_spaces((docs_dir / SUMMARY).read_text(encoding="utf-8"))
-        return cls(docs_dir=docs_dir, spaces=tuple(spaces), ref=ref)
+        return cls(docs_dir=docs_dir, spaces=tuple(spaces), ref=ref, site_url=site_url.rstrip("/"))
 
     @property
     def published(self) -> frozenset[str]:
@@ -180,6 +211,14 @@ class Site:
         for space in self.spaces:
             if page in space.pages:
                 return f"{space.directory}/{page}"
+        raise KeyError(page)
+
+    def page_url(self, page: str) -> str:
+        """Return a published page's absolute URL. The first space is the site's default, so its path is the root."""
+        for index, space in enumerate(self.spaces):
+            if page in space.pages:
+                parts = ("" if index == 0 else space.directory, space.page_paths()[page])
+                return "/".join([self.site_url, *(part for part in parts if part)]) + ("" if any(parts) else "/")
         raise KeyError(page)
 
     def rewrite_links(self, text: str, page: str) -> str:
@@ -220,8 +259,7 @@ class Site:
                 here, there = self.site_path(page), self.site_path(linked)
                 if here.split("/", 1)[0] == there.split("/", 1)[0]:
                     return match.group(0)
-                relative = posixpath.relpath(there, posixpath.dirname(here))
-                return f"{label}({relative}{'#' + anchor if anchor else ''}{title})"
+                return f"{label}({self.page_url(linked)}{'#' + anchor if anchor else ''}{title})"
         kind = "tree" if resolved.is_dir() else "blob"
         url = f"{REPO_URL}/{kind}/{self.ref}/{PurePosixPath(resolved.relative_to(repo_root))}"
         if anchor:
@@ -282,9 +320,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--ref", default="main", help="Git ref that links to unpublished files point at.")
     parser.add_argument("--out", type=Path, default=REPO_ROOT / "site", help="Directory to write the site to.")
+    parser.add_argument("--site-url", default=SITE_URL, help="URL the site is published at, for links between spaces.")
     args = parser.parse_args()
 
-    site = Site.from_summary(DOCS_DIR, args.ref)
+    site = Site.from_summary(DOCS_DIR, args.ref, args.site_url)
     if off_menu := pages_off_the_menu(DOCS_DIR, site.published):
         print(
             f"Pages under docs/ that docs/{SUMMARY} does not list: {', '.join(off_menu)}",

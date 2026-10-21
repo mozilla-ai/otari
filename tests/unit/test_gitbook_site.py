@@ -104,9 +104,29 @@ def test_link_within_a_space_is_kept(site: Any) -> None:
     assert site.rewrite_links(text, "providers/openai.md") == text
 
 
-def test_link_to_another_space_gets_the_path_between_the_directories(site: Any) -> None:
-    assert site.rewrite_links("[Home](../index.md#top)", "providers/openai.md") == "[Home](../../home/index.md#top)"
-    assert site.rewrite_links("[Guide](guide.md)", "index.md") == "[Guide](../guides/guide.md)"
+def test_link_to_another_space_gets_the_page_url_on_the_site(site: Any) -> None:
+    assert site.rewrite_links("[Home](../index.md#top)", "providers/openai.md") == "[Home](https://docs.otari.ai/#top)"
+    assert site.rewrite_links("[Guide](guide.md)", "index.md") == "[Guide](https://docs.otari.ai/guides)"
+    assert site.rewrite_links("[OpenAI](providers/openai.md)", "index.md") == (
+        "[OpenAI](https://docs.otari.ai/guides/setup/openai)"
+    )
+
+
+def test_page_paths_follow_the_group_the_parent_and_the_file_name() -> None:
+    menu = "* [Start](start.md)\n\n## Run It Well\n\n* [API](api-reference.md)\n  * [Chat](api-endpoints/chat.md)\n"
+    space = gitbook.Space("Reference", "reference", menu)
+    assert space.page_paths() == {
+        "start.md": "",
+        "api-reference.md": "run-it-well/api-reference",
+        "api-endpoints/chat.md": "run-it-well/api-reference/chat",
+    }
+
+
+def test_site_url_option_moves_links_between_spaces(repo: Path) -> None:
+    site = gitbook.Site.from_summary(repo / "docs", "main", "https://preview.example/token/")
+    assert site.rewrite_links("[API](api-reference.md)", "index.md") == (
+        "[API](https://preview.example/token/guides/setup/api-reference)"
+    )
 
 
 def test_link_to_an_unpublished_page_points_at_github(site: Any) -> None:
