@@ -34,7 +34,7 @@ def _operations(app: FastAPI) -> Operations:
     return Counter((path, method) for path, route in _api_routes(app) for method in route.methods or ())
 
 
-def _standalone() -> GatewayConfig:
+def _gateway_config() -> GatewayConfig:
     """A config that does not read the machine it runs on.
 
     A bare ``GatewayConfig()`` takes routing decisions from the ambient
@@ -50,7 +50,7 @@ def _standalone() -> GatewayConfig:
 
 def _mounted_on(aggregate: APIRouter) -> Operations:
     """Mount the gateway onto ``aggregate`` and report the operations that reach an app."""
-    config = _standalone()
+    config = _gateway_config()
     _register_core_routers(aggregate, config, ())
     _register_contributed_routers(aggregate, build_container(config.bootstrap, workspace_listener=None))
 
@@ -72,7 +72,7 @@ def test_register_routers_hands_the_app_the_aggregate_and_its_siblings() -> None
     app.state.container = build_container(None, workspace_listener=None)
     app.state.enabled_features = ()
 
-    register_routers(app, _standalone())
+    register_routers(app, _gateway_config())
 
     siblings = FastAPI()
     siblings.include_router(otlp.router, prefix=OTLP_ROOT)
@@ -99,7 +99,7 @@ def test_a_fixed_route_is_matched_before_the_catch_all_that_would_swallow_it() -
     with the wrong body, no error anywhere, and a counted-operations check
     cannot see it because the set of routes did not change.
     """
-    order = _mount_order(_standalone())
+    order = _mount_order(_gateway_config())
 
     def first(path: str) -> int:
         assert path in order, f"{path} is not mounted, so the check below would hold vacuously"

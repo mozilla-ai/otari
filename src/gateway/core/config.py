@@ -78,7 +78,7 @@ ROUTER_TASK_HEADER = "Otari-Router-Task"
 # Response header naming one inference request, minted by the gateway. Clients use
 # it to correlate a response with its usage record.
 REQUEST_ID_HEADER = "Otari-Request-ID"
-# Response headers describing how a standalone completion was served: the
+# Response headers describing how a completion was served: the
 # provider instance that answered (its name, never its base URL), the model it
 # was sent, how many candidates were sent the request, whether a candidate other
 # than the plan's first served it, and how long the gateway took to answer. See

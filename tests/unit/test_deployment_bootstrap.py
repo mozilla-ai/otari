@@ -50,7 +50,7 @@ def _reset_process_state() -> Generator[None, None, None]:
     reset_db()
 
 
-def _standalone(
+def _gateway_config(
     tmp_path: Path,
     docs_url: str | None = None,
     *,
@@ -68,8 +68,8 @@ def _standalone(
     )
 
 
-def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: Path) -> None:
-    app = create_app(_standalone(tmp_path))
+def test_the_bootstrap_reports_a_local_operator_and_the_full_surface_set(tmp_path: Path) -> None:
+    app = create_app(_gateway_config(tmp_path))
 
     with TestClient(app) as client:
         response = client.get(f"{API_ROOT}/bootstrap")
@@ -110,7 +110,7 @@ def test_a_database_outage_reports_no_sign_in_rather_than_failing(
         raise SQLAlchemyError("database is down")
 
     monkeypatch.setattr(bootstrap_route, "operator_has_password", _unavailable)
-    app = create_app(_standalone(tmp_path))
+    app = create_app(_gateway_config(tmp_path))
 
     with TestClient(app) as client:
         response = client.get(f"{API_ROOT}/bootstrap")
@@ -127,7 +127,7 @@ def test_bootstrap_needs_no_credential(tmp_path: Path) -> None:
     the config sets is genuinely not being required, rather than the route
     happening to be unauthenticated because nothing protects it.
     """
-    app = create_app(_standalone(tmp_path))
+    app = create_app(_gateway_config(tmp_path))
 
     with TestClient(app) as client:
         anonymous = client.get(f"{API_ROOT}/bootstrap")
@@ -149,7 +149,7 @@ def test_passkeys_ready_turns_on_with_an_address_alone(tmp_path: Path) -> None:
     the form from the operator about to register the first one. This answers the
     prior question, whether a ceremony could run here at all.
     """
-    unconfigured = _standalone(tmp_path)
+    unconfigured = _gateway_config(tmp_path)
 
     with TestClient(create_app(unconfigured)) as client:
         answered = client.get(f"{API_ROOT}/bootstrap").json()
@@ -160,7 +160,7 @@ def test_passkeys_ready_turns_on_with_an_address_alone(tmp_path: Path) -> None:
     reset_db()
 
     # An address is the whole requirement: the relying-party ID derives from it.
-    ready = _standalone(tmp_path)
+    ready = _gateway_config(tmp_path)
     ready.public_base_url = "https://otari.example.com"
 
     with TestClient(create_app(ready)) as client:
@@ -178,7 +178,7 @@ def test_a_deployment_can_turn_passkeys_off_entirely(tmp_path: Path) -> None:
     With the setting off the deployment says so, publishes no passkey sign-in,
     and takes the ceremony and management routes out of the API altogether.
     """
-    off = _standalone(tmp_path)
+    off = _gateway_config(tmp_path)
     off.public_base_url = "https://otari.example.com"
     off.passkeys_enabled = False
 
@@ -200,7 +200,7 @@ def test_a_deployment_can_turn_passkeys_off_entirely(tmp_path: Path) -> None:
 
 
 def test_passkeys_stay_on_by_default_and_mounted(tmp_path: Path) -> None:
-    on = _standalone(tmp_path)
+    on = _gateway_config(tmp_path)
     on.public_base_url = "https://otari.example.com"
 
     with TestClient(create_app(on)) as client:
@@ -218,7 +218,7 @@ def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Pa
     carries a link back into this deployment, and it needs its own address to
     build one.
     """
-    transport_only = _standalone(tmp_path)
+    transport_only = _gateway_config(tmp_path)
     transport_only.smtp_host = "smtp.example.com"
     transport_only.mail_from_email = "otari@example.com"
 
@@ -228,7 +228,7 @@ def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Pa
     reset_config()
     reset_db()
 
-    ready = _standalone(tmp_path)
+    ready = _gateway_config(tmp_path)
     ready.smtp_host = "smtp.example.com"
     ready.mail_from_email = "otari@example.com"
     ready.public_base_url = "https://otari.example.com"
@@ -243,7 +243,7 @@ def test_open_signup_is_published_only_with_mail_to_carry_the_verification(tmp_p
     The route refuses without a transport anyway, so publishing the setting
     alone would advertise a form whose every submit answers 503.
     """
-    no_mail = _standalone(tmp_path)
+    no_mail = _gateway_config(tmp_path)
     no_mail.open_signup = True
 
     with TestClient(create_app(no_mail)) as client:
@@ -252,7 +252,7 @@ def test_open_signup_is_published_only_with_mail_to_carry_the_verification(tmp_p
     reset_config()
     reset_db()
 
-    ready = _standalone(tmp_path)
+    ready = _gateway_config(tmp_path)
     ready.open_signup = True
     ready.smtp_host = "smtp.example.com"
     ready.mail_from_email = "otari@example.com"
@@ -291,7 +291,7 @@ def test_the_organization_guardrail_surface_is_published(tmp_path: Path) -> None
     """
     assert "organization_guardrails" in SURFACES
 
-    mounted = {route.path or "" for route in iter_route_contexts(create_app(_standalone(tmp_path)).routes)}
+    mounted = {route.path or "" for route in iter_route_contexts(create_app(_gateway_config(tmp_path)).routes)}
 
     assert any(path.startswith(f"{API_ROOT}/organizations/me/guardrails") for path in mounted)
     assert any(path.startswith(f"{API_ROOT}/organizations/me/guardrail-definitions") for path in mounted)
@@ -303,7 +303,7 @@ def test_the_organization_usage_surface_is_published(tmp_path: Path) -> None:
     ``/usage`` reads the workspace the sidebar selected, so a deployment serving
     several organizations needs this page too.
     """
-    with TestClient(create_app(_standalone(tmp_path))) as client:
+    with TestClient(create_app(_gateway_config(tmp_path))) as client:
         answered = client.get(f"{API_ROOT}/bootstrap").json()
 
     assert "organization_usage" in answered["surfaces"]
@@ -311,7 +311,7 @@ def test_the_organization_usage_surface_is_published(tmp_path: Path) -> None:
 
 def test_every_surface_names_a_route_the_gateway_mounts(tmp_path: Path) -> None:
     """A surface that outlives its API would gate a nav item onto a 404."""
-    app = create_app(_standalone(tmp_path))
+    app = create_app(_gateway_config(tmp_path))
     mounted = {route.path or "" for route in iter_route_contexts(app.routes)}
 
     # The fixed tuple and what the endpoint publishes, which adds each enabled
@@ -323,7 +323,7 @@ def test_every_surface_names_a_route_the_gateway_mounts(tmp_path: Path) -> None:
 
 def test_a_deployment_with_no_docs_url_points_at_the_bundled_guide(tmp_path: Path) -> None:
     """Null is the answer the dashboard reads as "use the bundled guide", not a missing field."""
-    app = create_app(_standalone(tmp_path))
+    app = create_app(_gateway_config(tmp_path))
 
     with TestClient(app) as client:
         response = client.get(f"{API_ROOT}/bootstrap")
@@ -331,13 +331,13 @@ def test_a_deployment_with_no_docs_url_points_at_the_bundled_guide(tmp_path: Pat
     assert response.json()["docs_url"] is None
 
 
-def test_docs_url_is_published_to_a_standalone_dashboard(tmp_path: Path) -> None:
+def test_docs_url_is_published_to_the_dashboard(tmp_path: Path) -> None:
     """The retargeted Documentation link, published exactly as configured.
 
     No trailing slash is trimmed and no path is appended: this is the whole
     destination, and a docs site can need its trailing slash to resolve.
     """
-    app = create_app(_standalone(tmp_path, docs_url="https://docs.otari.ai/en/"))
+    app = create_app(_gateway_config(tmp_path, docs_url="https://docs.otari.ai/en/"))
 
     with TestClient(app) as client:
         response = client.get(f"{API_ROOT}/bootstrap")
@@ -376,7 +376,7 @@ def test_a_deployment_with_no_legal_urls_leaves_the_account_menu_as_it_was(tmp_p
     that stays disabled with the reason it has always carried, rather than as a
     missing field.
     """
-    app = create_app(_standalone(tmp_path))
+    app = create_app(_gateway_config(tmp_path))
 
     with TestClient(app) as client:
         body = client.get(f"{API_ROOT}/bootstrap").json()
@@ -392,7 +392,7 @@ def test_a_deployment_publishes_the_legal_pages_on_its_own_site(tmp_path: Path) 
     the terms publishes both addresses so the account menu can name them.
     """
     app = create_app(
-        _standalone(
+        _gateway_config(
             tmp_path,
             terms_url="https://otari.ai/terms",
             privacy_url="https://otari.ai/privacy",
@@ -409,7 +409,7 @@ def test_a_deployment_publishes_the_legal_pages_on_its_own_site(tmp_path: Path) 
 
 def test_site_url_is_published_for_the_public_catalogs_logo(tmp_path: Path) -> None:
     """Where the logo on the pages ahead of a session goes, for a deployment with a site of its own."""
-    app = create_app(_standalone(tmp_path, site_url="https://otari.ai/"))
+    app = create_app(_gateway_config(tmp_path, site_url="https://otari.ai/"))
 
     with TestClient(app) as client:
         body = client.get(f"{API_ROOT}/bootstrap").json()
@@ -477,7 +477,7 @@ def test_the_unauthenticated_bootstrap_cannot_publish_a_legal_page_credential(tm
     later relaxes one of them.
     """
     app = create_app(
-        _standalone(
+        _gateway_config(
             tmp_path,
             terms_url="https://otari.ai/terms",
             privacy_url="https://otari.ai/privacy",

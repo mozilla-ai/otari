@@ -59,7 +59,7 @@ from gateway.api.routes._pipeline import (
     resolve_dispatch_provider,
     resolve_request_context,
     run_single_attempt_stream,
-    run_standalone_non_stream,
+    run_non_stream,
     scope_prompt_cache_key,
 )
 from gateway.api.routes._request_tags import (
@@ -951,8 +951,8 @@ async def create_message(
 
     async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Anthropic wire payload
-        # before the cost estimate. Standalone only; no-op when the files
-        # feature is off or the request has no attachments.
+        # before the cost estimate. A no-op when the files feature is off or the
+        # request has no attachments.
         code_execution_header = raw_request.headers.get(CODE_EXECUTION_HEADER)
         request.messages, stats = await normalize_request_messages(
             request.messages,
@@ -1144,7 +1144,7 @@ async def create_message(
         apply_endpoint_defaults({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved),
         resolved.instance,
     )
-    result = await run_standalone_non_stream(
+    result = await run_non_stream(
         adapter=adapter,
         ctx=ctx,
         tool_ctx=tool_ctx,

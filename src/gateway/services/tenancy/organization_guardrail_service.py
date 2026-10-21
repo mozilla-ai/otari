@@ -448,8 +448,8 @@ async def resolve_organization_guardrails(
 ) -> list[ResolvedOrganizationGuardrail]:
     """The organization's guardrails that are in effect for one workspace.
 
-    One indexed read, on every request that reaches a completion endpoint in
-    standalone mode, which is inherent rather than incidental: a mandate nobody
+    One indexed read, on every request that reaches a completion endpoint,
+    which is inherent rather than incidental: a mandate nobody
     looked for is not a mandate. It is deliberately not cached and not overlaid
     onto the config object, per the seam #678 settled: an organization that turns
     a guardrail on expects the next request to run it, not the next process.

@@ -41,7 +41,7 @@ from gateway.api.routes._pipeline import (
     resolve_dispatch_provider,
     resolve_request_context,
     run_single_attempt_stream,
-    run_standalone_non_stream,
+    run_non_stream,
     scope_prompt_cache_key,
     stream_error_code,
     stream_error_message,
@@ -467,8 +467,8 @@ async def create_response(
 
     async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Responses input payload
-        # before the cost estimate. Standalone only; no-op when the files
-        # feature is off or the request has no attachments.
+        # before the cost estimate. A no-op when the files feature is off or the
+        # request has no attachments.
         request_body.input, stats = await normalize_request_messages(
             request_body.input,
             fmt="responses",
@@ -638,7 +638,7 @@ async def create_response(
     call_kwargs = apply_endpoint_defaults(
         {**provider_kwargs, **_with_codex_extra_body(base_request_fields, provider), "model": model}, resolved
     )
-    result = await run_standalone_non_stream(
+    result = await run_non_stream(
         adapter=_ADAPTER,
         ctx=ctx,
         tool_ctx=tool_ctx,

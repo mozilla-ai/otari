@@ -456,8 +456,8 @@ def test_the_series_splits_only_the_callers_own_rows(client: TestClient, world: 
     assert keys == set(_ALPHA_ONE_MODELS)
 
 
-def test_a_standalone_deployment_publishes_and_scopes_the_surface(client: TestClient, world: _World) -> None:
-    """The shared config is standalone, so every test here is the several-organization standalone case.
+def test_the_deployment_publishes_and_scopes_the_surface(client: TestClient, world: _World) -> None:
+    """Every test here is the several-organization case.
 
     The dashboard gates its page on the bootstrap, so both the published surface
     and the reads behind it are pinned: each of the deployment's organizations

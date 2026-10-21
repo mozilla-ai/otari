@@ -64,7 +64,7 @@ from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin,
 
 # ``client_args`` is arbitrary JSON, and this gateway's own Bedrock support is
 # the reason a credential-shaped entry in it cannot simply be rejected outright:
-# standalone mode's classic AWS IAM shape genuinely requires
+# the classic AWS IAM shape genuinely requires
 # ``aws_access_key_id`` and ``aws_secret_access_key`` inside ``client_args``
 # (any-llm-sdk's ``BedrockProvider`` never forwards ``api_key`` into the boto3
 # client it builds), so those are real

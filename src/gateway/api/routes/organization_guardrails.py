@@ -38,7 +38,7 @@ from gateway.services.tenancy.organization_guardrail_service import (
 )
 from gateway.services.tool_settings_service import GUARDRAILS_URL, effective_value
 
-# Master key on the router, as every standalone management router declares it.
+# Master key on the router, as every management router declares it.
 # The role gate is a separate question answered in the service: the credential
 # says a request is the operator's, the membership says whether that identity may
 # change what every workspace of the organization is checked against.

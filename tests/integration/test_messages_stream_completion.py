@@ -239,7 +239,7 @@ def _poll_usage_row(make_session: Callable[[], Session], user_id: str, *, timeou
         time.sleep(0.1)
 
 
-def test_a_standalone_stream_with_no_events_fails_and_releases_its_reservation(
+def test_a_stream_with_no_events_fails_and_releases_its_reservation(
     client: TestClient,
     master_key_header: dict[str, str],
     db_session_factory: Callable[[], Session],

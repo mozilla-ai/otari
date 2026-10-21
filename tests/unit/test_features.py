@@ -40,7 +40,7 @@ def _reset_process_state() -> Generator[None, None, None]:
     reset_db()
 
 
-def _standalone(tmp_path: Path) -> GatewayConfig:
+def _gateway_config(tmp_path: Path) -> GatewayConfig:
     return GatewayConfig(database_url=f"sqlite:///{tmp_path / 'features.db'}", master_key="sk-test-master")
 
 
@@ -90,7 +90,7 @@ def test_a_feature_mounts_its_routers_only_when_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool
 ) -> None:
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=enabled),))
-    app = create_app(_standalone(tmp_path))
+    app = create_app(_gateway_config(tmp_path))
     mounted = {route.path for route in iter_route_contexts(app.routes) if isinstance(route.original_route, APIRoute)}
     assert (f"{API_ROOT}/probe" in mounted) is enabled
 
@@ -104,7 +104,7 @@ def test_a_feature_route_is_a_core_route_with_no_capability_gate(
     router does not, which is the difference between the two seams.
     """
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True),))
-    app = create_app(_standalone(tmp_path))
+    app = create_app(_gateway_config(tmp_path))
 
     with TestClient(app) as client:
         response = client.get(f"{API_ROOT}/probe")
@@ -126,7 +126,7 @@ def test_a_surface_the_deployment_already_hosts_is_published_once() -> None:
 
 def test_a_disabled_feature_hosts_no_surface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=False),))
-    app = create_app(_standalone(tmp_path))
+    app = create_app(_gateway_config(tmp_path))
 
     with TestClient(app) as client:
         surfaces = client.get(f"{API_ROOT}/bootstrap").json()["surfaces"]
@@ -142,7 +142,7 @@ def test_a_feature_with_no_page_hosts_no_surface() -> None:
 def test_the_bootstrap_publishes_an_enabled_feature_surface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The end the helper exists for: the dashboard learns about the page from here."""
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True),))
-    app = create_app(_standalone(tmp_path))
+    app = create_app(_gateway_config(tmp_path))
 
     with TestClient(app) as client:
         surfaces = client.get(f"{API_ROOT}/bootstrap").json()["surfaces"]
@@ -172,7 +172,7 @@ async def test_the_lifespan_starts_an_enabled_worker_and_stops_it_at_shutdown(
 ) -> None:
     probe = _Probe()
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True, worker=probe.run),))
-    app = create_app(_standalone(tmp_path))
+    app = create_app(_gateway_config(tmp_path))
 
     async with _create_lifespan()(app):
         await asyncio.wait_for(probe.started.wait(), timeout=5)
@@ -186,7 +186,7 @@ async def test_the_lifespan_starts_an_enabled_worker_and_stops_it_at_shutdown(
 async def test_the_lifespan_leaves_a_disabled_worker_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     probe = _Probe()
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=False, worker=probe.run),))
-    app = create_app(_standalone(tmp_path))
+    app = create_app(_gateway_config(tmp_path))
 
     async with _create_lifespan()(app):
         await asyncio.sleep(0)
@@ -206,7 +206,7 @@ async def test_a_worker_that_dies_is_reported_when_it_dies(
         raise RuntimeError("probe worker blew up")
 
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True, worker=worker),))
-    app = create_app(_standalone(tmp_path))
+    app = create_app(_gateway_config(tmp_path))
     gateway_logger = logging.getLogger("gateway")
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.ERROR, logger="gateway")
@@ -240,7 +240,7 @@ async def test_a_worker_that_will_not_stop_is_abandoned_and_named_as_a_worker(
         await asyncio.sleep(3600)
 
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True, worker=stubborn),))
-    app = create_app(_standalone(tmp_path))
+    app = create_app(_gateway_config(tmp_path))
     gateway_logger = logging.getLogger("gateway")
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.WARNING, logger="gateway")
@@ -274,7 +274,7 @@ def test_a_switch_changed_after_the_app_is_built_moves_nothing(
 
     feature = replace(_probe(enabled=True, worker=worker), enabled=lambda _config: switch["on"])
     monkeypatch.setattr(features, "CORE_FEATURES", (feature,))
-    app = create_app(_standalone(tmp_path))
+    app = create_app(_gateway_config(tmp_path))
     switch["on"] = not built_enabled
 
     with TestClient(app) as client:

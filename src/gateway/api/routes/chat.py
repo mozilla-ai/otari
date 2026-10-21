@@ -42,7 +42,7 @@ from gateway.api.routes._pipeline import (
     resolve_dispatch_provider,
     resolve_request_context,
     run_single_attempt_stream,
-    run_standalone_non_stream,
+    run_non_stream,
     scope_prompt_cache_key,
     stream_error_code,
     stream_error_message,
@@ -331,8 +331,7 @@ class _ChatAdapter:
     ) -> ChatCompletion:
         # ``native_tools`` names the web tools whose calls the answer reports in
         # ``otari_tool_calls``; ``use_budget`` caps what the caller is billed for.
-        # Standalone dispatch has no lock-in callback; each kwarg is passed only when
-        # set, so test fakes can mirror each call shape.
+        # Each kwarg is passed only when set, so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
@@ -534,8 +533,8 @@ async def run_chat_completion(
     async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the wire payload (extract to
         # text for text-only models, inline for natively-capable ones) before
-        # the cost estimate. Standalone only; no-op when the files feature is
-        # off or the request has no attachments.
+        # the cost estimate. A no-op when the files feature is off or the
+        # request has no attachments.
         request.messages, stats = await normalize_request_messages(
             request.messages,
             fmt="openai",
@@ -678,7 +677,7 @@ async def run_chat_completion(
     call_kwargs = apply_endpoint_defaults(
         {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
     )
-    result = await run_standalone_non_stream(
+    result = await run_non_stream(
         adapter=adapter,
         ctx=ctx,
         tool_ctx=tool_ctx,

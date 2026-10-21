@@ -25,7 +25,7 @@ What the registry decides:
   a resume while another request is running is refused with
   :class:`ContainerBusyError` rather than admitted.
 
-Standalone only: it keeps its rows in the local database. Reclaiming the
+It keeps its rows in the local database. Reclaiming the
 sandbox itself is the provider's job, told the idle timeout at release; the
 sweep (``container_sweeper``) only drops rows whose clocks ran out.
 """

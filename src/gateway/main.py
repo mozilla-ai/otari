@@ -204,7 +204,7 @@ _UNAUTHENTICATED_PATHS = frozenset(
 
 @dataclass(frozen=True)
 class _LifespanWorker:
-    """One periodic background task a standalone deployment runs.
+    """One periodic background task the gateway runs.
 
     ``start`` returns the task's coroutine, or None for a worker this config does
     not run. ``reset`` clears the cache the worker keeps warm.
@@ -404,7 +404,7 @@ async def _import_configured_providers(config: GatewayConfig) -> None:
         )
 
 
-# The periodic background workers a standalone deployment runs.
+# The periodic background workers the gateway runs.
 # A new worker is one entry here.
 #
 # Each ``start`` resolves its refresher by name in this module when the lifespan

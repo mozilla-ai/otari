@@ -668,7 +668,7 @@ async def test_deleting_a_workspace_takes_its_servers(async_db: AsyncSession) ->
 def _request_context(
     db: AsyncSession, workspace_id: uuid.UUID, organization_id: uuid.UUID | None = None
 ) -> RequestContext:
-    """A standalone request context of the shape the completion preamble builds.
+    """A request context of the shape the completion preamble builds.
 
     ``organization_id`` is part of that shape: the preamble derives it from the
     same workspace it resolves, and every gate in `prepare_gateway_tools` now

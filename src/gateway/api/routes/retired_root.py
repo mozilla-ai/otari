@@ -6,8 +6,8 @@ commonly configured with a base URL ending in ``/v1``, or append it themselves,
 so a caller pointed at the host alone lands here. A bare 404 would not say why;
 this one names the equivalent path under the current root.
 
-Mounted beside the API root rather than under it, in every mode, and left out of
-the document: it serves nothing a client can call.
+Mounted beside the API root rather than under it, and left out of the document:
+it serves nothing a client can call.
 """
 
 from fastapi import APIRouter, HTTPException, Request, status

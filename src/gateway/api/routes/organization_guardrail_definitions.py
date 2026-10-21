@@ -37,7 +37,7 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionUpdate,
 )
 
-# Master key on the router, as every standalone management router declares it.
+# Master key on the router, as every management router declares it.
 # The role gate is a separate question answered in the service: the credential
 # says a request is the operator's, the membership says whether that identity may
 # spend the organization's vendor accounts.

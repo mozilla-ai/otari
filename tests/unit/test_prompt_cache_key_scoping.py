@@ -37,7 +37,7 @@ def test_prompt_cache_key_is_stable_and_fixed_length() -> None:
     assert len(first) == 64
 
 
-def test_prompt_cache_key_isolated_between_standalone_users() -> None:
+def test_prompt_cache_key_isolated_between_users() -> None:
     assert _scoped_key(_context(user_id="user-a")) != _scoped_key(_context(user_id="user-b"))
 
 

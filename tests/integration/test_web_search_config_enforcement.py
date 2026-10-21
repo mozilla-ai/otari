@@ -760,8 +760,7 @@ def test_an_unresolvable_workspace_refuses_rather_than_searching(
 ) -> None:
     """The veto's defensive arm fails closed.
 
-    Unreachable today: a standalone request with no session is refused before
-    this, and `resolve_workspace_id` always answers, falling back to the default
+    Unreachable today: `resolve_workspace_id` always answers, falling back to the default
     workspace. It is pinned anyway because the arm guards a veto, so falling
     through would hand web search to a workspace whose row refuses it, with
     nothing to notice.

@@ -10,8 +10,7 @@ parsing, SSE chunk shape, error envelope, provider call, tool loop).
 
 Settlement invariants owned here:
 
-* ``reserve_budget`` happens in :func:`resolve_request_context` (standalone
-  mode only); every downstream success path reconciles via
+* ``reserve_budget`` happens in :func:`resolve_request_context`; every downstream success path reconciles via
   :func:`reconcile_reservation` and every failure path refunds via
   :func:`refund_reservation`, including streaming completions, streams that
   end without usage data (``stream_missing_usage_policy``), client
@@ -1308,7 +1307,7 @@ def _end_user_headers(ctx: RequestContext) -> dict[str, str]:
 def _served_by_headers(
     ctx: RequestContext, provider: Any, model: str, chosen: Attempt | None, sent: int
 ) -> dict[str, str]:
-    """The headers naming the instance and model that served a standalone request and how it was reached.
+    """The headers naming the instance and model that served a request and how it was reached.
 
     ``sent`` counts the candidates the request was sent to, so a candidate the walk
     skipped without calling (a model a rate limit had no room on) is not in it, while
@@ -1406,8 +1405,7 @@ async def resolve_dispatch_provider(
 ) -> ResolvedProvider:
     """Get the ``ResolvedProvider`` for dispatch, reusing the one computed for
     the pricing/budget gate (``ctx.resolved_provider``) instead of resolving
-    the selector a second time. Standalone-mode route handlers should call
-    this rather than ``resolve_provider_selector`` directly.
+    the selector a second time. Route handlers should call this rather than ``resolve_provider_selector`` directly.
 
     Falls back to a fresh ``resolve_provider_selector`` call only when
     ``ctx.resolved_provider`` is ``None``. The request preamble refuses a
@@ -2656,7 +2654,7 @@ async def resolve_request_context(
         key_allowlist = await resolve_request_allowlist(db, api_key)
     if not names_end_user:
         rate_limit_info = await check_rate_limit(raw_request, user_id)
-    # Never refused here: a standalone request always has a workspace and a user.
+    # Never refused here: a request always has a workspace and a user.
     upstream_user = _end_user(
         adapter,
         config,
@@ -2713,7 +2711,7 @@ async def resolve_request_context(
         except (ValueError, AnyLLMError):
             gate_instance, gate_impl, gate_model = None, None, model
 
-    # Model access control (per-key, standalone). None = unrestricted; a
+    # Model access control (per key). None = unrestricted; a
     # non-null list restricts. Master-key callers have api_key None, so the
     # allow-list is None and this is skipped.
     # A key with no list of its own inherits its user's default here, and a
@@ -4596,8 +4594,8 @@ log_usage = _cost_only(record_usage)
 """Log API usage to the database and return the computed cost (see :func:`record_usage`)."""
 
 
-def standalone_settlement(logged: LoggedUsage) -> SettledCost | None:
-    """The inline cost a standalone response carries for ``logged``, if any.
+def inline_settlement(logged: LoggedUsage) -> SettledCost | None:
+    """The inline cost a response carries for ``logged``, if any.
 
     A priced result carries both fields, anything else (unpriced model,
     fixed-amount estimate, no usage) carries neither.
@@ -4607,15 +4605,15 @@ def standalone_settlement(logged: LoggedUsage) -> SettledCost | None:
     return SettledCost(cost_usd=f"{quantize_cost(logged.cost):.6f}", pricing_source=logged.pricing_source)
 
 
-def _attach_standalone_cost(adapter: FormatAdapter[ResultT, Any], result: ResultT, logged: LoggedUsage) -> None:
+def _attach_settled_cost(adapter: FormatAdapter[ResultT, Any], result: ResultT, logged: LoggedUsage) -> None:
     """Put a priced non-streaming result's cost on its usage object, never failing the response."""
-    settlement = standalone_settlement(logged)
+    settlement = inline_settlement(logged)
     if settlement is None:
         return
     try:
         attached = adapter.attach_cost(result, settlement)
     except Exception as exc:
-        logger.warning("Failed to attach standalone inline cost: %s", exc)
+        logger.warning("Failed to attach inline cost: %s", exc)
         attached = False
     record_inline_cost_settlement("attached" if attached else "unattached")
 
@@ -5340,7 +5338,7 @@ def build_streaming_response(
             await reconcile_reservation(
                 db, reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
             )
-        return standalone_settlement(logged)
+        return inline_settlement(logged)
 
     async def _on_no_usage() -> None:
         # Stream completed but the provider sent no usage data: settle the
@@ -6040,7 +6038,7 @@ async def _log_absorbed_row(
         )
 
 
-async def run_standalone_non_stream(
+async def run_non_stream(
     *,
     adapter: FormatAdapter[ResultT, Any],
     ctx: RequestContext,
@@ -6053,7 +6051,7 @@ async def run_standalone_non_stream(
     base_request_fields: dict[str, Any] | None = None,
     prepare_kwargs: PrepareKwargs | None = None,
 ) -> ResultT:
-    """Standalone-mode non-streaming dispatch with reservation settlement.
+    """Non-streaming dispatch with reservation settlement.
 
     Success applies the rate-limit headers to ``response``, writes the usage
     log (per the adapter's no-usage policy), and reconciles the reservation
@@ -6204,7 +6202,7 @@ async def run_standalone_non_stream(
             await reconcile_reservation(
                 ctx.db, ctx.reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
             )
-        _attach_standalone_cost(adapter, result, logged)
+        _attach_settled_cost(adapter, result, logged)
         await _copy_provider_files(
             ctx, tool_ctx.sandbox_files, produced_files_for(adapter.name, result), instance=provider
         )
@@ -6217,7 +6215,7 @@ async def run_standalone_non_stream(
     except MaxToolIterationsExceeded as e:
         # Gateway-owned cap, not an upstream provider failure. 422 lets
         # callers distinguish a runaway tool loop from a real outage.
-        logger.warning("Tool loop iteration cap hit (standalone): cap=%d", served_tools.max_tool_iterations)
+        logger.warning("Tool loop iteration cap hit: cap=%d", served_tools.max_tool_iterations)
         await _log_failure_and_refund(
             ctx,
             adapter,

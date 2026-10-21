@@ -53,7 +53,7 @@ from gateway.api.routes._pipeline import (
     log_usage,
     prepare_gateway_tools,
     run_single_attempt_stream,
-    run_standalone_non_stream,
+    run_non_stream,
 )
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyValidationError
@@ -399,7 +399,7 @@ def _usage_payload(frames: list[str]) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_standalone_stream_carries_priced_cost_on_terminal_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_stream_carries_priced_cost_on_terminal_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
@@ -417,7 +417,7 @@ async def test_standalone_stream_carries_priced_cost_on_terminal_usage(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_standalone_stream_omits_cost_when_the_model_is_unpriced(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_stream_omits_cost_when_the_model_is_unpriced(monkeypatch: pytest.MonkeyPatch) -> None:
     settlement = _Settlement(pricing_source=None)
     settlement.install(monkeypatch)
 
@@ -1099,12 +1099,12 @@ async def test_stream_settlement_forwards_the_contexts_workspace_id(monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_standalone_non_stream_forwards_the_contexts_workspace_id(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_non_stream_forwards_the_contexts_workspace_id(monkeypatch: pytest.MonkeyPatch) -> None:
     settlement = _Settlement()
     settlement.install(monkeypatch)
     workspace_id = uuid.uuid4()
 
-    await _run_standalone(
+    await _run_non_stream(
         monkeypatch,
         result=_completion(usage=_usage()),
         reservation=_reservation(),
@@ -1571,7 +1571,7 @@ async def test_invalid_web_declaration_is_rejected_before_policy_io(monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_combined_standalone_request_domains_narrow_fetch_without_workspace_row() -> None:
+async def test_combined_request_domains_narrow_fetch_without_workspace_row() -> None:
     ctx = _ctx(
         GatewayConfig(
             require_pricing=False,
@@ -1627,7 +1627,7 @@ async def test_a_disjoint_allow_list_gets_one_refusal_whether_or_not_fetch_is_de
 
 
 @pytest.mark.asyncio
-async def test_combined_standalone_policy_narrows_fetch_domains() -> None:
+async def test_combined_policy_narrows_fetch_domains() -> None:
     workspace = ResolvedWebSearchConfig(
         enabled=True,
         max_results=None,
@@ -2084,7 +2084,7 @@ async def test_pre_stream_failure_refunds_reservation(
 # ---------------------------------------------------------------------------
 # Non-streaming settlement (characterization, issue #463 P1a)
 #
-# `run_standalone_non_stream` reserves budget, logs usage, reconciles, and
+# `run_non_stream` reserves budget, logs usage, reconciles, and
 # relabels the model. Before this block it was exercised only through
 # route-level HTTP tests in the Postgres-backed integration tier, so these pin
 # its behavior in the fast tier.
@@ -2112,7 +2112,7 @@ def _usage() -> CompletionUsage:
     return CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
 
 
-async def _run_standalone(
+async def _run_non_stream(
     monkeypatch: pytest.MonkeyPatch,
     *,
     result: ChatCompletion | None = None,
@@ -2143,7 +2143,7 @@ async def _run_standalone(
     )
     ctx.deployment_charge = deployment_charge
     response = Response()
-    returned = await run_standalone_non_stream(
+    returned = await run_non_stream(
         adapter=chat._ADAPTER,
         ctx=ctx,
         tool_ctx=_tool_ctx(),
@@ -2157,11 +2157,11 @@ async def _run_standalone(
 
 
 @pytest.mark.asyncio
-async def test_standalone_non_stream_success_logs_once_and_reconciles(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_non_stream_success_logs_once_and_reconciles(monkeypatch: pytest.MonkeyPatch) -> None:
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    result, _ = await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=_reservation())
+    result, _ = await _run_non_stream(monkeypatch, result=_completion(usage=_usage()), reservation=_reservation())
 
     assert result.usage is not None
     assert len(settlement.logged) == 1
@@ -2170,23 +2170,23 @@ async def test_standalone_non_stream_success_logs_once_and_reconciles(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_standalone_non_stream_carries_priced_cost_inline(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_non_stream_carries_priced_cost_inline(monkeypatch: pytest.MonkeyPatch) -> None:
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    result, _ = await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=_reservation())
+    result, _ = await _run_non_stream(monkeypatch, result=_completion(usage=_usage()), reservation=_reservation())
 
     assert result.usage.cost_usd == "0.250000"
     assert result.usage.pricing_source == "deployment"
 
 
 @pytest.mark.asyncio
-async def test_standalone_non_stream_omits_cost_when_the_model_is_unpriced(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_non_stream_omits_cost_when_the_model_is_unpriced(monkeypatch: pytest.MonkeyPatch) -> None:
     """A cost with no model rate behind it (tool charges alone) is not presented as the request's price."""
     settlement = _Settlement(pricing_source=None)
     settlement.install(monkeypatch)
 
-    result, _ = await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=_reservation())
+    result, _ = await _run_non_stream(monkeypatch, result=_completion(usage=_usage()), reservation=_reservation())
 
     assert getattr(result.usage, "cost_usd", None) is None
     assert getattr(result.usage, "pricing_source", None) is None
@@ -2194,14 +2194,14 @@ async def test_standalone_non_stream_omits_cost_when_the_model_is_unpriced(monke
 
 
 @pytest.mark.asyncio
-async def test_standalone_non_stream_logs_success_without_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_non_stream_logs_success_without_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     """Chat sets ``log_success_without_usage``, so a usage-less result still
     writes a row and still reconciles (at cost 0.0, since the fake returns None).
     """
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    await _run_standalone(monkeypatch, result=_completion(usage=None), reservation=_reservation())
+    await _run_non_stream(monkeypatch, result=_completion(usage=None), reservation=_reservation())
 
     assert len(settlement.logged) == 1
     assert settlement.reconciled == [0.0]
@@ -2209,7 +2209,7 @@ async def test_standalone_non_stream_logs_success_without_usage(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
-async def test_standalone_non_stream_keys_usage_on_target_and_relabels_result(
+async def test_non_stream_keys_usage_on_target_and_relabels_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An alias relabels the response ``model`` while usage keys on the target.
@@ -2220,7 +2220,7 @@ async def test_standalone_non_stream_keys_usage_on_target_and_relabels_result(
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    result, _ = await _run_standalone(
+    result, _ = await _run_non_stream(
         monkeypatch,
         result=_completion(usage=_usage()),
         reservation=_reservation(),
@@ -2233,11 +2233,11 @@ async def test_standalone_non_stream_keys_usage_on_target_and_relabels_result(
 
 
 @pytest.mark.asyncio
-async def test_standalone_non_stream_applies_rate_limit_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_non_stream_applies_rate_limit_headers(monkeypatch: pytest.MonkeyPatch) -> None:
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    _, response = await _run_standalone(
+    _, response = await _run_non_stream(
         monkeypatch,
         result=_completion(usage=_usage()),
         reservation=_reservation(),
@@ -2249,14 +2249,14 @@ async def test_standalone_non_stream_applies_rate_limit_headers(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
-async def test_standalone_non_stream_provider_failure_logs_error_and_refunds_once(
+async def test_non_stream_provider_failure_logs_error_and_refunds_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
     with pytest.raises(HTTPException):
-        await _run_standalone(monkeypatch, error=RuntimeError("connection refused"), reservation=_reservation())
+        await _run_non_stream(monkeypatch, error=RuntimeError("connection refused"), reservation=_reservation())
 
     assert settlement.refunded == 1
     assert settlement.reconciled == []
@@ -2266,7 +2266,7 @@ async def test_standalone_non_stream_provider_failure_logs_error_and_refunds_onc
 
 
 @pytest.mark.asyncio
-async def test_standalone_non_stream_http_exception_refunds_without_logging(
+async def test_non_stream_http_exception_refunds_without_logging(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An already-mapped HTTPException refunds but writes no usage row.
@@ -2278,7 +2278,7 @@ async def test_standalone_non_stream_http_exception_refunds_without_logging(
     settlement.install(monkeypatch)
 
     with pytest.raises(HTTPException):
-        await _run_standalone(
+        await _run_non_stream(
             monkeypatch,
             error=HTTPException(status_code=403, detail="nope"),
             reservation=_reservation(),
@@ -2289,14 +2289,14 @@ async def test_standalone_non_stream_http_exception_refunds_without_logging(
 
 
 @pytest.mark.asyncio
-async def test_standalone_non_stream_without_reservation_settles_nothing(
+async def test_non_stream_without_reservation_settles_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Master-key callers reserve nothing, so there is nothing to reconcile."""
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=None)
+    await _run_non_stream(monkeypatch, result=_completion(usage=_usage()), reservation=None)
 
     assert len(settlement.logged) == 1
     assert settlement.reconciled == []
@@ -2304,7 +2304,7 @@ async def test_standalone_non_stream_without_reservation_settles_nothing(
 
 
 @pytest.mark.asyncio
-async def test_standalone_non_stream_marks_budget_exempt_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_non_stream_marks_budget_exempt_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     """An ``exclude_from_budget`` key holds an unreserved handle: the row is
     still written, flagged as not counting toward the budget.
     """
@@ -2319,13 +2319,13 @@ async def test_standalone_non_stream_marks_budget_exempt_rows(monkeypatch: pytes
         counts_toward_budget=False,
         scope_ceilings=(),
     )
-    await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=exempt)
+    await _run_non_stream(monkeypatch, result=_completion(usage=_usage()), reservation=exempt)
 
     assert settlement.logged[0]["counts_toward_budget"] is False
 
 
 @pytest.mark.asyncio
-async def test_standalone_stream_has_no_first_chunk_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_stream_has_no_first_chunk_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     """A slow first token must not be cut off on the standalone streaming path.
 
     ``run_single_attempt_stream`` has no next entry to fail over to, so it
@@ -2576,7 +2576,7 @@ async def test_a_deployment_paid_completion_is_charged_once_before_it_settles(
     settlement.install(monkeypatch)
     recorder = _ChargeRecorder(settlement)
 
-    await _run_standalone(
+    await _run_non_stream(
         monkeypatch,
         result=_completion(usage=_usage()),
         reservation=_reservation(),
@@ -2595,7 +2595,7 @@ async def test_a_failed_deployment_paid_completion_is_not_charged(monkeypatch: p
     recorder = _ChargeRecorder(settlement)
 
     with pytest.raises(HTTPException):
-        await _run_standalone(
+        await _run_non_stream(
             monkeypatch,
             error=RuntimeError("upstream broke"),
             reservation=_reservation(),
@@ -2676,7 +2676,7 @@ async def test_a_completions_row_says_whether_the_deployment_paid(
     charge = _deployment_charge(_ChargeRecorder(settlement)) if paid else None
 
     with contextlib.suppress(HTTPException):
-        await _run_standalone(
+        await _run_non_stream(
             monkeypatch,
             result=_completion(usage=_usage()),
             error=RuntimeError("upstream broke") if fails else None,

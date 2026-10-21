@@ -1,13 +1,11 @@
 """Workspace-scoped MCP server configuration: CRUD, and the request-path resolve.
 
-Ported from otari-ai's `MCPServerService` (otari#658). The platform stores an
-MCP server per workspace, encrypts its bearer token on save, decrypts it when
-the gateway asks for it by id, and never returns it in a public response. This
-module is the same thing against the local database, for a standalone
-deployment that has no platform to ask.
+Ported from otari-ai's `MCPServerService` (otari#658). An MCP server is stored
+per workspace, its bearer token encrypted on save and decrypted when a request
+names the server by id, and never returned in a public response.
 
 **Where it plugs in.** A request names stored servers with `mcp_server_ids`.
-A deployment that holds the rows resolves them here, through
+They are resolved here, through
 :func:`resolve_workspace_mcp_servers`, called at admission where the request's session is live and
 `RequestContext.workspace_id` already names the workspace its key belongs to.
 That is the seam otari#655 settled and otari#678 wrote down; MCP is the
@@ -15,8 +13,7 @@ exception that decision names, because there is no deployment-wide server list
 for a workspace row to narrow, so a row here is the only source of the
 configuration rather than a narrowing of one.
 
-**Deliberate divergences from the platform's version**, all of them because a
-standalone deployment is not a hosted multi-tenant one:
+**Deliberate divergences from otari-ai's version:**
 
 - Authorization is this repository's own workspace check
   (`services.tenancy.authorization`), so a workspace owner/admin qualifies and

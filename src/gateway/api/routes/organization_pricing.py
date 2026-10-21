@@ -46,7 +46,7 @@ from gateway.services.organization_pricing_service import (
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
 
-# Master key on the router, as every standalone management router declares it.
+# Master key on the router, as every management router declares it.
 # The role gate is a separate question answered in the service: the credential
 # says a request is the operator's, the membership says whether that identity may
 # change what the organization is billed.

@@ -23,7 +23,7 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetUpdate,
 )
 
-# Master key on the router, as every standalone management router declares it.
+# Master key on the router, as every management router declares it.
 # The role gate is a separate question answered in the service: the credential
 # says a request is authenticated, the membership says whether that identity may
 # set what this organization's members are allowed to spend.

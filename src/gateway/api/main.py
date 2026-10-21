@@ -91,7 +91,7 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     # /v1/{traces,logs,metrics} tail, so an exporter pointed at `{origin}/otlp`
     # appends it unaided.
     app.include_router(otlp.router, prefix=OTLP_ROOT)
-    # The pre-/api root, refused in every mode with a pointer to its successor.
+    # The pre-/api root, refused with a pointer to its successor.
     app.include_router(retired_root.router)
 
 
