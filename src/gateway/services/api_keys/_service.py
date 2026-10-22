@@ -110,11 +110,14 @@ class ApiKeyService:
 
         An operator's rule must name one of ``allowed_issuers``, and is refused when it names the identity of an
         existing operator's rule: the same identity on this key, or on another key a subject or an email in common
-        and no contradicting value, since a token matching rules of two keys authenticates as neither.
+        and no contradicting value, since a token matching rules of two keys authenticates as neither. Members' rules
+        take no part in that check: they never match a bare identity token, so they cannot make one ambiguous, and
+        leaving them out keeps a member from blocking the operator's rule.
 
         A member's rule (``member_managed``) may name any https issuer; that its host is public is checked when its
-        keys are fetched, as for every issuer. It is refused only when this key already holds it. Either is refused
-        past the per-key limit.
+        keys are fetched, as for every issuer. It is refused only when this key already holds it: it matches only in
+        the exchange that names it, so another key's rule for the same identity takes nothing from it, and searching
+        further would make a 409 reveal another tenant's identity. Either is refused past the per-key limit.
         """
         if member_managed:
             problem = https_url_problem(rule.issuer)
@@ -125,13 +128,15 @@ class ApiKeyService:
         async with self._uow:
             if await self._federation_rules.count_for_key(api_key_id) >= MAX_FEDERATION_RULES_PER_KEY:
                 raise FederationRuleLimitError(MAX_FEDERATION_RULES_PER_KEY)
-            existing = await self._federation_rules.find_conflicting(
+            find = (
+                self._federation_rules.find_member_rule if member_managed else self._federation_rules.find_conflicting
+            )
+            existing = await find(
                 api_key_id=api_key_id,
                 issuer=rule.issuer,
                 audience=rule.audience,
                 subject=rule.subject,
                 email=rule.email,
-                member_managed=member_managed,
             )
             if existing is not None:
                 raise FederationRuleExistsError
