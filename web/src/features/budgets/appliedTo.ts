@@ -1,12 +1,13 @@
 /**
  * What a budget is applied to, as the Budgets table names it.
  *
- * Two axes decide what an entity is called, and the resource axis wins. An
- * entity narrowed to a provider, or to one of its models, caps the
- * organization's spend there, so it reads as the provider or the model rather
- * than as the scope carrying it; only an un-narrowed entity reads as its
- * scope. Reading `scope_type` alone is what would print the organization twice
- * and the provider never.
+ * Two axes decide what an entity is called. The organization narrowed to a
+ * provider, or to one of its models, caps the organization's spend there, so it
+ * reads as the provider or the model rather than as the organization; reading
+ * `scope_type` alone is what would print the organization twice and the
+ * provider never. Anything narrower keeps its scope's phrase: one member capped
+ * on a provider is a member, and reading it as the provider would claim the
+ * whole organization's spend there. The detail page names the narrowing.
  */
 
 import type { NamedAppliedEntity } from "@/client"
@@ -24,10 +25,12 @@ const GROUP_ORDER = [
 
 type GroupKey = (typeof GROUP_ORDER)[number]
 
-/** What an entity counts as: the model or provider it narrows to, else its scope. */
+/** What an entity counts as: the organization's model or provider when it narrows to one, else its scope. */
 function findGroup(entity: NamedAppliedEntity): GroupKey {
-  if (entity.model) return "model"
-  if (entity.provider_key_id) return "provider"
+  if (entity.scope_type === "organization") {
+    if (entity.model) return "model"
+    if (entity.provider_key_id) return "provider"
+  }
   return GROUP_ORDER.includes(entity.scope_type as GroupKey)
     ? (entity.scope_type as GroupKey)
     : "organization"

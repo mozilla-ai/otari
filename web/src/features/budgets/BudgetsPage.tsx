@@ -530,9 +530,13 @@ function DeploymentBudgetsPage() {
         id: "id",
         header: "ID",
         cell: (budget) => (
-          // Only a prefix is rendered; the copy hands over the whole id.
+          // A generated id is cut to its head and a long chosen one truncated;
+          // the title and the copy hand over the whole id.
           <CopyableValue value={budget.budget_id} label="budget id">
-            <code className="text-mono-micro" title={budget.budget_id}>
+            <code
+              className="text-mono-micro inline-block max-w-[12rem] truncate align-bottom"
+              title={budget.budget_id}
+            >
               {shortBudgetId(budget.budget_id)}
             </code>
           </CopyableValue>
