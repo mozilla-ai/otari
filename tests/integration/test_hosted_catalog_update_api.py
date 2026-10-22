@@ -60,8 +60,8 @@ def _prices(monkeypatch: pytest.MonkeyPatch, *, approve: object = True) -> list[
             raise approve
         return bool(approve)
 
-    monkeypatch.setattr(pricing_refresh_service.SessionPriceUpdates, "fetch", fetch)
-    monkeypatch.setattr(pricing_refresh_service.SessionPriceUpdates, "approve", approve_digest)
+    monkeypatch.setattr(pricing_refresh_service.ModelsDevPriceUpdates, "fetch", fetch)
+    monkeypatch.setattr(pricing_refresh_service.ModelsDevPriceUpdates, "approve", approve_digest)
     return approved
 
 

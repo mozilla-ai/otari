@@ -445,22 +445,21 @@ async def claim_poll_tick(session: AsyncSession, interval_seconds: float) -> boo
     return True
 
 
-class SessionPriceUpdates:
-    """The models.dev price steps of a catalog update, on one session.
+class ModelsDevPriceUpdates:
+    """The models.dev price steps of a catalog update.
 
-    What the hosted catalog update calls for its price half, so the providers
-    domain reaches these steps without holding a session. Each method commits
-    on the session it was given, so it is called outside any open Unit of
-    Work block.
+    What the hosted catalog update calls for its price half. Each step opens a
+    session of its own and commits there, as the price refresh functions do, so
+    the caller hands over no session and holds none across a step.
     """
 
-    def __init__(self, session: AsyncSession, config: GatewayConfig) -> None:
-        self.session = session
+    def __init__(self, config: GatewayConfig) -> None:
         self.config = config
 
     async def claim(self, interval_seconds: float) -> bool:
         """Whether this worker owns the next scheduled update."""
-        return await claim_poll_tick(self.session, interval_seconds)
+        async with create_session() as session:
+            return await claim_poll_tick(session, interval_seconds)
 
     async def fetch(self) -> PricingRefreshPreview | None:
         """Fetch the latest prices and hold them as pending, or ``None`` when nothing changed.
@@ -468,14 +467,15 @@ class SessionPriceUpdates:
         Raises:
             PricingRefreshError: the data could not be fetched, or was implausible.
         """
-        preview = await prepare_price_refresh(self.session, self.config)
-        if preview.added_count + preview.changed_count + preview.removed_count:
-            return preview
-        try:
-            await reject_price_refresh(self.session, digest=preview.digest)
-        except PendingSnapshotChanged:
-            pass
-        return None
+        async with create_session() as session:
+            preview = await prepare_price_refresh(session, self.config)
+            if preview.added_count + preview.changed_count + preview.removed_count:
+                return preview
+            try:
+                await reject_price_refresh(session, digest=preview.digest)
+            except PendingSnapshotChanged:
+                pass
+            return None
 
     async def poll(self, policy: str) -> str:
         """One scheduled price check under ``policy``: ``unchanged``, ``pending`` or ``applied``.
@@ -483,7 +483,8 @@ class SessionPriceUpdates:
         Raises:
             PricingRefreshError: the data could not be fetched, or was implausible.
         """
-        return await poll_price_updates(self.session, policy, self.config)
+        async with create_session() as session:
+            return await poll_price_updates(session, policy, self.config)
 
     async def approve(self, digest: str) -> bool:
         """Apply the pending prices an operator reviewed under ``digest``; false when none is pending.
@@ -492,7 +493,8 @@ class SessionPriceUpdates:
             PendingSnapshotChanged: the pending prices are no longer the reviewed ones.
             PricingRefreshError: they could not be applied.
         """
-        return await confirm_price_refresh(self.session, digest=digest)
+        async with create_session() as session:
+            return await confirm_price_refresh(session, digest=digest)
 
 
 async def reject_price_refresh(session: AsyncSession, *, digest: str | None = None) -> bool:

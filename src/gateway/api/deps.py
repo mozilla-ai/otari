@@ -16,7 +16,7 @@ from gateway.container import Container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, create_session, get_db, release_session
 from gateway.core.feature import CoreFeature
-from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work, create_unit_of_work_with_session
+from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
@@ -102,7 +102,7 @@ from gateway.services.organizations import InvitationMailLimit, UserAccess
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
-from gateway.services.pricing_refresh_service import SessionPriceUpdates
+from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
 from gateway.services.providers import (
     HostedCatalogUpdate,
     HostedProviderService,
@@ -1649,33 +1649,28 @@ def get_hosted_provider_service(
 HostedProviderServiceDep = Annotated[HostedProviderService, Depends(get_hosted_provider_service)]
 
 
-def build_hosted_catalog_update(
-    session: AsyncSession, uow: UnitOfWork, *, config: GatewayConfig
-) -> HostedCatalogUpdate:
-    """Build the catalog update on ``uow`` and the session beneath it, whose price steps still take a session."""
-    return HostedCatalogUpdate(build_hosted_provider_service(uow, config=config), SessionPriceUpdates(session, config))
+def build_hosted_catalog_update(uow: UnitOfWork, *, config: GatewayConfig) -> HostedCatalogUpdate:
+    """Build the catalog update on ``uow``; its price steps open sessions of their own."""
+    return HostedCatalogUpdate(build_hosted_provider_service(uow, config=config), ModelsDevPriceUpdates(config))
 
 
 def get_hosted_catalog_update(
-    db: Annotated[AsyncSession, Depends(get_db)],
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> HostedCatalogUpdate:
-    """The catalog update for one request, on its session and Unit of Work."""
-    return build_hosted_catalog_update(db, uow, config=config)
+    """The catalog update for one request, on its Unit of Work."""
+    return build_hosted_catalog_update(uow, config=config)
 
 
 HostedCatalogUpdateDep = Annotated[HostedCatalogUpdate, Depends(get_hosted_catalog_update)]
 
 
 def build_scheduled_catalog_update(config: GatewayConfig) -> ScheduledRun:
-    """Build the catalog update worker's run, each on a session of its own."""
+    """Build the catalog update worker's run, each on a Unit of Work of its own."""
 
     async def run(policy: str, interval_seconds: float) -> str | None:
-        async with create_unit_of_work_with_session() as (session, uow):
-            return await build_hosted_catalog_update(session, uow, config=config).run_scheduled(
-                policy, interval_seconds
-            )
+        async with create_unit_of_work() as uow:
+            return await build_hosted_catalog_update(uow, config=config).run_scheduled(policy, interval_seconds)
 
     return run
 
