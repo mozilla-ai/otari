@@ -52,7 +52,13 @@ from gateway.api.deps import (
 from gateway.api.request_id import set_request_id
 from gateway.api.routes._attempt_metrics import record_attempt
 from gateway.api.routes._attempts import classify_local_attempt_error
-from gateway.api.routes._helpers import missing_credential_error, resolve_user_id, with_retry_hint
+from gateway.api.routes._helpers import (
+    country_gate_for,
+    country_not_supported,
+    missing_credential_error,
+    resolve_user_id,
+    with_retry_hint,
+)
 from gateway.api.routes._pipeline import (
     FUNDS_CHECK_UNAVAILABLE_DETAIL,
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
@@ -139,7 +145,12 @@ from gateway.services.provider_kwargs import (
     require_declared_credential,
     resolve_provider_selector,
 )
-from gateway.services.providers import serve_on_hosted_provider, unpriced_model_refusal
+from gateway.services.providers import (
+    CountryNotServedError,
+    ensure_provider_country,
+    serve_on_hosted_provider,
+    unpriced_model_refusal,
+)
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
 ResultT = TypeVar("ResultT")
@@ -617,6 +628,19 @@ async def run_passthrough(
             detail=refusal.detail,
             headers=error_headers(refusal.code),
         )
+
+    try:
+        ensure_provider_country(config, country_gate_for(config, raw_request), resolved.instance)
+    except CountryNotServedError as exc:
+        await refund_reservation(db, reservation)
+        refused = country_not_supported(exc.gate, model)
+        await _log_rejection(
+            str(refused.detail),
+            row_model=resolved.model,
+            row_provider=resolved.instance,
+            status_code=refused.status_code,
+        )
+        raise refused from exc
 
     # The last rung of the credential ladder, past every gate on the name the caller wrote.
     deployment_charge: DeploymentCharge | None = None
@@ -1120,6 +1144,12 @@ async def run_decision(
         not_allowed_detail = model_not_allowed_detail(selector)
         await log_rejection(not_allowed_detail, row_model=model, row_provider=provider_name, status_code=403)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
+    try:
+        ensure_provider_country(config, country_gate_for(config, raw_request), provider_name)
+    except CountryNotServedError as exc:
+        refused = country_not_supported(exc.gate, selector)
+        await log_rejection(str(refused.detail), row_model=model, row_provider=provider_name, status_code=403)
+        raise refused from exc
 
     pricing: ModelPricing | None = None
     if quote.charge is None:

@@ -24,7 +24,12 @@ from gateway.api.deps import (
     model_provider_port_on,
     verify_api_key_or_master_key,
 )
-from gateway.api.routes._helpers import missing_credential_error, resolve_user_id
+from gateway.api.routes._helpers import (
+    country_gate_for,
+    country_not_supported,
+    missing_credential_error,
+    resolve_user_id,
+)
 from gateway.api.routes._pipeline import (
     FUNDS_CHECK_UNAVAILABLE_DETAIL,
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
@@ -80,7 +85,12 @@ from gateway.services.provider_kwargs import (
     require_declared_credential,
     resolve_provider_selector,
 )
-from gateway.services.providers import hosted_implementation, serve_on_hosted_provider
+from gateway.services.providers import (
+    CountryNotServedError,
+    ensure_provider_country,
+    hosted_implementation,
+    serve_on_hosted_provider,
+)
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -489,6 +499,10 @@ async def create_batch(
             detail=refusal.detail,
             headers=error_headers(refusal.code),
         )
+    try:
+        ensure_provider_country(config, country_gate_for(config, raw_request), resolved.instance)
+    except CountryNotServedError as exc:
+        raise country_not_supported(exc.gate, request.model) from exc
 
     # Validate provider supports batch operations
     provider_class = AnyLLM.get_provider_class(provider)

@@ -15,13 +15,13 @@ from sqlmodel import col
 from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER, ROUTER_TASK_HEADER
 from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, describe_database_error
 from gateway.core.env import otari_env
-from gateway.core.error_codes import error_headers
+from gateway.core.error_codes import COUNTRY_NOT_SUPPORTED, error_headers
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.tenancy import Workspace
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.services.guardrails import GuardrailsNotReachableError, InProcessGuardrail, run_input_guardrails
-from gateway.services.inference import is_retry_futile
+from gateway.services.inference import is_retry_futile, request_country_gate
 from gateway.services.routing import RoutingSignal
 from gateway.services.traces import RequestTrace, TraceService, TraceWriter
 from gateway.services.url_safety import UnsafeURLError
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
     from gateway.db import APIKey
     from gateway.services.provider_kwargs import MissingCredential
+    from gateway.services.providers import CountryGate
 
 
 GUARDRAILS_RESULT_HEADER = "Otari-Guardrails"
@@ -513,3 +514,18 @@ async def erase_user_records(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not erase this user's agent traces; the user was not deleted",
         ) from None
+
+
+def country_gate_for(config: GatewayConfig, raw_request: Request) -> CountryGate | None:
+    """The country gate for ``raw_request``, or None when no provider type lists countries."""
+    client = raw_request.client
+    return request_country_gate(config, raw_request.headers, client.host if client is not None else None)
+
+
+def country_not_supported(gate: CountryGate, selector: str) -> HTTPException:
+    """The 403 for a ``selector`` whose provider ``gate`` closes to the request's country."""
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=gate.refusal_detail(selector),
+        headers=error_headers(COUNTRY_NOT_SUPPORTED),
+    )
