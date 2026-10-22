@@ -24,10 +24,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
     op.add_column("trace_spans", sa.Column("content_sealed", sa.Text(), nullable=True))
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
     op.drop_column("trace_spans", "content_sealed")
