@@ -7856,9 +7856,11 @@ export interface components {
         };
         /**
          * AppliedEntityPublic
-         * @description One entity a budget applies to: the scope a ceiling caps, and the provider it narrows to.
+         * @description One entity a budget applies to: the scope a ceiling caps, and the provider or model it narrows to.
          */
         AppliedEntityPublic: {
+            /** Model */
+            model: string | null;
             /**
              * Name
              * @description The organization's or the workspace's name; null for a membership or an API key
@@ -9412,6 +9414,11 @@ export interface components {
              * @description The budget this ceiling enforces; its limit and period are read through it
              */
             budget_id: string;
+            /**
+             * Model
+             * @description Narrow the cap to one model of the provider, by the id the provider gives it; omit or null to cap every model. Requires provider_key_id, because a model id is only unique within its provider
+             */
+            model?: string | null;
             /**
              * Name
              * @description Admin-facing label for this ceiling
@@ -13991,6 +13998,11 @@ export interface components {
              */
             budget_id: string;
             /**
+             * Model
+             * @description Narrow the cap to one model of the provider, by the id the provider gives it; omit or null to cap every model. Requires provider_key_id, because a model id is only unique within its provider
+             */
+            model?: string | null;
+            /**
              * Name
              * @description Admin-facing label for this ceiling
              */
@@ -14038,6 +14050,8 @@ export interface components {
             manageable: boolean;
             /** Max Budget */
             max_budget: number | null;
+            /** Model */
+            model: string | null;
             /** Name */
             name: string | null;
             /** Period End */
@@ -15845,6 +15859,8 @@ export interface components {
             id: string;
             /** Max Budget */
             max_budget: number | null;
+            /** Model */
+            model: string | null;
             /** Name */
             name: string | null;
             /** Period End */

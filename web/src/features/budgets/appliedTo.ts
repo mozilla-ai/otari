@@ -2,10 +2,11 @@
  * What a budget is applied to, as the Budgets table names it.
  *
  * Two axes decide what an entity is called, and the resource axis wins. An
- * entity narrowed to a provider caps the organization's spend with that
- * provider, so it reads as the provider rather than as the scope carrying it;
- * only an un-narrowed entity reads as its scope. Reading `scope_type` alone is
- * what would print the organization twice and the provider never.
+ * entity narrowed to a provider, or to one of its models, caps the
+ * organization's spend there, so it reads as the provider or the model rather
+ * than as the scope carrying it; only an un-narrowed entity reads as its
+ * scope. Reading `scope_type` alone is what would print the organization twice
+ * and the provider never.
  */
 
 import type { AppliedEntity } from "@/client"
@@ -18,12 +19,14 @@ const GROUP_ORDER = [
   "workspace_member",
   "api_token",
   "provider",
+  "model",
 ] as const
 
 type GroupKey = (typeof GROUP_ORDER)[number]
 
-/** What an entity counts as: the provider it narrows to, else its scope. */
+/** What an entity counts as: the model or provider it narrows to, else its scope. */
 function findGroup(entity: AppliedEntity): GroupKey {
+  if (entity.model) return "model"
   if (entity.provider_key_id) return "provider"
   return GROUP_ORDER.includes(entity.scope_type as GroupKey)
     ? (entity.scope_type as GroupKey)
@@ -56,6 +59,10 @@ function describeGroup(
     case "provider":
       if (count > 1) return formatCount(count, "provider", "providers")
       return entities[0].provider_key_id ?? "1 provider"
+    case "model":
+      if (count > 1) return formatCount(count, "model", "models")
+      // A model id is only unique within its provider, so the provider is named too.
+      return `${entities[0].model} on ${entities[0].provider_key_id}`
     case "org_member":
       return formatCount(count, "organization member", "organization members")
     case "workspace_member":

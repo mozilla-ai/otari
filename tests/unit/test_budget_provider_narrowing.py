@@ -1,4 +1,4 @@
-"""Guards on the ``provider_key_id`` field of the three create bodies that narrow to a provider."""
+"""Guards on the resource narrowing (`provider_key_id`, `model`) of the create bodies that narrow a cap."""
 
 from typing import Any
 
@@ -47,3 +47,21 @@ def test_the_published_narrowing_constraints_are_the_same_on_every_body(body: ty
     published = body.model_json_schema()["properties"]["provider_key_id"]
     assert published["anyOf"] == [_PUBLISHED_STRING_CONSTRAINTS, {"type": "null"}]
     assert published["default"] is None
+
+
+_CEILING_BODIES = [CreateScopedBudgetRequest, OrganizationScopedBudgetCreate]
+
+
+@pytest.mark.parametrize("body", _CEILING_BODIES)
+def test_a_model_narrowing_needs_a_provider(body: type[BaseModel]) -> None:
+    with pytest.raises(ValidationError, match="model requires provider_key_id"):
+        body.model_validate({**_CEILING_BODY, "model": "gpt-4o"})
+    narrowed = body.model_validate({**_CEILING_BODY, "provider_key_id": "openai", "model": "gpt-4o"})
+    assert narrowed.model_dump()["model"] == "gpt-4o"
+
+
+@pytest.mark.parametrize("body", _CEILING_BODIES)
+@pytest.mark.parametrize("refused", ["", " ", "two words", "x" * 256])
+def test_a_blank_spaced_or_overlong_model_is_refused(body: type[BaseModel], refused: str) -> None:
+    with pytest.raises(ValidationError):
+        body.model_validate({**_CEILING_BODY, "provider_key_id": "openai", "model": refused})
