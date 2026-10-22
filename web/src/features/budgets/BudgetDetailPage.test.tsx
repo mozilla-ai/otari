@@ -177,6 +177,21 @@ describe("OrganizationBudgetDetail", () => {
     ).toBeNull()
   })
 
+  it("names the next reset only while it is still to come", async () => {
+    const ceiling = (periodEnd: string) =>
+      spendCeiling({ id: "c-org", budget_id: BUDGET_ID, period_end: periodEnd })
+    mockApi({ ceilings: [ceiling("2099-01-01T00:00:00+00:00")] })
+    const { unmount } = renderDetail()
+    expect(await screen.findByText(/Next reset/)).toBeInTheDocument()
+    unmount()
+
+    // A period that ended is waiting on a request to roll it, not a reset to come.
+    mockApi({ ceilings: [ceiling("2001-01-01T00:00:00+00:00")] })
+    renderDetail()
+    await screen.findByRole("grid", { name: "Spend by entity" })
+    expect(screen.queryByText(/Next reset/)).toBeNull()
+  })
+
   it("adds a column for an axis only when the budget caps it", async () => {
     mockApi({ budgets: [budget({ token_limit: 1000 })] })
     renderDetail()

@@ -2036,6 +2036,7 @@ async def _bill_vision_side_call(
     request_id: str | None = None,
     tags: dict[str, str] | None = None,
     source_label: str | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> None:
     """Meter and bill a vision describe side-call made during normalization.
 
@@ -2074,6 +2075,7 @@ async def _bill_vision_side_call(
         request_id=request_id,
         tags=tags,
         source_label=source_label,
+        workspace_id=workspace_id,
     )
     # Commit the spend directly via an unreserved handle (no held estimate to
     # release): this just adds the actual cost to users.spend. When the request is
@@ -2732,6 +2734,7 @@ async def resolve_request_context(
             db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
+            workspace_id=workspace_id,
             user_id=user_id,
             model=gate_model,
             provider=gate_instance,
@@ -2771,6 +2774,7 @@ async def resolve_request_context(
                 db=db,
                 log_writer=log_writer,
                 api_key_id=api_key_id,
+                workspace_id=workspace_id,
                 user_id=user_id,
                 model=gate_model,
                 provider=gate_instance,
@@ -2794,6 +2798,7 @@ async def resolve_request_context(
                     db=db,
                     log_writer=log_writer,
                     api_key_id=api_key_id,
+                    workspace_id=workspace_id,
                     user_id=user_id,
                     model=gate_model,
                     provider=gate_instance,
@@ -2869,7 +2874,9 @@ async def resolve_request_context(
             # The tenancy-scoped ceilings resolve from the key's workspace and
             # the identity behind it, and from the provider and model this
             # attempt is about to call.
-            scope=BudgetScopeRequest(api_key=api_key, provider_instance=gate_instance, model=gate_model),
+            scope=BudgetScopeRequest(
+                api_key=api_key, provider_instance=gate_instance, model=gate_model, workspace_id=workspace_id
+            ),
             # Already resolved for the pricing gate above, so the free-model
             # check reads the same rate the estimate was built from.
             organization_id=organization_id,
@@ -2892,6 +2899,7 @@ async def resolve_request_context(
                 db=db,
                 log_writer=log_writer,
                 api_key_id=api_key_id,
+                workspace_id=workspace_id,
                 user_id=user_id,
                 model=gate_model,
                 provider=gate_instance,
@@ -2910,6 +2918,7 @@ async def resolve_request_context(
             db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
+            workspace_id=workspace_id,
             user_id=user_id,
             model=gate_model,
             provider=None,
@@ -2946,6 +2955,7 @@ async def resolve_request_context(
             db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
+            workspace_id=workspace_id,
             user_id=user_id,
             model=gate_model,
             provider=gate_instance,
@@ -3019,6 +3029,7 @@ async def resolve_request_context(
                     log_writer=log_writer,
                     config=config,
                     api_key_id=api_key_id,
+                    workspace_id=workspace_id,
                     user_id=user_id,
                     endpoint=adapter.endpoint,
                     usage=vision_usage,
@@ -4772,6 +4783,7 @@ async def log_gateway_rejection(
     started_at: float | None,
     request_id: str | None = None,
     tags: dict[str, str] | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> None:
     """Record a request the gateway itself refused before any provider was called.
 
@@ -4843,6 +4855,7 @@ async def log_gateway_rejection(
             counts_toward_budget=True,
             request_id=request_id,
             tags=tags,
+            workspace_id=workspace_id,
         )
     except Exception:
         # Deliberately broad, and deliberately not re-raised: see the docstring.

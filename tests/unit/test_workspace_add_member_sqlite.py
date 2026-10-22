@@ -21,7 +21,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db, reset_db
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import WorkspaceMemberAlreadyExistsError
-from gateway.models.tenancy import User, WorkspaceCreate, WorkspaceMember
+from gateway.models.tenancy import OrganizationMember, User, WorkspaceCreate, WorkspaceMember
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -46,6 +46,9 @@ class _QuietListener:
         return None
 
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
+        return None
+
+    async def organization_member_removed(self, member: OrganizationMember) -> None:
         return None
 
 

@@ -137,8 +137,14 @@ export function OrganizationBudgetDetail({
 
   const name = budgetLabeler(budgets.data ?? [])(budget)
   const nameEntity = entityNamer(sources, organizationName)
-  // The window is the budget's, so every entity shares one next reset.
-  const nextReset = held.find((ceiling) => ceiling.period_end)?.period_end
+  // The window is the budget's, so every entity shares one next reset. One
+  // already passed is a period still waiting on a request to roll it, and the
+  // spend reads zero for it, so it is not a reset still to come. Compared with
+  // when the rows were read rather than with the clock, which keeps render pure
+  // and agrees with the spend the server reported at that moment.
+  const nextReset = held
+    .map((ceiling) => ceiling.period_end)
+    .find((end) => end && new Date(end).getTime() > ceilings.dataUpdatedAt)
 
   const columns: DataTableColumn<OrganizationSpendCeiling>[] = [
     {

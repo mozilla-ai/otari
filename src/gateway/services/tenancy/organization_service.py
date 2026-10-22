@@ -1029,7 +1029,7 @@ class OrganizationService:
         )
         spend = {
             user_id: MemberAttributionPublic(
-                spend=float(row.spend),
+                spend=float(row.spend_now),
                 reserved=float(row.reserved),
                 blocked=row.blocked,
                 allowed_models=row.allowed_models,
@@ -1205,6 +1205,23 @@ class OrganizationService:
             if workspace.organization_id == organization.id
         }
         return [assignment for assignment in assignments if assignment.workspace_id in found]
+
+    async def _release_membership(self, membership: OrganizationMember) -> None:
+        """Take back what a membership granted, ahead of suspending it.
+
+        Suspension keeps the row for attribution, so nothing cascades from it:
+        left alone, its workspace memberships stay active and every budget keyed
+        on either goes on binding. The workspace rows go the way a workspace
+        removal takes them, so their budgets go with them. API keys stay, and so
+        do their budgets: a key belongs to its workspace and keeps working, and
+        dropping its budget would uncap it.
+        """
+        listener = self._require_membership_listener()
+        workspace_ids = await self.get_workspace_ids_in_organization(membership.organization_id)
+        for row in await self.workspaces.get_by_workspaces_and_user(workspace_ids, membership.user_id):
+            await listener.member_removed(row)
+            await self.workspaces.delete(row)
+        await listener.organization_member_removed(membership)
 
     def _require_membership_listener(self) -> MembershipListener:
         if self._membership_listener is None:
@@ -2018,8 +2035,8 @@ class OrganizationService:
         await self.organizations.lock(organization.id)
         _, membership, _ = await self._resolve_own_pending_invitation(user, organization_member_id)
 
-        await self._update_membership(membership, {"status": "suspended"})
-        await self.db.commit()
+        async with self._require_unit_of_work():
+            await self._update_membership(membership, {"status": "suspended"})
 
     async def revoke_organization_member_invitation_for_user(
         self,
@@ -2067,9 +2084,10 @@ class OrganizationService:
                 update_data={"status": "suspended"},
                 organization_id=organization.id,
             )
-            await self._update_membership(membership, {"status": "suspended"})
-        await self.invitations.update_status(invitation, {"status": "cancelled"})
-        await self.db.commit()
+        async with self._require_unit_of_work():
+            if membership is not None and membership.status == "invited":
+                await self._update_membership(membership, {"status": "suspended"})
+            await self.invitations.update_status(invitation, {"status": "cancelled"})
 
     async def _open_invitation(
         self, invitation_id: uuid.UUID, organization: Organization
@@ -2167,8 +2185,11 @@ class OrganizationService:
         invitation on a membership that is active or suspended is a working
         link to it: accepting it later would reactivate the membership and
         re-apply the parked workspace grants, undoing a removal, a decline or a
-        revoke.
+        revoke. Suspending a membership first takes back what it granted (see
+        ``_release_membership``), so every path that suspends one does.
         """
+        if update_data.get("status") == "suspended" and membership.status != "suspended":
+            await self._release_membership(membership)
         updated = await self.members.update_membership(membership, update_data)
         if updated.status != "invited":
             pending = await self.invitations.get_pending_by_organization_members([updated.id])
@@ -2239,11 +2260,11 @@ class OrganizationService:
             organization_id=organization.id,
         )
 
-        updated = await self._update_membership(target, update_data)
-        target_user = await self.users.get(updated.user_id)
-        if target_user is None:
-            raise OrganizationMemberNotFoundError(organization_member_id)
-        await self.db.commit()
+        async with self._require_unit_of_work():
+            updated = await self._update_membership(target, update_data)
+            target_user = await self.users.get(updated.user_id)
+            if target_user is None:
+                raise OrganizationMemberNotFoundError(organization_member_id)
 
         live = await live_attribution_user_ids(self.db, [str(target_user.id)])
         invitation = None
@@ -2283,8 +2304,8 @@ class OrganizationService:
             organization_id=organization.id,
         )
 
-        await self._update_membership(target, {"status": "suspended"})
-        await self.db.commit()
+        async with self._require_unit_of_work():
+            await self._update_membership(target, {"status": "suspended"})
 
     async def _validate_membership_update(
         self,
