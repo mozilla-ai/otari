@@ -552,7 +552,26 @@ def test_otlp_a_judge_gates_model_calls_are_booked_to_the_agents_session(
             }.items()
         ],
     }
-    body = {"resourceSpans": [{"scopeSpans": [{"scope": {"name": "otari.hook"}, "spans": [gate]}]}]}
+    # A call the judge made on a second model comes on a usage span under the gate, at its own rate.
+    side_id = "abc19b7ec3c1b175"
+    side = {
+        **gate,
+        "spanId": base64.b64encode(bytes.fromhex(side_id)).decode(),
+        "parentSpanId": gate["spanId"],
+        "name": "otari.gate.usage",
+        "attributes": [
+            _attr(key, value)
+            for key, value in {
+                "session.id": "77192d4d-b969-44eb-bb05-e7ca84f6dfab",
+                "otari.gate.id": "writing-style",
+                "gen_ai.provider.name": "anthropic",
+                "gen_ai.request.model": "claude-sonnet-4-5",
+                "gen_ai.usage.input_tokens": 300,
+                "gen_ai.usage.output_tokens": 20,
+            }.items()
+        ],
+    }
+    body = {"resourceSpans": [{"scopeSpans": [{"scope": {"name": "otari.hook"}, "spans": [gate, side]}]}]}
 
     resp = client.post("/otlp/v1/traces", json=body, headers=headers)
 
@@ -564,6 +583,13 @@ def test_otlp_a_judge_gates_model_calls_are_booked_to_the_agents_session(
         "claude-haiku-4-5-20251001",
         9,
         6684,
+    )
+    other = db_session.query(UsageLog).filter(UsageLog.source_event_id == side_id).one()
+    assert (other.source, other.source_label, other.model, other.prompt_tokens) == (
+        "otari-hook",
+        "77192d4d-b969-44eb-bb05-e7ca84f6dfab",
+        "claude-sonnet-4-5",
+        300,
     )
 
 

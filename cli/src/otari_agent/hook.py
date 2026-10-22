@@ -1637,21 +1637,33 @@ class _GateRun(NamedTuple):
 
     started_ns: int
     ended_ns: int
-    usage: ModelUsage | None = None
+    usage: tuple[ModelUsage, ...] = ()
 
 
-def _summed_usage(usages: list[ModelUsage]) -> ModelUsage | None:
-    """One gate's model calls as one: a retry's tokens added in, on the model that used the most."""
-    if not usages:
-        return None
-    main = max(usages, key=lambda usage: usage.input_tokens + usage.output_tokens + usage.cache_read_tokens)
-    return ModelUsage(
-        provider=main.provider,
-        model=main.model,
-        input_tokens=sum(usage.input_tokens for usage in usages),
-        output_tokens=sum(usage.output_tokens for usage in usages),
-        cache_read_tokens=sum(usage.cache_read_tokens for usage in usages),
-        cache_write_tokens=sum(usage.cache_write_tokens for usage in usages),
+def _usage_by_model(usages: list[ModelUsage]) -> tuple[ModelUsage, ...]:
+    """One gate's model calls, a retry's tokens added in, as one total per model, the most used first."""
+    totals: dict[tuple[str, str], ModelUsage] = {}
+    for usage in usages:
+        key = (usage.provider, usage.model)
+        seen = totals.get(key)
+        totals[key] = (
+            usage
+            if seen is None
+            else ModelUsage(
+                provider=usage.provider,
+                model=usage.model,
+                input_tokens=seen.input_tokens + usage.input_tokens,
+                output_tokens=seen.output_tokens + usage.output_tokens,
+                cache_read_tokens=seen.cache_read_tokens + usage.cache_read_tokens,
+                cache_write_tokens=seen.cache_write_tokens + usage.cache_write_tokens,
+            )
+        )
+    return tuple(
+        sorted(
+            totals.values(),
+            key=lambda usage: usage.input_tokens + usage.output_tokens + usage.cache_read_tokens,
+            reverse=True,
+        )
     )
 
 
@@ -1816,7 +1828,7 @@ def _hook_collect_judge_verdicts(
                 usage=usage,
             )
         if runs is not None:
-            runs[gate.id] = _GateRun(started_ns, time.time_ns(), _summed_usage(usage))
+            runs[gate.id] = _GateRun(started_ns, time.time_ns(), _usage_by_model(usage))
         _hook_log_judge_call(change.repo_root, gate.id, outcome, detail=reasoning if settings.dry_run else None)
         return JudgeVerdict(gate_id=gate.id, outcome=cast(_VerdictOutcome, outcome), reasoning=reasoning)
 
@@ -2205,7 +2217,7 @@ def _hook_report(
                 blocked=result.enforcement == "required" and result.outcome.is_blocking,
                 started_ns=run.started_ns if (run := runs.get(result.gate_id)) else started_ns,
                 ended_ns=run.ended_ns if run else evaluated_ns,
-                usage=run.usage if run else None,
+                usage=run.usage if run else (),
             )
             for result in results
             if result.outcome is not Outcome.NOT_APPLICABLE

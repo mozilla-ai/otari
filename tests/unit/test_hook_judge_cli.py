@@ -641,7 +641,7 @@ def test_a_failed_claude_p_envelope_with_no_answer_keeps_its_output_as_the_detai
     assert "error_during_execution" in reasoning
 
 
-def test_a_retried_judge_reports_both_calls_as_one(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+def test_a_retried_judge_reports_one_total_per_model(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     gates_yaml = (
         "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n"
         "  - id: g\n    type: judge\n    runs: [stop.session]\n    enforcement: advisory\n"
@@ -652,6 +652,7 @@ def test_a_retried_judge_reports_both_calls_as_one(monkeypatch: pytest.MonkeyPat
     def fake_run_judge(*args: Any, usage: list[ModelUsage] | None = None, **kwargs: Any) -> tuple[str, str]:
         assert usage is not None
         usage.append(ModelUsage("anthropic", "claude-haiku-4-5-20251001", 100, 0))
+        usage.append(ModelUsage("anthropic", "claude-sonnet-4-5", 300, 20))
         usage.append(ModelUsage("anthropic", "claude-haiku-4-5-20251001", 50, 10, cache_write_tokens=5))
         return "pass", "ok"
 
@@ -667,4 +668,7 @@ def test_a_retried_judge_reports_both_calls_as_one(monkeypatch: pytest.MonkeyPat
 
     [run] = runs.values()
     assert run.started_ns <= run.ended_ns
-    assert run.usage == ModelUsage("anthropic", "claude-haiku-4-5-20251001", 150, 10, cache_write_tokens=5)
+    assert run.usage == (
+        ModelUsage("anthropic", "claude-sonnet-4-5", 300, 20),
+        ModelUsage("anthropic", "claude-haiku-4-5-20251001", 150, 10, cache_write_tokens=5),
+    )

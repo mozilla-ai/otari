@@ -11,7 +11,7 @@ from gateway.types.trace_views import TraceView, TurnView
 from gateway.types.traces import SpanRecord, TraceBucket, TracePage, TraceSummary
 from otari_agent.domain.definitions import DIGEST_LENGTH, MAX_DEFINITION_GATES, MAX_GATE_MESSAGE_LENGTH, MAX_GATE_RUNS
 from otari_agent.domain.policy import MAX_GATE_ID_LENGTH
-from otari_agent.domain.types import RunsAt
+from otari_agent.domain.types import GateType, RunsAt
 
 
 class TraceSummaryPublic(BaseModel):
@@ -263,7 +263,7 @@ class GateDefinitionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     gate_id: str = Field(min_length=1, max_length=MAX_GATE_ID_LENGTH)
-    gate_type: Literal["path", "command", "command_if_changed", "judge", "verifier"]
+    gate_type: GateType
     enforcement: Literal["required", "advisory"]
     origin: Literal["repo", "user"]
     runs: list[RunsAt] = Field(max_length=MAX_GATE_RUNS)

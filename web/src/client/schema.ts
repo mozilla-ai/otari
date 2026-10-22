@@ -10632,7 +10632,7 @@ export interface components {
              * Gate Type
              * @enum {string}
              */
-            gate_type: "path" | "command" | "command_if_changed" | "judge" | "verifier";
+            gate_type: "command" | "command_if_changed" | "judge" | "path" | "verifier";
             /** Message */
             message: string;
             /**

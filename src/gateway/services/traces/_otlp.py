@@ -14,7 +14,9 @@ without that session a conversation would read as one trace per turn.
 harness named, as a guardrail span: required gates block, advisory ones only
 flag. A gate span names the tool call it checked, and a read attaches it there.
 A gate that fired is the guardrail working, so neither it nor the tool call it
-stopped is an error: only a gate that could not decide is.
+stopped is an error: only a gate that could not decide is. A judge whose calls
+ran on a second model reports that model's tokens on a child usage span, which
+the usage ledger prices and a trace leaves out.
 
 Nothing is passed through verbatim. Each name and value is projected the way the
 gateway's own spans are, so text an agent put in a span name or attribute never
@@ -58,6 +60,7 @@ _CLAUDE_CODE_DECISION = "tool.blocked_on_user"
 _CLAUDE_CODE_EXECUTION = "tool.execution"
 
 HOOK_SCOPE = "otari.hook"
+_HOOK_USAGE_SPAN = "otari.gate.usage"
 # A gate that could not decide, which reads like a guardrail that could not run.
 _UNDECIDED_GATE = frozenset({"unknown", "error", "not_run"})
 _GATE_ATTRIBUTES = (
@@ -499,6 +502,8 @@ def _project(
     tools = _tool_facts(spans)
     for span in spans:
         if not span.trace_id or not span.span_id:
+            continue
+        if span.scope == HOOK_SCOPE and span.name == _HOOK_USAGE_SPAN:
             continue
         try:
             session = _session(span)

@@ -39,6 +39,8 @@ from otari_agent import __version__
 from otari_agent.domain.definitions import GateDefinition, definition_body
 
 SCOPE = "otari.hook"
+# A judge's calls on a model other than its gate span's: priced, never read as a gate.
+USAGE_SPAN = "otari.gate.usage"
 # Past these an outbox stops growing: a server that never answers must not fill the disk.
 _MAX_PENDING = 1_000
 _MAX_AGE_S = 24 * 3600
@@ -71,7 +73,8 @@ class GateReport:
     # When the gate ran; without them it is reported as taking the whole check.
     started_ns: int | None = None
     ended_ns: int | None = None
-    usage: ModelUsage | None = None
+    # One per model a judge's calls ran on, the most used first: its gate span carries that one.
+    usage: tuple[ModelUsage, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -153,7 +156,11 @@ def _usage_attributes(usage: ModelUsage | None) -> list[dict[str, Any]]:
 
 
 def otlp_body(report: CheckReport, *, ended_ns: int) -> dict[str, Any]:
-    """The OTLP/JSON export of one check: a span per gate, all on the agent's session."""
+    """The OTLP/JSON export of one check: a span per gate, all on the agent's session.
+
+    A judge whose calls ran on more than one model reports each further model on
+    a child span of its gate, so each model's tokens are priced at its own rate.
+    """
     trace_id = secrets.token_hex(16)
     shared = [
         _attribute("session.id", report.session_id),
@@ -165,27 +172,44 @@ def otlp_body(report: CheckReport, *, ended_ns: int) -> dict[str, Any]:
         shared.append(_attribute("gen_ai.tool.call.id", report.tool_call_id))
     if report.tool_name:
         shared.append(_attribute("gen_ai.tool.name", report.tool_name))
-    spans = [
-        {
-            "traceId": trace_id,
-            "spanId": secrets.token_hex(8),
-            "name": "otari.gate",
+    spans: list[dict[str, Any]] = []
+    for gate in report.gates:
+        span_id = secrets.token_hex(8)
+        window = {
             "kind": 1,
             "startTimeUnixNano": str(gate.started_ns or report.started_ns),
             "endTimeUnixNano": str(gate.ended_ns or ended_ns),
-            "attributes": [
-                *shared,
-                _attribute("otari.gate.id", gate.gate_id),
-                _attribute("otari.gate.type", gate.gate_type),
-                _attribute("otari.gate.origin", gate.origin),
-                _attribute("otari.gate.enforcement", gate.enforcement),
-                _attribute("otari.gate.outcome", gate.outcome),
-                _attribute("otari.gate.blocked", gate.blocked),
-                *_usage_attributes(gate.usage),
-            ],
         }
-        for gate in report.gates
-    ]
+        main, *others = gate.usage or (None,)
+        spans.append(
+            {
+                "traceId": trace_id,
+                "spanId": span_id,
+                "name": "otari.gate",
+                **window,
+                "attributes": [
+                    *shared,
+                    _attribute("otari.gate.id", gate.gate_id),
+                    _attribute("otari.gate.type", gate.gate_type),
+                    _attribute("otari.gate.origin", gate.origin),
+                    _attribute("otari.gate.enforcement", gate.enforcement),
+                    _attribute("otari.gate.outcome", gate.outcome),
+                    _attribute("otari.gate.blocked", gate.blocked),
+                    *_usage_attributes(main),
+                ],
+            }
+        )
+        spans.extend(
+            {
+                "traceId": trace_id,
+                "spanId": secrets.token_hex(8),
+                "parentSpanId": span_id,
+                "name": USAGE_SPAN,
+                **window,
+                "attributes": [*shared, _attribute("otari.gate.id", gate.gate_id), *_usage_attributes(usage)],
+            }
+            for usage in others
+        )
     resource = [_attribute("service.name", "otari-hook"), _attribute("service.version", __version__)]
     return {
         "resourceSpans": [
@@ -332,8 +356,10 @@ def send_pending(queue: Path, env: Mapping[str, str], post: Any = None) -> bool:
     Delivered exports are removed. One the server could not take yet stays, and
     sending stops there for the next sender: a network failure, 408, 429, a 5xx,
     or a 401/403, which a corrected key fixes. Any other refusal drops that one
-    export and goes on. A guardrail version counts as taken only when the server
-    answers 2xx. An entry that is not an export is dropped.
+    export and goes on, and so does a 403 on a guardrail version: a key the server
+    takes spans from may still not be allowed to declare guardrails, and holding
+    the queue there would hold every check behind it. A guardrail version counts
+    as taken only when the server answers 2xx. An entry that is not an export is dropped.
     """
     if post is None:
         import httpx
@@ -352,9 +378,10 @@ def send_pending(queue: Path, env: Mapping[str, str], post: Any = None) -> bool:
         except Exception:  # noqa: BLE001 - any transport failure leaves the export queued
             return False
         status = response.status_code
-        if status in (401, 403, 408, 429) or status >= 500:
+        definition = entry.get("kind") == "definition"
+        if status in (401, 408, 429) or status >= 500 or (status == 403 and not definition):
             return False
-        if 200 <= status < 300 and entry.get("kind") == "definition":
+        if 200 <= status < 300 and definition:
             marker = _settled_marker(queue, str(body.get("digest", "")))
             try:
                 marker.parent.mkdir(parents=True, exist_ok=True)

@@ -324,6 +324,21 @@ def test_a_judge_gate_keeps_the_model_its_calls_ran_on_and_the_tokens_they_used(
     )
 
 
+def test_a_judges_usage_on_a_further_model_is_priced_not_read_as_a_gate() -> None:
+    side = _span(
+        "u1",
+        trace_id="e" * 32,
+        parent="g1",
+        name="otari.gate.usage",
+        attrs={"session.id": "77192d4d-b969-44eb-bb05-e7ca84f6dfab", "gen_ai.request.model": "claude-sonnet-4-5"},
+        scope="otari.hook",
+    )
+
+    [write] = _project(_gate("g1", "pass"), side)
+
+    assert [span.name for span in write.spans] == ["gate:no-changelog"]
+
+
 def test_a_gate_that_called_no_model_has_no_usage() -> None:
     [write] = _project(_gate("g1", "pass"))
 

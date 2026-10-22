@@ -7662,10 +7662,10 @@
           },
           "gate_type": {
             "enum": [
-              "path",
               "command",
               "command_if_changed",
               "judge",
+              "path",
               "verifier"
             ],
             "title": "Gate Type",

@@ -131,12 +131,14 @@ def test_a_gate_spans_its_own_run_and_carries_what_its_model_calls_used() -> Non
         blocked=False,
         started_ns=_CHECK.started_ns + 1_000,
         ended_ns=_CHECK.started_ns + 40_000_000_000,
-        usage=ModelUsage(
-            provider="anthropic",
-            model="claude-haiku-4-5-20251001",
-            input_tokens=9,
-            output_tokens=111,
-            cache_write_tokens=6_684,
+        usage=(
+            ModelUsage(
+                provider="anthropic",
+                model="claude-haiku-4-5-20251001",
+                input_tokens=9,
+                output_tokens=111,
+                cache_write_tokens=6_684,
+            ),
         ),
     )
     body = report.otlp_body(
@@ -160,6 +162,32 @@ def test_a_gate_spans_its_own_run_and_carries_what_its_model_calls_used() -> Non
         "gen_ai.usage.cache_read_tokens": "0",
         "gen_ai.usage.cache_write_tokens": "6684",
     }
+
+
+def test_each_further_model_a_judge_ran_on_goes_on_a_usage_span_under_its_gate() -> None:
+    judged = GateReport(
+        gate_id="writing-style",
+        gate_type="judge",
+        origin="repo",
+        enforcement="advisory",
+        outcome="pass",
+        blocked=False,
+        usage=(
+            ModelUsage("anthropic", "claude-sonnet-4-5", 300, 20),
+            ModelUsage("anthropic", "claude-haiku-4-5-20251001", 9, 111),
+        ),
+    )
+    body = report.otlp_body(CheckReport(**{**_CHECK.__dict__, "gates": (judged,)}), ended_ns=_CHECK.started_ns + 1)
+
+    gate, side = body["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    assert gate["name"] == "otari.gate" and side["name"] == report.USAGE_SPAN
+    assert side["parentSpanId"] == gate["spanId"]
+    assert _attributes(gate)["gen_ai.request.model"] == "claude-sonnet-4-5"
+    attributes = _attributes(side)
+    assert attributes["gen_ai.request.model"] == "claude-haiku-4-5-20251001"
+    assert (attributes["gen_ai.usage.input_tokens"], attributes["gen_ai.usage.output_tokens"]) == ("9", "111")
+    assert attributes["session.id"] == _CHECK.session_id and attributes["otari.gate.id"] == "writing-style"
+    assert "otari.gate.outcome" not in attributes
 
 
 def test_a_queued_report_holds_no_credential(tmp_path: Path) -> None:
@@ -360,6 +388,27 @@ def test_a_rejected_key_holds_the_queue_for_a_corrected_one(tmp_path: Path) -> N
     assert not report.send_pending(queue, _OTARI, post)
 
     assert len(sent) == 1 and len(list(queue.glob("*.json"))) == 1
+
+
+def test_a_key_that_may_not_declare_guardrails_still_delivers_its_checks(tmp_path: Path) -> None:
+    queue = _queue(_OTARI, tmp_path)
+    report.enqueue(_CHECK, _OTARI, definition=_DEFINITION, outbox=tmp_path, spawn=False)
+    sent, post = _answering(403, 200)
+
+    assert report.send_pending(queue, _OTARI, post)
+
+    assert sent == ["http://localhost:8200/api/v1/hooks/guardrails", "http://localhost:8200/otlp/v1/traces"]
+    assert not list(queue.glob("*.json"))
+
+
+def test_a_definition_refused_for_a_bad_key_holds_the_queue(tmp_path: Path) -> None:
+    queue = _queue(_OTARI, tmp_path)
+    report.enqueue(_CHECK, _OTARI, definition=_DEFINITION, outbox=tmp_path, spawn=False)
+    sent, post = _answering(401)
+
+    assert not report.send_pending(queue, _OTARI, post)
+
+    assert len(sent) == 1 and len(list(queue.glob("*.json"))) == 2
 
 
 def test_each_server_and_key_queue_apart_so_a_key_only_goes_where_it_was_meant(tmp_path: Path) -> None:
