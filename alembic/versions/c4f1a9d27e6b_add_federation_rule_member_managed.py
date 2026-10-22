@@ -3,11 +3,10 @@
 Marks a rule a member gave their own key, which names any public issuer and
 matches only in the token exchange that names it. Every existing rule was
 created by the operator, so the column defaults to false and nothing changes on
-upgrade. It also merges the two heads main had, both of which revised
-e8b2d4f6a0c3.
+upgrade.
 
 Revision ID: c4f1a9d27e6b
-Revises: 7e02300efc98, b7d9e1f3a5c2
+Revises: b7d9e1f3a5c2
 Create Date: 2026-10-22
 """
 
@@ -17,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c4f1a9d27e6b"
-down_revision: str | Sequence[str] | None = ("7e02300efc98", "b7d9e1f3a5c2")
+down_revision: str | Sequence[str] | None = "b7d9e1f3a5c2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
