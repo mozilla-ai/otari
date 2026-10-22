@@ -1348,8 +1348,9 @@ def _server_timing(ctx: RequestContext, now: float) -> dict[str, str]:
     ``otari`` runs from the handler preamble to the first provider attempt: the
     budget hold, routing, rate limits and preparing the call. ``upstream`` runs
     from there to the provider's answer, or for a stream to its first chunk
-    within the first-chunk hold, fallbacks and in-loop gateway tools included. ``total`` is
-    ``Otari-Response-Duration-Ms``. Empty when no attempt was timed.
+    within the first-chunk hold, fallbacks and in-loop gateway tools included. A
+    tool-loop stream is not held, so for one it ends when the stream opens. ``total``
+    is ``Otari-Response-Duration-Ms``. Empty when no attempt was timed.
     """
     if ctx.dispatched_at is None:
         return {}
