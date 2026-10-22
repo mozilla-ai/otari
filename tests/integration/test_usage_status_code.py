@@ -412,7 +412,7 @@ def test_user_key_mismatch_rejection_records_its_403(
     """The mismatch gate fires before anything is resolved and still records 403."""
     _make_user(client, master_key_header, "owner")
     _make_user(client, master_key_header, "someone-else")
-    key = _make_key(client, master_key_header, "owned", user_id="owner")
+    key = _make_key(client, master_key_header, "owned", user_id="owner", reject_user_mismatch=True)
 
     assert _chat(client, key, user="someone-else") == 403
 
@@ -493,7 +493,7 @@ def test_passthrough_user_key_mismatch_records_its_403(
     """The pass-through mismatch gate records 403, like its pipeline counterpart."""
     _make_user(client, master_key_header, "embed-owner")
     _make_user(client, master_key_header, "embed-stranger")
-    key = _make_key(client, master_key_header, "embed-owned", user_id="embed-owner")
+    key = _make_key(client, master_key_header, "embed-owned", user_id="embed-owner", reject_user_mismatch=True)
 
     assert _embeddings(client, key, "openai:text-embedding-3-small", user="embed-stranger") == 403
 

@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -248,12 +249,11 @@ def test_api_key_cannot_bill_other_user(
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
     test_messages: list[dict[str, str]],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A non-master key naming a user other than its own is rejected (IDOR fix).
-
-    Previously a user key could set ``user`` to any value and charge spend to
-    that user; the gateway now binds non-master spend to the key's own user.
-    """
+    """With reject_user_mismatch=True, a non-master key naming a user other than its own is rejected."""
+    monkeypatch.setattr(test_config, "reject_user_mismatch", True)
     # Create the would-be victim so this proves the rejection is an ownership
     # check, not merely a "user not found" path.
     client.post(

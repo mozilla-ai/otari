@@ -188,27 +188,28 @@ a budget-exempt key.
 ### Mismatched `user` fields
 
 A request can name a user: `user` on Chat Completions, Responses and the
-pass-through routes, `metadata.user_id` on Messages. On an ordinary key that
-value may only be the key's own user; anything else is refused with `403`. A
-key's `reject_user_mismatch` changes that for the key alone:
+pass-through routes, `metadata.user_id` on Messages. On an ordinary key, spend
+binds to the key's own user, so any other value is ignored by default. A key's
+`reject_user_mismatch` changes that for the key alone:
 
 | Value | Dashboard choice | A request naming another user |
 | --- | --- | --- |
-| `null` (default) | Use the deployment setting | Follows the deployment-wide `reject_user_mismatch`, which rejects unless changed |
+| `null` (default) | Use the deployment setting | Follows the deployment-wide `reject_user_mismatch`, which accepts unless changed |
 | `true` | Always reject (403) | Rejected, even where the deployment accepts |
 | `false` | Always accept | Accepted, and billed to the key's user |
 
 Spend binds to the key's own user whichever value applies, so accepting a
-mismatch never lets a key charge someone else.
+mismatch never lets a key charge someone else. Rejecting only surfaces a client
+that names a user it does not own.
 
-Accept mismatches on a key whose client puts something other than an Otari
-user ID in that field. Claude Code sends a telemetry value there (see
+Clients often put something other than an Otari user ID in that field. Claude
+Code sends a telemetry value there (see
 [Use with Claude Code](use-with-claude-code.md)). So does an application that
 sends every request on one key and passes its own end user's ID. That
 application has two choices:
 
-- Accept mismatches, and every request bills the key's user: one budget for
-  the whole application.
+- Keep accepting mismatches, and every request bills the key's user: one
+  budget for the whole application.
 - Make the key a [service key](#service-keys-and-end-users), and each ID
   becomes an end user with spend and a budget of its own.
 
