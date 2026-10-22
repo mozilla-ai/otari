@@ -61,7 +61,7 @@ azureopenai:gpt-5.4
 
 Those names match catalog model ids, so bundled pricing can price a deployment that uses the model id as its name. A deployment with a name of its own is called by that name (`azureopenai:prod-chat`). Microsoft describes this on [Endpoints for Microsoft Foundry Models](https://learn.microsoft.com/azure/foundry/foundry-models/concepts/endpoints): the v1 route takes the deployment name in `model`.
 
-With `messages_api: responses`, Otari sends reasoning and carries it across turns only when the deployment name looks like a reasoning model: the `o` series (`o1`, `o3`, `o4-mini`), `gpt-5` except names containing `-chat`, or a name containing `codex`. Name that deployment after the model (`gpt-5-mini`). See [Messages through the Responses API](../configuration.md#messages-through-the-responses-api).
+With `messages_api: responses`, Otari sends reasoning and carries it across turns only when the deployment name looks like a reasoning model: the `o` series (`o1`, `o3`, `o4-mini`), `gpt-5` except names containing `-chat`, or a name containing `codex`. For the `o` series and `gpt-5`, the deployment name has to start with the model family (`gpt-5-prod` works, `prod-gpt-5` does not), and names containing `-chat` are excluded. Name that deployment after the model (`gpt-5-mini`). See [Messages through the Responses API](../configuration.md#messages-through-the-responses-api).
 
 ## Verify
 
