@@ -32,7 +32,7 @@ import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
  * this component.
  */
 export function TelemetryIdentity() {
-  const { data } = useOrganizationContext()
+  const { data, isPlaceholderData } = useOrganizationContext()
   const { consent, identify } = useTelemetry()
   // Whether this component has handed the tracker an actor. Revoking consent
   // has to take it back, and there is nothing else that knows one was sent.
@@ -57,11 +57,18 @@ export function TelemetryIdentity() {
       }
       return
     }
-    if (!actorId || !organizationId || !organizationName || !role) {
+    if (
+      isPlaceholderData ||
+      !actorId ||
+      !organizationId ||
+      !organizationName ||
+      !role
+    ) {
       // Nothing to say yet, and `identify(null)` is not the thing to say: that
       // is the sign-out signal and `AuthContext` owns it. Sending it here would
       // clear a tracker's actor once on every mount, before the context this is
-      // waiting for had a chance to answer.
+      // waiting for had a chance to answer. A context kept from the previous
+      // load is not that answer: it may name somebody this session is not.
       return
     }
     identified.current = true
@@ -71,7 +78,15 @@ export function TelemetryIdentity() {
       organizationName,
       role,
     })
-  }, [consent, identify, actorId, organizationId, organizationName, role])
+  }, [
+    consent,
+    identify,
+    isPlaceholderData,
+    actorId,
+    organizationId,
+    organizationName,
+    role,
+  ])
 
   return null
 }

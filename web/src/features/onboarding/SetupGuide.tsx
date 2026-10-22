@@ -53,12 +53,17 @@ export function SetupGuide({
    */
   canServeRequests: boolean
 }) {
-  const { selected } = useSelectedWorkspace()
+  const { selected, isConfirmed } = useSelectedWorkspace()
   const workspaceId = selected?.workspace_id ?? null
   // Held back until the deployment can actually serve a request: with nothing to
   // route to this would be handing out a key for a call that cannot succeed, and
   // on the operator page the getting-started panel is the right guide instead.
-  const activation = useWorkspaceActivation(workspaceId, canServeRequests)
+  // And until the workspace is the current answer's, since the guide mints a
+  // key in it unasked.
+  const activation = useWorkspaceActivation(
+    workspaceId,
+    canServeRequests && isConfirmed,
+  )
 
   if (!workspaceId || !activation.data) {
     return null

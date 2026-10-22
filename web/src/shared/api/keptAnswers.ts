@@ -102,10 +102,14 @@ export function forgetKeptAnswer(key: string): void {
 /**
  * Records what a kept answer did on this load as a performance mark, for the
  * boot timing to read back (`boot:kept-bootstrap:hit`, `ctx:kept:off`, ...).
+ * Once per load, though a hook that records one remounts with the tree when
+ * the current bootstrap replaces a kept one.
  */
 export function markKeptAnswer(name: string): void {
   try {
-    performance.mark(name)
+    if (performance.getEntriesByName(name, "mark").length === 0) {
+      performance.mark(name)
+    }
   } catch {
     // An environment without the User Timing API records nothing.
   }

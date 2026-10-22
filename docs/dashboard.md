@@ -23,6 +23,16 @@ Where a build opts in, it can keep:
   response replaces it and the page renders again when the two differ. When the
   current one cannot be read, the kept one stays for that load and is forgotten,
   so the next load says the gateway could not be reached.
+- **The organization context** (`otari.dashboard.organizationContext`), for a
+  signed-in browser: the organization's id, name, slug and creation date, your
+  membership id, role and status in it, whether you operate the deployment,
+  whether the deployment can encrypt provider keys, and the id, name and role of
+  each workspace you belong to. Your name, email address and user id are not
+  kept, so the account menu names you once the current answer arrives. Signing
+  in, signing out, an expired session, a failed read and an answer that you
+  belong to no organization all forget it. Nothing is sent to analytics, no
+  workspace selection is remembered and no setup key is created from it until
+  the current answer confirms it.
 
 Each entry records the API address it came from and when it was kept. An entry
 for another address, or one older than the default dashboard session lifetime

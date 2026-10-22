@@ -77,7 +77,8 @@ export function PasswordCard() {
         Dashboard password
       </h2>
 
-      {context.isPending && !context.data ? (
+      {/* A context kept from the last load carries no caller to read. */}
+      {(context.isPending && !context.data) || context.isPlaceholderData ? (
         <Skeleton
           className="h-20 w-full max-w-md"
           ariaLabel="Loading your sign-in details"

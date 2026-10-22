@@ -133,6 +133,14 @@ are not icons, the product mark and a chart's own marks.
 TanStack Query owns server state. Query keys, mutation invalidation, pagination,
 and loading behavior follow the frontend standards topic guides.
 
+Where the request policy sets `keptAnswers.organizationContext` (false here),
+`GET /organizations/me` answers first from the context kept on the previous
+load (`useKeepOrganizationContext`), as placeholder data and never as cached
+data. Code that only draws the context or starts reads from it needs nothing
+more. Code that acts on it (telemetry identity, a storage write, a redirect,
+a mutation nobody pressed) waits for `!isPlaceholderData`, or for
+`useSelectedWorkspace().isConfirmed`. The kept copy carries no `caller`.
+
 Import API shapes from `@/client`, not directly from the generated schema.
 `src/client/schema.ts` is generated from `docs/public/openapi.json` and
 committed. Keep `src/client/local.ts` limited to shapes OpenAPI cannot own.
