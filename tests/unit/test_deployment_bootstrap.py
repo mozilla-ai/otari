@@ -22,6 +22,7 @@ from gateway.api.routes.bootstrap import SURFACES, published_surfaces
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
+from gateway.services.secret_box import generate_secret_key
 
 MASTER_KEY = "sk-master-not-in-the-bootstrap"
 
@@ -89,6 +90,7 @@ def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
         "passkeys_ready": False,
         "oauth_providers": [],
         "feedback_enabled": True,
+        "federation_member_rules": False,
         "mail_ready": False,
         "public_catalog": False,
         "open_signup": False,
@@ -206,6 +208,17 @@ def test_passkeys_stay_on_by_default_and_mounted(tmp_path: Path) -> None:
         assert answered["passkeys_ready"] is True
         # Mounted: refused for want of a session, not for want of a route.
         assert client.get(f"{API_ROOT}/auth/webauthn/credentials").status_code in {401, 403}
+
+
+def test_member_federation_rules_are_published_when_the_setting_is_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    on = _gateway_config(tmp_path)
+    on.federation_member_rules = True
+
+    with TestClient(create_app(on)) as client:
+        assert client.get(f"{API_ROOT}/bootstrap").json()["federation_member_rules"] is True
 
 
 def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Path) -> None:

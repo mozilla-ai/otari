@@ -9815,6 +9815,11 @@ export interface components {
              */
             docs_url: string | null;
             /**
+             * Federation Member Rules
+             * @description Whether a member may give their own API keys federation rules (the federation_member_rules setting), so the dashboard offers workload identity on a member's key.
+             */
+            federation_member_rules: boolean;
+            /**
              * Feedback Enabled
              * @description Whether this deployment accepts deliberate feedback submissions.
              */

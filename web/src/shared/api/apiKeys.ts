@@ -1,16 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   ApiKey,
+  CreateFederationRuleRequest,
   CreateKeyRequest,
   CreateKeyResponse,
   CreateOwnKeyRequest,
+  FederationRule,
   UpdateKeyRequest,
   UpdateOwnKeyRequest,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import { fetchAllRows } from "@/shared/api/paging"
-import { KEYS, workspaceMeta } from "@/shared/api/queryKeys"
+import { FEDERATION_RULES, KEYS, workspaceMeta } from "@/shared/api/queryKeys"
 
 // Which of the two key surfaces this caller may act on.
 //
@@ -121,6 +123,55 @@ export function useDeleteKey() {
         method: "DELETE",
       }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
+  })
+}
+
+// The identity tokens that may stand in for one key's secret. Under the same
+// prefix as the key: a member's rule on `/organizations/me/keys`, an operator's
+// on `/keys`, which also says which issuers the gateway accepts for it.
+function federationRulesPath(base: string, keyId: string): string {
+  return `${base}/${encodeURIComponent(keyId)}/federation-rules`
+}
+
+export function useFederationRules(keyId: string) {
+  const scope = useKeysScope()
+  return useQuery({
+    queryKey: [FEDERATION_RULES, scope.base, keyId],
+    queryFn: () =>
+      apiFetch<FederationRule[]>(federationRulesPath(scope.base, keyId)),
+    enabled: scope.isReady,
+  })
+}
+
+export function useAddFederationRule(keyId: string) {
+  const queryClient = useQueryClient()
+  const scope = useKeysScope()
+  return useMutation({
+    mutationFn: (body: CreateFederationRuleRequest) =>
+      apiFetch<FederationRule>(federationRulesPath(scope.base, keyId), {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({
+        queryKey: [FEDERATION_RULES, scope.base, keyId],
+      }),
+  })
+}
+
+export function useDeleteFederationRule(keyId: string) {
+  const queryClient = useQueryClient()
+  const scope = useKeysScope()
+  return useMutation({
+    mutationFn: (ruleId: string) =>
+      apiFetch<void>(
+        `${federationRulesPath(scope.base, keyId)}/${encodeURIComponent(ruleId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({
+        queryKey: [FEDERATION_RULES, scope.base, keyId],
+      }),
   })
 }
 

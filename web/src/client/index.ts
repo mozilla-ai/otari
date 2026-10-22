@@ -216,6 +216,8 @@ export type UpdateKeyRequest = Schemas["UpdateKeyRequest"]
 // owner and the budget exemption, which that surface derives or refuses.
 export type CreateOwnKeyRequest = Schemas["CreateOwnKeyRequest"]
 export type UpdateOwnKeyRequest = Schemas["UpdateOwnKeyRequest"]
+export type FederationRule = Schemas["FederationRulePublic"]
+export type CreateFederationRuleRequest = Schemas["FederationRuleCreate"]
 export type Budget = Schemas["BudgetResponse"]
 export type CreateBudgetRequest = Schemas["CreateBudgetRequest"]
 export type UpdateBudgetRequest = Schemas["UpdateBudgetRequest"]

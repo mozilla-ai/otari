@@ -20,8 +20,10 @@ import type {
 } from "@/client"
 import { KeysPage } from "@/features/keys/KeysPage"
 import { API_ROOT } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   apiKey,
+  bootstrap,
   budget,
   organizationMember,
   scopedBudget,
@@ -288,14 +290,16 @@ function mockApi(
     })
 }
 
-function renderPage(ui: ReactElement) {
+function renderPage(ui: ReactElement, deployment = bootstrap()) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   // The page links to the pages that own a key's budget, so it needs a router
   // around it.
   return renderWithRouter(
-    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+    <QueryClientProvider client={client}>
+      <DeploymentProvider value={deployment}>{ui}</DeploymentProvider>
+    </QueryClientProvider>,
   )
 }
 
@@ -797,6 +801,51 @@ describe("KeysPage", () => {
     expect(
       await screen.findByRole("menuitem", { name: /^Delete/ }),
     ).not.toHaveAttribute("aria-disabled", "true")
+  })
+
+  it.each([
+    ["the deployment does not let members manage rules", false, false],
+    ["the caller operates the deployment", true, true],
+  ])(
+    "offers no workload identity when %s",
+    async (_case, federationMemberRules, deploymentOperator) => {
+      mockApi({
+        keys: [apiKey({ id: "key-1", key_name: "ci-bot" })],
+        deploymentOperator,
+      })
+      const user = userEvent.setup()
+      renderPage(
+        <KeysPage />,
+        bootstrap({ federation_member_rules: federationMemberRules }),
+      )
+
+      const row = (await screen.findByText("ci-bot")).closest("tr")!
+      await user.click(
+        within(row).getByRole("button", { name: /^Actions for / }),
+      )
+      await screen.findByRole("menuitem", { name: /^Edit/ })
+
+      expect(
+        screen.queryByRole("menuitem", { name: /^Workload identity/ }),
+      ).not.toBeInTheDocument()
+    },
+  )
+
+  it("opens a member's key's federation rules from its menu", async () => {
+    mockApi({
+      keys: [apiKey({ id: "key-1", key_name: "ci-bot" })],
+      deploymentOperator: false,
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />, bootstrap({ federation_member_rules: true }))
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!
+    await chooseAction(user, row, "Workload identity")
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Workload identity",
+    })
+    expect(within(dialog).getByText("ci-bot")).toBeInTheDocument()
   })
 
   it("regenerates a secret after an explicit confirm", async () => {

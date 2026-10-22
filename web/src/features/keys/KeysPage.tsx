@@ -72,7 +72,9 @@ import {
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 import { ExpiryFields } from "./ExpiryFields"
+import { FederationRulesDialog } from "./FederationRulesDialog"
 import { KeyActionsMenu } from "./KeyActionsMenu"
 import {
   type CappingBudget,
@@ -1286,6 +1288,11 @@ export function KeysPage() {
   }
 
   const [pendingRegenerate, setPendingRegenerate] = useState<ApiKey>()
+  const [federating, setFederating] = useState<ApiKey>()
+  // Only on the member surface: an operator's rules on `/keys` take only the
+  // deployment's federation_issuers, which this page cannot list.
+  const canFederate =
+    useDeployment().federation_member_rules && !isDeploymentWide
   const [pendingDelete, setPendingDelete] = useState<ApiKey>()
   const [lastAction, setLastAction] = useState<string>()
   // Still load-bearing, though `confirmRef` goes unused: a menu closes on choice,
@@ -1355,6 +1362,9 @@ export function KeysPage() {
         }}
         onRegenerate={() => setPendingRegenerate(apiKey)}
         onDelete={() => setPendingDelete(apiKey)}
+        onWorkloadIdentity={
+          canFederate ? () => setFederating(apiKey) : undefined
+        }
       />
     ),
     [
@@ -1366,6 +1376,7 @@ export function KeysPage() {
       updateKey.isPending,
       rotateKey.isPending,
       setActive,
+      canFederate,
     ],
   )
   // Memoized on what the cells read, so DataTable's per-row cache holds across
@@ -1617,6 +1628,13 @@ export function KeysPage() {
             rotateKey.reset()
             createButtonRef.current?.focus()
           }}
+        />
+      ) : null}
+
+      {federating ? (
+        <FederationRulesDialog
+          apiKey={federating}
+          onClose={() => setFederating(undefined)}
         />
       ) : null}
 

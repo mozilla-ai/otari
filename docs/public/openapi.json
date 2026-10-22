@@ -5937,6 +5937,11 @@
             "description": "Where this deployment's documentation lives, when it is not docs.otari.ai. Set, the dashboard's Documentation links open it in a new tab; null, they open https://docs.otari.ai/. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.",
             "title": "Docs Url"
           },
+          "federation_member_rules": {
+            "description": "Whether a member may give their own API keys federation rules (the federation_member_rules setting), so the dashboard offers workload identity on a member's key.",
+            "title": "Federation Member Rules",
+            "type": "boolean"
+          },
           "feedback_enabled": {
             "description": "Whether this deployment accepts deliberate feedback submissions.",
             "title": "Feedback Enabled",
@@ -6052,6 +6057,7 @@
           "oauth_providers",
           "open_signup",
           "feedback_enabled",
+          "federation_member_rules",
           "mail_ready"
         ],
         "title": "DeploymentBootstrap",

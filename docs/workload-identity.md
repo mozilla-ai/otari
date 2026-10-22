@@ -307,9 +307,20 @@ with its own refresh.
 
 On a deployment shared by several organizations, one list of trusted issuers
 does not fit every tenant, and the operator should not have to write every
-tenant's rules. With `federation_member_rules: true`, a member gives their own
-key a rule, naming the issuer on the rule itself. The request is authenticated
-by the member's dashboard session:
+tenant's rules. With `federation_member_rules: true` (or
+`OTARI_FEDERATION_MEMBER_RULES=true`), a member gives their own key a rule,
+naming the issuer on the rule itself.
+
+In the dashboard, open **API keys**, choose **Workload identity…** from the
+key's actions menu, and add a rule with the issuer, the audience your workload
+asks its platform for, and the service account's email or subject. The dialog
+then shows the environment that points Claude Code or an Anthropic SDK at that
+rule, with the rule id and the organization id filled in; set
+`ANTHROPIC_IDENTITY_TOKEN_FILE` to wherever your refresher writes the token
+(see [Keeping the token file fresh](#keeping-the-token-file-fresh)).
+
+The same is available over the API, authenticated by the member's dashboard
+session:
 
 ```bash
 curl -X POST "https://otari.example.com/api/v1/organizations/me/keys/$KEY_ID/federation-rules" \
