@@ -34,10 +34,10 @@ SECRET = _secret()
 OTHER_SECRET = _secret()
 
 BUDGETS = {
-    "end-user-budget-ai": BudgetConfig(max_budget=0.1, reset_alignment="calendar_day", rpm_limit=40, tpm_limit=2000),
-    "end-user-budget-memories": BudgetConfig(max_budget=0.05, reset_alignment="calendar_day"),
-    "mlpa-global": BudgetConfig(max_budget=100, reset_alignment="calendar_day"),
-    "mlpa-global-2": BudgetConfig(max_budget=200, reset_alignment="calendar_month"),
+    "end-user-budget-ai": BudgetConfig(max_budget=0.1, reset_cycle="daily", rpm_limit=40, tpm_limit=2000),
+    "end-user-budget-memories": BudgetConfig(max_budget=0.05, reset_cycle="daily"),
+    "mlpa-global": BudgetConfig(max_budget=100, reset_cycle="daily"),
+    "mlpa-global-2": BudgetConfig(max_budget=200, reset_cycle="monthly", reset_month_day=1),
 }
 
 
@@ -94,7 +94,7 @@ def test_declared_budgets_and_key_are_created_and_the_secret_authenticates(test_
     with _boot(_config(test_config, mlpa=_key())) as client:
         budget = client.get(f"{API_ROOT}/budgets/end-user-budget-ai", headers=MASTER).json()
         assert budget["max_budget"] == 0.1
-        assert budget["reset_alignment"] == "calendar_day"
+        assert budget["reset_cycle"] == "daily"
         assert budget["rpm_limit"] == 40
         assert budget["tpm_limit"] == 2000
         assert budget["origin"] == "config"
@@ -156,7 +156,7 @@ def test_changing_an_entry_in_config_writes_it_back_over_the_api_change(test_con
         client.patch(f"{API_ROOT}/budgets/mlpa-global", json={"max_budget": 0}, headers=MASTER)
         client.patch(f"{API_ROOT}/keys/{key['id']}", json={"is_active": False}, headers=MASTER)
 
-    budgets = {**BUDGETS, "mlpa-global": BudgetConfig(max_budget=50, reset_alignment="calendar_day")}
+    budgets = {**BUDGETS, "mlpa-global": BudgetConfig(max_budget=50, reset_cycle="daily")}
     with _boot(_config(test_config, budgets=budgets, mlpa=_key(key_name="mlpa-service"))) as client:
         assert client.get(f"{API_ROOT}/budgets/mlpa-global", headers=MASTER).json()["max_budget"] == 50
         assert client.get(f"{API_ROOT}/keys/{key['id']}", headers=MASTER).json()["is_active"] is True

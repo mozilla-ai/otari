@@ -35,8 +35,12 @@ function organizationBudget(
     max_budget: 250,
     token_limit: null,
     request_limit: null,
-    budget_duration_sec: null,
-    reset_alignment: "calendar_month",
+    reset_cycle: "monthly",
+    reset_every_n: null,
+    reset_anchor_at: null,
+    reset_weekdays: null,
+    reset_month_day: 1,
+    reset_month: null,
     ceiling_count: 0,
     applied_to: [],
     created_at: "2026-01-01T00:00:00+00:00",
@@ -280,8 +284,8 @@ describe("OrganizationBudgetsPage", () => {
     expect(posted?.body).toMatchObject({
       name: "Design",
       max_budget: 75,
-      reset_alignment: "calendar_month",
-      budget_duration_sec: null,
+      reset_cycle: "monthly",
+      reset_month_day: 1,
     })
   })
 
@@ -312,6 +316,25 @@ describe("OrganizationBudgetsPage", () => {
       screen.getAllByRole("button", { name: "Create budget" })[0],
     )
     await user.type(screen.getByLabelText("Limit (USD)"), "-5")
+
+    const submit = screen
+      .getAllByRole("button", { name: "Create budget" })
+      .at(-1)
+    expect(submit).toBeDisabled()
+  })
+
+  it("refuses an interval that is not a whole number rather than sending another", async () => {
+    mockApi({ budgets: [] })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("No budgets yet")
+
+    await user.click(
+      screen.getAllByRole("button", { name: "Create budget" })[0],
+    )
+    await user.click(screen.getByRole("button", { name: /Reset cycle/ }))
+    await user.click(screen.getByRole("option", { name: "Every N hours" }))
+    await user.type(screen.getByLabelText("Hours"), "1e3")
 
     const submit = screen
       .getAllByRole("button", { name: "Create budget" })

@@ -62,7 +62,7 @@ def _user_with_key(client: TestClient, user_id: str, *, max_budget: float | None
     body: dict[str, Any] = {"user_id": user_id}
     if max_budget is not None:
         budget = client.post(
-            f"{API_ROOT}/budgets", json={"max_budget": max_budget, "budget_duration_sec": 86400}, headers=HEADERS
+            f"{API_ROOT}/budgets", json={"max_budget": max_budget, "reset_cycle": "daily"}, headers=HEADERS
         )
         body["budget_id"] = budget.json()["budget_id"]
     assert client.post(f"{API_ROOT}/users", json=body, headers=HEADERS).status_code in (200, 201)

@@ -9,7 +9,8 @@
  * of them would still read alike.
  */
 
-import { hasNoLimit, limitLabel, shortPeriodLabel } from "./organizationBudget"
+import { hasNoLimit, limitLabel } from "./organizationBudget"
+import { type ReadCycleFields, shortCycleLabel } from "./resetCycle"
 
 /**
  * The fields a label is derived from, as every budget response shape carries
@@ -22,12 +23,10 @@ export type LabelableBudget = BudgetShape & {
 }
 
 /** What a label is derived from, where there is no name to use instead. */
-type BudgetShape = {
+type BudgetShape = ReadCycleFields & {
   max_budget: number | null
   token_limit: number | null
   request_limit: number | null
-  reset_alignment: string | null
-  budget_duration_sec: number | null
 }
 
 /** The head of a budget id: the fingerprint the budgets list already shows. */
@@ -57,7 +56,7 @@ export function unnamedBudgetLabel(budget: BudgetShape): string {
   // A budget that caps nothing has no period worth saying: "No limit / month"
   // reads as a reset on a ceiling that does not exist.
   if (hasNoLimit(budget)) return limit
-  const period = shortPeriodLabel(budget)
+  const period = shortCycleLabel(budget)
   return period === undefined ? limit : `${limit} / ${period}`
 }
 
