@@ -262,6 +262,16 @@ def test_a_judge_gates_cost_is_read_on_the_gate_and_not_counted_as_a_turns_reque
     assert turn.cost == Decimal(0)
 
 
+def test_a_judges_further_model_is_added_to_its_gates_cost() -> None:
+    main = _span("usage-1", "llm", operation="usage", request_id="00000000000000b2", cost_snapshot=Decimal("0.02"))
+    side = replace(
+        main, span_id="usage-2", request_id="00000000000000b2:00000000000000c3", cost_snapshot=Decimal("0.005")
+    )
+    spans = _price_requests([_span("gate-1", "guardrail", request_id="00000000000000b2"), main, side])
+
+    assert [(span.span_id, span.cost_snapshot) for span in spans] == [("gate-1", Decimal("0.025"))]
+
+
 def test_a_requests_cost_the_ledger_priced_later_is_read_on_the_request_and_counted_in_its_turn() -> None:
     usage = _span("usage-1", "llm", operation="usage", request_id="req_1", cost_snapshot=Decimal("0.25"))
     spans = _price_requests(

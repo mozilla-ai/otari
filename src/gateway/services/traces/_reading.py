@@ -27,7 +27,7 @@ from decimal import Decimal
 
 from gateway.services.traces._tool_costs import tool_costs
 from gateway.types.trace_views import GateSummary, TraceView, TurnState, TurnView
-from gateway.types.traces import USAGE_OPERATION, GuardrailDefinition, SpanRecord, TraceDetail
+from gateway.types.traces import GATE_USAGE_SEPARATOR, USAGE_OPERATION, GuardrailDefinition, SpanRecord, TraceDetail
 
 # How long a session may be quiet and still count as in progress.
 IDLE_TIMEOUT = timedelta(minutes=10)
@@ -76,18 +76,25 @@ def _price_requests(spans: list[SpanRecord]) -> list[SpanRecord]:
 
     No span is left that only carried a cost.
     """
-    priced = {
-        span.request_id: span
-        for span in spans
-        if span.operation == USAGE_OPERATION and span.request_id and span.cost_snapshot is not None
-    }
+    priced: dict[str, SpanRecord] = {}
+    further: dict[str, Decimal] = {}
+    for span in spans:
+        if span.operation != USAGE_OPERATION or not span.request_id or span.cost_snapshot is None:
+            continue
+        gate, separator, _ = span.request_id.partition(GATE_USAGE_SEPARATOR)
+        if separator:
+            further[gate] = further.get(gate, Decimal(0)) + span.cost_snapshot
+        priced[span.request_id] = span
     read: list[SpanRecord] = []
     for span in spans:
         if span.operation == USAGE_OPERATION:
             continue
         usage = priced.get(span.request_id or "") if span.kind in _PRICED_KINDS and span.cost_snapshot is None else None
-        if usage is not None:
-            span = replace(span, cost_snapshot=usage.cost_snapshot, attributes={**span.attributes, **usage.attributes})
+        if usage is not None and usage.cost_snapshot is not None:
+            cost = usage.cost_snapshot + (
+                further.get(span.request_id or "", Decimal(0)) if span.kind == "guardrail" else Decimal(0)
+            )
+            span = replace(span, cost_snapshot=cost, attributes={**span.attributes, **usage.attributes})
         read.append(span)
     return read
 

@@ -95,6 +95,7 @@ from gateway.services.traces import (
     OtlpSpan,
     PricedRequest,
     TraceWriter,
+    gate_usage_event_id,
     record_otlp_export,
     record_priced_requests,
 )
@@ -587,7 +588,11 @@ async def receive_traces(
                     }
                 mapped = _build_event(
                     attrs,
-                    fallback_event_id=span.span_id.hex() or None,
+                    fallback_event_id=gate_usage_event_id(
+                        scope, span.name, span.span_id.hex(), span.parent_span_id.hex()
+                    )
+                    or span.span_id.hex()
+                    or None,
                     default_timestamp=_nanos_to_dt(span.start_time_unix_nano),
                     duration_ms=duration,
                 )

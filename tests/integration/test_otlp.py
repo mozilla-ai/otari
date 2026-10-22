@@ -584,7 +584,7 @@ def test_otlp_a_judge_gates_model_calls_are_booked_to_the_agents_session(
         9,
         6684,
     )
-    other = db_session.query(UsageLog).filter(UsageLog.source_event_id == side_id).one()
+    other = db_session.query(UsageLog).filter(UsageLog.source_event_id == f"{span_id}:{side_id}").one()
     assert (other.source, other.source_label, other.model, other.prompt_tokens) == (
         "otari-hook",
         "77192d4d-b969-44eb-bb05-e7ca84f6dfab",

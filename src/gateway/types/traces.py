@@ -189,6 +189,9 @@ def _check_identifier(name: str, value: str | None) -> None:
 # The operation of a span that carries only what a model request cost, priced by
 # the usage ledger after the request: a read folds it onto that request.
 USAGE_OPERATION = "usage"
+# A judge's further model is priced under ``<gate request id><separator><span id>``,
+# so a read adds that cost to its gate's.
+GATE_USAGE_SEPARATOR = ":"
 # The meters a model request is priced on, each a rate attribute ``otari.llm.rate.<meter>``.
 RATE_METERS = ("input", "output", "cache_read", "cache_write")
 

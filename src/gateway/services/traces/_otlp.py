@@ -45,6 +45,7 @@ from gateway.services.traces._collector import call_id_digest, identifier_or_non
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._writer import SPANS_DROPPED, TraceWriter
 from gateway.types.traces import (
+    GATE_USAGE_SEPARATOR,
     ID_PATTERN,
     LIST_SEPARATOR,
     RATE_METERS,
@@ -704,6 +705,13 @@ class PricedRequest:
     source: str
     # USD per million tokens on each of :data:`RATE_METERS`, where the request was priced by the token.
     rates: Mapping[str, Decimal] = field(default_factory=dict)
+
+
+def gate_usage_event_id(scope: str, name: str, span_id: str, parent_span_id: str) -> str | None:
+    """The ledger id a judge's further-model usage span is priced under, or None for any other span."""
+    if scope != HOOK_SCOPE or name != _HOOK_USAGE_SPAN or not parent_span_id:
+        return None
+    return f"{parent_span_id}{GATE_USAGE_SEPARATOR}{span_id}"
 
 
 def _usage_span(request: PricedRequest, window: _Window) -> SpanRecord:
