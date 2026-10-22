@@ -2869,9 +2869,9 @@ async def resolve_request_context(
             strategy=config.budget_strategy,
             counts_toward_budget=not budget_exempt,
             # The tenancy-scoped ceilings resolve from the key's workspace and
-            # the identity behind it, and from the provider this attempt is
-            # about to call.
-            scope=BudgetScopeRequest(api_key=api_key, provider_instance=gate_instance),
+            # the identity behind it, and from the provider and model this
+            # attempt is about to call.
+            scope=BudgetScopeRequest(api_key=api_key, provider_instance=gate_instance, model=gate_model),
             # Already resolved for the pricing gate above, so the free-model
             # check reads the same rate the estimate was built from.
             organization_id=organization_id,
