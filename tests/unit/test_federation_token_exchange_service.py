@@ -1,7 +1,7 @@
 """The token exchange service, on a Unit of Work over a stand-in session and in-memory repositories.
 
-Pins how it is built and what it does with its one transaction: the lookups run in a block, a refusal rolls the
-block back, and nothing is ever added to the session.
+Pins how it is built and what it does with its transactions: the rule is read in one block and the key in another,
+the identity token is verified between them, a refusal rolls its block back, and nothing is ever added to the session.
 """
 
 import time
@@ -143,7 +143,6 @@ async def test_a_matching_grant_mints_a_token_for_the_rules_key_and_stages_nothi
 @pytest.mark.parametrize(
     ("rows", "overrides", "reason"),
     [
-        (_Rows(None, _key()), {}, "federation_no_rule"),
         (_Rows(_rule(), None), {}, "federation_no_rule"),
         (_Rows(_rule(), _key()), {"organization_id": str(uuid.uuid4())}, "federation_grant_mismatch"),
         (_Rows(_rule(), _key()), {"workspace_id": str(uuid.uuid4())}, "federation_grant_mismatch"),
@@ -155,7 +154,7 @@ async def test_a_matching_grant_mints_a_token_for_the_rules_key_and_stages_nothi
             "expired_key",
         ),
     ],
-    ids=["no-rule", "no-key", "organization", "workspace", "service-account", "inactive", "expired"],
+    ids=["no-key", "organization", "workspace", "service-account", "inactive", "expired"],
 )
 async def test_a_refusal_rolls_the_block_back_and_answers_invalid_grant(
     rows: _Rows, overrides: dict[str, Any], reason: str
@@ -166,9 +165,42 @@ async def test_a_refusal_rolls_the_block_back_and_answers_invalid_grant(
         await _exchange(exchange, **overrides)
 
     assert (refused.value.error, refused.value.status_code, refused.value.reason) == ("invalid_grant", 401, reason)
+    # The rule's block ends before the refusal; the key's block is the one rolled back.
+    session.commit.assert_awaited_once()
     session.rollback.assert_awaited_once()
-    session.commit.assert_not_awaited()
     session.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_rule_is_refused_before_the_token_is_verified() -> None:
+    rows = _Rows(None, _key())
+    exchange, session = _build(rows)
+
+    with pytest.raises(FederationGrantError) as refused:
+        await _exchange(exchange)
+
+    assert refused.value.reason == "federation_no_rule"
+    assert rows.reads == ["rule:rule-1"]
+    cast(AsyncMock, exchange._verifier.verify).assert_not_awaited()
+    session.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_token_is_verified_with_no_block_open() -> None:
+    exchange, session = _build(_Rows(_rule(), _key()))
+    open_depths: list[int] = []
+    verify = cast(AsyncMock, exchange._verifier.verify)
+    identity = cast(FederatedIdentity, verify.return_value)
+
+    async def recording_verify(*_args: Any, **_kwargs: Any) -> FederatedIdentity:
+        open_depths.append(exchange._uow._depth)
+        return identity
+
+    verify.side_effect = recording_verify
+
+    await _exchange(exchange)
+
+    assert open_depths == [0]
 
 
 @pytest.mark.asyncio
@@ -220,10 +252,11 @@ async def test_an_operators_rule_names_no_member_issuer() -> None:
 
 @pytest.mark.asyncio
 async def test_a_members_rule_is_refused_while_members_rules_are_off() -> None:
-    exchange, session = _build(_Rows(_rule(member_managed=True), _key()), member_issuers=False)
+    rows = _Rows(_rule(member_managed=True), _key())
+    exchange, _session = _build(rows, member_issuers=False)
 
     with pytest.raises(FederationGrantError) as refused:
         await _exchange(exchange)
 
     assert refused.value.reason == "federation_member_rules_off"
-    session.commit.assert_not_awaited()
+    assert rows.reads == ["rule:rule-1"]
