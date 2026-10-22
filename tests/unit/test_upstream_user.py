@@ -29,8 +29,6 @@ _KEY = "k" * 32
 # ``user`` to an API that does not take it fails the call.
 _FIELD_BY_PROVIDER: dict[LLMProvider, str | None] = {
     # Their chat APIs document ``user`` as an end-user id for abuse monitoring.
-    LLMProvider.OPENAI: "user",
-    LLMProvider.AZUREOPENAI: "user",
     LLMProvider.CEREBRAS: "user",
     LLMProvider.FIREWORKS: "user",
     LLMProvider.GROQ: "user",
@@ -44,7 +42,9 @@ _FIELD_BY_PROVIDER: dict[LLMProvider, str | None] = {
     LLMProvider.BEDROCK: "requestMetadata",
     # Gemini API documents a ``safety_identifier`` label for aggregators.
     LLMProvider.GEMINI: "labels",
-    # Meta's chat API documents ``safety_identifier`` and deprecates ``user``.
+    # Their chat APIs document ``safety_identifier`` and deprecate ``user``.
+    LLMProvider.OPENAI: "safety_identifier",
+    LLMProvider.AZUREOPENAI: "safety_identifier",
     LLMProvider.META: "safety_identifier",
     # The SDK any-llm calls has no ``user`` argument, so the call would fail.
     LLMProvider.COHERE: None,
@@ -289,7 +289,11 @@ async def test_the_gemini_request_body_carries_a_safety_identifier_label() -> No
 
 
 @pytest.mark.asyncio
-async def test_the_meta_call_receives_a_safety_identifier() -> None:
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [(LLMProvider.META, "Llama-4-Maverick-17B-128E-Instruct-FP8"), (LLMProvider.OPENAI, "gpt-4o-mini")],
+)
+async def test_the_call_receives_a_safety_identifier(provider: LLMProvider, model: str) -> None:
     captured: dict[str, Any] = {}
 
     async def fake_create(*_: Any, **kwargs: Any) -> None:
@@ -298,10 +302,10 @@ async def test_the_meta_call_receives_a_safety_identifier() -> None:
 
     with patch("openai.resources.chat.completions.AsyncCompletions.create", new=fake_create), pytest.raises(_Stop):
         await acompletion(
-            model="meta:Llama-4-Maverick-17B-128E-Instruct-FP8",
+            model=f"{provider.value}:{model}",
             messages=[{"role": "user", "content": "hi"}],
-            api_key="meta-key",
-            **chat_user_fields(LLMProvider.META, "id"),
+            api_key="key",
+            **chat_user_fields(provider, "id"),
         )
 
     assert captured["safety_identifier"] == "id"
@@ -346,7 +350,7 @@ def test_turned_on_a_request_with_nothing_to_derive_it_from_is_refused(missing: 
     ("provider", "native", "expected"),
     [
         (LLMProvider.ANTHROPIC, True, {"metadata": {"user_id": "id"}}),
-        (LLMProvider.OPENAI, False, {"user": "id"}),
+        (LLMProvider.OPENAI, False, {"safety_identifier": "id"}),
         (LLMProvider.BEDROCK, False, {"requestMetadata": {"otari_user": "id"}}),
         (LLMProvider.GEMINI, False, {"http_options": {"extra_body": {"labels": {"safety_identifier": "id"}}}}),
     ],

@@ -714,7 +714,7 @@ anyone. Otari cannot detect that; the answer is to block that customer.
 
 | Provider | Field |
 | --- | --- |
-| OpenAI, Azure OpenAI | `user` on chat completions, `safety_identifier` on Responses |
+| OpenAI, Azure OpenAI | `safety_identifier` |
 | Cerebras, DeepSeek, Fireworks, Groq, OpenRouter, xAI | `user` on chat completions (DeepSeek's `user_id`) |
 | Anthropic, including Azure and Vertex AI | `metadata.user_id` |
 | Bedrock | `requestMetadata.otari_user`, except `metadata.user_id` on Messages to a Claude model that sets no `output_format` |

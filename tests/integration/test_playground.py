@@ -860,7 +860,9 @@ def test_a_body_tag_cannot_choose_the_provider_end_user_identifier(
 
     assert code == status.HTTP_200_OK
     workspace = str(world.workspaces["alpha_one"])
-    assert mock.call_args.kwargs["user"] == upstream_user_identifier(workspace, str(world.users["member"]), None)
+    assert mock.call_args.kwargs["safety_identifier"] == upstream_user_identifier(
+        workspace, str(world.users["member"]), None
+    )
 
 
 def test_a_completion_streams_server_sent_events(

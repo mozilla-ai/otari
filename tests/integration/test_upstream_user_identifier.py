@@ -17,6 +17,7 @@ _MASTER = {API_KEY_HEADER: f"Bearer {_MASTER_KEY}"}
 _KEY = "k" * 32
 _PROVIDERS = {
     "openai": {"api_key": "sk-openai"},
+    "azureopenai": {"api_key": "sk-azure", "api_base": "https://example.openai.azure.com"},
     "anthropic": {"api_key": "sk-anthropic"},
     "gemini": {"api_key": "gemini-key"},
     "meta": {"api_key": "meta-key"},
@@ -102,8 +103,18 @@ def test_openai_gets_a_digest_of_the_workspace_and_resolved_user(
 
     _chat(client, headers)
 
-    assert captured[0]["user"] == upstream_user_identifier(workspace, "alice", None)
-    assert UPSTREAM_USER_FIELD not in captured[0]
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
+    assert not {"user", UPSTREAM_USER_FIELD} & set(captured[0])
+
+
+def test_azure_openai_gets_a_safety_identifier(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers, model="azureopenai:gpt-4o-mini")
+
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
+    assert "user" not in captured[0]
 
 
 def test_a_user_tag_replaces_the_resolved_user(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
@@ -112,7 +123,7 @@ def test_a_user_tag_replaces_the_resolved_user(make_client: ClientFactory, captu
 
     _chat(client, headers, user="end-user-7")
 
-    assert captured[0]["user"] == upstream_user_identifier(workspace, "end-user-7", None)
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "end-user-7", None)
 
 
 def test_a_safety_identifier_is_the_tag(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
@@ -122,8 +133,8 @@ def test_a_safety_identifier_is_the_tag(make_client: ClientFactory, captured: li
     _chat(client, headers, safety_identifier="a")
     _chat(client, headers, safety_identifier="b")
 
-    assert captured[0]["user"] == upstream_user_identifier(workspace, "a", None)
-    assert captured[1]["user"] == upstream_user_identifier(workspace, "b", None)
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "a", None)
+    assert captured[1]["safety_identifier"] == upstream_user_identifier(workspace, "b", None)
 
 
 def test_a_safety_identifier_wins_over_user(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
@@ -132,7 +143,7 @@ def test_a_safety_identifier_wins_over_user(make_client: ClientFactory, captured
 
     _chat(client, headers, user="alice", safety_identifier="end-user-7")
 
-    assert captured[0]["user"] == upstream_user_identifier(workspace, "end-user-7", None)
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "end-user-7", None)
 
 
 def test_the_callers_safety_identifier_never_reaches_the_provider(
@@ -156,7 +167,7 @@ def test_echoing_your_own_user_gives_the_same_identifier(
     _chat(client, headers)
     _chat(client, headers, user="alice")
 
-    assert captured[0]["user"] == captured[1]["user"]
+    assert captured[0]["safety_identifier"] == captured[1]["safety_identifier"]
 
 
 def test_the_master_key_user_is_digested_too(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
@@ -166,8 +177,8 @@ def test_the_master_key_user_is_digested_too(make_client: ClientFactory, capture
     _chat(client, headers)
     _chat(client, _MASTER, user="alice")
 
-    assert captured[1]["user"] == captured[0]["user"]
-    assert captured[1]["user"] != "alice"
+    assert captured[1]["safety_identifier"] == captured[0]["safety_identifier"]
+    assert captured[1]["safety_identifier"] != "alice"
 
 
 def test_a_key_makes_the_digest_keyed(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
@@ -176,7 +187,7 @@ def test_a_key_makes_the_digest_keyed(make_client: ClientFactory, captured: list
 
     _chat(client, headers)
 
-    assert captured[0]["user"] == upstream_user_identifier(workspace, "alice", _KEY)
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", _KEY)
 
 
 def test_anthropic_gets_metadata_user_id_and_no_user(
@@ -239,7 +250,7 @@ def test_a_streamed_request_carries_it(make_client: ClientFactory, captured: lis
 
     _chat(client, headers, stream=True)
 
-    assert captured[0]["user"] == upstream_user_identifier(workspace, "alice", None)
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
 
 
 def test_turned_off_nothing_is_sent(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
@@ -248,7 +259,7 @@ def test_turned_off_nothing_is_sent(make_client: ClientFactory, captured: list[d
 
     _chat(client, headers, user="alice")
 
-    assert not {"user", UPSTREAM_USER_FIELD} & set(captured[0])
+    assert not {"user", "safety_identifier", UPSTREAM_USER_FIELD} & set(captured[0])
 
 
 # ---------------------------------------------------------------------------
@@ -395,5 +406,5 @@ def test_messages_served_as_a_chat_completion_gets_the_providers_chat_field(
 
     _message(client, headers, model="openai:gpt-4o-mini")
 
-    assert messages_captured[0]["user"] == upstream_user_identifier(workspace, "alice", None)
+    assert messages_captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
     assert not {"metadata", UPSTREAM_USER_FIELD} & set(messages_captured[0])

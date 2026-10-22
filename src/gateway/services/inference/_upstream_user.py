@@ -28,8 +28,6 @@ reads just before the call.
 # gets nothing, because an API that does not take ``user`` can fail the call.
 _USER_FIELD = frozenset(
     {
-        LLMProvider.OPENAI,
-        LLMProvider.AZUREOPENAI,
         LLMProvider.CEREBRAS,
         LLMProvider.DEEPSEEK,
         LLMProvider.FIREWORKS,
@@ -39,7 +37,7 @@ _USER_FIELD = frozenset(
     }
 )
 # Chat APIs that document ``safety_identifier`` and deprecate ``user``.
-_SAFETY_IDENTIFIER_FIELD = frozenset({LLMProvider.META})
+_SAFETY_IDENTIFIER_FIELD = frozenset({LLMProvider.OPENAI, LLMProvider.AZUREOPENAI, LLMProvider.META})
 # Anthropic's API reads ``metadata.user_id`` and rejects ``user``.
 _METADATA_USER_ID = frozenset({LLMProvider.ANTHROPIC, LLMProvider.AZUREANTHROPIC, LLMProvider.VERTEXAIANTHROPIC})
 # Bedrock's abuse detection reads no end-user id, but ``requestMetadata`` reaches the
