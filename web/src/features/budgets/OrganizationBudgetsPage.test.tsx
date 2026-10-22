@@ -17,6 +17,7 @@ import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   apiKey,
   bootstrap,
+  namedAppliedEntity,
   organization,
   organizationContext,
   organizationMember,
@@ -236,13 +237,8 @@ describe("OrganizationBudgetsPage", () => {
   })
 
   it("lists a budget with its limit, cycle and what it applies to", async () => {
-    const entity = (scope_type: string, scope_id: string) => ({
-      scope_type,
-      scope_id,
-      provider_key_id: null,
-      model: null,
-      name: null,
-    })
+    const entity = (scope_type: string, scope_id: string) =>
+      namedAppliedEntity({ scope_type, scope_id })
     mockApi({
       budgets: [
         organizationBudget({
@@ -270,6 +266,40 @@ describe("OrganizationBudgetsPage", () => {
     expect(
       within(table).getByText("2 organization members, 1 API key"),
     ).toBeInTheDocument()
+  })
+
+  it("reads usage off the tightest entity and names it", async () => {
+    mockApi({
+      budgets: [
+        organizationBudget({
+          ceiling_count: 2,
+          applied_to: [
+            namedAppliedEntity({
+              scope_type: "organization",
+              name: "Acme",
+              current_spend: 10,
+            }),
+            namedAppliedEntity({
+              name: "Research",
+              current_spend: 200,
+              reserved_spend: 25,
+            }),
+          ],
+        }),
+        organizationBudget({
+          budget_id: "uncapped",
+          name: "No cap",
+          max_budget: null,
+        }),
+      ],
+    })
+    renderPage()
+
+    const table = await screen.findByRole("grid", { name: "Budgets" })
+    // Held spend counts as used: 225 of 250 leaves 10%.
+    expect(await within(table).findByText("10% left")).toBeInTheDocument()
+    expect(within(table).getByText("Research")).toBeInTheDocument()
+    expect(within(table).getByText("Uncapped")).toBeInTheDocument()
   })
 
   it("says a budget applies to nothing when nothing holds it", async () => {

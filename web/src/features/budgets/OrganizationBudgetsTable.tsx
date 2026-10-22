@@ -5,14 +5,17 @@ import type { OrganizationBudget } from "@/client"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { HeadroomRing } from "@/design-system/metrics/HeadroomRing"
 
 import { formatAppliedTo } from "./appliedTo"
-import { limitLabel } from "./organizationBudget"
+import { hasNoLimit, limitLabel, tightestUsage } from "./organizationBudget"
 import { cycleLabel } from "./resetCycle"
 
-// One row per budget. What each budget has spent is per applied entity, because
-// each entity draws on its own allowance of the limit, so there is no spend
-// column: summed into one cell it would read as a single pool.
+// One row per budget. Usage is the tightest entity, not a sum: each entity draws
+// on its own allowance of the limit, so a summed cell would read as a single pool
+// and hide the one entity already being refused behind the others' headroom. The
+// cell names that entity when there is more than one; every entity's own bar is
+// on the detail page.
 
 export interface OrganizationBudgetsTableProps {
   budgets: OrganizationBudget[]
@@ -54,6 +57,27 @@ export function OrganizationBudgetsTable({
       id: "applied",
       header: "Applied to",
       cell: (row) => formatAppliedTo(row.applied_to),
+    },
+    {
+      id: "usage",
+      header: "Usage",
+      cell: (row) => {
+        if (hasNoLimit(row))
+          return <span className="text-subtle">Uncapped</span>
+        const tightest = tightestUsage(row, row.applied_to)
+        if (!tightest) return <span className="text-subtle">Not applied</span>
+        return (
+          <div className="flex flex-col gap-0.5">
+            <HeadroomRing used={tightest.used} />
+            {/* Named only when it stands out: at nothing used, every entity ties. */}
+            {row.applied_to.length > 1 && tightest.used > 0 ? (
+              <span className="text-caption">
+                {formatAppliedTo([tightest.ceiling])}
+              </span>
+            ) : null}
+          </div>
+        )
+      },
     },
     {
       id: "resets",

@@ -86,3 +86,53 @@ export function scopeLabel(
 function shortId(value: string): string {
   return value.length > 8 ? `${value.slice(0, 8)}…` : value
 }
+
+/** The spend counters a ceiling carries this period, as the list endpoint has them. */
+type CeilingUsage = Pick<
+  OrganizationSpendCeiling,
+  | "current_spend"
+  | "reserved_spend"
+  | "current_tokens"
+  | "reserved_tokens"
+  | "current_requests"
+  | "reserved_requests"
+>
+
+/**
+ * The entity closest to its limit, and how much of the limit it has used.
+ *
+ * Each entity draws on its own allowance of the limit, so a budget has no
+ * single pool to measure. The figure that means something is the tightest one:
+ * at 1 an entity under this budget is being refused, which a sum or an average
+ * across entities would hide behind the others' headroom.
+ *
+ * Every capped axis counts and the furthest along wins, because a request is
+ * refused on whichever axis runs out first. Held spend counts as used, as it
+ * does on the detail page's meters. `null` when there is nothing to measure: no
+ * cap, or no entities.
+ */
+export function tightestUsage<T extends CeilingUsage>(
+  budget: BudgetCaps,
+  ceilings: readonly T[],
+): { used: number; ceiling: T } | null {
+  const share = (value: number, limit: number | null) =>
+    // A zero cap refuses every request, so even unused it has nothing left.
+    limit == null ? 0 : limit > 0 ? value / limit : value > 0 ? Infinity : 1
+  if (hasNoLimit(budget)) return null
+  let tightest: { used: number; ceiling: T } | null = null
+  for (const ceiling of ceilings) {
+    const used = Math.max(
+      share(ceiling.current_spend + ceiling.reserved_spend, budget.max_budget),
+      share(
+        ceiling.current_tokens + ceiling.reserved_tokens,
+        budget.token_limit,
+      ),
+      share(
+        ceiling.current_requests + ceiling.reserved_requests,
+        budget.request_limit,
+      ),
+    )
+    if (!tightest || used > tightest.used) tightest = { used, ceiling }
+  }
+  return tightest
+}

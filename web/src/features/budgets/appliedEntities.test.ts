@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import type { OrganizationMember } from "@/client"
-import { organizationSpendCeiling } from "@/tests/fixtures"
+import { namedAppliedEntity, organizationSpendCeiling } from "@/tests/fixtures"
 
 import {
   describeEntity,
@@ -129,13 +129,7 @@ describe("entityGroups", () => {
 })
 
 describe("takenEntities", () => {
-  const entity = (scope_id: string) => ({
-    scope_type: "workspace",
-    scope_id,
-    provider_key_id: null,
-    model: null,
-    name: null,
-  })
+  const entity = (scope_id: string) => namedAppliedEntity({ scope_id })
   const budgets = [
     { budget_id: "mine", name: "Mine", applied_to: [entity("ws-1")] },
     { budget_id: "theirs", name: "Research", applied_to: [entity("ws-2")] },
