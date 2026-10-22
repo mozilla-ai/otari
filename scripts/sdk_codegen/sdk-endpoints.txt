@@ -390,6 +390,9 @@ POST /api/v1/organizations/me/keys                              # dashboard-only
 PATCH /api/v1/organizations/me/keys/{key_id}                    # dashboard-only
 DELETE /api/v1/organizations/me/keys/{key_id}                   # dashboard-only
 POST /api/v1/organizations/me/keys/{key_id}/rotate              # dashboard-only
+POST /api/v1/organizations/me/keys/{key_id}/federation-rules    # dashboard-only
+GET /api/v1/organizations/me/keys/{key_id}/federation-rules     # dashboard-only
+DELETE /api/v1/organizations/me/keys/{key_id}/federation-rules/{rule_id}  # dashboard-only
 # The organization's own budgets and the ceilings enforcing them
 # (otari-ai#1943), excluded for the same reason as the keys above: the
 # organization is resolved from the caller's dashboard session rather than named

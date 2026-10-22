@@ -36,7 +36,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,6 +67,7 @@ from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.ports.growth_signal_port import GrowthActivationEvent
 from gateway.repositories.users_repository import get_or_create_attribution_user
+from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
     KEY_TOOLS_EXCEED_USER_DETAIL,
@@ -458,3 +459,65 @@ async def delete_own_key(
     except DATABASE_ERRORS as exc:
         await db.rollback()
         raise database_error("delete own key", exc) from None
+
+
+@router.post("/{key_id}/federation-rules", status_code=status.HTTP_201_CREATED)
+async def create_own_federation_rule(
+    key_id: str,
+    request: FederationRuleCreate,
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    api_keys: ApiKeyServiceDep,
+) -> FederationRulePublic:
+    """Let an OpenID Connect identity token stand in for one of the caller's own keys, through the token exchange.
+
+    Needs ``federation_member_rules``, else 403. The issuer may be any https URL; its signing keys are fetched only
+    from a public host. The rule matches only in ``POST /api/v1/oauth/token`` naming its id, never as a bare identity
+    token, so it lets a workload act as this key and no other: a rule naming another tenant's workload gives that
+    workload nothing it did not ask for. That is no more than the caller could do by handing the workload the key's
+    secret, which is why their own key is all it takes. A rule this key already holds answers 409.
+    """
+    if not config.federation_member_rules:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This deployment does not let members manage federation rules.",
+        )
+    organization_id, owner_user_id = await _caller_context(db, identity)
+    key = await _load_key_in_organization(db, key_id, organization_id, owner_user_id=owner_user_id)
+    return await api_keys.add_federation_rule(key.id, request, allowed_issuers=(), member_managed=True)
+
+
+@router.get("/{key_id}/federation-rules")
+async def list_own_federation_rules(
+    key_id: str,
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_keys: ApiKeyServiceDep,
+) -> list[FederationRulePublic]:
+    """List the identities that may authenticate as one of the caller's own keys, oldest first.
+
+    Includes any rule the deployment operator gave the key, which ``member_managed`` tells apart.
+    """
+    organization_id, owner_user_id = await _caller_context(db, identity)
+    key = await _load_key_in_organization(db, key_id, organization_id, owner_user_id=owner_user_id)
+    return await api_keys.list_federation_rules(key.id)
+
+
+@router.delete("/{key_id}/federation-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_own_federation_rule(
+    key_id: str,
+    rule_id: str,
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_keys: ApiKeyServiceDep,
+) -> Response:
+    """Remove a federation rule from one of the caller's own keys. Tokens it matched stop with the next request.
+
+    Works whether or not ``federation_member_rules`` is on, so a member can always take back what they granted, and
+    on a rule the operator gave the key too, as deleting the key itself would.
+    """
+    organization_id, owner_user_id = await _caller_context(db, identity)
+    key = await _load_key_in_organization(db, key_id, organization_id, owner_user_id=owner_user_id)
+    await api_keys.delete_federation_rule(key.id, rule_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

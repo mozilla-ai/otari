@@ -385,6 +385,65 @@ async def test_the_verifier_fetches_with_the_configured_private_host_setting() -
     assert FederatedTokenVerifier(issuer, allow_private_hosts=True).allow_private_hosts is True
 
 
+# Issuers named by members' rules
+
+
+@pytest.mark.asyncio
+async def test_a_members_issuer_is_verified_when_the_rule_names_it() -> None:
+    issuer = _Issuer([_jwk(SIGNING_KEY, "k1")])
+    verifier = FederatedTokenVerifier([], member_issuers=True, transport_factory=issuer.transport)
+
+    identity = await verifier.verify(_token(), member_issuer=ISSUER)
+
+    assert identity.issuer == ISSUER
+    assert issuer.fetches == [DISCOVERY_URI, JWKS_URI]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("member_issuers", "member_issuer"),
+    [(False, ISSUER), (True, None), (True, "https://other.example.com")],
+    ids=["not-admitted", "no-rule-issuer", "another-rule-issuer"],
+)
+async def test_a_members_issuer_is_trusted_only_when_admitted_and_named(
+    member_issuers: bool, member_issuer: str | None
+) -> None:
+    issuer = _Issuer([_jwk(SIGNING_KEY, "k1")])
+    verifier = FederatedTokenVerifier([], member_issuers=member_issuers, transport_factory=issuer.transport)
+
+    with pytest.raises(FederationRefusedError) as refused:
+        await verifier.verify(_token(), member_issuer=member_issuer)
+
+    assert refused.value.reason == "federation_unknown_issuer"
+    assert issuer.fetches == []
+
+
+@pytest.mark.asyncio
+async def test_a_members_issuer_is_never_fetched_from_a_private_host() -> None:
+    """Even on a deployment that lets its own issuers sit on a private network."""
+    private = "https://10.0.0.1"
+    verifier = FederatedTokenVerifier([], allow_private_hosts=True, member_issuers=True)
+
+    with pytest.raises(FederationUnavailableError):
+        await verifier.verify(_token(iss=private), member_issuer=private)
+
+
+@pytest.mark.asyncio
+async def test_the_verifiers_kept_for_members_issuers_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    from gateway.services.api_keys import _federation
+
+    monkeypatch.setattr(_federation, "MAX_MEMBER_ISSUERS", 2)
+    issuer = _Issuer([])
+    verifier = FederatedTokenVerifier([], member_issuers=True, transport_factory=issuer.transport)
+
+    for name in ("a", "b", "c"):
+        member_issuer = f"https://{name}.example.com"
+        with pytest.raises((FederationRefusedError, FederationUnavailableError)):
+            await verifier.verify(_token(iss=member_issuer), member_issuer=member_issuer)
+
+    assert list(verifier._by_member_issuer) == ["https://b.example.com", "https://c.example.com"]
+
+
 def test_the_private_host_setting_is_validated_at_config_load(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS", "sometimes")
     with pytest.raises(ValidationError, match="federation_allow_private_hosts"):
@@ -417,6 +476,14 @@ def test_federation_with_a_secret_key_starts(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
     GatewayConfig.model_validate({"federation_issuers": [ISSUER]}).validate_declared_access()
+
+
+def test_members_rules_without_a_secret_key_refuse_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+    config = GatewayConfig.model_validate({"federation_member_rules": True})
+
+    with pytest.raises(ValueError, match="federation_member_rules is set, but OTARI_SECRET_KEY is not"):
+        config.validate_declared_access()
 
 
 def test_no_secret_key_is_needed_with_federation_off(monkeypatch: pytest.MonkeyPatch) -> None:

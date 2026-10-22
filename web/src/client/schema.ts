@@ -2561,10 +2561,11 @@ export interface paths {
          * Exchange Token
          * @description Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).
          *
-         *     The identity token must verify against an issuer on ``federation_issuers`` and match the federation rule
-         *     ``federation_rule_id`` names. ``organization_id``, ``workspace_id`` and ``service_account_id``, where set, must
-         *     be the UUIDs of the rule's key's organization and workspace and the key's id. The access token authenticates as
-         *     that key until ``expires_in`` runs out, the rule is deleted or the key stops passing its checks.
+         *     The identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:
+         *     one on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,
+         *     ``workspace_id`` and ``service_account_id``, where set, must be the UUIDs of the rule's key's organization and
+         *     workspace and the key's id. The access token authenticates as that key until ``expires_in`` runs out, the rule is
+         *     deleted or the key stops passing its checks.
          *
          *     Every refusal of the identity token answers 401 ``invalid_grant`` with the same description.
          */
@@ -3132,6 +3133,61 @@ export interface paths {
          * @description Update one of the caller's own API keys.
          */
         patch: operations["organization-keys-update_own_key"];
+        trace?: never;
+    };
+    "/api/v1/organizations/me/keys/{key_id}/federation-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Own Federation Rules
+         * @description List the identities that may authenticate as one of the caller's own keys, oldest first.
+         *
+         *     Includes any rule the deployment operator gave the key, which ``member_managed`` tells apart.
+         */
+        get: operations["organization-keys-list_own_federation_rules"];
+        put?: never;
+        /**
+         * Create Own Federation Rule
+         * @description Let an OpenID Connect identity token stand in for one of the caller's own keys, through the token exchange.
+         *
+         *     Needs ``federation_member_rules``, else 403. The issuer may be any https URL; its signing keys are fetched only
+         *     from a public host. The rule matches only in ``POST /api/v1/oauth/token`` naming its id, never as a bare identity
+         *     token, so it lets a workload act as this key and no other: a rule naming another tenant's workload gives that
+         *     workload nothing it did not ask for. That is no more than the caller could do by handing the workload the key's
+         *     secret, which is why their own key is all it takes. A rule this key already holds answers 409.
+         */
+        post: operations["organization-keys-create_own_federation_rule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/keys/{key_id}/federation-rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Own Federation Rule
+         * @description Remove a federation rule from one of the caller's own keys. Tokens it matched stop with the next request.
+         *
+         *     Works whether or not ``federation_member_rules`` is on, so a member can always take back what they granted, and
+         *     on a rule the operator gave the key too, as deleting the key itself would.
+         */
+        delete: operations["organization-keys-delete_own_federation_rule"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/organizations/me/keys/{key_id}/rotate": {
@@ -10521,7 +10577,7 @@ export interface components {
             email?: string | null;
             /**
              * Issuer
-             * @description The token's 'iss', one of the deployment's federation_issuers.
+             * @description The token's 'iss'. On an operator's rule, one of the deployment's federation_issuers; on a member's own key, any https issuer on a public host.
              */
             issuer: string;
             /**
@@ -10550,6 +10606,11 @@ export interface components {
             id: string;
             /** Issuer */
             issuer: string;
+            /**
+             * Member Managed
+             * @description Whether a member gave the rule to their own key: it then matches only in the token exchange.
+             */
+            member_managed: boolean;
             /** Subject */
             subject: string | null;
         };
@@ -23931,6 +23992,102 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["KeyInfo"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-keys-list_own_federation_rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FederationRulePublic"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-keys-create_own_federation_rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FederationRuleCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FederationRulePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-keys-delete_own_federation_rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

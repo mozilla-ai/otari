@@ -1560,6 +1560,11 @@ class GatewayConfig(
         return self.effective_mail_transport != "none"
 
     @property
+    def federation_enabled(self) -> bool:
+        """Whether an identity token may authenticate as some key: an issuer is trusted, or members may name one."""
+        return bool(self.federation_issuers) or self.federation_member_rules
+
+    @property
     def mail_ready(self) -> bool:
         """Whether this deployment can send a message that links back to itself.
 
@@ -1808,11 +1813,12 @@ class GatewayConfig(
 
     def validate_declared_access(self) -> None:
         """Refuse federation without ``OTARI_SECRET_KEY``."""
-        if self.federation_issuers and not (otari_env("SECRET_KEY") or "").replace(",", " ").strip():
+        if self.federation_enabled and not (otari_env("SECRET_KEY") or "").replace(",", " ").strip():
+            setting = "federation_issuers" if self.federation_issuers else "federation_member_rules"
             msg = (
-                "federation_issuers is set, but OTARI_SECRET_KEY is not; it signs the access tokens "
+                f"{setting} is set, but OTARI_SECRET_KEY is not; it signs the access tokens "
                 "POST /api/v1/oauth/token issues. Set OTARI_SECRET_KEY (generate one with "
-                "`otari gen-secret-key`) or clear federation_issuers"
+                f"`otari gen-secret-key`) or clear {setting}"
             )
             raise ValueError(msg)
 

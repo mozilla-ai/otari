@@ -7,7 +7,7 @@ block back, and nothing is ever added to the session.
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -63,13 +63,21 @@ def _key(**overrides: Any) -> APIKey:
     return APIKey(**fields)
 
 
-def _rule() -> APIKeyFederationRule:
+def _rule(*, member_managed: bool = False) -> APIKeyFederationRule:
     return APIKeyFederationRule(
-        id="rule-1", api_key_id="key-1", issuer=ISSUER, audience=AUDIENCE, subject=None, email=EMAIL
+        id="rule-1",
+        api_key_id="key-1",
+        issuer=ISSUER,
+        audience=AUDIENCE,
+        subject=None,
+        email=EMAIL,
+        member_managed=member_managed,
     )
 
 
-def _build(rows: _Rows, *, identity_exp: int | None = None) -> tuple[FederationTokenExchange, MagicMock]:
+def _build(
+    rows: _Rows, *, identity_exp: int | None = None, member_issuers: bool = False
+) -> tuple[FederationTokenExchange, MagicMock]:
     session = MagicMock()
     session.commit = AsyncMock()
     session.rollback = AsyncMock()
@@ -78,6 +86,7 @@ def _build(rows: _Rows, *, identity_exp: int | None = None) -> tuple[FederationT
     object.__setattr__(repositories.federation_rules, "get", rows.get_rule)
     object.__setattr__(repositories.keys, "get", rows.get_key)
     verifier = MagicMock()
+    verifier.member_issuers = member_issuers
     verifier.verify = AsyncMock(
         return_value=FederatedIdentity(
             issuer=ISSUER,
@@ -189,3 +198,32 @@ async def test_an_identity_token_about_to_expire_is_not_exchanged() -> None:
         await _exchange(exchange)
 
     assert refused.value.reason == "federation_expired"
+
+
+@pytest.mark.asyncio
+async def test_a_members_rule_has_its_own_issuer_verified() -> None:
+    exchange, _session = _build(_Rows(_rule(member_managed=True), _key()), member_issuers=True)
+
+    await _exchange(exchange)
+
+    cast(AsyncMock, exchange._verifier.verify).assert_awaited_once_with(ASSERTION, member_issuer=ISSUER)
+
+
+@pytest.mark.asyncio
+async def test_an_operators_rule_names_no_member_issuer() -> None:
+    exchange, _session = _build(_Rows(_rule(), _key()), member_issuers=True)
+
+    await _exchange(exchange)
+
+    cast(AsyncMock, exchange._verifier.verify).assert_awaited_once_with(ASSERTION, member_issuer=None)
+
+
+@pytest.mark.asyncio
+async def test_a_members_rule_is_refused_while_members_rules_are_off() -> None:
+    exchange, session = _build(_Rows(_rule(member_managed=True), _key()), member_issuers=False)
+
+    with pytest.raises(FederationGrantError) as refused:
+        await _exchange(exchange)
+
+    assert refused.value.reason == "federation_member_rules_off"
+    session.commit.assert_not_awaited()

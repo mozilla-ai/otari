@@ -352,9 +352,12 @@ def _federated_token_verifier(request: Request, config: GatewayConfig) -> Federa
         verifier is None
         or verifier.issuers != tuple(config.federation_issuers)
         or verifier.allow_private_hosts != config.federation_allow_private_hosts
+        or verifier.member_issuers != config.federation_member_rules
     ):
         verifier = FederatedTokenVerifier(
-            config.federation_issuers, allow_private_hosts=config.federation_allow_private_hosts
+            config.federation_issuers,
+            allow_private_hosts=config.federation_allow_private_hosts,
+            member_issuers=config.federation_member_rules,
         )
         request.app.state.federated_token_verifier = verifier
     return verifier
@@ -403,15 +406,19 @@ async def _verify_federated_token(request: Request, db: AsyncSession, token: str
 async def _verify_access_token(db: AsyncSession, token: str, config: GatewayConfig) -> APIKey:
     """Authenticate an access token from ``POST /oauth/token`` as the key of the rule it names.
 
-    The rule and the key are reloaded on every request, so deleting the rule, deactivating the key or dropping the
-    rule's issuer from ``federation_issuers`` ends the token at once. Refusals answer the same 401 as an unknown key.
+    The rule and the key are reloaded on every request, so deleting the rule, deactivating the key, dropping an
+    operator's rule's issuer from ``federation_issuers`` or turning ``federation_member_rules`` off for a member's rule
+    ends the token at once. Refusals answer the same 401 as an unknown key.
     """
     try:
         claims = read_access_token(token, configured_secret_keys(), now=time.time())
         rule = await FederationRuleRepository(db).get(claims.rule_id)
         if rule is None or rule.api_key_id != claims.api_key_id:
             raise FederationRefusedError("federation_rule_gone")
-        if all(entry.issuer != rule.issuer for entry in config.federation_issuers):
+        if rule.member_managed:
+            if not config.federation_member_rules:
+                raise FederationRefusedError("federation_member_rules_off")
+        elif all(entry.issuer != rule.issuer for entry in config.federation_issuers):
             raise FederationRefusedError("federation_unknown_issuer")
         api_key = await ApiKeyRepository(db).get(claims.api_key_id)
     except FederationRefusedError as exc:
@@ -433,12 +440,13 @@ async def _verify_credential(request: Request, db: AsyncSession, token: str, con
     """Verify a presented credential as an API key.
 
     With federation on, the prefix of an access token or the shape of a JWT routes it before anything is parsed:
-    an access token, then a raw identity token. Everything else is a key secret.
+    an access token, then a raw identity token, which only an operator's rule on an allow-listed issuer can match.
+    Everything else is a key secret.
     """
-    if config.federation_issuers:
+    if config.federation_enabled:
         if is_access_token(token):
             return await _verify_access_token(db, token, config)
-        if unverified_issuer(token) is not None:
+        if config.federation_issuers and unverified_issuer(token) is not None:
             return await _verify_federated_token(request, db, token, config)
     return await _verify_and_update_api_key(db, token, _api_key_format(request, db))
 
@@ -609,7 +617,7 @@ async def verify_api_key(
     """Verify API key from the credential headers.
 
     ``config`` says whether an identity token may stand in for a key's secret
-    (``federation_issuers``). Like its sibling ``verify_api_key_or_master_key``,
+    (``federation_issuers``, ``federation_member_rules``). Like its sibling ``verify_api_key_or_master_key``,
     this is called directly (not only via ``Depends``) by downstream
     deployments, so the three-argument shape is API.
 

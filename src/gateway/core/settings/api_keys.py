@@ -121,7 +121,7 @@ class ApiKeyConfig(BaseModel):
         return declaration_digest(entry)
 
 
-def _https_url_problem(value: str) -> str | None:
+def https_url_problem(value: str) -> str | None:
     """Why ``value`` is not an absolute https URL without credentials, a query or a fragment, or None."""
     parts = urlsplit(value)
     if parts.scheme != "https" or not parts.hostname:
@@ -153,7 +153,7 @@ class FederationIssuer(BaseModel):
     @field_validator("issuer")
     @classmethod
     def _issuer_is_https(cls, value: str) -> str:
-        problem = _https_url_problem(value)
+        problem = https_url_problem(value)
         if problem is not None:
             msg = f"federation issuer '{value}' {problem}"
             raise ValueError(msg)
@@ -164,7 +164,7 @@ class FederationIssuer(BaseModel):
     def _jwks_uri_is_https(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        problem = _https_url_problem(value)
+        problem = https_url_problem(value)
         if problem is not None:
             msg = f"federation jwks_uri '{value}' {problem}"
             raise ValueError(msg)
@@ -189,6 +189,16 @@ class ApiKeySettings(BaseModel):
             "OpenID Connect issuers whose identity tokens may authenticate as an API key, in place of its secret, "
             "when they match one of the key's federation rules. Each entry is an https issuer URL or a mapping "
             "with 'issuer' and an optional 'jwks_uri'. Empty, the default, turns workload identity off."
+        ),
+    )
+
+    federation_member_rules: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
+        default=False,
+        description=(
+            "Let a member give their own API keys federation rules, through "
+            "/api/v1/organizations/me/keys/{key_id}/federation-rules, naming any public https issuer. A member's "
+            "rule authenticates only through POST /api/v1/oauth/token naming it, never as a bare identity token, "
+            "so it cannot claim another tenant's workload. Off by default."
         ),
     )
 

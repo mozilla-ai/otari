@@ -48,10 +48,11 @@ def _unavailable(reason: str) -> FederationGrantError:
 class FederationTokenExchange:
     """Exchange a verified identity token, naming one federation rule, for a short-lived access token.
 
-    The RFC 7523 ``jwt-bearer`` grant. The identity token must verify and match the named rule, the rule's key must
-    be active and unexpired, and any organization, workspace or service account the request names must be that
-    key's own. Its one Unit of Work block only reads, and a refusal raised inside it rolls it back, so an exchange,
-    refused or not, writes nothing.
+    The RFC 7523 ``jwt-bearer`` grant. The identity token must verify and match the named rule, whether an operator's
+    rule on an allow-listed issuer or a member's on the issuer it names; the rule's key must be active and unexpired,
+    and any organization, workspace or service account the request names must be that key's own. A member's rule
+    exchanges only while the deployment admits members' rules. Its one Unit of Work block only reads, and a refusal
+    raised inside it rolls it back, so an exchange, refused or not, writes nothing.
     """
 
     def __init__(
@@ -106,11 +107,17 @@ class FederationTokenExchange:
         if unverified_issuer(assertion) is None:
             raise _invalid_grant("federation_invalid_token")
         try:
-            identity = await self._verifier.verify(assertion)
             async with self._uow:
+                # The named rule is read before the token is verified, because a member's rule supplies the issuer
+                # to verify it against, trusted for this exchange alone. The issuer's keys are cached, so the
+                # verification inside the block fetches them only on first use and when they rotate.
                 rule = await self._rules.get(federation_rule_id)
+                member_issuer = rule.issuer if rule is not None and rule.member_managed else None
+                identity = await self._verifier.verify(assertion, member_issuer=member_issuer)
                 if rule is None or not rule_matches(rule, identity):
                     raise FederationRefusedError("federation_no_rule")
+                if rule.member_managed and not self._verifier.member_issuers:
+                    raise FederationRefusedError("federation_member_rules_off")
                 api_key = await self._keys.get(rule.api_key_id)
                 if api_key is None:
                     raise FederationRefusedError("federation_no_rule")

@@ -23,6 +23,13 @@ class FederationIssuerNotAllowedError(TenancyValidationError):
         super().__init__(f"issuer '{issuer}' is not one of this deployment's federation_issuers")
 
 
+class FederationIssuerInvalidError(TenancyValidationError):
+    """A member's federation rule names an issuer that is not an https URL the gateway may fetch keys from."""
+
+    def __init__(self, issuer: str, problem: str):
+        super().__init__(f"issuer '{issuer}' {problem}")
+
+
 class FederationRuleLimitError(TenancyValidationError):
     """A key already holds as many federation rules as it may."""
 

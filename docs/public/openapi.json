@@ -7445,7 +7445,7 @@
             "title": "Email"
           },
           "issuer": {
-            "description": "The token's 'iss', one of the deployment's federation_issuers.",
+            "description": "The token's 'iss'. On an operator's rule, one of the deployment's federation_issuers; on a member's own key, any https issuer on a public host.",
             "maxLength": 512,
             "minLength": 1,
             "title": "Issuer",
@@ -7508,6 +7508,11 @@
             "title": "Issuer",
             "type": "string"
           },
+          "member_managed": {
+            "description": "Whether a member gave the rule to their own key: it then matches only in the token exchange.",
+            "title": "Member Managed",
+            "type": "boolean"
+          },
           "subject": {
             "anyOf": [
               {
@@ -7527,6 +7532,7 @@
           "audience",
           "subject",
           "email",
+          "member_managed",
           "created_at"
         ],
         "title": "FederationRulePublic",
@@ -33105,7 +33111,7 @@
     },
     "/api/v1/oauth/token": {
       "post": {
-        "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must verify against an issuer on ``federation_issuers`` and match the federation rule\n``federation_rule_id`` names. ``organization_id``, ``workspace_id`` and ``service_account_id``, where set, must\nbe the UUIDs of the rule's key's organization and workspace and the key's id. The access token authenticates as\nthat key until ``expires_in`` runs out, the rule is deleted or the key stops passing its checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
+        "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:\none on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,\n``workspace_id`` and ``service_account_id``, where set, must be the UUIDs of the rule's key's organization and\nworkspace and the key's id. The access token authenticates as that key until ``expires_in`` runs out, the rule is\ndeleted or the key stops passing its checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
         "operationId": "oauth-exchange_token",
         "requestBody": {
           "content": {
@@ -34894,6 +34900,173 @@
           }
         ],
         "summary": "Update Own Key",
+        "tags": [
+          "organization-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/keys/{key_id}/federation-rules": {
+      "get": {
+        "description": "List the identities that may authenticate as one of the caller's own keys, oldest first.\n\nIncludes any rule the deployment operator gave the key, which ``member_managed`` tells apart.",
+        "operationId": "organization-keys-list_own_federation_rules",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FederationRulePublic"
+                  },
+                  "title": "Response Organization-Keys-List Own Federation Rules",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Own Federation Rules",
+        "tags": [
+          "organization-keys"
+        ]
+      },
+      "post": {
+        "description": "Let an OpenID Connect identity token stand in for one of the caller's own keys, through the token exchange.\n\nNeeds ``federation_member_rules``, else 403. The issuer may be any https URL; its signing keys are fetched only\nfrom a public host. The rule matches only in ``POST /api/v1/oauth/token`` naming its id, never as a bare identity\ntoken, so it lets a workload act as this key and no other: a rule naming another tenant's workload gives that\nworkload nothing it did not ask for. That is no more than the caller could do by handing the workload the key's\nsecret, which is why their own key is all it takes. A rule this key already holds answers 409.",
+        "operationId": "organization-keys-create_own_federation_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FederationRuleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FederationRulePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Own Federation Rule",
+        "tags": [
+          "organization-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/keys/{key_id}/federation-rules/{rule_id}": {
+      "delete": {
+        "description": "Remove a federation rule from one of the caller's own keys. Tokens it matched stop with the next request.\n\nWorks whether or not ``federation_member_rules`` is on, so a member can always take back what they granted, and\non a rule the operator gave the key too, as deleting the key itself would.",
+        "operationId": "organization-keys-delete_own_federation_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Own Federation Rule",
         "tags": [
           "organization-keys"
         ]
