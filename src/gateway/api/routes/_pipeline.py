@@ -2535,6 +2535,7 @@ async def resolve_request_context(
     tags: dict[str, str] | None = None,
     turn: TurnFacts | None = None,
     session_label: str | None = None,
+    safety_identifier: str | None = None,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
 
@@ -2566,6 +2567,10 @@ async def resolve_request_context(
     ``(prompt_chars, vision_usage)``; any vision describe side-call it made is
     metered and billed here as committed spend (the call already happened, so it
     is not gated or refundable).
+
+    ``safety_identifier`` is the caller's tag for the end user, which wins over
+    ``user_id_from_request`` as the subject of the provider's end-user
+    identifier. Unlike ``user``, it names nobody billed, so nothing checks it.
     """
     # Earliest point in the shared handler preamble; anchors the request's
     # latency_ms (measured monotonically, so it is immune to wall-clock steps).
@@ -2659,7 +2664,7 @@ async def resolve_request_context(
         adapter,
         config,
         str(workspace_id),
-        user_id_from_request,
+        safety_identifier or user_id_from_request,
         user_id,
         session=session_principal is not None,
     )

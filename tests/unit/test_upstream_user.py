@@ -14,6 +14,7 @@ from gateway.api.routes import chat
 from gateway.services.inference import (
     UPSTREAM_USER_FIELD,
     UnidentifiedEndUserError,
+    bind_upstream_user,
     chat_user_fields,
     end_user_identifier,
     messages_user_fields,
@@ -319,6 +320,12 @@ def test_the_tag_wins_over_the_resolved_user() -> None:
 
 def test_a_session_s_tag_is_ignored() -> None:
     assert _identifier(tag="end-user-7", session=True) == upstream_user_identifier("ws", "alice", None)
+
+
+def test_binding_replaces_both_caller_tags_with_the_identifier() -> None:
+    fields = {"model": "m", "user": "alice", "safety_identifier": "end-user-7"}
+
+    assert bind_upstream_user(fields, "id") == {"model": "m", UPSTREAM_USER_FIELD: "id"}
 
 
 def test_turned_off_there_is_no_identifier_and_no_refusal() -> None:

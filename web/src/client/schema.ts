@@ -4279,8 +4279,9 @@ export interface paths {
          *     also have to be added to the pipeline's strip list, and a gateway-internal
          *     field that is not stripped is forwarded to the provider as a call kwarg.
          *
-         *     ``user`` in the body is the one field the pipeline will not read here: spend
-         *     binds to the session's own attribution user, derived and never accepted.
+         *     ``user`` and ``safety_identifier`` in the body are the fields the pipeline
+         *     will not read here: spend and the provider's end-user identifier both bind
+         *     to the session's own attribution user, derived and never accepted.
          */
         post: operations["playground-playground_chat_completions"];
         delete?: never;
@@ -8880,6 +8881,11 @@ export interface components {
             response_format?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Safety Identifier
+             * @description A stable identifier for the end user behind the request, used as the tag the provider's end-user identifier is derived from. Wins over `user` for that, and is never sent upstream. The dashboard's Playground ignores it.
+             */
+            safety_identifier?: string | null;
             /** Seed */
             seed?: number | null;
             /** Service Tier */

@@ -693,14 +693,24 @@ and workspace on the deployment loses that provider.
 
 So while `provider_user_identifier_enabled` is on, which it is by default, Otari
 sends each provider call a digest of the workspace and the user tag the caller
-sent Otari (`user` on chat completions and Responses, `metadata.user_id` on
-Messages), or of the workspace and the resolved user when the caller sent no
-tag. The table below names the field each provider receives it in. The
-provider never sees the tag, which may be personal data, or an Otari id. The
-same user in the same workspace always gets the same identifier, which is what
-a provider scopes enforcement by. The dashboard's Playground ignores a `user`
-sent in its request body, so the identifier its calls carry is always the
-signed-in member's.
+sent Otari, or of the workspace and the resolved user when the caller sent no
+tag. On chat completions and Responses the tag is `safety_identifier`, or `user`
+when the request has none; on Messages it is `metadata.user_id`. The table
+below names the field each provider receives it in. The provider never sees the
+tag, which may be personal data, or an Otari id. The same tag in the same
+workspace always gets the same identifier, which is what a provider scopes
+enforcement by. The dashboard's Playground ignores a `user` or
+`safety_identifier` sent in its request body, so the identifier its calls carry
+is always the signed-in member's.
+
+`user` has a second job: on a service key it names the billed end user, and on
+any other key it must match the key's user unless `reject_user_mismatch` is
+off. `safety_identifier` names nobody billed and nothing checks it, so one
+request can bill one user and tag another. Send it when one key serves several
+end users that `user` does not tell apart: a request with neither tag gets the
+key holder's identifier, so a block meant for one lands on all of them. The caller chooses the tag, so a caller that sends
+a new one on each request gets a new identifier each time and no block lands on
+anyone. Otari cannot detect that; the answer is to block that customer.
 
 | Provider | Field |
 | --- | --- |

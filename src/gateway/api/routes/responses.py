@@ -503,6 +503,7 @@ async def create_response(
             log_writer=log_writer,
             model=request_body.model,
             user_id_from_request=request_body.user,
+            safety_identifier=request_body.safety_identifier,
             estimate_prompt_chars=len(str(request_body.input))
             + len(str(getattr(request_body, "instructions", "") or "")),
             estimate_max_output_tokens=max_output_tokens,
@@ -599,7 +600,6 @@ async def create_response(
         input_payload, codex_extra_body = _codex_extra_body(request_fields.pop("input"), client_metadata)
         request_fields.pop("stream", None)
         request_fields.pop("model", None)
-        request_fields.pop("safety_identifier", None)
         bind_upstream_user(request_fields, ctx.upstream_user)
 
         # What gets merged with per-attempt creds; it includes ``provider`` and

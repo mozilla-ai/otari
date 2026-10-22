@@ -186,6 +186,16 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     )
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
+    # OpenAI's chat field, absent from ``CompletionParams``. The provider gets a
+    # digest of it instead (see ``bind_upstream_user``), never the caller's value.
+    safety_identifier: str | None = Field(
+        default=None,
+        description=(
+            "A stable identifier for the end user behind the request, used as the tag the provider's "
+            "end-user identifier is derived from. Wins over `user` for that, and is never sent upstream. "
+            "The dashboard's Playground ignores it."
+        ),
+    )
     # OpenAI's chat field, absent from ``CompletionParams``: read for request tags
     # and never forwarded, since a provider other than OpenAI would reject it.
     metadata: RequestMetadata = None
@@ -588,6 +598,7 @@ async def run_chat_completion(
             log_writer=log_writer,
             model=request.model,
             user_id_from_request=request.user,
+            safety_identifier=request.safety_identifier,
             estimate_prompt_chars=len(str(request.messages)),
             estimate_max_output_tokens=output_cap,
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,

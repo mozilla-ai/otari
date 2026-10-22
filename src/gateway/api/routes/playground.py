@@ -195,8 +195,9 @@ async def playground_chat_completions(
     also have to be added to the pipeline's strip list, and a gateway-internal
     field that is not stripped is forwarded to the provider as a call kwarg.
 
-    ``user`` in the body is the one field the pipeline will not read here: spend
-    binds to the session's own attribution user, derived and never accepted.
+    ``user`` and ``safety_identifier`` in the body are the fields the pipeline
+    will not read here: spend and the provider's end-user identifier both bind
+    to the session's own attribution user, derived and never accepted.
     """
     principal = await playground_service.resolve_playground_principal(
         db,

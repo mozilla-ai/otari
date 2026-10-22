@@ -115,6 +115,38 @@ def test_a_user_tag_replaces_the_resolved_user(make_client: ClientFactory, captu
     assert captured[0]["user"] == upstream_user_identifier(workspace, "end-user-7", None)
 
 
+def test_a_safety_identifier_is_the_tag(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers, safety_identifier="a")
+    _chat(client, headers, safety_identifier="b")
+
+    assert captured[0]["user"] == upstream_user_identifier(workspace, "a", None)
+    assert captured[1]["user"] == upstream_user_identifier(workspace, "b", None)
+
+
+def test_a_safety_identifier_wins_over_user(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers, user="alice", safety_identifier="end-user-7")
+
+    assert captured[0]["user"] == upstream_user_identifier(workspace, "end-user-7", None)
+
+
+def test_the_callers_safety_identifier_never_reaches_the_provider(
+    make_client: ClientFactory, captured: list[dict[str, Any]]
+) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers, model="anthropic:claude-sonnet-4-5", safety_identifier="end-user-7")
+
+    assert captured[0]["metadata"] == {"user_id": upstream_user_identifier(workspace, "end-user-7", None)}
+    assert "safety_identifier" not in captured[0]
+
+
 def test_echoing_your_own_user_gives_the_same_identifier(
     make_client: ClientFactory, captured: list[dict[str, Any]]
 ) -> None:
@@ -248,10 +280,23 @@ def test_responses_sends_openai_a_safety_identifier_and_no_user(
     client = make_client()
     headers, workspace = _keyed_user(client)
 
-    _respond(client, headers, user="alice", safety_identifier="caller-chosen")
+    _respond(client, headers, user="alice")
 
     assert responses_captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
     assert not {"user", UPSTREAM_USER_FIELD} & set(responses_captured[0])
+
+
+def test_responses_digests_the_callers_safety_identifier(
+    make_client: ClientFactory, responses_captured: list[dict[str, Any]]
+) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _respond(client, headers, user="alice", safety_identifier="a")
+    _respond(client, headers, user="alice", safety_identifier="b")
+
+    assert responses_captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "a", None)
+    assert responses_captured[1]["safety_identifier"] == upstream_user_identifier(workspace, "b", None)
 
 
 def test_responses_to_anthropic_sends_metadata_user_id_and_never_user(

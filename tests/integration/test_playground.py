@@ -833,8 +833,11 @@ def test_a_completion_cannot_be_billed_to_a_workspace_that_is_not_the_caller_s(
     assert db_session.query(UsageLog).count() == 0
 
 
-def test_a_body_user_cannot_choose_the_provider_end_user_identifier(client: TestClient, world: _World) -> None:
-    """The identifier is the caller's own, whatever ``user`` the body names.
+@pytest.mark.parametrize("field", ["user", "safety_identifier"])
+def test_a_body_tag_cannot_choose_the_provider_end_user_identifier(
+    client: TestClient, world: _World, field: str
+) -> None:
+    """The identifier is the caller's own, whatever tag the body names.
 
     An API key may name an end user, so a member who could do the same here
     could take on the identifier a key's end user is known by upstream.
@@ -850,7 +853,7 @@ def test_a_body_user_cannot_choose_the_provider_end_user_identifier(client: Test
             json={
                 "model": "openai:gpt-4o-mini",
                 "messages": [{"role": "user", "content": "hi"}],
-                "user": "shared-tag-alpha",
+                field: "shared-tag-alpha",
             },
             params=_ws(world),
         )
