@@ -1,18 +1,24 @@
 """Inference request settings."""
 
 import re
-from typing import Annotated
+from typing import Annotated, Self
 
-from pydantic import BaseModel, Field, field_validator
+from any_llm import LLMProvider
+from pydantic import BaseModel, Field, field_validator, model_validator
 
+from gateway.core.country_codes import COUNTRY_CODES
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 
 # An RFC 9110 field name (a token).
 _HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
+_COUNTRY_CODE = re.compile(r"[A-Z]{2}")
 
 
 class InferenceSettings(BaseModel):
-    """How a completion request is sent and retried upstream, deduplicated, streamed and attributed to an end user."""
+    """How a completion request is sent and retried upstream, deduplicated, streamed and attributed to an end user.
+
+    Also which providers the country a request comes from may reach.
+    """
 
     provider_max_retries: Annotated[int | None, Shown(SettingsGroup.MODELS)] = Field(
         default=None,
@@ -43,6 +49,16 @@ class InferenceSettings(BaseModel):
             "Key for the digest behind the opaque end-user identifier each provider call carries. Unset, "
             "the digest is unkeyed. Must differ from OTARI_SECRET_KEY and the master key. See "
             "docs/configuration.md#end-user-identifiers."
+        ),
+    )
+
+    provider_supported_countries: Annotated[dict[str, list[str]], OMITTED] = Field(
+        default_factory=dict,
+        description=(
+            "The ISO country codes each provider type serves, such as openai: [US, DE]. A request from "
+            "another country, or from one no source knows, skips that provider's candidates. A provider "
+            "type with no entry serves every country. Needs client_country_header or "
+            "client_country_database."
         ),
     )
 
@@ -117,3 +133,46 @@ class InferenceSettings(BaseModel):
             msg = f"client_country_header must be an HTTP header name, got {value!r}"
             raise ValueError(msg)
         return value
+
+    @field_validator("provider_supported_countries", mode="before")
+    @classmethod
+    def _normalize_provider_supported_countries(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        known = {member.value for member in LLMProvider}
+        normalized: dict[str, list[str]] = {}
+        for raw_type, raw_codes in value.items():
+            provider_type = str(raw_type).strip().lower()
+            if provider_type not in known:
+                msg = f"provider_supported_countries: {raw_type!r} is not a provider type"
+                raise ValueError(msg)
+            if not isinstance(raw_codes, list):
+                msg = f"provider_supported_countries.{provider_type} must be a list of country codes"
+                raise ValueError(msg)
+            codes: list[str] = []
+            for raw_code in raw_codes:
+                code = str(raw_code).strip().upper()
+                if code not in COUNTRY_CODES:
+                    msg = (
+                        f"provider_supported_countries.{provider_type}: {raw_code!r} is not an ISO 3166-1 "
+                        "alpha-2 country code"
+                    )
+                    raise ValueError(msg)
+                if code not in codes:
+                    codes.append(code)
+            normalized[provider_type] = codes
+        return normalized
+
+    @model_validator(mode="after")
+    def _country_gate_has_a_source(self) -> Self:
+        if (
+            self.provider_supported_countries
+            and self.client_country_header is None
+            and self.client_country_database is None
+        ):
+            msg = (
+                "provider_supported_countries needs client_country_header or client_country_database: "
+                "without one no request has a country, and every listed provider would be refused"
+            )
+            raise ValueError(msg)
+        return self

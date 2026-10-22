@@ -41,6 +41,7 @@ from gateway.services.provider_kwargs import (
     resolve_catalog_fallback,
     resolve_provider_selector,
 )
+from gateway.services.providers import CountryGate
 from gateway.types.attempt import Attempt
 from gateway.types.budget_state import BudgetState
 
@@ -93,6 +94,11 @@ class NoEligibleCandidatesError(Exception):
         super().__init__(self.operator_detail)
 
 
+def _country_fragment(gate: CountryGate) -> str:
+    origin = f"country '{gate.country}'" if gate.country is not None else "an unknown country"
+    return f"is on a provider provider_supported_countries closes to {origin}"
+
+
 @dataclass(frozen=True)
 class RouterOrdering:
     """What a router backend decided for one request.
@@ -119,7 +125,7 @@ class DroppedCandidate:
 
     selector: str
     reason: str
-    """Machine-readable: ``unresolvable``, ``not_allowed``, ``duplicate``, ``over_cap``."""
+    """Machine-readable: ``unresolvable``, ``not_allowed``, ``country_not_supported``, ``duplicate``, ``over_cap``."""
     detail: str
     """Human-readable, for an operator."""
 
@@ -283,6 +289,7 @@ def compile_policy(
     budget: BudgetState | None = None,
     router_ordering: RouterOrdering | None = None,
     workspace_id: uuid.UUID | None = None,
+    country_gate: CountryGate | None = None,
 ) -> CompiledPlan:
     """Turn ``spec`` into an ordered plan for one request.
 
@@ -302,6 +309,9 @@ def compile_policy(
     ``explain`` and the CLI omit it, which only affects a bare candidate
     selector with no matching ``config.providers`` instance.
 
+    ``country_gate`` drops a candidate whose provider the request's country may
+    not reach. ``explain`` and the CLI have no request, so they omit it.
+
     Raises :class:`NoEligibleCandidatesError` when nothing survives. That error
     derives its own status from why the candidates went: 403 when access rules
     filtered them, 502 when none of them resolve to a configured provider.
@@ -320,7 +330,12 @@ def compile_policy(
     ordered: list[tuple[str, str]] = list(selected)
     ordered.extend((selector, "on_failure") for selector in spec.on_failure)
     attempts, dropped = _resolve_candidates(
-        config, ordered, display_model=policy_name, allowlist=allowlist, workspace_id=workspace_id
+        config,
+        ordered,
+        display_model=policy_name,
+        allowlist=allowlist,
+        workspace_id=workspace_id,
+        country_gate=country_gate,
     )
 
     if not attempts:
@@ -360,6 +375,7 @@ def compile_catalog_plan(
     user_id: str | None = None,
     allowlist: list[str] | None = None,
     workspace_id: uuid.UUID | None = None,
+    country_gate: CountryGate | None = None,
 ) -> CompiledPlan | None:
     """Turn a catalog ID into a failover plan over its offerings, best first, or ``None``.
 
@@ -373,7 +389,12 @@ def compile_catalog_plan(
         return None
     ordered = [(selector, "catalog") for selector in offerings]
     attempts, dropped = _resolve_candidates(
-        config, ordered, display_model=model_selector, allowlist=allowlist, workspace_id=workspace_id
+        config,
+        ordered,
+        display_model=model_selector,
+        allowlist=allowlist,
+        workspace_id=workspace_id,
+        country_gate=country_gate,
     )
     if dropped and logger.isEnabledFor(logging.DEBUG):
         logger.debug(
@@ -403,6 +424,7 @@ def _resolve_candidates(
     display_model: str,
     allowlist: list[str] | None,
     workspace_id: uuid.UUID | None,
+    country_gate: CountryGate | None,
 ) -> tuple[list[Attempt], list[DroppedCandidate]]:
     """The attempts ``ordered`` resolves to for this caller, and every candidate dropped on the way."""
     attempts: list[Attempt] = []
@@ -444,6 +466,9 @@ def _resolve_candidates(
         )
         if refusal is not None:
             dropped.append(DroppedCandidate(selector, "not_allowed", _ORG_REFUSAL_FRAGMENTS[refusal.code]))
+            continue
+        if country_gate is not None and country_gate.refuses(config, resolved.instance):
+            dropped.append(DroppedCandidate(selector, "country_not_supported", _country_fragment(country_gate)))
             continue
         seen.add(canonical)
         attempts.append(

@@ -14,9 +14,12 @@ from typing import TYPE_CHECKING, Any
 
 from gateway.core.country_codes import COUNTRY_CODES
 from gateway.log_config import logger
+from gateway.services.providers import CountryGate
 
 if TYPE_CHECKING:
     from maxminddb.reader import Reader
+
+    from gateway.core.config import GatewayConfig
 
 
 class CountryDatabaseError(ValueError):
@@ -134,3 +137,16 @@ def client_country(
     if database is not None and client_host is not None:
         return _looked_up(database, client_host)
     return None
+
+
+def request_country_gate(
+    config: "GatewayConfig", headers: Mapping[str, str], client_host: str | None
+) -> CountryGate | None:
+    """The country gate for one request, or None when no provider type lists countries."""
+    if not config.provider_supported_countries:
+        return None
+    return CountryGate(
+        client_country(
+            headers, client_host, header=config.client_country_header, database=config.client_country_database
+        )
+    )

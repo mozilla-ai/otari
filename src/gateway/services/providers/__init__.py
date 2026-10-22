@@ -8,6 +8,7 @@ are still in the flat modules beside `services/`, and move here when the
 domain's migration reaches them (`DOMAINS.md`).
 """
 
+from gateway.services.providers._country_gate import CountryGate, CountryNotServedError, ensure_provider_country
 from gateway.services.providers._hosted_catalog_update import (
     HostedCatalogUpdate,
     PriceUpdates,
@@ -58,6 +59,8 @@ from gateway.services.providers._provider_endpoint_cache import (
 from gateway.services.providers._provider_endpoint_service import ProviderEndpointService
 
 __all__ = [
+    "CountryGate",
+    "CountryNotServedError",
     "HostedCatalogUpdate",
     "HostedProviderService",
     "HostedSources",
@@ -75,6 +78,7 @@ __all__ = [
     "aresponses",
     "cached_owned_endpoint",
     "dispatch_on_hosted_credential",
+    "ensure_provider_country",
     "hosted_credential_for",
     "hosted_implementation",
     "hosted_models_for",

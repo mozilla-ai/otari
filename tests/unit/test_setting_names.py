@@ -123,6 +123,7 @@ _SETTING_NAMES = frozenset(
         "provider_endpoints_enabled",
         "provider_max_retries",
         "provider_request_timeout_seconds",
+        "provider_supported_countries",
         "provider_user_identifier_key",
         "providers",
         "public_base_url",

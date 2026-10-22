@@ -1,6 +1,11 @@
 """The inference domain: idempotent completion requests, structured decisions and dialect bridges."""
 
-from gateway.services.inference._client_country import CountryDatabaseError, client_country, open_country_database
+from gateway.services.inference._client_country import (
+    CountryDatabaseError,
+    client_country,
+    open_country_database,
+    request_country_gate,
+)
 from gateway.services.inference._decisions import (
     DecisionProvider,
     DecisionProviderError,
@@ -142,6 +147,7 @@ __all__ = [
     "messages_user_fields",
     "open_country_database",
     "reported_charge",
+    "request_country_gate",
     "request_decision",
     "responses_user_fields",
     "embedding_usage",
