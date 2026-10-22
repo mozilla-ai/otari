@@ -887,9 +887,14 @@ async def build_merged_catalog(
     # ``?provider=`` filters these like any real model, and the allow-list filter
     # at the end still applies: an offered model the caller's key may not use is
     # withheld exactly as a discovered one would be.
+    # Compared canonically: phase 2 lists a price stored under the legacy
+    # ``provider/model`` spelling, and listing the selector again would show the
+    # model twice, once without its rate.
+    listed = {normalize_pricing_key(config, model_key) for model_key in merged}
     hosted_only: set[str] = set()
     for model_key in sorted(scope.offered_keys | scope.hosted_keys):
-        if model_key in merged or normalize_pricing_key(config, model_key) in alias_targets:
+        canonical = normalize_pricing_key(config, model_key)
+        if canonical in listed or canonical in alias_targets:
             continue
         owner = owner_from_key(model_key)
         if provider is not None and owner != provider:

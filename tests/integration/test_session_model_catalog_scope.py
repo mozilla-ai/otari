@@ -912,6 +912,34 @@ def test_with_require_pricing_on_a_hosted_model_is_listed_only_once_a_default_pr
     assert "mistral:open-mistral-defaulted" in ids
 
 
+def test_a_hosted_model_priced_under_its_legacy_spelling_is_listed_once_with_its_rate(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    world: _World,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    session = db_session_factory()
+    try:
+        session.add(
+            ModelPricing(
+                model_key="mistral/open-mistral-legacy",
+                input_price_per_million=Decimal(1),
+                output_price_per_million=Decimal(2),
+                effective_at=datetime.now(UTC) - timedelta(days=1),
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    bind_model_provider(client, HostedModelProvider("mistral", models={"mistral": {"open-mistral-legacy"}}))
+
+    response = client.get(f"{API_ROOT}/models", headers=master_key_header)
+    assert response.status_code == status.HTTP_200_OK, response.text
+    listed = [model for model in response.json()["data"] if "open-mistral-legacy" in model["id"]]
+    assert len(listed) == 1, listed
+    assert listed[0]["pricing"] is not None
+
+
 def test_the_master_key_keeps_a_model_its_default_workspace_reaches_on_its_own_key(
     client: TestClient, master_key_header: dict[str, str], world: _World, db_session_factory: Callable[[], Session]
 ) -> None:
