@@ -27,6 +27,7 @@ def _trace(trace_id: str, *, start: int, end: int, failed: bool = False) -> Trac
         workspace_id=uuid.uuid4(),
         trace_id=trace_id,
         session_source="otlp",
+        span_count=1,
         started_at=_T0 + timedelta(minutes=start),
         last_activity_at=_T0 + timedelta(minutes=end),
         error_count=1 if failed else 0,
