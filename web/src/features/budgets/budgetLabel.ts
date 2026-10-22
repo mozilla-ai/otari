@@ -29,9 +29,18 @@ type BudgetShape = ReadCycleFields & {
   request_limit: number | null
 }
 
-/** The head of a budget id: the fingerprint the budgets list already shows. */
+// The shape of an id the server generates, as opposed to one an operator chose
+// (`PUT /budgets/{budget_id}`, or a budget config.yml declares).
+const GENERATED_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * A budget id as the budgets list shows it: the head of a generated one, and a
+ * chosen one whole. A chosen id is already readable, and its head is not a
+ * fingerprint: `team-daily` and `team-weekly` would both read `team`.
+ */
 export function shortBudgetId(budgetId: string): string {
-  return budgetId.split("-")[0]
+  return GENERATED_ID.test(budgetId) ? budgetId.split("-")[0] : budgetId
 }
 
 /**

@@ -96,6 +96,30 @@ describe("formatAppliedTo", () => {
     ).toBe("openai, 2 models")
   })
 
+  it("reads a member or key narrowed to a provider as that member or key", () => {
+    // One member's cap on a provider is not the organization's spend there.
+    const label = formatAppliedTo([
+      entity({
+        scope_type: "organization",
+        scope_id: "org-1",
+        provider_key_id: "mock",
+        model: "gpt-big",
+      }),
+      entity({
+        scope_type: "workspace_member",
+        scope_id: "wm-1",
+        provider_key_id: "mock",
+      }),
+      entity({
+        scope_type: "api_token",
+        scope_id: "k-1",
+        provider_key_id: "mock",
+        model: "gpt-mini",
+      }),
+    ])
+    expect(label).toBe("1 workspace member, 1 API key, gpt-big on mock")
+  })
+
   it("counts members and keys without inventing names for them", () => {
     const label = formatAppliedTo([
       entity({ scope_type: "org_member", scope_id: "m-1" }),

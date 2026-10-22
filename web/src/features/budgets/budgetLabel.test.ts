@@ -34,10 +34,15 @@ describe("hasBudgetName", () => {
 })
 
 describe("shortBudgetId", () => {
-  it("takes the head of the id", () => {
+  it("takes the head of a generated id", () => {
     expect(shortBudgetId("abcd1234-2222-3333-4444-555555555555")).toBe(
       "abcd1234",
     )
+  })
+
+  it("keeps a chosen id whole, so two that share a head stay apart", () => {
+    expect(shortBudgetId("declared-daily")).toBe("declared-daily")
+    expect(shortBudgetId("declared-twice-weekly")).toBe("declared-twice-weekly")
   })
 })
 
