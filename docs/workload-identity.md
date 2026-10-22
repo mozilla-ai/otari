@@ -253,8 +253,8 @@ which the SDKs report with a hint to check the federation rule. A refusal
 writes nothing to the database.
 
 The endpoint takes no credential, since the identity token is one, and is
-mounted only when `federation_issuers` lists an issuer: otherwise it answers
-404.
+mounted only when `federation_issuers` lists an issuer or
+`federation_member_rules` is on: otherwise it answers 404.
 
 ### Keeping the token file fresh
 

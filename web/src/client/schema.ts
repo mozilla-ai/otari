@@ -10577,7 +10577,7 @@ export interface components {
             email?: string | null;
             /**
              * Issuer
-             * @description The token's 'iss'. On an operator's rule, one of the deployment's federation_issuers; on a member's own key, any https issuer on a public host.
+             * @description The token's 'iss'. On an operator's rule, one of the deployment's federation_issuers; on a member's own key, any https issuer, whose discovery document and signing keys are fetched only from a public host.
              */
             issuer: string;
             /**
