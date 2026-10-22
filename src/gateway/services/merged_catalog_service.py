@@ -55,7 +55,6 @@ from gateway.services.tenancy.deployment_user_service import DeploymentUserServi
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_model_access import (
     hosted_allowlist_entries,
-    hosted_model_keys,
     resolve_default_workspace_offered_keys,
     resolve_hosted_models,
     resolve_organization_byo_providers,
@@ -479,6 +478,16 @@ def served_on_deployment_key(hosted_models: HostedModels, model_key: str) -> boo
     return roster is None or model in roster
 
 
+def _listed_hosted_keys(hosted_models: HostedModels) -> frozenset[str]:
+    """The selectors ``hosted_models`` switches on, for phase 2b to list.
+
+    A provider that advertises no particular models names none: it permits
+    whatever is priced on it, which the price list lists already.
+    """
+    entries = hosted_allowlist_entries(hosted_models, frozenset(hosted_models))
+    return frozenset(entry for entry in entries if not entry.endswith(":*"))
+
+
 def _without(hosted_models: HostedModels, providers: frozenset[str]) -> HostedModels:
     return {provider: roster for provider, roster in hosted_models.items() if provider not in providers}
 
@@ -598,7 +607,7 @@ async def catalog_scope(
             reads_workspace_layer=False,
             deployment_supplied_providers=hosted,
             offered_keys=frozenset(),
-            hosted_keys=hosted_model_keys(hosted_models),
+            hosted_keys=_listed_hosted_keys(hosted_models),
             deployment_key_models=hosted_models,
         )
     if session_identity is not None:
@@ -633,7 +642,7 @@ async def catalog_scope(
                 # the others, so only a key every workspace calls on takes a
                 # provider out.
                 deployment_key_models=_without(hosted_models, organization_key_providers),
-                hosted_keys=hosted_model_keys(_without(hosted_models, organization_key_providers)),
+                hosted_keys=_listed_hosted_keys(_without(hosted_models, organization_key_providers)),
             )
         scope = await resolve_session_catalog_scope(db, config, user=session_identity, model_provider=model_provider)
         return CatalogScope(
@@ -686,7 +695,7 @@ async def catalog_scope(
         withheld_providers=withheld_providers,
         withhold_unserved=withhold_unserved,
         deployment_key_models=_without(hosted_models, byo_providers),
-        hosted_keys=hosted_model_keys(_without(hosted_models, byo_providers)),
+        hosted_keys=_listed_hosted_keys(_without(hosted_models, byo_providers)),
     )
 
 

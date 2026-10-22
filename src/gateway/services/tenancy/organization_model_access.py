@@ -121,17 +121,6 @@ def hosted_allowlist_entries(hosted_models: HostedModels, providers: frozenset[s
     return entries
 
 
-def hosted_model_keys(hosted_models: HostedModels) -> frozenset[str]:
-    """The ``provider:model`` selectors ``hosted_models`` switches on, for the catalog to list.
-
-    A provider that advertises no particular models names none: it permits
-    whatever is priced on it, which the price list lists already.
-    """
-    return frozenset(
-        f"{provider}:{model}" for provider, roster in hosted_models.items() if roster is not None for model in roster
-    )
-
-
 async def resolve_organization_byo_providers(db: AsyncSession, organization_id: uuid.UUID | None) -> frozenset[str]:
     """The providers one organization holds a usable key of its own for, in any workspace.
 
@@ -401,7 +390,9 @@ async def resolve_session_catalog_scope(
         # key, which says the organization may reach everything that provider
         # serves and nothing about which of them to list.
         offered_keys=frozenset(entry for entry in byo_allowlist if not entry.endswith(":*")),
-        hosted_keys=hosted_model_keys({provider: hosted_models[provider] for provider in reachable_hosted}),
+        hosted_keys=frozenset(
+            entry for entry in hosted_allowlist_entries(hosted_models, reachable_hosted) if not entry.endswith(":*")
+        ),
     )
 
 
