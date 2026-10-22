@@ -150,6 +150,17 @@ instance declared `openai-compatible` is looked up under OpenAI, so a model it
 serves under another name usually has no models.dev entry. With
 `models_dev_metadata: false`, the context window comes from the pricing snapshot alone.
 
+Each model also says what it accepts, in the fields OpenRouter's model listing
+uses, so a client built for that shape reads them unchanged. `name` is models.dev's
+display name. `supported_parameters` lists `tools` and `tool_choice` for a model
+that calls tools, `response_format` for one with structured output, and
+`reasoning` for a reasoning model; it names only the parameters models.dev records
+a flag for, not every parameter the model takes. `architecture` carries
+`input_modalities` and `output_modalities`, such as `["text", "image"]`. All three
+are `null` for a model models.dev does not describe, which means unknown rather
+than unsupported. An alias reports its target's capabilities but no `name`,
+because the target's name would say what the alias points at.
+
 Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's
 `models` list.

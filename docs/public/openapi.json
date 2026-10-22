@@ -11067,6 +11067,27 @@
         "title": "MessagesRequest",
         "type": "object"
       },
+      "ModelArchitecture": {
+        "description": "What a model reads and writes, in OpenRouter's ``architecture`` shape.",
+        "properties": {
+          "input_modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Input Modalities",
+            "type": "array"
+          },
+          "output_modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Output Modalities",
+            "type": "array"
+          }
+        },
+        "title": "ModelArchitecture",
+        "type": "object"
+      },
       "ModelListResponse": {
         "description": "OpenAI-compatible model list response.",
         "properties": {
@@ -11285,6 +11306,16 @@
       "ModelObject": {
         "description": "OpenAI-compatible model object.",
         "properties": {
+          "architecture": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelArchitecture"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "context_window": {
             "anyOf": [
               {
@@ -11320,6 +11351,17 @@
             ],
             "title": "Max Output Tokens"
           },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
           "object": {
             "default": "model",
             "title": "Object",
@@ -11343,6 +11385,20 @@
             "default": "none",
             "title": "Pricing Source",
             "type": "string"
+          },
+          "supported_parameters": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supported Parameters"
           }
         },
         "required": [

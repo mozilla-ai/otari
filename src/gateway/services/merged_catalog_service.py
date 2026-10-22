@@ -30,7 +30,7 @@ from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedModels, ModelProviderPort
 from gateway.services.alias_service import effective_aliases
-from gateway.services.catalog import apply_model_limits, load_catalog_metadata
+from gateway.services.catalog import ModelArchitecture, apply_model_metadata, load_catalog_metadata
 from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
 from gateway.services.model_discovery_service import background_discovery_enabled, discover_all_models
 from gateway.services.policy_store import effective_policies
@@ -140,6 +140,12 @@ class ModelObject(BaseModel):
     # Metadata only, independent of the default_pricing toggle; ``None`` where neither knows one.
     context_window: int | None = None
     max_output_tokens: int | None = None
+    # Capabilities from the live models.dev catalog (see ``model_capabilities``), in the
+    # fields OpenRouter's listing uses, so an OpenAI-compatible client can tell which models
+    # take tools or images. ``None`` where models.dev has no entry: unknown, not unsupported.
+    name: str | None = None
+    supported_parameters: list[str] | None = None
+    architecture: ModelArchitecture | None = None
     # True when the deployment pays the upstream bill for this model, so the organization may not set its own rate.
     # An alias or policy is a name, not a model, so it is always False.
     deployment_managed: bool = False
@@ -219,8 +225,9 @@ def alias_model(
     # this an alias to an unpriced model would report no price while the gateway
     # billed it at the default rate.
     apply_default_pricing(obj, pricing_selector=canonical_target)
-    # Limits from the target too, for the same reason. Exposing them does not reveal the target.
-    apply_model_limits(config, models_dev, obj, limits_selector=canonical_target)
+    # Limits and capabilities from the target too, for the same reason. Exposing them does not
+    # reveal the target; its display name would, so the alias gets none.
+    apply_model_metadata(config, models_dev, obj, metadata_selector=canonical_target, with_name=False)
     return obj
 
 
@@ -886,7 +893,7 @@ async def build_merged_catalog(
     # asked to price. Aliases fill both from the resolved target in phase 4.
     for obj in merged.values():
         apply_default_pricing(obj)
-        apply_model_limits(config, models_dev, obj)
+        apply_model_metadata(config, models_dev, obj)
 
     # Phase 4: aliases, from config.yml and from storage alike. An alias is a
     # display name, not a provider, so it is only listed for the unfiltered

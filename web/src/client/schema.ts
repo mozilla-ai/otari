@@ -12214,6 +12214,16 @@ export interface components {
             top_p?: number | null;
         };
         /**
+         * ModelArchitecture
+         * @description What a model reads and writes, in OpenRouter's ``architecture`` shape.
+         */
+        ModelArchitecture: {
+            /** Input Modalities */
+            input_modalities?: string[];
+            /** Output Modalities */
+            output_modalities?: string[];
+        };
+        /**
          * ModelListResponse
          * @description OpenAI-compatible model list response.
          */
@@ -12316,6 +12326,7 @@ export interface components {
          * @description OpenAI-compatible model object.
          */
         ModelObject: {
+            architecture?: components["schemas"]["ModelArchitecture"] | null;
             /** Context Window */
             context_window?: number | null;
             /** Created */
@@ -12329,6 +12340,8 @@ export interface components {
             id: string;
             /** Max Output Tokens */
             max_output_tokens?: number | null;
+            /** Name */
+            name?: string | null;
             /**
              * Object
              * @default model
@@ -12342,6 +12355,8 @@ export interface components {
              * @default none
              */
             pricing_source: string;
+            /** Supported Parameters */
+            supported_parameters?: string[] | null;
         };
         /**
          * ModelPricingInfo
