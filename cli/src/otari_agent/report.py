@@ -182,10 +182,10 @@ def otlp_body(report: CheckReport, *, ended_ns: int) -> dict[str, Any]:
         shared.append(_attribute("gen_ai.tool.call.id", report.tool_call_id))
     if report.tool_name:
         shared.append(_attribute("gen_ai.tool.name", report.tool_name))
-    if report.evidence:
-        shared.append(_attribute("otari.gate.evidence", report.evidence[:_MAX_CONTENT]))
+    # One check read one body of evidence, so it travels once, on the first gate.
+    evidence = [_attribute("otari.gate.evidence", report.evidence[:_MAX_CONTENT])] if report.evidence else []
     spans: list[dict[str, Any]] = []
-    for gate in report.gates:
+    for index, gate in enumerate(report.gates):
         span_id = secrets.token_hex(8)
         window = {
             "kind": 1,
@@ -207,6 +207,7 @@ def otlp_body(report: CheckReport, *, ended_ns: int) -> dict[str, Any]:
                     _attribute("otari.gate.enforcement", gate.enforcement),
                     _attribute("otari.gate.outcome", gate.outcome),
                     _attribute("otari.gate.blocked", gate.blocked),
+                    *(evidence if index == 0 else []),
                     *_usage_attributes(main),
                     *([_attribute("otari.gate.detail", gate.detail[:_MAX_CONTENT])] if gate.detail else []),
                 ],

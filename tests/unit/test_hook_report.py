@@ -190,6 +190,18 @@ def test_each_further_model_a_judge_ran_on_goes_on_a_usage_span_under_its_gate()
     assert "otari.gate.outcome" not in attributes
 
 
+def test_what_a_check_read_travels_once_on_its_first_gate() -> None:
+    second = GateReport(**{**_GATE.__dict__, "gate_id": "no-lockfile"})
+    body = report.otlp_body(
+        CheckReport(**{**_CHECK.__dict__, "gates": (_GATE, second), "evidence": "CHANGELOG.md"}),
+        ended_ns=_CHECK.started_ns + 1,
+    )
+
+    first, other = (_attributes(span) for span in body["resourceSpans"][0]["scopeSpans"][0]["spans"])
+    assert first["otari.gate.evidence"] == "CHANGELOG.md"
+    assert "otari.gate.evidence" not in other
+
+
 def test_a_queued_report_holds_no_credential(tmp_path: Path) -> None:
     assert report.enqueue(_CHECK, _EXPORTING, outbox=tmp_path, spawn=False)
 

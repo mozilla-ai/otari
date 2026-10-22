@@ -302,6 +302,46 @@ describe("toTrace", () => {
     })
   })
 
+  it("gives every gate of a check what the check read, sent on one of them", () => {
+    const gate = (span_id: string, gateId: string, otel_trace_id: string) =>
+      traceSpan({
+        span_id,
+        parent_span_id: "tool-1",
+        kind: "guardrail",
+        origin: "otlp",
+        otel_trace_id,
+        attributes: {
+          "otari.gate.id": gateId,
+          "otari.gate.outcome": "pass",
+          "otari.gate.blocked": false,
+        },
+      })
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+          }),
+          {
+            ...gate("gate-1", "no-changelog", "check-a"),
+            content: { "gate.evidence": "CHANGELOG.md" },
+          },
+          gate("gate-2", "no-lockfile", "check-a"),
+          gate("gate-3", "no-changelog", "check-b"),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("gate-1")?.gate?.evidence).toBe("CHANGELOG.md")
+    expect(byId.get("gate-2")?.gate?.evidence).toBe("CHANGELOG.md")
+    expect(byId.get("gate-3")?.gate?.evidence).toBeNull()
+  })
+
   it("says what a permission decision, a run and a model call were", () => {
     const trace = toTrace(
       traceSummary(),

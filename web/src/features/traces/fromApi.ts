@@ -167,9 +167,12 @@ function gateOrigin(value: string | null): GateCheck["origin"] {
 }
 
 // A gate's check, joined to what the session's guardrail says about the gate.
+// What the check read travels on one of its gate spans, found by the OTLP trace
+// every gate of one check shares.
 function gateCheck(
   span: TraceSpan,
   gates: ReadonlyMap<string, TraceGateSummary>,
+  checkEvidence: ReadonlyMap<string, string>,
 ): GateCheck | undefined {
   const verdict = gateVerdict(span)
   const gateId = stringAttribute(span, "otari.gate.id")
@@ -187,7 +190,10 @@ function gateCheck(
       gateOrigin(stringAttribute(span, "otari.gate.origin")),
     moment: span.operation,
     digest: stringAttribute(span, "otari.policy.digest"),
-    evidence: span.content["gate.evidence"] ?? null,
+    evidence:
+      span.content["gate.evidence"] ??
+      (span.otel_trace_id ? checkEvidence.get(span.otel_trace_id) : null) ??
+      null,
     detail: span.content["gate.detail"] ?? null,
   }
 }
@@ -278,6 +284,14 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
     const gateSummaries = new Map(
       detail.gates.map((gate) => [gate.gate_id, gate] as const),
     )
+    const checkEvidence = new Map(
+      detail.spans.flatMap((span) => {
+        const evidence = span.content["gate.evidence"]
+        return evidence && span.otel_trace_id
+          ? [[span.otel_trace_id, evidence] as const]
+          : []
+      }),
+    )
     const gateMessages = new Map(
       detail.gates.flatMap((gate) =>
         gate.message ? [[gate.gate_id, gate.message] as const] : [],
@@ -325,7 +339,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         type: TYPE_BY_KIND[span.kind] ?? "SPAN",
         name: spanLabel(span),
         input: spanInput(span),
-        gate: gateCheck(span, gateSummaries),
+        gate: gateCheck(span, gateSummaries, checkEvidence),
         detail:
           span.operation === "tool.blocked_on_user" ||
           span.operation === "tool.execution" ||

@@ -157,7 +157,9 @@ or refused it: a tool a hook refused, such as an
 not count toward a session's errors. Nor does a tool call that returned an
 error, such as a command that exited non-zero: the agent reads that error like
 any other result, and `grep` finding nothing or a test failing on purpose
-returns one too. A short `claude -p` run can exit before its last spans are
+returns one too. A tool the gateway runs itself (an MCP tool, web search, web
+fetch or code execution) still records an error result as an error, as
+[Sessions and failures](#sessions-and-failures) describes. A short `claude -p` run can exit before its last spans are
 exported.
 
 ### Keeping what a span was about
