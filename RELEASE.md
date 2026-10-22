@@ -167,8 +167,8 @@ secret of that name is granted to.
   organization through a Docker Hub OIDC connection (Docker Home, Identity &
   auth, OIDC connections) whose subject claim is
   `repo:mozilla-ai/otari:environment:docker-hub`, so only a job in that
-  environment can push. The connection's ID is the repository variable
-  `DOCKERHUB_OIDC_CONNECTIONID`; it is not a secret. The repository's
+  environment can push. The connection's ID is the `docker-hub` environment
+  variable `DOCKERHUB_OIDC_CONNECTIONID`; it is not a secret. The repository's
   description on Docker Hub is edited by hand, because updating it takes a
   personal token with delete scope.
 - `CODEGEN_APP_ID` and `CODEGEN_APP_KEY`, the Client ID and private key of the
