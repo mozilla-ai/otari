@@ -187,7 +187,7 @@ dev = [
 # alone from the lock, so a dependency release cannot move the gate between runs.
 loadtest = [
     "httpx>=0.27",
-    "psycopg[binary]>=3.2",
+    "psycopg[binary]>=3.3.6",
     "pytest>=8",
     "redis>=5",
 ]
