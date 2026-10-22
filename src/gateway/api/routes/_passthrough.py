@@ -51,7 +51,7 @@ from gateway.api.deps import (
 )
 from gateway.api.request_id import set_request_id
 from gateway.api.routes._attempts import classify_local_attempt_error
-from gateway.api.routes._helpers import resolve_user_id, with_retry_hint
+from gateway.api.routes._helpers import country_gate_for, country_not_supported, resolve_user_id, with_retry_hint
 from gateway.api.routes._pipeline import (
     FUNDS_CHECK_UNAVAILABLE_DETAIL,
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
@@ -612,6 +612,18 @@ async def run_passthrough(
             headers=error_headers(refusal.code),
         )
 
+    country_gate = country_gate_for(config, raw_request)
+    if country_gate is not None and country_gate.refuses(config, resolved.instance):
+        await refund_reservation(db, reservation)
+        refused = country_not_supported(country_gate, model)
+        await _log_rejection(
+            str(refused.detail),
+            row_model=resolved.model,
+            row_provider=resolved.instance,
+            status_code=refused.status_code,
+        )
+        raise refused
+
     # The last rung of the credential ladder, past every gate on the name the caller wrote.
     deployment_charge: DeploymentCharge | None = None
     hosted = await _serve_hosted(resolved, reservation)
@@ -1092,6 +1104,11 @@ async def run_decision(
         not_allowed_detail = model_not_allowed_detail(selector)
         await log_rejection(not_allowed_detail, row_model=model, row_provider=provider_name, status_code=403)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
+    country_gate = country_gate_for(config, raw_request)
+    if country_gate is not None and country_gate.refuses(config, provider_name):
+        refused = country_not_supported(country_gate, selector)
+        await log_rejection(str(refused.detail), row_model=model, row_provider=provider_name, status_code=403)
+        raise refused
 
     pricing: ModelPricing | None = None
     if quote.charge is None:

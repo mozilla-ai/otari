@@ -133,3 +133,67 @@ def test_the_image_describe_call_stays_within_the_gate(
 
     assert resp.status_code == 200, resp.text
     assert describe.await_count == (1 if described else 0)
+
+
+def test_a_passthrough_endpoint_is_refused_for_another_country(client: TestClient) -> None:
+    with patch("gateway.api.routes.embeddings.aembedding", new=AsyncMock()) as mock:
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hi", "user": "alice"},
+            headers={**HEADERS, _COUNTRY_HEADER: "FR"},
+        )
+
+    assert resp.status_code == 403, resp.text
+    assert resp.headers[ERROR_CODE_HEADER] == COUNTRY_NOT_SUPPORTED
+    mock.assert_not_awaited()
+    rows = client.get(f"{API_ROOT}/usage", params={"status": "error"}, headers=HEADERS).json()
+    assert [(row["provider"], row["status_code"]) for row in rows] == [("openai", 403)]
+
+
+def test_a_batch_is_refused_for_another_country(client: TestClient) -> None:
+    with patch("gateway.api.routes.batches.acreate_batch", new=AsyncMock()) as mock:
+        resp = client.post(
+            f"{API_ROOT}/batches",
+            json={
+                "model": "openai:gpt-4o-mini",
+                "user": "alice",
+                "requests": [{"custom_id": "req-1", "body": {"messages": [{"role": "user", "content": "hi"}]}}],
+            },
+            headers={**HEADERS, _COUNTRY_HEADER: "FR"},
+        )
+
+    assert resp.status_code == 403, resp.text
+    assert resp.headers[ERROR_CODE_HEADER] == COUNTRY_NOT_SUPPORTED
+    mock.assert_not_awaited()
+
+
+@pytest.fixture
+def decisions_client(postgres_url: str) -> Generator[TestClient]:
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        auto_migrate=False,
+        require_pricing=False,
+        decision_providers={"openrouter": {"api_key": "or-secret"}},
+        provider_supported_countries={"openrouter": ["US"]},
+        client_country_header=_COUNTRY_HEADER,
+    )
+    yield from _client_with_alice(config)
+
+
+def test_a_decision_is_refused_for_another_country(decisions_client: TestClient) -> None:
+    with patch("gateway.api.routes._passthrough.request_decision", new=AsyncMock()) as mock:
+        resp = decisions_client.post(
+            f"{API_ROOT}/decisions",
+            json={
+                "model": "openrouter:some-model",
+                "user": "alice",
+                "state": "hi",
+                "questions": {"urgent": {"type": "noul", "instructions": "Is this urgent?"}},
+            },
+            headers={**HEADERS, _COUNTRY_HEADER: "FR"},
+        )
+
+    assert resp.status_code == 403, resp.text
+    assert resp.headers[ERROR_CODE_HEADER] == COUNTRY_NOT_SUPPORTED
+    mock.assert_not_awaited()

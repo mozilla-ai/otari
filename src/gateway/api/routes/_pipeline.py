@@ -82,7 +82,7 @@ from gateway.api.routes._attempts import (
     PrepareKwargs,
     walk_attempts,
 )
-from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
+from gateway.api.routes._helpers import apply_input_guardrails, country_gate_for, resolve_user_id
 from gateway.api.routes._idempotency import (
     IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL,
     IDEMPOTENCY_KEY_REUSED_DETAIL,
@@ -234,7 +234,6 @@ from gateway.services.inference import (
     is_upstream_request_fault,
     is_upstream_stream_interrupted,
     provider_failure,
-    request_country_gate,
     upstream_body_messages,
     upstream_error_message,
     upstream_exception_chain,
@@ -2732,8 +2731,7 @@ async def resolve_request_context(
     # capability detection needs the underlying implementation, so keep both.
     gate_instance: str | None
     gate_impl: LLMProvider | None
-    client = raw_request.client
-    country_gate = request_country_gate(config, raw_request.headers, client.host if client is not None else None)
+    country_gate = country_gate_for(config, raw_request)
     # A policy name, or a catalog ID with several offerings, resolves to a plan.
     # Everything below keys on the plan's head candidate, as it would on a plain model.
     plan = await _compile_request_plan(
