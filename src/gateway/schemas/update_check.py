@@ -1,14 +1,25 @@
 """Request and response models of the update-check domain."""
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
 
 Severity = Literal["low", "medium", "high", "critical"]
 
 MAX_SUMMARY = 500
 MAX_ADVISORIES = 50
+
+
+def _require_https(value: str) -> str:
+    # The dashboard renders these as links, so a javascript: or data: URL would run in its origin.
+    if not value.lower().startswith("https://"):
+        msg = "link must start with https://"
+        raise ValueError(msg)
+    return value
+
+
+HttpsLink = Annotated[str, AfterValidator(_require_https)]
 
 
 class UpdateCheckAdvisory(BaseModel):
@@ -17,7 +28,7 @@ class UpdateCheckAdvisory(BaseModel):
     id: str = Field(max_length=64)
     summary: str = Field(max_length=MAX_SUMMARY)
     severity: Severity
-    url: str = Field(max_length=500)
+    url: HttpsLink = Field(max_length=500)
     fixed_in: str | None = Field(default=None, max_length=64)
 
     @field_validator("summary", mode="before")
@@ -31,7 +42,7 @@ class UpdateCheckReply(BaseModel):
     """What otari.ai answers a check with. Anything else in the reply is ignored."""
 
     latest_version: str | None = Field(default=None, max_length=64)
-    release_url: str | None = Field(default=None, max_length=500)
+    release_url: HttpsLink | None = Field(default=None, max_length=500)
     advisories: list[UpdateCheckAdvisory] = Field(default_factory=list, max_length=MAX_ADVISORIES)
 
     @field_validator("advisories", mode="before")
