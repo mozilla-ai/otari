@@ -104,7 +104,7 @@ async def test_create_materializes_onto_existing_members_but_skips_an_override(a
         user=owner,
         workspace_id=workspace.id,
         request=WorkspaceMemberBudgetPolicyCreate(
-            budget_id=await create_budget(async_db, name="Default", max_budget=50.0, budget_duration_sec=86400)
+            budget_id=await create_budget(async_db, name="Default", max_budget=50.0, reset_cycle="daily")
         ),
     )
     assert created.max_budget == 50.0
@@ -116,7 +116,7 @@ async def test_create_materializes_onto_existing_members_but_skips_an_override(a
     assert await _limit(async_db, owner_budget) == 50.0
     owner_limit = await async_db.get(Budget, owner_budget.budget_id)
     assert owner_limit is not None
-    assert owner_limit.budget_duration_sec == 86400
+    assert owner_limit.reset_cycle == "daily"
     # The window is the member's own, stamped when they were materialized.
     assert owner_budget.period_end is not None
 
@@ -504,10 +504,8 @@ async def test_concurrent_default_create_and_member_add_both_land(
 async def test_a_calendar_aligned_budget_materializes_a_window_that_rolls(async_db: AsyncSession) -> None:
     """A cadence the budget declares has to reach the ceiling it hands out.
 
-    Materialization derived the window from ``budget_duration_sec`` alone, in a
-    local copy of the derivation that predated budgets being able to carry an
-    alignment. A calendar-aligned budget therefore produced a ceiling with a null
-    window, and ``_roll_expired_periods`` only rolls a window that exists, so the
+    A calendar cycle has to produce a ceiling with a window, because
+    ``_roll_expired_periods`` only rolls a window that exists, so the
     cadence was silently ignored forever and spend accumulated until the member
     was permanently refused. Nothing surfaced it: the row looked normal.
     """
@@ -520,7 +518,7 @@ async def test_a_calendar_aligned_budget_materializes_a_window_that_rolls(async_
         user=owner,
         workspace_id=workspace.id,
         request=WorkspaceMemberBudgetPolicyCreate(
-            budget_id=await create_budget(async_db, max_budget=500.0, reset_alignment="calendar_month")
+            budget_id=await create_budget(async_db, max_budget=500.0, reset_cycle="monthly", reset_month_day=1)
         ),
     )
 
@@ -603,13 +601,11 @@ async def test_removing_a_member_takes_their_workspace_ceiling_with_them(async_d
     assert await _member_budget(async_db, added.id) is None, "the ceiling must not outlive the membership"
 
 
-async def test_the_read_surface_reports_a_calendar_alignment(async_db: AsyncSession) -> None:
+async def test_the_read_surface_reports_the_cycle(async_db: AsyncSession) -> None:
     """A period a caller cannot read is a period it has to fetch the budget to learn.
 
-    The two period fields are exclusive (a CHECK on ``budgets`` refuses both), so
-    a default naming a calendar-aligned budget has a null ``budget_duration_sec``.
-    While that was the only period field on this shape, such a default read back
-    with nothing at all in it, which is indistinguishable from a budget that never
+    A default naming a calendar-cycle budget has to read back with its cycle;
+    with nothing in it, it would be indistinguishable from a budget that never
     resets. ``ScopedBudgetResponse`` already carries both off the budget for the
     same reason, and so does the platform's own policy read shape.
     """
@@ -622,19 +618,20 @@ async def test_the_read_surface_reports_a_calendar_alignment(async_db: AsyncSess
         user=owner,
         workspace_id=workspace.id,
         request=WorkspaceMemberBudgetPolicyCreate(
-            budget_id=await create_budget(async_db, max_budget=250.0, reset_alignment="calendar_month")
+            budget_id=await create_budget(async_db, max_budget=250.0, reset_cycle="monthly", reset_month_day=1)
         ),
     )
 
-    assert created.reset_alignment == "calendar_month"
-    assert created.budget_duration_sec is None
+    assert created.reset_cycle == "monthly"
+    assert created.reset_month_day == 1
+    assert created.reset_every_n is None
 
     listed = await service.list_member_policies(user=owner, workspace_id=workspace.id)
-    assert [one.reset_alignment for one in listed.data] == ["calendar_month"]
+    assert [one.reset_cycle for one in listed.data] == ["monthly"]
 
 
-async def test_a_rolling_budget_still_reads_back_with_no_alignment(async_db: AsyncSession) -> None:
-    """The other arm of the exclusive pair, so the new field cannot be a constant."""
+async def test_another_cycle_reads_back_as_itself(async_db: AsyncSession) -> None:
+    """A second cycle, so the field cannot be a constant."""
     org = await create_organization(async_db, slug="acme-read-rolling")
     owner = await create_member(async_db, org, role="owner", full_name="Owner")
     workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
@@ -643,12 +640,12 @@ async def test_a_rolling_budget_still_reads_back_with_no_alignment(async_db: Asy
         user=owner,
         workspace_id=workspace.id,
         request=WorkspaceMemberBudgetPolicyCreate(
-            budget_id=await create_budget(async_db, max_budget=250.0, budget_duration_sec=86400)
+            budget_id=await create_budget(async_db, max_budget=250.0, reset_cycle="daily")
         ),
     )
 
-    assert created.budget_duration_sec == 86400
-    assert created.reset_alignment is None
+    assert created.reset_cycle == "daily"
+    assert created.reset_month_day is None
 
 
 async def test_bootstrap_provisioning_materializes_the_default_workspaces_defaults(
@@ -672,7 +669,7 @@ async def test_bootstrap_provisioning_materializes_the_default_workspaces_defaul
     workspace = await workspaces.get_by_organization_and_name(organization.id, DEFAULT_WORKSPACE_NAME)
     assert workspace is not None
 
-    budget_id = await create_budget(async_db, max_budget=125.0, reset_alignment="calendar_month")
+    budget_id = await create_budget(async_db, max_budget=125.0, reset_cycle="monthly", reset_month_day=1)
     async_db.add(WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=budget_id))
     await async_db.commit()
 

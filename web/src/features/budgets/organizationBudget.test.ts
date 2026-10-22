@@ -1,36 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import type { OrganizationBudget } from "@/client"
 import {
   hasNoLimit,
   limitLabel,
-  PERIOD_OPTIONS,
-  periodLabel,
-  periodValue,
   scopeLabel,
-  shortPeriodLabel,
 } from "@/features/budgets/organizationBudget"
 import { workspace } from "@/tests/fixtures"
-
-function budget(
-  overrides: Partial<OrganizationBudget> = {},
-): OrganizationBudget {
-  return {
-    budget_id: "abcd1234-2222-3333-4444-555555555555",
-    organization_id: "11111111-1111-1111-1111-111111111111",
-    name: null,
-    max_budget: 250,
-    token_limit: null,
-    request_limit: null,
-    budget_duration_sec: null,
-    reset_alignment: "calendar_month",
-    ceiling_count: 0,
-    applied_to: [],
-    created_at: "2026-01-01T00:00:00+00:00",
-    updated_at: "2026-01-01T00:00:00+00:00",
-    ...overrides,
-  }
-}
 
 const caps = (
   overrides: Partial<{
@@ -83,140 +58,6 @@ describe("limitLabel", () => {
     expect(label).toContain("25")
     expect(label).toContain("1,000 tokens")
     expect(label).toContain("10 requests")
-  })
-})
-
-describe("periodLabel", () => {
-  it("names each calendar boundary with the instant it resets on", () => {
-    expect(
-      periodLabel({
-        reset_alignment: "calendar_day",
-        budget_duration_sec: null,
-      }),
-    ).toContain("UTC midnight")
-    expect(
-      periodLabel({
-        reset_alignment: "calendar_week",
-        budget_duration_sec: null,
-      }),
-    ).toContain("Monday")
-    expect(
-      periodLabel({
-        reset_alignment: "calendar_month",
-        budget_duration_sec: null,
-      }),
-    ).toContain("1st")
-  })
-
-  it("says a duration is measured from the last reset, not from a clock time", () => {
-    // The distinction the page exists to keep honest: 86400 does not mean
-    // "resets at midnight", it means "at least 24 hours, restarted on next use".
-    const label = periodLabel({
-      reset_alignment: null,
-      budget_duration_sec: 86_400,
-    })
-    expect(label).toContain("1 day")
-    expect(label).toContain("from the last reset")
-  })
-
-  it("falls back to seconds for a duration that is not whole hours", () => {
-    expect(
-      periodLabel({ reset_alignment: null, budget_duration_sec: 90 }),
-    ).toBe("Every 90s, from the last reset")
-  })
-
-  it("says never when a budget carries no period at all", () => {
-    expect(
-      periodLabel({ reset_alignment: null, budget_duration_sec: null }),
-    ).toBe("Never")
-  })
-
-  it("prefers the alignment when a row somehow carries both", () => {
-    // The database refuses the pair, so this is unreachable through either
-    // surface; asserted because the alignment is the one that actually governs
-    // the reset in `_aligned_window`, so a row read from a hand-edited database
-    // should not be described by the field that is ignored.
-    expect(
-      periodLabel({
-        reset_alignment: "calendar_month",
-        budget_duration_sec: 86_400,
-      }),
-    ).toContain("1st")
-  })
-})
-
-describe("periodValue", () => {
-  it("opens the form on the budget's own boundary", () => {
-    expect(periodValue(budget({ reset_alignment: "calendar_day" }))).toBe(
-      "calendar_day",
-    )
-  })
-
-  it("defaults a new budget to monthly", () => {
-    expect(periodValue(undefined)).toBe("calendar_month")
-  })
-
-  it("opens on no reset for a duration the form cannot express", () => {
-    // Rather than proposing a boundary the budget never had. The dialog warns
-    // that saving replaces the duration, which is the honest version of this.
-    expect(
-      periodValue(
-        budget({ reset_alignment: null, budget_duration_sec: 86_400 }),
-      ),
-    ).toBe("none")
-  })
-
-  it("only ever returns a value the picker offers", () => {
-    const offered = PERIOD_OPTIONS.map((option) => option.value)
-    for (const alignment of [
-      "calendar_day",
-      "calendar_week",
-      "calendar_month",
-    ]) {
-      expect(offered).toContain(
-        periodValue(budget({ reset_alignment: alignment })),
-      )
-    }
-    expect(offered).toContain(periodValue(undefined))
-  })
-})
-
-describe("shortPeriodLabel", () => {
-  it("names a calendar boundary as its bare unit", () => {
-    expect(
-      shortPeriodLabel(budget({ reset_alignment: "calendar_month" })),
-    ).toBe("month")
-    expect(shortPeriodLabel(budget({ reset_alignment: "calendar_week" }))).toBe(
-      "week",
-    )
-    expect(shortPeriodLabel(budget({ reset_alignment: "calendar_day" }))).toBe(
-      "day",
-    )
-  })
-
-  it("counts a rolling duration rather than naming it, whatever its length", () => {
-    // A count, never a calendar word: "30 days" is the deployment form's
-    // "Monthly" preset, and it is not the calendar month `calendar_month` is, so
-    // the two must not read alike in a picker. That makes one day "1 day" too,
-    // since a lone singular reading "day" beside "7 days" is arbitrary.
-    const rolling = (seconds: number) =>
-      shortPeriodLabel(
-        budget({ reset_alignment: null, budget_duration_sec: seconds }),
-      )
-    expect(rolling(86_400)).toBe("1 day")
-    expect(rolling(7 * 86_400)).toBe("7 days")
-    expect(rolling(30 * 86_400)).toBe("30 days")
-    expect(rolling(3_600)).toBe("1 hour")
-    expect(rolling(12 * 3_600)).toBe("12 hours")
-    expect(rolling(90)).toBe("90s")
-  })
-
-  it("has no unit for a budget that never resets", () => {
-    expect(
-      shortPeriodLabel(
-        budget({ reset_alignment: null, budget_duration_sec: null }),
-      ),
-    ).toBeUndefined()
   })
 })
 

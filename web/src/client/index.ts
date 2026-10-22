@@ -228,6 +228,9 @@ export type BudgetResetLog = Schemas["BudgetResetLogResponse"]
 export type ScopedBudget = Schemas["ScopedBudgetResponse"]
 export type CreateScopedBudgetRequest = Schemas["CreateScopedBudgetRequest"]
 export type UpdateScopedBudgetRequest = Schemas["UpdateScopedBudgetRequest"]
+// The cadence moved onto the budget with the limit, so it is derived from the
+// budget request now rather than from the ceiling's.
+export type BudgetResetCycle = NonNullable<CreateBudgetRequest["reset_cycle"]>
 
 // ---------------------------------------------------------------------------
 // Models, pricing and providers

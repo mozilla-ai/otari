@@ -75,7 +75,7 @@ def test_excluded_key_logged_but_not_billed_or_gated(
     _seed(client, master_key_header)
     # A tiny budget that a normal $7.50 request could never pass.
     budget = client.post(
-        f"{API_ROOT}/budgets", json={"max_budget": 0.01, "budget_duration_sec": 86400}, headers=master_key_header
+        f"{API_ROOT}/budgets", json={"max_budget": 0.01, "reset_cycle": "daily"}, headers=master_key_header
     ).json()
     client.post(
         f"{API_ROOT}/users",

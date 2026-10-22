@@ -15,11 +15,8 @@ import {
   shortBudgetId,
   unnamedBudgetLabel,
 } from "@/features/budgets/budgetLabel"
-import {
-  hasNoLimit,
-  limitLabel,
-  PERIOD_OPTIONS,
-} from "@/features/budgets/organizationBudget"
+import { hasNoLimit, limitLabel } from "@/features/budgets/organizationBudget"
+import { cycleFields, shortCycleLabel } from "@/features/budgets/resetCycle"
 import { canManage } from "@/features/organization/roles"
 import {
   useApiKeyCeilings,
@@ -53,8 +50,17 @@ export interface KeyBudgetDraft {
 export const EMPTY_KEY_BUDGET: KeyBudgetDraft = {
   choice: NO_BUDGET,
   amount: "",
-  period: "calendar_month",
+  period: "monthly",
 }
+
+// The cycles a cap typed in here can take: the calendar ones with no setting to
+// choose, each rolling on its first day. Any other cycle is set on the budget.
+const PERIOD_OPTIONS = [
+  { value: "never", label: "No reset" },
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+]
 
 /** The custom amount as dollars, or undefined when it is not a positive number. */
 function customAmount(draft: KeyBudgetDraft): number | undefined {
@@ -103,26 +109,12 @@ export function ceilingUsage(ceiling: KeyCeiling): string {
   return `${formatUsd(spent)} of ${formatUsd(ceiling.max_budget)}`
 }
 
-const CALENDAR_RESETS: Record<string, string> = {
-  calendar_day: "resets daily",
-  calendar_week: "resets weekly",
-  calendar_month: "resets monthly",
-}
-
 /** How often a budget resets, in words: "/ 30 days" did not read as a reset. */
 function resetPhrase(budget: CappingBudget): string {
-  if (budget.reset_alignment) {
-    return CALENDAR_RESETS[budget.reset_alignment] ?? "resets"
-  }
-  const seconds = budget.budget_duration_sec
-  if (!seconds) return "never resets"
-  const [count, unit] =
-    seconds % 86_400 === 0
-      ? [seconds / 86_400, "day"]
-      : seconds % 3_600 === 0
-        ? [seconds / 3_600, "hour"]
-        : [seconds, "second"]
-  return count === 1 ? `resets every ${unit}` : `resets every ${count} ${unit}s`
+  const unit = shortCycleLabel(budget)
+  if (unit === undefined) return "never resets"
+  // Several weekdays read as a count ("2x a week") rather than as a unit.
+  return unit.includes(" a ") ? `resets ${unit}` : `resets every ${unit}`
 }
 
 /** A budget as the picker offers it: its name, its limit, and its reset spelled out. */
@@ -212,9 +204,7 @@ export function useKeyBudgets(isDeploymentWide: boolean, enabled = true) {
         const body = {
           name: `${keyLabel} (API key)`.slice(0, 200),
           max_budget: customAmount(draft) ?? null,
-          reset_alignment:
-            PERIOD_OPTIONS.find((option) => option.value === draft.period)
-              ?.alignment ?? null,
+          ...cycleFields(draft.period, { weekdayBits: [0], monthDay: 1 }),
         }
         created = isDeploymentWide
           ? await createDeploymentBudget.mutateAsync(body)

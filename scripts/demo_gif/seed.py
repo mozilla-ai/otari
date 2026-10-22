@@ -158,7 +158,13 @@ ORGANIZATION, WORKSPACE = default_tenancy()
 # spend once the usage rows exist, at the end of this file.
 budgets: dict[str, Budget] = {}
 for name in BUDGETS:
-    budgets[name] = Budget(budget_id=str(uuid.uuid4()), name=name, max_budget=0.0, budget_duration_sec=MONTH)
+    budgets[name] = Budget(
+        budget_id=str(uuid.uuid4()),
+        name=name,
+        max_budget=0.0,
+        reset_cycle="monthly",
+        reset_month_day=1,
+    )
     db.add(budgets[name])
 
 # --- Members -----------------------------------------------------------------

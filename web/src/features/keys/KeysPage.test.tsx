@@ -234,7 +234,6 @@ function mockApi(
         return jsonResponse(
           budget({
             budget_id: "b-custom",
-            budget_duration_sec: null,
             ...JSON.parse(String(init?.body)),
           }),
         )
@@ -1181,8 +1180,12 @@ describe("KeysPage", () => {
             max_budget: 250,
             token_limit: null,
             request_limit: null,
-            budget_duration_sec: null,
-            reset_alignment: "calendar_month",
+            reset_cycle: "monthly",
+            reset_every_n: null,
+            reset_anchor_at: null,
+            reset_weekdays: null,
+            reset_month_day: 1,
+            reset_month: null,
             applied_to: [],
             ceiling_count: 0,
             created_at: "2026-01-01T00:00:00+00:00",
@@ -1273,7 +1276,12 @@ describe("KeysPage", () => {
       expect(JSON.parse(String(created?.[1]?.body))).toEqual({
         name: "ci-bot (API key)",
         max_budget: 50,
-        reset_alignment: "calendar_month",
+        reset_cycle: "monthly",
+        reset_every_n: null,
+        reset_anchor_at: null,
+        reset_weekdays: null,
+        reset_month_day: 1,
+        reset_month: null,
       })
       const post = ceilingPost(fetchMock, "/scoped-budgets")
       expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({

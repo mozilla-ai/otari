@@ -638,12 +638,12 @@ def check_mail_is_honestly_unavailable(base_url: str, admin: dict[str, str]) -> 
 
 
 def create_key(base_url: str, admin: dict[str, str], names: Names) -> str:
-    """Create a calendar-day budget, a user on it and an API key for it, and return the raw key."""
+    """Create a daily budget, a user on it and an API key for it, and return the raw key."""
     status, body = _request(
         "POST",
         f"{base_url}{API_ROOT}/budgets",
         headers=admin,
-        payload={"name": "OSS edition smoke", "max_budget": 100, "reset_alignment": "calendar_day"},
+        payload={"name": "OSS edition smoke", "max_budget": 100, "reset_cycle": "daily"},
     )
     _expect(status, 200, f"POST {API_ROOT}/budgets", body)
     budget_id = body.get("budget_id") if isinstance(body, dict) else None
@@ -668,7 +668,7 @@ def create_key(base_url: str, admin: dict[str, str], names: Names) -> str:
     key = body.get("key") if isinstance(body, dict) else None
     if not isinstance(key, str) or not key:
         raise SmokeFailure(f"POST {API_ROOT}/keys returned no key: {body!r}")
-    log("Created a calendar-day budget, a user on it and an API key")
+    log("Created a daily budget, a user on it and an API key")
     return key
 
 
