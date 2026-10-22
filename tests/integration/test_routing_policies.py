@@ -273,6 +273,7 @@ def test_a_plain_model_names_the_instance_and_model_that_served_it(
     assert all(duration >= 0 for duration in timing.values())
     # The gateway's share and the provider's add up to the whole, to the rounding of each.
     assert abs(timing["otari"] + timing["upstream"] - timing["total"]) <= 0.2
+    assert abs(timing["total"] - int(resp.headers[RESPONSE_DURATION_HEADER])) <= 0.5
 
 
 def _server_timing(resp: Any) -> dict[str, float]:
@@ -307,6 +308,7 @@ def test_failover_serves_the_next_candidate_and_bills_it_once(client: TestClient
     async def flaky(**kwargs: Any) -> ChatCompletion:
         calls.append(kwargs["model"])
         if kwargs["model"] == "openai:gpt-5-mini":
+            await asyncio.sleep(0.05)
             raise _http_error(503)
         return _completion("claude-haiku-4-5")
 
@@ -315,6 +317,8 @@ def test_failover_serves_the_next_candidate_and_bills_it_once(client: TestClient
 
     assert resp.status_code == 200, resp.text
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+    # The candidate that failed spent provider time, not Otari's.
+    assert _server_timing(resp)["upstream"] >= 50
     # Relabeled to the policy, so a fallover is invisible to the caller's code.
     assert resp.json()["model"] == "fast"
     # ...but not to a caller reading the headers, which name what served it.

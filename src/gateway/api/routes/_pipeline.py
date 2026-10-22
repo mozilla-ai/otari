@@ -1323,14 +1323,16 @@ def _served_by_headers(
     # but a header cannot carry would fail the response after the provider answered.
     if model.isascii() and model.isprintable():
         headers[MODEL_HEADER] = model
+    # One reading, so ``Server-Timing``'s ``total`` and the duration header end together.
+    now = time.monotonic()
     return (
         headers
         | {
             ATTEMPT_COUNT_HEADER: str(sent),
             FALLBACK_HEADER: "true" if fell_back else "false",
-            RESPONSE_DURATION_HEADER: str(_elapsed_ms(ctx.started_at)),
+            RESPONSE_DURATION_HEADER: str(round((now - ctx.started_at) * 1000)),
         }
-        | _server_timing(ctx)
+        | _server_timing(ctx, now)
     )
 
 
@@ -1340,7 +1342,7 @@ def _mark_dispatched(ctx: RequestContext) -> None:
         ctx.dispatched_at = time.monotonic()
 
 
-def _server_timing(ctx: RequestContext) -> dict[str, str]:
+def _server_timing(ctx: RequestContext, now: float) -> dict[str, str]:
     """``Server-Timing`` splitting the response's duration into the gateway's time and the provider's.
 
     ``otari`` runs from the handler preamble to the first provider attempt: the
@@ -1351,7 +1353,6 @@ def _server_timing(ctx: RequestContext) -> dict[str, str]:
     """
     if ctx.dispatched_at is None:
         return {}
-    now = time.monotonic()
     metrics = (
         ("otari", ctx.dispatched_at - ctx.started_at, "Otari before the provider"),
         ("upstream", now - ctx.dispatched_at, "Provider until its answer or first chunk"),
