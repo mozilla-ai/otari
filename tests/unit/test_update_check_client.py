@@ -54,6 +54,11 @@ async def test_a_refusal_carries_the_servers_retry_after() -> None:
         httpx.Response(200, json={"advisories": [{"id": "GHSA-1"}]}),
         httpx.Response(200, content=b'{"latest_version": "' + b"9" * MAX_REPLY_BYTES + b'"}'),
         httpx.Response(302, headers={"Location": "https://elsewhere.example/"}),
+        httpx.Response(200, json={"latest_version": "0.31.0", "release_url": "javascript:alert(1)"}),
+        httpx.Response(
+            200,
+            json={"advisories": [{"id": "GHSA-1", "summary": "s", "severity": "high", "url": "data:text/html,x"}]},
+        ),
     ],
 )
 @pytest.mark.asyncio
