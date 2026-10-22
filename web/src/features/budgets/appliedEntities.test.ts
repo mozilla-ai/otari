@@ -8,6 +8,7 @@ import {
   entityFromKey,
   entityGroups,
   entityKey,
+  entityNamer,
   takenEntities,
 } from "./appliedEntities"
 
@@ -173,5 +174,36 @@ describe("describeEntity", () => {
         names,
       ),
     ).toBe("Workspace member wm-9, openai:o3")
+  })
+})
+
+describe("entityNamer", () => {
+  const name = entityNamer(SOURCES, "Acme")
+
+  it("names an entity the way the picker offered it, with its kind", () => {
+    expect(
+      name(entityKey({ scope_type: "workspace_member", scope_id: "wm-1" })),
+    ).toEqual({
+      name: "Pat Okafor (Platform)",
+      kind: "Workspace member",
+    })
+    expect(
+      name(entityKey({ scope_type: "organization", scope_id: ORG })),
+    ).toEqual({
+      name: "Acme",
+      kind: "Whole organization",
+    })
+  })
+
+  it("falls back to a description for an entity no group offers", () => {
+    expect(
+      name(
+        entityKey({
+          scope_type: "workspace",
+          scope_id: "ws-1",
+          provider_key_id: "openai",
+        }),
+      ),
+    ).toEqual({ name: "Platform, on openai", kind: "Narrowed" })
   })
 })

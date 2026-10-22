@@ -181,7 +181,9 @@ the entities it applies to (the organization, workspaces, members, API keys,
 providers and models), while a deployment operator gets the deployment's own
 budgets, their active organization's, and the gateway users assigned to them.
 Usage, activity, traces, routing and the overview's key count likewise show an
-operator their active organization, not every organization on the deployment.
+operator their active organization, not every organization on the deployment. Each organization budget has a
+page of its own showing what every entity has spent this cycle, and deleting a
+budget stops it capping everything it applies to.
 
 Providers answers to the organization role rather than to deployment authority.
 Its owners and admins manage the keys, the models each key offers, and the rate
