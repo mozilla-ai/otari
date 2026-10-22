@@ -33,6 +33,8 @@ _SETTING_NAMES = frozenset(
         "budget_strategy",
         "budgets",
         "capture_agent_telemetry",
+        "client_country_database",
+        "client_country_header",
         "code_execution_executor",
         "code_execution_workspace_default",
         "cors_allow_origins",

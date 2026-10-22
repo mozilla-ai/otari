@@ -1,5 +1,6 @@
 """The inference domain: idempotent completion requests, structured decisions and dialect bridges."""
 
+from gateway.services.inference._client_country import CountryDatabaseError, client_country, open_country_database
 from gateway.services.inference._decisions import (
     DecisionProvider,
     DecisionProviderError,
@@ -112,6 +113,7 @@ __all__ = [
     "Admission",
     "BlockedCaller",
     "Claimed",
+    "CountryDatabaseError",
     "DecisionProvider",
     "DecisionProviderError",
     "DeploymentCharge",
@@ -130,6 +132,7 @@ __all__ = [
     "call_messages",
     "call_responses",
     "chat_user_fields",
+    "client_country",
     "conversation_cache_key",
     "close_decision_client",
     "decision_body",
@@ -137,6 +140,7 @@ __all__ = [
     "is_chat_stream_cost_carrier",
     "keep_claim_alive",
     "messages_user_fields",
+    "open_country_database",
     "reported_charge",
     "request_decision",
     "responses_user_fields",
