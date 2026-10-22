@@ -845,6 +845,30 @@ def test_an_unadvertised_model_is_withheld_from_the_operator_and_the_master_key(
     assert port.asked_for[-1] is None, "the master key asks for the deployment-wide answer"
 
 
+def test_a_hosted_model_switched_on_unpriced_is_listed_for_every_caller_it_serves(
+    client: TestClient, master_key_header: dict[str, str], world: _World
+) -> None:
+    """Nothing prices it and nothing dials the hosted provider, so the roster is what lists it.
+
+    A config.yml provider copied onto a hosted provider is exactly this: its
+    models are switched on and, on a deployment that prices nothing, unpriced.
+    """
+    unpriced = "mistral:open-mistral-free"
+    bind_model_provider(client, HostedModelProvider("mistral", models={"mistral": {"open-mistral-free"}}))
+
+    for who in ("alpha_member", "beta_member", "alpha_owner", "superuser", "beta_root"):
+        listed = _listing_as(client, world, who)
+        assert unpriced in listed, who
+        assert listed[unpriced]["pricing"] is None, who
+        # The roster is the deployment's whole say on the provider: the priced
+        # model it switched off stays withheld.
+        assert _MISTRAL_MODEL not in listed, who
+
+    response = client.get(f"{API_ROOT}/models", headers=master_key_header)
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert unpriced in {model["id"] for model in response.json()["data"]}
+
+
 def test_the_master_key_keeps_a_model_its_default_workspace_reaches_on_its_own_key(
     client: TestClient, master_key_header: dict[str, str], world: _World, db_session_factory: Callable[[], Session]
 ) -> None:
