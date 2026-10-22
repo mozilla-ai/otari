@@ -312,8 +312,8 @@ async def test_the_call_receives_a_safety_identifier(provider: LLMProvider, mode
     assert "user" not in captured
 
 
-def _identifier(**overrides: Any) -> str | None:
-    inputs: dict[str, Any] = {"enabled": True, "key": None, "workspace_id": "ws", "tag": None, "user_id": "alice"}
+def _identifier(**overrides: Any) -> str:
+    inputs: dict[str, Any] = {"key": None, "workspace_id": "ws", "tag": None, "user_id": "alice"}
     return end_user_identifier(**{**inputs, **overrides})
 
 
@@ -332,16 +332,12 @@ def test_binding_replaces_both_caller_tags_with_the_identifier() -> None:
     assert bind_upstream_user(fields, "id") == {"model": "m", UPSTREAM_USER_FIELD: "id"}
 
 
-def test_turned_off_there_is_no_identifier_and_no_refusal() -> None:
-    assert _identifier(enabled=False, workspace_id=None, user_id=None) is None
-
-
 @pytest.mark.parametrize(
     "missing",
     [{"workspace_id": None}, {"user_id": None}, {"workspace_id": None, "tag": "end-user-7"}],
     ids=["no-workspace", "no-user-no-tag", "tag-but-no-workspace"],
 )
-def test_turned_on_a_request_with_nothing_to_derive_it_from_is_refused(missing: dict[str, Any]) -> None:
+def test_a_request_with_nothing_to_derive_it_from_is_refused(missing: dict[str, Any]) -> None:
     with pytest.raises(UnidentifiedEndUserError):
         _identifier(**missing)
 

@@ -704,16 +704,15 @@ def _validate_provider_user_identifier_key(config: GatewayConfig) -> None:
     """Refuse an end-user identifier key that shares a value with another secret.
 
     A missing key only warns: refusing to start would take down every deployment
-    that upgrades with the identifier on, which is the default.
+    that upgrades without one.
     """
     key = config.provider_user_identifier_key
     if key is None:
-        if config.provider_user_identifier_enabled:
-            logger.warning(
-                "provider_user_identifier_enabled is on with no OTARI_PROVIDER_USER_IDENTIFIER_KEY, so the "
-                "end-user identifier sent to providers is an unkeyed digest: anyone who knows a workspace id "
-                "can test a guessed user tag against it. Set the key to a random value of at least 32 characters."
-            )
+        logger.warning(
+            "OTARI_PROVIDER_USER_IDENTIFIER_KEY is unset, so the end-user identifier sent to providers is an "
+            "unkeyed digest: anyone who knows a workspace id can test a guessed user tag against it. Set the "
+            "key to a random value of at least 32 characters."
+        )
         return
     _refuse_shared_secret("OTARI_PROVIDER_USER_IDENTIFIER_KEY", key, config)
 

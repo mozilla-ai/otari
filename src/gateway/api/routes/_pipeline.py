@@ -1220,8 +1220,7 @@ class RequestContext:
         # pay that per candidate.
         self.organization_id = organization_id
         self.user_id = user_id
-        # The end-user identifier each provider call carries, or `None` while
-        # the feature is off.
+        # The end-user identifier each provider call carries.
         self.upstream_user = upstream_user
         # The caller's request tags, written onto every usage row the request
         # writes once this context exists.
@@ -1364,10 +1363,9 @@ def _end_user(
     user_id: str | None,
     *,
     session: bool = False,
-) -> str | None:
+) -> str:
     try:
         return end_user_identifier(
-            enabled=config.provider_user_identifier_enabled,
             key=config.provider_user_identifier_key,
             workspace_id=workspace_id,
             tag=tag,

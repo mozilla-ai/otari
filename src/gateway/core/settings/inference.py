@@ -32,20 +32,13 @@ class InferenceSettings(BaseModel):
         ),
     )
 
-    provider_user_identifier_enabled: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
-        default=True,
-        description=(
-            "Whether each provider call carries an opaque identifier of the end user behind it. A startup "
-            "setting: the dashboard shows it but cannot change it. See "
-            "docs/configuration.md#end-user-identifiers."
-        ),
-    )
     provider_user_identifier_key: Annotated[str | None, SECRET] = Field(
         default=None,
         min_length=32,
         description=(
-            "Key for the digest behind provider_user_identifier_enabled. Unset, the digest is unkeyed. "
-            "Must differ from OTARI_SECRET_KEY and the master key."
+            "Key for the digest behind the opaque end-user identifier each provider call carries. Unset, "
+            "the digest is unkeyed. Must differ from OTARI_SECRET_KEY and the master key. See "
+            "docs/configuration.md#end-user-identifiers."
         ),
     )
 

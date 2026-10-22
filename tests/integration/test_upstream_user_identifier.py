@@ -253,15 +253,6 @@ def test_a_streamed_request_carries_it(make_client: ClientFactory, captured: lis
     assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
 
 
-def test_turned_off_nothing_is_sent(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
-    client = make_client(provider_user_identifier_enabled=False)
-    headers, _ = _keyed_user(client)
-
-    _chat(client, headers, user="alice")
-
-    assert not {"user", "safety_identifier", UPSTREAM_USER_FIELD} & set(captured[0])
-
-
 # ---------------------------------------------------------------------------
 # Responses
 # ---------------------------------------------------------------------------
@@ -323,17 +314,6 @@ def test_responses_to_anthropic_sends_metadata_user_id_and_never_user(
     assert not {"user", "safety_identifier"} & set(responses_captured[0])
 
 
-def test_responses_turned_off_sends_no_identifier_at_all(
-    make_client: ClientFactory, responses_captured: list[dict[str, Any]]
-) -> None:
-    client = make_client(provider_user_identifier_enabled=False)
-    headers, _ = _keyed_user(client)
-
-    _respond(client, headers, user="alice", safety_identifier="caller-chosen")
-
-    assert not {"user", "safety_identifier", UPSTREAM_USER_FIELD} & set(responses_captured[0])
-
-
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
@@ -385,17 +365,6 @@ def test_messages_without_a_tag_digests_the_resolved_user(
     _message(client, headers)
 
     assert messages_captured[0]["metadata"] == {"user_id": upstream_user_identifier(workspace, "alice", None)}
-
-
-def test_messages_turned_off_drops_the_callers_user_id(
-    make_client: ClientFactory, messages_captured: list[dict[str, Any]]
-) -> None:
-    client = make_client(provider_user_identifier_enabled=False)
-    headers, _ = _keyed_user(client)
-
-    _message(client, headers, metadata={"user_id": "alice"})
-
-    assert not {"metadata", UPSTREAM_USER_FIELD} & set(messages_captured[0])
 
 
 def test_messages_served_as_a_chat_completion_gets_the_providers_chat_field(

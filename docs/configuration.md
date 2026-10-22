@@ -100,7 +100,6 @@ the corresponding startup value after the database is available.
 | `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
 | `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
-| `provider_user_identifier_enabled` | Send each provider call an opaque, per-end-user identifier, so a provider's policy block lands on one user rather than the whole account. Defaults to `true`. See [End-user identifiers](#end-user-identifiers). |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
 | `streaming_first_chunk_hold_ms` | How long the gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
@@ -691,8 +690,7 @@ provider that enforces its usage policy per end user needs an identifier for
 each one, or a block meant for one person lands on the account, and every user
 and workspace on the deployment loses that provider.
 
-So while `provider_user_identifier_enabled` is on, which it is by default, Otari
-sends each provider call a digest of the workspace and the user tag the caller
+So Otari sends each provider call a digest of the workspace and the user tag the caller
 sent Otari, or of the workspace and the resolved user when the caller sent no
 tag. On chat completions and Responses the tag is `safety_identifier`, or `user`
 when the request has none; on Messages it is `metadata.user_id`. The table
@@ -729,6 +727,9 @@ back to a user. Every other provider gets nothing: some have no such field
 (Vertex AI, whose labels are for billing only, and Mistral), some run your own
 models, and for the rest an unknown field can fail the call. A Responses or
 Messages request served as a chat completion gets that provider's chat field.
+
+Nothing turns the identifier off. OpenAI's partner program for gateways requires
+one on every request, and a provider that cannot take one already gets nothing.
 
 Set `OTARI_PROVIDER_USER_IDENTIFIER_KEY` to a random value of at least 32
 characters (`openssl rand -base64 32`) to key the digest. Without it the digest

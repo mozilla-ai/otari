@@ -71,23 +71,20 @@ class UnidentifiedEndUserError(Exception):
 
 def end_user_identifier(
     *,
-    enabled: bool,
     key: str | None,
     workspace_id: str | None,
     tag: str | None,
     user_id: str | None,
     session: bool = False,
-) -> str | None:
-    """The identifier a request's provider calls carry, or ``None`` while the feature is off.
+) -> str:
+    """The identifier a request's provider calls carry.
 
     The caller's own user tag wins over the resolved user, except on a dashboard
     ``session``: it names no end user, so its tag would let a member pick another's
-    identifier. While the feature is on, a request with nothing to derive it from
-    raises :class:`UnidentifiedEndUserError` rather than going upstream unscoped,
-    where a block would land on the whole account.
+    identifier. A request with nothing to derive it from raises
+    :class:`UnidentifiedEndUserError` rather than going upstream unscoped, where a
+    block would land on the whole account.
     """
-    if not enabled:
-        return None
     subject = user_id if session else tag or user_id
     if not workspace_id or not subject:
         raise UnidentifiedEndUserError
