@@ -1,13 +1,25 @@
 """The end-user identifier a completion sends its provider."""
 
-from collections.abc import Callable, Generator
+import time
+from collections.abc import AsyncIterator, Callable, Generator
 from typing import Any
 
 import pytest
-from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
+from any_llm.types.completion import (
+    ChatCompletion,
+    ChatCompletionChunk,
+    ChatCompletionMessage,
+    Choice,
+    ChoiceDelta,
+    ChunkChoice,
+    CompletionUsage,
+)
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.models.usage import UsageLog
 from gateway.services.inference import UPSTREAM_USER_FIELD, upstream_user_identifier
 
 from .conftest import build_test_client
@@ -78,9 +90,10 @@ def captured(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     return calls
 
 
-def _keyed_user(client: TestClient, user_id: str = "alice") -> tuple[dict[str, str], str]:
+def _keyed_user(client: TestClient, user_id: str = "alice", *, create_user: bool = True) -> tuple[dict[str, str], str]:
     """A key for ``user_id``, and the workspace it bills to."""
-    assert client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=_MASTER).status_code == 200
+    if create_user:
+        assert client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=_MASTER).status_code == 200
     created = client.post(f"{API_ROOT}/keys", json={"key_name": "k", "user_id": user_id}, headers=_MASTER)
     assert created.status_code == 200
     key = created.json()
@@ -295,6 +308,112 @@ def test_the_image_describe_call_carries_the_requests_identifier(
     identifier = upstream_user_identifier(workspace, "end-user-7", None)
     end_user_fields = {"user", "safety_identifier", "metadata", UPSTREAM_USER_FIELD}
     assert {key: value for key, value in described[0].items() if key in end_user_fields} == fields(identifier)
+
+
+# ---------------------------------------------------------------------------
+# Usage rows
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def served(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every chat completion succeeds, streamed or not."""
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        if not kwargs.get("stream"):
+            return _completion()
+
+        async def chunks() -> AsyncIterator[ChatCompletionChunk]:
+            yield ChatCompletionChunk(
+                id="chunk-1",
+                object="chat.completion.chunk",
+                created=0,
+                model="gpt-4o-mini",
+                choices=[ChunkChoice(index=0, delta=ChoiceDelta(role="assistant", content="hi"), finish_reason="stop")],
+                usage=CompletionUsage(prompt_tokens=4, completion_tokens=2, total_tokens=6),
+            )
+
+        return chunks()
+
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+
+def _logged_identifiers(postgres_url: str, count: int, *, timeout: float = 3.0) -> list[str | None]:
+    """The ``safety_identifier`` of each usage row, once ``count`` rows are written."""
+    engine = create_engine(postgres_url)
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            with Session(engine) as db:
+                identifiers = list(db.scalars(select(UsageLog.safety_identifier)).all())
+            if len(identifiers) >= count:
+                return identifiers
+            assert time.monotonic() < deadline, f"expected {count} usage rows, found {len(identifiers)}"
+            time.sleep(0.1)
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
+@pytest.mark.usefixtures("served")
+def test_the_usage_row_stores_the_identifier_the_provider_got(
+    make_client: ClientFactory, postgres_url: str, stream: bool
+) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers, safety_identifier="end-user-7", stream=stream)
+
+    assert _logged_identifiers(postgres_url, 1) == [upstream_user_identifier(workspace, "end-user-7", None)]
+
+
+@pytest.mark.usefixtures("captured")
+def test_a_failed_calls_usage_row_stores_the_identifier(make_client: ClientFactory, postgres_url: str) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers)
+
+    assert _logged_identifiers(postgres_url, 1) == [upstream_user_identifier(workspace, "alice", None)]
+
+
+@pytest.mark.usefixtures("captured")
+def test_a_refusal_after_the_user_is_resolved_stores_the_identifier(
+    make_client: ClientFactory, postgres_url: str
+) -> None:
+    client = make_client()
+    created = client.post(
+        f"{API_ROOT}/users", json={"user_id": "alice", "allowed_models": ["openai:gpt-4o"]}, headers=_MASTER
+    )
+    assert created.status_code == 200
+    headers, workspace = _keyed_user(client, create_user=False)
+
+    _chat(client, headers, safety_identifier="end-user-7")
+
+    assert _logged_identifiers(postgres_url, 1) == [upstream_user_identifier(workspace, "end-user-7", None)]
+
+
+@pytest.mark.usefixtures("served")
+def test_the_image_describe_row_stores_the_requests_identifier(
+    make_client: ClientFactory, postgres_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_describe(**_kwargs: Any) -> ChatCompletion:
+        return _completion()
+
+    monkeypatch.setattr("gateway.services.vision.acompletion", fake_describe)
+    client = make_client(vision_strategy="describe", vision_describe_model="openai:gpt-4o-mini")
+    headers, workspace = _keyed_user(client)
+
+    _chat(
+        client,
+        headers,
+        model="ollama:llama3",
+        safety_identifier="end-user-7",
+        messages=[{"role": "user", "content": [{"type": "image_url", "image_url": {"url": _IMAGE}}]}],
+    )
+
+    identifier = upstream_user_identifier(workspace, "end-user-7", None)
+    assert _logged_identifiers(postgres_url, 2) == [identifier, identifier]
 
 
 # ---------------------------------------------------------------------------

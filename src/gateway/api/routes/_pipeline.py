@@ -1444,6 +1444,7 @@ async def resolve_dispatch_provider(
             started_at=ctx.started_at,
             request_id=ctx.request_id,
             tags=ctx.tags,
+            safety_identifier=ctx.upstream_user,
         )
         _raise_for_unresolvable_model(model_selector, exc)
     return await _prepare_for_dispatch(ctx, resolved, adapter=adapter, port=model_provider, billing=billing)
@@ -1513,6 +1514,7 @@ async def _refuse_if_hosted_model_switched_off(
         started_at=ctx.started_at,
         request_id=ctx.request_id,
         tags=ctx.tags,
+        safety_identifier=ctx.upstream_user,
     )
     raise adapter.error(
         status.HTTP_424_FAILED_DEPENDENCY,
@@ -1551,6 +1553,7 @@ async def _hold_at_deployment_paid_rate(
             started_at=ctx.started_at,
             request_id=ctx.request_id,
             tags=ctx.tags,
+            safety_identifier=ctx.upstream_user,
         )
         kind = (
             ErrorKind.INVALID_REQUEST
@@ -1604,6 +1607,7 @@ async def _admit_or_refuse(
             started_at=ctx.started_at,
             request_id=ctx.request_id,
             tags=ctx.tags,
+            safety_identifier=ctx.upstream_user,
         )
         raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)) from exc
     except Exception as exc:
@@ -1655,6 +1659,7 @@ async def _funding_unavailable(
         started_at=ctx.started_at,
         request_id=ctx.request_id,
         tags=ctx.tags,
+        safety_identifier=ctx.upstream_user,
     )
     return adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API)
 
@@ -1682,6 +1687,7 @@ async def _provider_not_configured(
         started_at=ctx.started_at,
         request_id=ctx.request_id,
         tags=ctx.tags,
+        safety_identifier=ctx.upstream_user,
     )
     public = missing.behind_alias(resolved.alias)
     return adapter.error(
@@ -2036,6 +2042,7 @@ async def _bill_vision_side_call(
     request_id: str | None = None,
     tags: dict[str, str] | None = None,
     source_label: str | None = None,
+    safety_identifier: str | None = None,
 ) -> None:
     """Meter and bill a vision describe side-call made during normalization.
 
@@ -2074,6 +2081,7 @@ async def _bill_vision_side_call(
         request_id=request_id,
         tags=tags,
         source_label=source_label,
+        safety_identifier=safety_identifier,
     )
     # Commit the spend directly via an unreserved handle (no held estimate to
     # release): this just adds the actual cost to users.spend. When the request is
@@ -2288,6 +2296,7 @@ async def _compile_request_plan(
     workspace_id: uuid.UUID,
     request_id: str | None = None,
     tags: dict[str, str] | None = None,
+    safety_identifier: str | None = None,
 ) -> CompiledPlan | None:
     """Compile ``model`` into a plan when it names a policy or a catalog ID with several offerings, else ``None``.
 
@@ -2358,6 +2367,7 @@ async def _compile_request_plan(
             started_at=started_at,
             request_id=request_id,
             tags=tags,
+            safety_identifier=safety_identifier,
         )
         raise adapter.error(exc.status_code, exc.caller_detail, ErrorKind.PERMISSION) from exc
 
@@ -2691,6 +2701,7 @@ async def resolve_request_context(
         workspace_id=workspace_id,
         request_id=request_id,
         tags=tags,
+        safety_identifier=upstream_user,
     )
     if plan is not None:
         head = plan.head
@@ -2741,6 +2752,7 @@ async def resolve_request_context(
             started_at=started_at,
             request_id=request_id,
             tags=tags,
+            safety_identifier=upstream_user,
         )
         raise adapter.error(
             key_refusal.status_code,
@@ -2780,6 +2792,7 @@ async def resolve_request_context(
                 started_at=started_at,
                 request_id=request_id,
                 tags=tags,
+                safety_identifier=upstream_user,
             )
             kind = ErrorKind.NOT_FOUND if refusal.status_code == status.HTTP_404_NOT_FOUND else ErrorKind.PERMISSION
             raise adapter.error(refusal.status_code, refusal.detail, kind, headers=error_headers(refusal.code))
@@ -2803,6 +2816,7 @@ async def resolve_request_context(
                     started_at=started_at,
                     request_id=request_id,
                     tags=tags,
+                    safety_identifier=upstream_user,
                 )
             raise
 
@@ -2901,6 +2915,7 @@ async def resolve_request_context(
                 started_at=started_at,
                 request_id=request_id,
                 tags=tags,
+                safety_identifier=upstream_user,
             )
         raise
     unresolved = unresolved_model_refusal(gate_instance, selector=model)
@@ -2919,6 +2934,7 @@ async def resolve_request_context(
             started_at=started_at,
             request_id=request_id,
             tags=tags,
+            safety_identifier=upstream_user,
         )
         raise adapter.error(
             unresolved.status_code,
@@ -2955,6 +2971,7 @@ async def resolve_request_context(
             started_at=started_at,
             request_id=request_id,
             tags=tags,
+            safety_identifier=upstream_user,
         )
         raise adapter.error(
             refusal.status_code,
@@ -3026,6 +3043,7 @@ async def resolve_request_context(
                     request_id=request_id,
                     tags=tags,
                     source_label=_session_trace_id(session, workspace_id, user_id, api_key_id),
+                    safety_identifier=upstream_user,
                 )
             # Attachments expanded the payload, so the stored inputs must
             # follow or a later fallover would reprice against the pre-
@@ -4335,6 +4353,7 @@ async def record_usage(
     prices: RequestPrices | None = None,
     deployment_paid: bool = False,
     source_label: str | None = None,
+    safety_identifier: str | None = None,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
@@ -4401,6 +4420,8 @@ async def record_usage(
         source_label: The trace id of the session the request belongs to
             (``RequestContext.source_label``), so usage groups by the same
             session the Sessions page shows; None when it names no session.
+        safety_identifier: The end-user identifier the provider call carried
+            (``RequestContext.upstream_user``); None when it carried none.
 
     Returns:
         The computed cost for this request, or None when usage/pricing is absent,
@@ -4431,6 +4452,7 @@ async def record_usage(
         tags=tags,
         deployment_paid=deployment_paid,
         source_label=source_label,
+        safety_identifier=safety_identifier,
     )
 
     usage_data = usage_override
@@ -4772,6 +4794,7 @@ async def log_gateway_rejection(
     started_at: float | None,
     request_id: str | None = None,
     tags: dict[str, str] | None = None,
+    safety_identifier: str | None = None,
 ) -> None:
     """Record a request the gateway itself refused before any provider was called.
 
@@ -4843,6 +4866,7 @@ async def log_gateway_rejection(
             counts_toward_budget=True,
             request_id=request_id,
             tags=tags,
+            safety_identifier=safety_identifier,
         )
     except Exception:
         # Deliberately broad, and deliberately not re-raised: see the docstring.
@@ -4895,6 +4919,7 @@ async def _log_failure_and_refund(
         request_id=ctx.request_id,
         tags=ctx.tags,
         source_label=ctx.source_label,
+        safety_identifier=ctx.upstream_user,
         deployment_paid=ctx.deployment_charge is not None,
     )
     if ctx.reservation is not None:
@@ -5232,6 +5257,7 @@ def build_streaming_response(
     tool_loop: bool = False,
     deployment_charge: DeploymentCharge | None = None,
     source_label: str | None = None,
+    safety_identifier: str | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -5314,6 +5340,7 @@ def build_streaming_response(
             request_id=request_id,
             tags=tags,
             source_label=source_label,
+            safety_identifier=safety_identifier,
             prices=prices,
             deployment_paid=deployment_paid,
         )
@@ -5358,6 +5385,7 @@ def build_streaming_response(
                 request_id=request_id,
                 tags=tags,
                 source_label=source_label,
+                safety_identifier=safety_identifier,
                 prices=prices,
                 deployment_paid=deployment_paid,
             )
@@ -5383,6 +5411,7 @@ def build_streaming_response(
                 request_id=request_id,
                 tags=tags,
                 source_label=source_label,
+                safety_identifier=safety_identifier,
                 deployment_paid=deployment_paid,
             )
             # "Free" is about the tokens the provider never reported, not about
@@ -5416,6 +5445,7 @@ def build_streaming_response(
             request_id=request_id,
             tags=tags,
             source_label=source_label,
+            safety_identifier=safety_identifier,
             deployment_paid=deployment_paid,
         )
         # The estimate covers the unreported tokens; log_usage adds any tool cost on
@@ -5468,6 +5498,7 @@ def build_streaming_response(
             request_id=request_id,
             tags=tags,
             source_label=source_label,
+            safety_identifier=safety_identifier,
             deployment_paid=deployment_paid,
         )
         if reservation is not None:
@@ -5514,6 +5545,7 @@ def build_streaming_response(
                 request_id=request_id,
                 tags=tags,
                 source_label=source_label,
+                safety_identifier=safety_identifier,
                 deployment_paid=deployment_paid,
             )
             await _charge(abandoned_cost, expects_cost=reported_usage is not None)
@@ -5848,6 +5880,7 @@ async def run_single_attempt_stream(
         tool_tally=tool_ctx.tally,
         tags=ctx.tags,
         source_label=ctx.source_label,
+        safety_identifier=ctx.upstream_user,
         tool_loop=served_tools.use_tool_loop,
         deployment_charge=ctx.deployment_charge,
     )
@@ -5941,6 +5974,7 @@ async def log_exhausted_plan(
         workspace_id=ctx.workspace_id,
         tags=ctx.tags,
         source_label=ctx.source_label,
+        safety_identifier=ctx.upstream_user,
     )
     ctx.tool_charge = cost or Decimal(0)
 
@@ -6032,6 +6066,7 @@ async def _log_absorbed_row(
             workspace_id=ctx.workspace_id,
             tags=ctx.tags,
             source_label=ctx.source_label,
+            safety_identifier=ctx.upstream_user,
         )
     except Exception:
         logger.warning(
@@ -6196,6 +6231,7 @@ async def run_non_stream(
                 request_id=ctx.request_id,
                 tags=ctx.tags,
                 source_label=ctx.source_label,
+                safety_identifier=ctx.upstream_user,
                 prices=ctx.prices,
                 deployment_paid=ctx.deployment_charge is not None,
             )
