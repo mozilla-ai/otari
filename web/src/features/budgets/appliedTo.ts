@@ -41,9 +41,9 @@ function formatCount(count: number, singular: string, plural: string): string {
 /**
  * One group's phrase.
  *
- * A group of one is named where the server names it, because "Acme" is what an
- * admin is looking for and "1 workspace" is what makes them open the row to find
- * out which. A membership or a key carries no name, so it stays a count.
+ * Workspaces are named, every one of them, because a name is what an admin is
+ * looking for and a count is what makes them open the row to find out which. A
+ * membership or a key carries no name, so it stays a count at every size.
  */
 function describeGroup(
   group: GroupKey,
@@ -53,9 +53,20 @@ function describeGroup(
   switch (group) {
     case "organization":
       return `${entities[0].name ?? "Organization"} (organization)`
-    case "workspace":
-      if (count > 1) return formatCount(count, "workspace", "workspaces")
-      return entities[0].name ?? "1 workspace"
+    case "workspace": {
+      const names = entities.flatMap((entity) =>
+        entity.name ? [entity.name] : [],
+      )
+      // One the server could not name is counted rather than dropped.
+      const unnamed = count - names.length
+      if (unnamed === 0) return names.join(", ")
+      if (names.length === 0)
+        return formatCount(unnamed, "workspace", "workspaces")
+      return [
+        ...names,
+        formatCount(unnamed, "other workspace", "other workspaces"),
+      ].join(", ")
+    }
     case "provider":
       if (count > 1) return formatCount(count, "provider", "providers")
       return entities[0].provider_key_id ?? "1 provider"
