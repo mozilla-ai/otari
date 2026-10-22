@@ -178,7 +178,9 @@ sends them:
 A span shows what it was about as its input, and a tool call is named for its
 command or file in the tree. A span's content is sealed for that span alone, and
 reads back empty once no configured key opens it, so keep a rotated-out key in
-`OTARI_SECRET_KEY` for as long as you keep traces.
+`OTARI_SECRET_KEY` for as long as you keep traces. Only the deployment operator, an
+owner or admin of the organization, and the user a session belongs to read its
+content; any other member reads the session with every span's content empty.
 
 ## Reading traces
 

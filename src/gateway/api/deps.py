@@ -1730,6 +1730,7 @@ class VisibleWorkspaces:
 
     organization_id: uuid.UUID
     workspace_ids: frozenset[uuid.UUID]
+    whole_organization: bool = False
 
 
 async def get_visible_workspaces(
@@ -1748,15 +1749,24 @@ async def get_visible_workspaces(
         if scope.workspace_ids is None
         else scope.workspace_ids
     )
-    return VisibleWorkspaces(organization_id=scope.organization.id, workspace_ids=frozenset(workspace_ids))
+    return VisibleWorkspaces(
+        organization_id=scope.organization.id,
+        workspace_ids=frozenset(workspace_ids),
+        whole_organization=scope.workspace_ids is None,
+    )
 
 
 VisibleWorkspacesDep = Annotated[VisibleWorkspaces, Depends(get_visible_workspaces)]
 
 
-async def get_organization_trace_scope(visible: VisibleWorkspacesDep) -> TraceScope:
-    """The workspaces of their active organization this caller may read traces in."""
-    return TraceScope.workspaces(visible.workspace_ids)
+async def get_organization_trace_scope(visible: VisibleWorkspacesDep, identity: CurrentIdentity) -> TraceScope:
+    """The workspaces of their active organization this caller may read traces in.
+
+    An owner or admin reads every trace's content; anyone else only their own traces'.
+    """
+    return TraceScope.workspaces(
+        visible.workspace_ids, all_content=visible.whole_organization, content_user_id=str(identity.id)
+    )
 
 
 def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> RoutingService:
@@ -1929,7 +1939,7 @@ CallerUsageScope = Annotated[ColumnElement[bool], Depends(_caller_usage_scope)]
 
 def get_deployment_trace_scope(workspace_ids: CallerWorkspaces) -> TraceScope:
     """The scope of the deployment-operator trace routes: every workspace in the caller's organization."""
-    return TraceScope.workspaces(workspace_ids)
+    return TraceScope.workspaces(workspace_ids, all_content=True)
 
 
 async def get_feedback_service(

@@ -137,7 +137,8 @@ class TraceService:
                 raise TraceAmbiguousError(trace_id)
             row = rows[0]
             spans = await self._spans.for_trace(row.workspace_id, row.trace_id, limit=span_limit + 1)
-            records = tuple(_span_record(span) for span in spans[:span_limit])
+            with_content = scope.reads_content_of(row.user_id)
+            records = tuple(_span_record(span, with_content=with_content) for span in spans[:span_limit])
             digests = {
                 digest for span in records if isinstance(digest := span.attributes.get("otari.policy.digest"), str)
             }
@@ -319,7 +320,7 @@ def _stored_call_id(row: TraceSpan) -> str | None:
     return call_id_digest(row.workspace_id, row.tool_call_id)
 
 
-def _span_record(row: TraceSpan) -> SpanRecord:
+def _span_record(row: TraceSpan, *, with_content: bool) -> SpanRecord:
     return SpanRecord(
         span_id=row.span_id,
         kind=row.kind,
@@ -349,7 +350,9 @@ def _span_record(row: TraceSpan) -> SpanRecord:
         otel_trace_id=row.otel_trace_id,
         otel_span_id=row.otel_span_id,
         attributes=row.attributes or {},
-        content=open_content(row.content_sealed, workspace_id=row.workspace_id, span_id=row.span_id),
+        content=open_content(row.content_sealed, workspace_id=row.workspace_id, span_id=row.span_id)
+        if with_content
+        else {},
     )
 
 

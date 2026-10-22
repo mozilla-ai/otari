@@ -313,16 +313,26 @@ class TraceScope:
 
     workspace_ids: frozenset[uuid.UUID]
     deployment_wide: bool = False
+    # A span's retained content (prompts, commands) goes to whoever manages the
+    # workspaces and to the user the trace belongs to; anyone else reads it empty.
+    all_content: bool = False
+    content_user_id: str | None = None
 
     @classmethod
     def deployment(cls) -> "TraceScope":
         """Every workspace: only for a deployment operator."""
-        return cls(workspace_ids=frozenset(), deployment_wide=True)
+        return cls(workspace_ids=frozenset(), deployment_wide=True, all_content=True)
 
     @classmethod
-    def workspaces(cls, workspace_ids: frozenset[uuid.UUID]) -> "TraceScope":
-        """Only these workspaces."""
-        return cls(workspace_ids=workspace_ids)
+    def workspaces(
+        cls, workspace_ids: frozenset[uuid.UUID], *, all_content: bool = False, content_user_id: str | None = None
+    ) -> "TraceScope":
+        """Only these workspaces, with every trace's content or only ``content_user_id``'s own."""
+        return cls(workspace_ids=workspace_ids, all_content=all_content, content_user_id=content_user_id)
+
+    def reads_content_of(self, user_id: str | None) -> bool:
+        """Whether a read in this scope returns the content of a trace ``user_id`` owns."""
+        return self.all_content or (user_id is not None and user_id == self.content_user_id)
 
 
 @dataclass(frozen=True)

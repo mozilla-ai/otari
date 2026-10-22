@@ -25,6 +25,7 @@ from sqlmodel import col
 from gateway.core.config import API_ROOT
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
+from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.traces._content import seal_content
@@ -547,3 +548,42 @@ def test_the_detail_returns_what_a_span_was_about_where_it_was_kept(
     contents = {span["span_id"]: span["content"] for span in detail["spans"]}
     assert contents["call-toolu_1"] == {"command": "pytest -x"}
     assert contents["req-1"] == {}
+
+
+def test_only_a_manager_or_the_sessions_own_user_reads_what_its_spans_were_about(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    with db_session_factory() as session:
+        span = session.scalars(
+            select(TraceSpan).where(col(TraceSpan.trace_id) == "s-one", col(TraceSpan.span_id) == "call-toolu_1")
+        ).one()
+        span.content_sealed = seal_content(
+            {"command": "pytest -x"}, workspace_id=span.workspace_id, span_id=span.span_id
+        )
+        session.commit()
+
+    def content(cookie: str) -> dict[str, str]:
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        try:
+            response = client.get(f"{API_ROOT}/organizations/me/traces/s-one")
+        finally:
+            client.cookies.clear()
+        assert response.status_code == status.HTTP_200_OK, response.text
+        return {span["span_id"]: span["content"] for span in response.json()["spans"]}["call-toolu_1"]
+
+    assert content(world["member"]) == {}
+    assert content(world["admin"]) == {"command": "pytest -x"}
+
+    with db_session_factory() as session:
+        member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+        trace = session.scalars(select(Trace).where(col(Trace.trace_id) == "s-one")).one()
+        session.add(BillingUser(user_id=str(member.id)))
+        session.flush()
+        trace.user_id = str(member.id)
+        session.commit()
+
+    assert content(world["member"]) == {"command": "pytest -x"}
