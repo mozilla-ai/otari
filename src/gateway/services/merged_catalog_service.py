@@ -878,12 +878,15 @@ async def build_merged_catalog(
     # ``?provider=`` filters these like any real model, and the allow-list filter
     # at the end still applies: an offered model the caller's key may not use is
     # withheld exactly as a discovered one would be.
+    hosted_only: set[str] = set()
     for model_key in sorted(scope.offered_keys | scope.hosted_keys):
         if model_key in merged or normalize_pricing_key(config, model_key) in alias_targets:
             continue
         owner = owner_from_key(model_key)
         if provider is not None and owner != provider:
             continue
+        if model_key not in scope.offered_keys:
+            hosted_only.add(model_key)
         merged[model_key] = ModelObject(
             id=model_key,
             created=0,
@@ -901,6 +904,14 @@ async def build_merged_catalog(
     for obj in merged.values():
         apply_default_pricing(obj)
         apply_model_limits(config, models_dev, obj)
+
+    # A hosted model phase 2b listed has no stored rate, and an organization's
+    # override does not admit it past ``require_pricing`` either, so with the
+    # gate on, the default just filled is all that makes it callable.
+    if config.require_pricing:
+        for model_key in hosted_only:
+            if merged[model_key].pricing is None:
+                del merged[model_key]
 
     # Phase 4: aliases, from config.yml and from storage alike. An alias is a
     # display name, not a provider, so it is only listed for the unfiltered

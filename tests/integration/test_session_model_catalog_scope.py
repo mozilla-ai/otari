@@ -21,6 +21,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -29,6 +30,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.models.pricing import ModelPricing
 from gateway.models.provider_keys import (
     OrgProviderKey,
     OrgProviderKeyModel,
@@ -36,6 +38,7 @@ from gateway.models.provider_keys import (
     WorkspaceProviderModelRestriction,
 )
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
+from gateway.services import merged_catalog_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
@@ -867,6 +870,46 @@ def test_a_hosted_model_switched_on_unpriced_is_listed_for_every_caller_it_serve
     response = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert response.status_code == status.HTTP_200_OK, response.text
     assert unpriced in {model["id"] for model in response.json()["data"]}
+
+
+def test_with_require_pricing_on_a_hosted_model_is_listed_only_once_a_default_prices_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    world: _World,
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dispatch refuses a hosted model nothing prices, so the catalog does not offer it.
+
+    An organization's override does not admit it either, which leaves the
+    models.dev default as the one rate that can.
+    """
+    monkeypatch.setattr(test_config, "require_pricing", True)
+    monkeypatch.setattr(merged_catalog_service, "default_pricing_enabled", lambda: True)
+    monkeypatch.setattr(
+        merged_catalog_service,
+        "default_model_pricing",
+        lambda provider, model, as_of: (
+            ModelPricing(
+                model_key=f"{provider}:{model}", input_price_per_million=Decimal(1), output_price_per_million=Decimal(2)
+            )
+            if model == "open-mistral-defaulted"
+            else None
+        ),
+    )
+    roster = {"open-mistral-free", "open-mistral-defaulted"}
+    bind_model_provider(client, HostedModelProvider("mistral", models={"mistral": roster}))
+
+    for who in ("alpha_member", "beta_member", "superuser"):
+        listed = _listing_as(client, world, who)
+        assert "mistral:open-mistral-free" not in listed, who
+        assert listed["mistral:open-mistral-defaulted"]["pricing_source"] == "default", who
+
+    response = client.get(f"{API_ROOT}/models", headers=master_key_header)
+    assert response.status_code == status.HTTP_200_OK, response.text
+    ids = {model["id"] for model in response.json()["data"]}
+    assert "mistral:open-mistral-free" not in ids
+    assert "mistral:open-mistral-defaulted" in ids
 
 
 def test_the_master_key_keeps_a_model_its_default_workspace_reaches_on_its_own_key(
