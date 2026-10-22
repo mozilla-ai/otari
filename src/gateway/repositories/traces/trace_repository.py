@@ -354,8 +354,12 @@ def _scoped(
 
 
 def _conditions(query: TraceFilter) -> list[ColumnElement[bool]]:
-    """Build the conditions a query narrows by. An unset value adds none."""
-    conditions: list[ColumnElement[bool]] = []
+    """Build the conditions a query narrows by. An unset value adds none.
+
+    A session matches only once it holds a span: a request's cost can reach it before
+    its spans do, or with none to follow (a logs-only import), and that alone is nothing to show.
+    """
+    conditions: list[ColumnElement[bool]] = [Trace.span_count > 0]
     if query.workspace_ids:
         conditions.append(Trace.workspace_id.in_(list(query.workspace_ids)))
     if (lower := utc_bound(query.start)) is not None:

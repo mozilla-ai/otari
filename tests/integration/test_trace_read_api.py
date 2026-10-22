@@ -337,6 +337,7 @@ def test_the_list_sorts_by_the_column_asked_for_across_pages(
                     output_tokens=tokens[1],
                     cost_snapshot=Decimal(cost),
                     error_count=errors,
+                    span_count=1,
                 )
             )
         session.commit()
@@ -382,6 +383,7 @@ def test_sessions_that_tie_on_the_sort_page_once_each(
                     output_tokens=5,
                     cost_snapshot=Decimal("0.02"),
                     error_count=0,
+                    span_count=1,
                 )
             )
         session.commit()

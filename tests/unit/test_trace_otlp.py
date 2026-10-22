@@ -745,3 +745,23 @@ def test_a_priced_request_reaches_a_session_only_from_a_source_the_trace_store_h
     )
 
     assert len(writer.writes) == written
+
+
+def test_a_priced_request_whose_id_a_span_cannot_carry_is_skipped_and_the_rest_recorded() -> None:
+    writer = _Writer()
+
+    record_priced_requests(
+        cast(TraceWriter, writer),
+        [
+            PricedRequest("batch/req_1", "session-1", datetime.now(UTC), Decimal("0.01"), "claude_code"),
+            PricedRequest("req_2", "session-2", datetime.now(UTC), Decimal("0.02"), "claude_code"),
+        ],
+        budget_exempt=True,
+        workspace_id=_WORKSPACE,
+        user_id=None,
+        api_key_id=None,
+        retention=timedelta(days=30),
+    )
+
+    [write] = writer.writes
+    assert [span.request_id for span in write.spans] == ["req_2"]

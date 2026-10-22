@@ -175,6 +175,30 @@ async def test_a_requests_cost_counts_once_on_its_session_and_is_not_a_span(
     assert (detail.summary.span_count, detail.summary.cost_snapshot) == (1, Decimal("0.25"))
 
 
+async def test_a_logs_only_export_creates_no_session_until_its_spans_arrive(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    priced = _write(
+        workspace,
+        "session-1",
+        _span("usage-1", kind="llm", operation="usage", request_id="req_1", cost_snapshot=Decimal("0.25")),
+        session_source="otlp",
+    )
+
+    await store.write((priced,))
+
+    scope = TraceScope.deployment()
+    assert await store.count(scope, TraceFilter()) == 0
+    assert (await store.search(scope, TraceFilter(), limit=10, offset=0)).items == ()
+    assert await store.series(scope, TraceFilter(), bucket="hour") == ()
+
+    await store.write((_write(workspace, "session-1", _span("llm-1", kind="llm", request_id="req_1")),))
+
+    [summary] = (await store.search(scope, TraceFilter(), limit=10, offset=0)).items
+    assert (summary.span_count, summary.cost_snapshot) == (1, Decimal("0.25"))
+
+
 async def test_a_span_repeated_inside_one_write_is_stored_once(
     store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
 ) -> None:

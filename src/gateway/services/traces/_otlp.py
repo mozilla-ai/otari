@@ -749,7 +749,8 @@ def record_priced_requests(
     try:
         by_session: dict[SessionRef, list[SpanRecord]] = {}
         for request in itertools.islice(requests, MAX_SPANS_PER_EXPORT):
-            if request.source not in _SESSION_USAGE_SOURCES:
+            # A ledger id a span cannot carry could never fold onto one, and would fail the whole export.
+            if request.source not in _SESSION_USAGE_SOURCES or not ID_PATTERN.fullmatch(request.request_id):
                 continue
             session = SessionRef(source="otlp", key=request.session_key)
             if session not in by_session and len(by_session) >= MAX_TRACES_PER_EXPORT:
