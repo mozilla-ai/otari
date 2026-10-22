@@ -363,7 +363,7 @@ describe("toTrace", () => {
             duration_ms: 14_000,
             attributes: {
               "otari.tool.decision": "accept",
-              "otari.tool.decision_source": "user",
+              "otari.tool.decision_source": "user_temporary",
             },
           }),
           traceSpan({

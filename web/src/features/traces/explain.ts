@@ -17,6 +17,14 @@ const DECIDED_BY: Record<string, string> = {
   user: "the user",
 }
 
+// Claude Code reports a user's decision as user_reject, user_temporary and so on.
+function decisionSource(span: TraceSpan): unknown {
+  const source = span.attributes["otari.tool.decision_source"]
+  return typeof source === "string" && source.startsWith("user_")
+    ? "user"
+    : source
+}
+
 const STOPPED_BECAUSE: Record<string, string> = {
   tool_use: "It asked to use a tool",
   end_turn: "It finished its answer",
@@ -50,7 +58,7 @@ function asked(tool: TraceSpan | undefined): string {
 
 function permission(span: TraceSpan, tool: TraceSpan | undefined): Explanation {
   const decision = span.attributes["otari.tool.decision"]
-  const source = span.attributes["otari.tool.decision_source"]
+  const source = decisionSource(span)
   const by =
     typeof source === "string" ? (DECIDED_BY[source] ?? source) : "something"
   const after = took(span)
@@ -99,7 +107,7 @@ function tool(
   blockedBy: readonly string[],
   gates: GateTally | undefined,
 ): Explanation {
-  const source = span.attributes["otari.tool.decision_source"]
+  const source = decisionSource(span)
   const decision = span.attributes["otari.tool.decision"]
   const decided =
     blockedBy.length > 0
