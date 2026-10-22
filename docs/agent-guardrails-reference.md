@@ -144,8 +144,8 @@ when the gate gets a chance to run at all.
 | `pre_tool_use.edit_target` | before a tool call | the path an `Edit`/`Write`/`NotebookEdit` (or Codex `apply_patch`) call names in its own `tool_input` | yes, the write never happens | no: a `Bash` call declares no path, so every shell write is invisible |
 | `pre_tool_use.read_target` | before a tool call | the path a `Read` call names in its own `tool_input` | yes, the contents never enter the transcript | no: a shell read (`cat`, `less`) is invisible, and nothing catches it later |
 | `pre_tool_use.command` | before a tool call | the literal text of a `Bash` command | yes, the command never runs | no: it cannot see inside a script the command invokes |
-| `stop.working_tree` | after the turn | every path `git status --porcelain` reports | no, the file already changed | yes, over the tree, whatever wrote it |
-| `stop.session` | after the turn | the working tree plus the session's own transcript | no | yes |
+| `stop.working_tree` | after the turn | every path in the branch merge-base diff plus untracked working-tree paths | no, the file already changed | yes, over the tree, whatever wrote it |
+| `stop.session` | after the turn | the same committed-and-working-tree diff plus the session's own transcript | no | yes |
 | `stop.verifier` | after the turn | a repo-local verifier script's exit code | no | whatever the script checks |
 
 Each gate type accepts only certain entries, because only a path is knowable
@@ -174,11 +174,11 @@ command refused before it runs, that is what `command` is for.
 
 **For a read, that gap has no afterwards.** A write the shell slips past
 `pre_tool_use.edit_target` still lands in the tree, so `stop.working_tree`
-reports it and the turn is blocked over a file that already changed. A read
-the shell slips past `pre_tool_use.read_target` lands nowhere: a read changes
-nothing, `git status` has nothing to report, and no `stop` entry exists or
-could exist for one. `cat .env` is therefore refused only by a `command`
-gate, or not at all. Plan a secret rule as two gates, not one.
+reports it and the turn is blocked over a file that already changed. A read that
+slips past `pre_tool_use.read_target` lands nowhere: it adds no path
+to the `Stop` evidence and no `stop` entry exists for the read itself. `cat .env`
+is therefore refused only by a `command` gate, or not at all. Plan a secret rule
+as two gates, not one.
 
 ## Gate types
 
@@ -441,8 +441,8 @@ field existed. Given, it scopes the gate to a session that actually touched
 a matching path, resolving `not_applicable` on a `Stop` event that changed
 nothing the gate cares about, without ever spending a model call to find
 that out: `otari hook` checks this locally, before reading the diff or
-transcript or shelling out to `claude -p`, against the same `git status`
-evidence it already collected for `path` gates.
+transcript or shelling out to `claude -p`, against the same branch merge-base
+diff and untracked-path evidence it already collected for `path` gates.
 
 ```yaml
   - id: follows-error-handling-pattern
@@ -567,7 +567,7 @@ what "no `--judge-model`/`OTARI_HOOK_JUDGE_MODEL` given" defaults to:
   for a later `Stop` event's own transcript scan to mistake for real session
   evidence.
 
-The diff covers tracked changes (`git diff HEAD`) and every untracked file
+The diff covers tracked changes (`git diff <selected Stop base>`) and every untracked file
 the ignore rules do not exclude, each appended as a `new file` hunk. Both
 halves are needed, because a rule about what a change adds is mostly a rule
 about files Git has never seen, and a tracked-only diff shows a judge the
@@ -593,7 +593,7 @@ untracked and a tree whose untracked files could not be listed would
 otherwise produce the same evidence, which for a change made entirely of new
 files is no evidence.
 
-A diff `otari hook` could not collect at all (`git diff HEAD` failing: no
+A diff `otari hook` could not collect at all (`git diff <selected Stop base>` failing: no
 `HEAD` yet, a timeout, `git` itself missing) is kept distinct from one it
 collected and found genuinely empty: the former skips the model call
 entirely and reports `error` directly, rather than asking the model to judge
@@ -610,7 +610,7 @@ transcript is JSONL, not English prose. A second real call at 100,505
 characters consumed ~73,383 tokens total and succeeded with comfortable
 headroom. The caps keep the worst case near that validated-safe size.
 
-`git diff HEAD`'s own bytes are a tracked file's real content, not
+The selected range's tracked diff bytes are a file's real content, not
 necessarily valid UTF-8 (a Latin-1-encoded file, a binary blob committed by
 mistake, ...); collecting it decodes leniently (`errors="replace"`, which an
 untracked file's own bytes also get) and
@@ -861,7 +861,7 @@ load-bearing throughout.
 
 | Evidence | What it is |
 | --- | --- |
-| paths | Repo-relative paths this moment puts in scope: the single target a tool call is about to write or read, or what `git status` reported changed, together with which of those moments it was. |
+| paths | Repo-relative paths this moment puts in scope: the single target a tool call is about to write or read, or what the branch merge-base diff and untracked working tree reported changed, together with which of those moments it was. |
 | commands | Shell commands observed running, or about to run. Its scope is either `call` (the single tool call about to run) or `session` (every command the session has run so far). `command` gates judge only `call` scope, `command_if_changed` only `session` scope. |
 | judge verdicts | One `pass`, `fail` or `error` per `judge` gate, from the model call `otari hook` made for it. `error` covers a CLI that was not found, a timeout, a launch failure, a nonzero exit, and output that could not be parsed as a verdict. A gate past the judge gate cap gets `not_run` instead, and no model call. |
 | verifier verdicts | One `pass`, `fail` or `error` per `verifier` gate, from the script's exit status: 0, 1, and anything else respectively. |
@@ -936,10 +936,10 @@ check either way, and the distinction is what keeps a required command
 gate from reading every unrelated `Edit`/`Write`/`NotebookEdit` call as a
 clean pass.
 
-On a `Stop` event, `path` instead reads `git status
---porcelain`'s output, which does cover shell-written file changes (anything
-a `Bash` call touched), at the cost of only catching them after the fact
-rather than preventing them. Alongside it `otari hook` collects every `Bash`
+On a `Stop` event, `path` instead reads the branch's merge-base diff and
+untracked working-tree paths, which covers committed and shell-written file
+changes (anything a `Bash` call touched), at the cost of only catching them
+after the fact rather than preventing them. Alongside it `otari hook` collects every `Bash`
 command it finds in the session's own transcript (see below), marked
 `command_scope: "session"`. That is what lets `command_if_changed` resolve:
 "did the required command ever run" is a question only a whole session can
@@ -956,8 +956,8 @@ dead-end. Nothing is lost by skipping it, because `otari hook setup` puts
 judged before it ran.
 
 `otari hook` collects both kinds of Stop-time evidence itself, because
-Claude Code's own Stop payload carries neither directly: `git status` for
-changed paths, the same as always, and a scan of `transcript_path` (the
+Claude Code's own Stop payload carries neither directly: the branch merge-base
+diff plus untracked paths for changed paths, and a scan of `transcript_path` (the
 session's own JSONL file, which the payload does carry) for command
 evidence. It walks every line of that file looking for a `Bash` tool call
 (`message.content[]` blocks with `type: "tool_use"`, `name: "Bash"`) and
@@ -992,9 +992,9 @@ overridden.
 
 A `judge` gate only ever runs on `Stop`, for the same reason
 `command_if_changed` is meaningful mainly there: it needs the same
-`transcript_path` this section already reads, plus `git diff HEAD`, both of
-which only mean something once there is a finished change to judge, not a
-`PreToolUse` call about to make one. `otari hook` parses the local policy
+`transcript_path` this section already reads, plus the selected Stop diff range
+and untracked paths. Those only mean something once there is a finished change
+to judge, not a `PreToolUse` call about to make one. `otari hook` parses the local policy
 itself to find each `judge` gate's `rubric`, then makes one local `claude -p`
 call per gate (see the `judge` gate type above) and checks the resulting
 verdicts.
@@ -1243,8 +1243,9 @@ that event: one `PreToolUse` block per command or path, then one
 `Stop` block with all of them together. A path is spelled the way each moment
 spells it, which differs only for a symlink: a `PreToolUse` edit target is
 resolved (that is how an absolute tool-call path becomes repo-relative, and it
-follows a link on the way), while a `Stop` path comes from `git status`, which
-reports the tracked name, link and all. A repo named through a directory
+follows a link on the way), while a `Stop` path comes from the branch
+merge-base diff plus untracked working-tree paths, which reports the tracked
+name, link and all. A repo named through a directory
 symlink (`/tmp/repo` where the repo really sits at `/private/tmp/repo`, which
 is every macOS temp path) is normalized without following the file's own link. Every gate that can resolve there is
 reported as `fires` or `quiet`, and the rest are counted in one line. `judge`
@@ -1271,7 +1272,7 @@ PreToolUse, Edit/Write: docs/public/openapi.json
   quiet      no-hand-edited-changelog (required)
   ...
 
-Stop, the finished turn: 1 changed path(s), 1 command(s)
+Stop, the finished turn: 1 changed path(s), 1 command(s); judge diff base: the branch merge base with its upstream, falling back to the default branch and then HEAD
   quiet      openapi-changed-needs-postman (required)
   fires      openapi-changed-needs-generator (required)
   would run  no-leftover-conflict-markers (verifier, required)
