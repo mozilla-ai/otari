@@ -36,7 +36,9 @@ addresses or networks, comma-separated, so Otari reads the client address from
 `X-Forwarded-For`. Use `*` only where the proxy is the sole path to the
 container, as on Railway: any peer in the list can set its own client address.
 When it is unset, uvicorn's `FORWARDED_ALLOW_IPS` applies, and without that
-only `127.0.0.1` is trusted.
+only `127.0.0.1` is trusted. A country file
+([Supported countries](configuration.md#supported-countries)) looks up the same
+client address.
 
 ### Watch the connection pool
 
