@@ -282,12 +282,11 @@ export type UpdateOrganizationPricingOverride = Defaulted<
 // types rather than the same ones: these carry an owner and, on a ceiling,
 // whether its figure is this organization's to change.
 export type OrganizationBudget = Schemas["OrganizationBudgetPublic"]
-export type AppliedEntity = Schemas["AppliedEntityPublic"]
+export type NamedAppliedEntity = Schemas["AppliedEntityPublic"]
 export type CreateOrganizationBudget = Schemas["OrganizationBudgetCreate"]
 export type UpdateOrganizationBudget = Schemas["OrganizationBudgetUpdate"]
+export type AppliedEntity = Schemas["AppliedEntity"]
 export type OrganizationSpendCeiling = Schemas["OrganizationScopedBudgetPublic"]
-export type OrganizationSpendCeilings =
-  Schemas["OrganizationScopedBudgetsPublic"]
 export type CreateOrganizationSpendCeiling =
   Schemas["OrganizationScopedBudgetCreate"]
 export type UpdateOrganizationSpendCeiling =

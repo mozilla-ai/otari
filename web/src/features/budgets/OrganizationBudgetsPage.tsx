@@ -14,7 +14,6 @@ import {
 import { budgetLabeler } from "./budgetLabel"
 import { OrganizationBudgetDialog } from "./OrganizationBudgetDialog"
 import { OrganizationBudgetsTable } from "./OrganizationBudgetsTable"
-import { SpendCeilingsCard } from "./SpendCeilingsCard"
 
 // Budgets, for an organization owner or admin: one table of the organization's
 // budgets, each naming what it applies to.
@@ -37,6 +36,19 @@ export function OrganizationBudgetsPage({
   const [openCount, setOpenCount] = useState(0)
   const [editing, setEditing] = useState<OrganizationBudget>()
   const [pendingDelete, setPendingDelete] = useState<OrganizationBudget>()
+
+  // Switching organization invalidates every query rather than remounting this
+  // page, so an open form or confirmation would outlive the budget it was opened
+  // on. Dropped during render rather than in an effect, so nothing renders
+  // against the new organization holding the old one's row.
+  const organizationId = organization.organization.id
+  const [shownFor, setShownFor] = useState(organizationId)
+  if (shownFor !== organizationId) {
+    setShownFor(organizationId)
+    setDialogOpen(false)
+    setEditing(undefined)
+    setPendingDelete(undefined)
+  }
 
   const rows = budgets.data ?? []
 
@@ -94,18 +106,15 @@ export function OrganizationBudgetsPage({
         />
       )}
 
-      {/* Where a budget is applied is still edited here, until the create and
-          edit journeys take the entity picker. Delete this with them. */}
-      <SpendCeilingsCard
-        organizationId={organization.organization.id}
-        organizationName={organization.organization.name}
-      />
-
+      {/* Keyed on the organization too: the picker's entities are the
+          organization's, and a remount is what re-seeds them. */}
       <OrganizationBudgetDialog
-        key={openCount}
+        key={`${organizationId}:${openCount}`}
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}
+        organizationId={organizationId}
+        organizationName={organization.organization.name}
         returnFocusRef={createButtonRef}
         onSaved={() => setDialogOpen(false)}
       />
@@ -119,7 +128,7 @@ export function OrganizationBudgetsPage({
           heading="Delete budget"
           body={
             pendingDelete.ceiling_count > 0
-              ? `${nameBudget(pendingDelete)} is applied to ${pendingDelete.ceiling_count} ${pendingDelete.ceiling_count === 1 ? "entity" : "entities"}, so this will be refused. Remove them first.`
+              ? `${nameBudget(pendingDelete)} is applied to ${pendingDelete.ceiling_count} ${pendingDelete.ceiling_count === 1 ? "entity" : "entities"}, so this will be refused. Edit the budget to remove them, or ask a deployment operator about any you cannot see.`
               : `${nameBudget(pendingDelete)} stops existing. It applies to nothing, so no cap changes.`
           }
           confirmLabel="Delete budget"
