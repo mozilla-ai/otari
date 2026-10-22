@@ -44,7 +44,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import Enum, StrEnum, auto
-from functools import reduce
+from functools import partial, reduce
 from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar
 
 import httpx
@@ -71,6 +71,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     ToolPorts,
+    get_automatic_router,
     get_budget_service,
     verify_api_key_or_master_key,
 )
@@ -2750,35 +2751,19 @@ async def resolve_request_context(
         tags=tags,
         safety_identifier=upstream_user,
     )
-    if (
-        plan is not None
-        and plan.selection_reason == "catalog"
-        and config.automatic_routing.enabled
-        and not any(f"{a.instance}/{a.model}" == model for a in plan.attempts)
-    ):
-        costs: dict[str, Decimal | None] = {}
-        await prices.prime(db, [(a.instance, a.model) for a in plan.attempts])
-        for candidate in plan.attempts:
-            selector = f"{candidate.instance}:{candidate.model}"
-            resolved_price = await prices.resolve(db, candidate.instance, candidate.model)
-            pricing = resolved_price.pricing if resolved_price is not None else None
-            costs[selector] = (
-                estimate_cost(
-                    pricing,
-                    prompt_chars=estimate_prompt_chars,
-                    max_output_tokens=estimate_max_output_tokens,
-                    default_output_tokens=config.budget_estimate_default_output_tokens,
-                    cache_write_ttl=estimate_cache_write_ttl,
-                )
-                if pricing is not None
-                else None
-            )
-        app_state = getattr(raw_request.scope.get("app"), "state", None)
-        automatic_router = getattr(app_state, "automatic_router", None)
-        if automatic_router is None:
-            automatic_router = AutomaticRouter()
-            if app_state is not None:
-                app_state.automatic_router = automatic_router
+    if plan is not None and AutomaticRouter.accepts(plan, model, config.automatic_routing):
+        automatic_router = get_automatic_router(raw_request)
+        costs = await prices.estimate_candidates(
+            db,
+            [(candidate.instance, candidate.model) for candidate in plan.attempts],
+            partial(
+                estimate_cost,
+                prompt_chars=estimate_prompt_chars,
+                max_output_tokens=estimate_max_output_tokens,
+                default_output_tokens=config.budget_estimate_default_output_tokens,
+                cache_write_ttl=estimate_cache_write_ttl,
+            ),
+        )
         signal = routing_signal() if routing_signal is not None else RoutingSignal()
         plan = automatic_router.rank(
             plan,

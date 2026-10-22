@@ -444,6 +444,9 @@ the provider identity. A credential supplied only at dispatch by a deployment
 extension has no reusable binding until it can be identified during selection.
 Only keyed digests and numeric observations are retained,
 not prompt text or credentials. Credential rotation starts a new history.
+Bedrock client recreation and Vertex service-account token refresh preserve that
+identity. Opaque custom credential objects, or service-account signers without a
+key ID, do not retain affinity because their identity cannot be verified safely.
 
 Configure endpoint regions, relative capacity and the trusted location header in
 [`automatic_routing`](configuration.md#automatic-routing). Set `enabled: false`

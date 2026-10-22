@@ -279,3 +279,87 @@ def test_dispatch_credential_rebinding_has_its_own_health_and_no_false_affinity(
     first.automatic.forget(served)
     assert not router.affinities
     assert "hosted-secret" not in repr(router.health)
+
+
+def test_bedrock_rebuilt_client_config_preserves_session_and_health(router: AutomaticRouter) -> None:
+    from gateway.services.provider_kwargs import get_provider_kwargs
+
+    config = GatewayConfig(
+        providers={
+            "eu": {
+                "provider": "bedrock",
+                "client_args": {
+                    "aws_access_key_id": "account",
+                    "aws_secret_access_key": "secret",
+                    "region_name": "eu-west-1",
+                },
+            }
+        }
+    )
+
+    def plan() -> CompiledPlan:
+        original = _plan()
+        bedrock = replace(
+            original.attempts[1],
+            provider=LLMProvider.BEDROCK,
+            kwargs=get_provider_kwargs(config, LLMProvider.BEDROCK, "eu"),
+        )
+        return replace(original, attempts=[original.head, bedrock])
+
+    first = _rank(router, plan=plan())
+    assert first.automatic is not None
+    first.automatic.start(first.attempts[1]).finish(success=True)
+    following = _rank(router, plan=plan())
+    assert following.head.instance == "eu"
+    assert following.automatic is not None
+    following.automatic.start(following.head).finish(unhealthy=True)
+    assert len(router.health) == 1
+    assert _rank(router, plan=plan()).head.instance == "us"
+
+
+def test_vertex_rebuilt_credentials_preserve_affinity_but_key_rotation_does_not(router: AutomaticRouter) -> None:
+    from unittest.mock import Mock
+
+    from google.oauth2.service_account import Credentials
+
+    def plan(key_id: str = "key-one", location: str = "europe-west1") -> CompiledPlan:
+        credentials = Credentials(  # type: ignore[no-untyped-call]
+            signer=Mock(key_id=key_id),
+            service_account_email="service@example.test",
+            token_uri="https://oauth2.googleapis.com/token",
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+        original = _plan()
+        vertex = replace(
+            original.attempts[1],
+            provider=LLMProvider.VERTEXAI,
+            kwargs={"client_args": {"credentials": credentials, "project": "project-one", "location": location}},
+        )
+        return replace(original, attempts=[original.head, vertex])
+
+    first = _rank(router, plan=plan())
+    assert first.automatic is not None
+    first.automatic.start(first.attempts[1]).finish(success=True)
+    assert _rank(router, plan=plan()).head.instance == "eu"
+    assert _rank(router, plan=plan(location="us-central1")).head.instance == "us"
+    first.automatic.start(first.attempts[1]).finish(success=True)
+    assert _rank(router, plan=plan(key_id="rotated-key")).head.instance == "us"
+
+
+def test_endpoint_and_nested_auth_changes_do_not_share_a_candidate(router: AutomaticRouter) -> None:
+    original = _plan().head
+    original = replace(
+        original,
+        kwargs={"api_base": "https://one.example.test", "client_args": {"default_headers": {"Authorization": "first"}}},
+    )
+    assert router.candidate_key(original) != router.candidate_key(
+        replace(original, kwargs={**original.kwargs, "api_base": "https://two.example.test"})
+    )
+    assert router.candidate_key(original) != router.candidate_key(
+        replace(original, kwargs={**original.kwargs, "client_args": {"default_headers": {"Authorization": "second"}}})
+    )
+
+
+def test_unknown_credential_objects_cannot_inherit_affinity(router: AutomaticRouter) -> None:
+    candidate = replace(_plan().head, kwargs={"client_args": {"credentials": object()}})
+    assert router.candidate_key(candidate) != router.candidate_key(candidate)

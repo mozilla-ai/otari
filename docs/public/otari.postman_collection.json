@@ -5205,7 +5205,7 @@
         {
           "name": "List Automatic Fallbacks",
           "request": {
-            "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in baseline\ncatalog order; automatic selection can reorder them per request using cost,\nload, region, latency and cache continuity. The list shows who runs the\nbuilt-in tools on each, beside its traffic: how many requests a backup served,\nand how many named one offering and so had no fallback. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
+            "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in baseline\ncatalog order; automatic selection can reorder them per request using cost,\nrecent health, load, region, latency and cache continuity. The list shows who runs the\nbuilt-in tools on each, beside its traffic: how many requests a backup served,\nand how many named one offering and so had no fallback. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
             "header": [],
             "method": "GET",
             "url": {

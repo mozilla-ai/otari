@@ -867,6 +867,20 @@ class RequestPrices:
         self.organization_id = organization_id
         self._resolved: dict[tuple[str | None, str, bool], ResolvedPricing | None] = {}
 
+    async def estimate_candidates(
+        self,
+        db: AsyncSession,
+        candidates: Sequence[tuple[str, str]],
+        estimate: Callable[[ModelPricing], Decimal],
+    ) -> dict[str, Decimal | None]:
+        """Estimate each candidate at this request's rates, retaining unknown prices."""
+        await self.prime(db, candidates)
+        costs: dict[str, Decimal | None] = {}
+        for provider, model in candidates:
+            resolved = await self.resolve(db, provider, model)
+            costs[f"{provider}:{model}"] = estimate(resolved.pricing) if resolved is not None else None
+        return costs
+
     async def prime(self, db: AsyncSession, candidates: Sequence[tuple[str, str]]) -> None:
         """Resolve a catalog's locally credentialed candidates in two batched reads.
 
