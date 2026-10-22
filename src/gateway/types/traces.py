@@ -31,6 +31,7 @@ from types import MappingProxyType
 from typing import Literal
 
 from otari_agent.domain.definitions import GateDefinition
+from otari_agent.domain.policy import MAX_GATE_ID_LENGTH
 
 # The longest id the tables hold: a gateway request id (a UUID, 36), an OTel
 # trace id (32 hex) or span id (16 hex), and the hashes derived from them.
@@ -142,6 +143,11 @@ def is_identifier(value: str) -> bool:
     return IDENTIFIER_PATTERN.fullmatch(value) is not None and not any(pattern.search(value) for pattern in _NOT_A_NAME)
 
 
+def is_gate_id(value: object) -> bool:
+    """Whether a value is a gate id a guardrail could declare, which is held to that rule, not the identifier one."""
+    return isinstance(value, str) and 0 < len(value) <= MAX_GATE_ID_LENGTH
+
+
 def is_identifier_list(value: str) -> bool:
     """Whether a list attribute, joined for storage, is short and each of its elements an identifier."""
     return len(value) <= IDENTIFIER_MAX_LENGTH and all(is_identifier(part) for part in value.split(LIST_SEPARATOR))
@@ -230,7 +236,10 @@ class SpanRecord:
                 raise InvalidSpanError("attributes may only hold allowlisted keys")
             if type(value) is not expected:
                 raise InvalidSpanError(f"attribute {key} must be a {expected.__name__}")
-            if isinstance(value, str) and not (
+            if key == "otari.gate.id":
+                if not is_gate_id(value):
+                    raise InvalidSpanError(f"attribute {key} must be a gate id")
+            elif isinstance(value, str) and not (
                 is_identifier_list(value) if key in LIST_ATTRIBUTES else is_identifier(value)
             ):
                 raise InvalidSpanError(f"attribute {key} must be identifier-shaped")

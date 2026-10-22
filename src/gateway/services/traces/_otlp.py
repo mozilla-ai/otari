@@ -35,7 +35,14 @@ from gateway.log_config import logger
 from gateway.services.traces._collector import call_id_digest, identifier_or_none
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._writer import SPANS_DROPPED, TraceWriter
-from gateway.types.traces import LIST_SEPARATOR, SpanRecord, TraceWrite, is_identifier, is_identifier_list
+from gateway.types.traces import (
+    LIST_SEPARATOR,
+    SpanRecord,
+    TraceWrite,
+    is_gate_id,
+    is_identifier,
+    is_identifier_list,
+)
 
 # ``gen_ai.operation.name`` values, by the span kind they are.
 _LLM_OPERATIONS = frozenset({"chat", "text_completion", "generate_content", "embeddings"})
@@ -54,7 +61,6 @@ HOOK_SCOPE = "otari.hook"
 # A gate that could not decide, which reads like a guardrail that could not run.
 _UNDECIDED_GATE = frozenset({"unknown", "error", "not_run"})
 _GATE_ATTRIBUTES = (
-    "otari.gate.id",
     "otari.gate.type",
     "otari.gate.origin",
     "otari.gate.outcome",
@@ -424,14 +430,19 @@ def _gate_record(span: OtlpSpan, window: _Window) -> SpanRecord:
     A judge gate also carries the model its calls ran on and the tokens they used.
     """
     attributes = span.attributes
-    gate_id = identifier_or_none(_str(attributes, "otari.gate.id"))
+    # Held to the rule a guardrail declares its ids by, so a gate such as
+    # ``api-key-in-diff`` keeps the id its definition and counts are keyed on.
+    sent = _str(attributes, "otari.gate.id")
+    gate_id = sent if is_gate_id(sent) else None
     undecided = _str(attributes, "otari.gate.outcome") in _UNDECIDED_GATE
     required = _str(attributes, "otari.gate.enforcement") == "required"
     extra: dict[str, str | bool] = {
         key: value for key in _GATE_ATTRIBUTES if (value := identifier_or_none(_str(attributes, key))) is not None
     }
     if gate_id:
-        extra["otari.guardrail.profile"] = gate_id
+        extra["otari.gate.id"] = gate_id
+        if is_identifier(gate_id):
+            extra["otari.guardrail.profile"] = gate_id
     extra["otari.guardrail.mode"] = "block" if required else "monitor"
     blocked = attributes.get("otari.gate.blocked") is True
     extra["otari.gate.blocked"] = blocked

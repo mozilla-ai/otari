@@ -12,6 +12,7 @@ from gateway.core.config import GatewayConfig
 from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, project_otlp_spans
 from gateway.services.traces._collector import call_id_digest
 from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT
+from gateway.services.traces._reading import _gate_summaries
 from gateway.types.traces import TraceWrite, is_identifier
 
 _WORKSPACE = uuid.uuid4()
@@ -281,6 +282,17 @@ def test_a_gate_the_hook_reported_is_a_guardrail_span_named_for_the_gate() -> No
     assert gate.attributes["otari.gate.blocked"] is True
     assert gate.attributes["otari.policy.digest"] == "0123456789abcdef"
     assert write.harness == "claude-code"
+
+
+def test_a_gate_id_a_guardrail_accepts_survives_even_where_it_is_not_an_identifier() -> None:
+    # `api-key-` reads as a credential to the identifier rule, but it is a legal gate id.
+    [write] = _project(_gate("g1", "fail", **{"otari.gate.id": "api-key-in-diff"}))
+
+    [gate] = write.spans
+    assert gate.attributes["otari.gate.id"] == "api-key-in-diff"
+    assert "otari.guardrail.profile" not in gate.attributes
+    [summary] = _gate_summaries(list(write.spans))
+    assert (summary.gate_id, summary.blocked) == ("api-key-in-diff", 1)
 
 
 def test_a_judge_gate_keeps_the_model_its_calls_ran_on_and_the_tokens_they_used() -> None:
