@@ -21,16 +21,14 @@ import uuid
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, OrganizationGuardrailServiceDep, get_config, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.services.tenancy.organization_guardrail_service import (
     OrganizationGuardrailCreate,
     OrganizationGuardrailPublic,
-    OrganizationGuardrailService,
     OrganizationGuardrailsPublic,
     OrganizationGuardrailTest,
     OrganizationGuardrailTestResult,
@@ -54,14 +52,6 @@ router = APIRouter(
 # ``org_provider_keys`` declares one surface over two routers for the same
 # reason.
 SURFACE = Surface("organization_guardrails")
-
-
-def get_organization_guardrail_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationGuardrailService:
-    """Build the service on the request's session."""
-    return OrganizationGuardrailService(db)
-
-
-OrganizationGuardrailServiceDep = Annotated[OrganizationGuardrailService, Depends(get_organization_guardrail_service)]
 
 
 @router.get("")

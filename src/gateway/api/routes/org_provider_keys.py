@@ -16,12 +16,11 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CurrentIdentity,
+    OrgProviderKeyServiceDep,
     OrgProviderModelServiceDep,
-    get_db,
     verify_master_key,
 )
 from gateway.api.routes.organizations import Message
@@ -43,7 +42,6 @@ from gateway.schemas.providers import (
     WorkspaceProviderModelRestrictionRequest,
     WorkspaceProviderModelRestrictionsPublic,
 )
-from gateway.services.tenancy import OrgProviderKeyService
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
 # see organizations.py/workspaces.py for the same note.
@@ -64,14 +62,6 @@ workspace_router = APIRouter(
     tags=["provider-keys"],
     dependencies=[Depends(verify_master_key)],
 )
-
-
-def get_org_provider_key_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrgProviderKeyService:
-    """Build the org provider key service on the request's session."""
-    return OrgProviderKeyService(db)
-
-
-OrgProviderKeyServiceDep = Annotated[OrgProviderKeyService, Depends(get_org_provider_key_service)]
 
 
 # ==============================================================================

@@ -12,16 +12,14 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, WorkspaceMcpServerServiceDep, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerCheckRequest,
     WorkspaceMcpServerCreate,
     WorkspaceMcpServerHealth,
     WorkspaceMcpServerPublic,
-    WorkspaceMcpServerService,
     WorkspaceMcpServersPublic,
     WorkspaceMcpServerUpdate,
 )
@@ -34,14 +32,6 @@ router = APIRouter(
     tags=["mcp-servers"],
     dependencies=[Depends(verify_master_key)],
 )
-
-
-def get_workspace_mcp_server_service(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceMcpServerService:
-    """Build the service on the request's session."""
-    return WorkspaceMcpServerService(db)
-
-
-WorkspaceMcpServerServiceDep = Annotated[WorkspaceMcpServerService, Depends(get_workspace_mcp_server_service)]
 
 
 @router.get("")
