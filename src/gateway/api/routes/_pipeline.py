@@ -3005,6 +3005,7 @@ async def resolve_request_context(
                     candidate_providers=(
                         tuple(attempt.provider for attempt in plan.attempts) if plan is not None else (gate_impl,)
                     ),
+                    upstream_user=upstream_user,
                 )
             )
             # Bill the vision describe side-call before the reservation

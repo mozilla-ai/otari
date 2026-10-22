@@ -301,7 +301,9 @@ def _inline_passthrough(block: dict[str, Any], fmt: WireFormat, src: _Source) ->
     return {"type": "file", "file": file_obj}
 
 
-async def _extract_to_text(src: _Source, config: GatewayConfig, stats: NormalizationStats) -> str | None:
+async def _extract_to_text(
+    src: _Source, config: GatewayConfig, stats: NormalizationStats, upstream_user: str | None
+) -> str | None:
     """Produce a text rendering of a non-text block for a text-only model."""
     if src.data is None:
         stats.details.append(f"skip remote {src.kind} url (not fetched)")
@@ -314,19 +316,21 @@ async def _extract_to_text(src: _Source, config: GatewayConfig, stats: Normaliza
             return f"[Attached file: {label}]\n{result.text}\n[End of {label}]"
         # Scanned/image-only PDF → rasterize and describe pages.
         if src.mime.split(";", 1)[0] == "application/pdf":
-            return await _describe_pdf_pages(src, config, stats)
+            return await _describe_pdf_pages(src, config, stats, upstream_user)
         stats.details.append(f"document extract failed: {result.detail}")
         return None
 
     # image
-    return await _render_image(src, config, stats)
+    return await _render_image(src, config, stats, upstream_user)
 
 
-async def _render_image(src: _Source, config: GatewayConfig, stats: NormalizationStats) -> str | None:
+async def _render_image(
+    src: _Source, config: GatewayConfig, stats: NormalizationStats, upstream_user: str | None
+) -> str | None:
     assert src.data is not None
     strategy = config.vision_strategy
     if strategy == "describe":
-        described, usage = await describe_image(config, _to_data_url(src.data, src.mime))
+        described, usage = await describe_image(config, _to_data_url(src.data, src.mime), upstream_user=upstream_user)
         if usage is not None:
             stats.vision_prompt_tokens += usage.prompt_tokens or 0
             stats.vision_completion_tokens += usage.completion_tokens or 0
@@ -341,7 +345,9 @@ async def _render_image(src: _Source, config: GatewayConfig, stats: Normalizatio
     return None
 
 
-async def _describe_pdf_pages(src: _Source, config: GatewayConfig, stats: NormalizationStats) -> str | None:
+async def _describe_pdf_pages(
+    src: _Source, config: GatewayConfig, stats: NormalizationStats, upstream_user: str | None
+) -> str | None:
     assert src.data is not None
     pages = await rasterize_pdf(src.data)
     if not pages:
@@ -350,7 +356,7 @@ async def _describe_pdf_pages(src: _Source, config: GatewayConfig, stats: Normal
     descriptions: list[str] = []
     for index, page_png in enumerate(pages, start=1):
         page_src = _Source(_IMAGE, page_png, "image/png", None, None)
-        rendered = await _render_image(page_src, config, stats)
+        rendered = await _render_image(page_src, config, stats, upstream_user)
         if rendered:
             descriptions.append(f"-- Page {index} --\n{rendered}")
     if not descriptions:
@@ -443,6 +449,7 @@ async def _normalize_block(
     files: FileService | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
+    upstream_user: str | None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
 ) -> Any:
@@ -495,7 +502,7 @@ async def _normalize_block(
         return _inline_passthrough(block, fmt, src) if src.needs_inline else block
 
     try:
-        text = await _extract_to_text(src, config, stats)
+        text = await _extract_to_text(src, config, stats, upstream_user)
     except Exception as exc:  # noqa: BLE001
         logger.warning("content normalizer: extraction failed for %s: %s", src.kind, exc)
         return block
@@ -539,6 +546,7 @@ async def normalize_messages(
     files: FileService | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None = None,
+    upstream_user: str | None = None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
@@ -547,6 +555,9 @@ async def normalize_messages(
     ``workspace_id`` confines ``file_id`` resolution to one workspace, and is the
     workspace of the API key that authenticated the request. ``None`` means "any",
     which is what a master-key request gets: the operator acting deployment-wide.
+
+    ``upstream_user`` is the request's end-user identifier, which an image
+    describe side-call carries as the main call does.
 
     ``sandbox_requested`` says the request runs the gateway's code-execution
     sandbox. Every stored upload the messages reference is then also recorded on
@@ -582,6 +593,7 @@ async def normalize_messages(
             files=files,
             user_id=user_id,
             workspace_id=workspace_id,
+            upstream_user=upstream_user,
             sandbox_requested=sandbox_requested,
             provider_container=provider_container,
         )

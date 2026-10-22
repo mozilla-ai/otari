@@ -1131,6 +1131,7 @@ def test_echoed_gateway_activity_is_removed_before_prompt_estimation(
                 file_workspace_id=None,
                 workspace_executor=None,
                 candidate_providers=(None,),
+                upstream_user=None,
             )
         )
         raise HTTPException(status_code=418, detail="stop after admission inputs")

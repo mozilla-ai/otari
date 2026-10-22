@@ -420,7 +420,7 @@ def test_vision_describe_side_call_is_billed(
     )
     client.post(f"{API_ROOT}/users", json={"user_id": "vision-user"}, headers=master_key_header)
 
-    async def fake_describe(config: Any, data_url: str) -> tuple[str | None, CompletionUsage | None]:
+    async def fake_describe(config: Any, data_url: str, **_: Any) -> tuple[str | None, CompletionUsage | None]:
         return "a chart of revenue", CompletionUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500)
 
     monkeypatch.setattr("gateway.services.content_normalizer.describe_image", fake_describe)
@@ -988,7 +988,7 @@ def test_vision_describe_side_call_row_carries_the_request_tags(
     monkeypatch.setattr(test_config, "vision_describe_model", "openai:gpt-4o-mini")
     client.post(f"{API_ROOT}/users", json={"user_id": "vision-tags-user"}, headers=master_key_header)
 
-    async def fake_describe(config: Any, data_url: str) -> tuple[str | None, CompletionUsage | None]:
+    async def fake_describe(config: Any, data_url: str, **_: Any) -> tuple[str | None, CompletionUsage | None]:
         return "a chart of revenue", CompletionUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500)
 
     monkeypatch.setattr("gateway.services.content_normalizer.describe_image", fake_describe)

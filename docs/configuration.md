@@ -726,7 +726,10 @@ invocation logs, which is where the prompt ids in an AWS abuse report are traced
 back to a user. Every other provider gets nothing: some have no such field
 (Vertex AI, whose labels are for billing only, and Mistral), some run your own
 models, and for the rest an unknown field can fail the call. A Responses or
-Messages request served as a chat completion gets that provider's chat field.
+Messages request served as a chat completion gets that provider's chat field. The
+call that describes an image for a text-only model (`vision_describe_model`)
+carries the request's identifier too, in the field the vision model's provider
+reads.
 
 Nothing turns the identifier off. OpenAI's partner program for gateways requires
 one on every request, and a provider that cannot take one already gets nothing.

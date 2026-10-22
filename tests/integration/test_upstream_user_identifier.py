@@ -22,6 +22,7 @@ _PROVIDERS = {
     "gemini": {"api_key": "gemini-key"},
     "meta": {"api_key": "meta-key"},
     "mistral": {"api_key": "mistral-key"},
+    "ollama": {"api_base": "http://ollama:11434"},
     "bedrock": {"api_key": "bedrock-key", "region_name": "us-east-1"},
 }
 
@@ -90,7 +91,7 @@ def _keyed_user(client: TestClient, user_id: str = "alice") -> tuple[dict[str, s
 def _chat(client: TestClient, headers: dict[str, str], model: str = "openai:gpt-4o-mini", **body: Any) -> None:
     client.post(
         f"{API_ROOT}/chat/completions",
-        json={"model": model, "messages": [{"role": "user", "content": "hi"}], **body},
+        json={"model": model, "messages": [{"role": "user", "content": "hi"}]} | body,
         headers=headers,
     )
 
@@ -251,6 +252,49 @@ def test_a_streamed_request_carries_it(make_client: ClientFactory, captured: lis
     _chat(client, headers, stream=True)
 
     assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
+
+
+_IMAGE = "data:image/png;base64,iVBORw0KGgo="
+
+
+@pytest.mark.parametrize(
+    ("vision_model", "fields"),
+    [
+        ("openai:gpt-4o-mini", lambda identifier: {"safety_identifier": identifier}),
+        ("anthropic:claude-sonnet-4-5", lambda identifier: {"metadata": {"user_id": identifier}}),
+    ],
+    ids=["openai", "anthropic"],
+)
+def test_the_image_describe_call_carries_the_requests_identifier(
+    make_client: ClientFactory,
+    captured: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    vision_model: str,
+    fields: Callable[[str], dict[str, Any]],
+) -> None:
+    """A text-only model's image is captioned by the vision model, which gets the main call's identifier."""
+    described: list[dict[str, Any]] = []
+
+    async def fake_describe(**kwargs: Any) -> ChatCompletion:
+        described.append(kwargs)
+        return _completion()
+
+    monkeypatch.setattr("gateway.services.vision.acompletion", fake_describe)
+    client = make_client(vision_strategy="describe", vision_describe_model=vision_model)
+    headers, workspace = _keyed_user(client)
+
+    _chat(
+        client,
+        headers,
+        model="ollama:llama3",
+        safety_identifier="end-user-7",
+        messages=[{"role": "user", "content": [{"type": "image_url", "image_url": {"url": _IMAGE}}]}],
+    )
+
+    assert len(captured) == 1
+    identifier = upstream_user_identifier(workspace, "end-user-7", None)
+    end_user_fields = {"user", "safety_identifier", "metadata", UPSTREAM_USER_FIELD}
+    assert {key: value for key, value in described[0].items() if key in end_user_fields} == fields(identifier)
 
 
 # ---------------------------------------------------------------------------
