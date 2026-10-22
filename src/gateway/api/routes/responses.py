@@ -510,6 +510,7 @@ async def create_response(
             estimate_max_output_tokens=max_output_tokens,
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
+            streaming=bool(request_body.stream),
             routing_signal=lambda: routing_signal_from_text(
                 _routing_text(request_body), raw_request, has_tools=bool(request_body.tools)
             ),

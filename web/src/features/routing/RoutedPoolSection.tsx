@@ -287,8 +287,7 @@ export function RoutedPoolSection({
             scored examples, a weakly supported pick, a request carrying tools,
             or a caller sending <code>Otari-Router: off</code>. Until it has
             scored examples (<code>POST /api/v1/routing/preferences/rank</code>
-            ), it serves the marked model; open <b>Examples</b> on the policy's
-            row to watch it warm up.
+            ), it serves the marked model.
           </>
         )}
       </p>

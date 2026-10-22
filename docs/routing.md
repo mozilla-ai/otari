@@ -6,6 +6,11 @@ spill-over past a rate limit, learned selection, or guardrails the caller cannot
 remove. Use an
 [alias](models.md#model-aliases) when one name always maps to one target.
 
+For provider selection within one model, an unpinned catalog ID already uses
+[automatic routing](models.md#automatic-provider-selection), considering estimated
+cost, load, region and latency, with sticky sessions for conversation continuity,
+without scored examples.
+
 ## Failover
 
 ```yaml
@@ -26,7 +31,7 @@ In the dashboard, choose Create policy on Routing, then Fallback: name it, pick
 the main model, and list at least one backup under "If unavailable, use", each a
 model other than the main one and the other backups. The backups are
 `on_failure`, in the order shown. Create policy offers one kind at a time
-(Fallback, Split traffic, Smart router, Spill over at rate limits, Tier down on
+(Fallback, Split traffic, Spill over at rate limits, Tier down on
 budget), each with only its own fields. To combine them, open the policy from
 the list once it exists: its page has a section each for the main selection,
 the fallback chain, a budget tier-down and guardrails, and each section saves on
@@ -163,6 +168,12 @@ limits", order the models with the arrows, and add the limit under Settings,
 Rate limit rules, counted for "Each model". On an existing policy, pick "Spill
 over" in its Main selection section.
 
+
+## Learned routing (API and configuration only)
+
+Smart router is not offered in the dashboard. It requires externally scored
+examples and has not been validated for general use. Existing learned policies
+continue to run and appear read-only in Routing.
 
 The `knn` router uses scored examples to rank candidates for each user's
 traffic:

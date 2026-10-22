@@ -2710,8 +2710,9 @@ export interface paths {
          * @description The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.
          *
          *     A request that sends a model's catalog ID moves to the model's next offering
-         *     when one fails, with no policy. Each model lists its offerings in the order
-         *     such a request tries them, priced for this organization, with who runs the
+         *     when one fails, with no policy. Each model lists its offerings in baseline
+         *     catalog order; automatic selection can reorder them per request using cost,
+         *     load, region, latency and cache continuity. The list shows who runs the
          *     built-in tools on each, beside its traffic: how many requests a backup served,
          *     and how many named one offering and so had no fallback. The traffic is the
          *     workspaces the caller may see in their active organization, by the rule the

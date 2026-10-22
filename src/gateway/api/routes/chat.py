@@ -605,6 +605,7 @@ async def run_chat_completion(
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
             session_principal=session_principal,
+            streaming=bool(request.stream),
             routing_signal=lambda: routing_signal_from_messages(
                 request.messages, raw_request, has_tools=bool(request.tools)
             ),

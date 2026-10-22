@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from any_llm.exceptions import AnyLLMError
 
@@ -134,6 +135,10 @@ _ORG_REFUSAL_FRAGMENTS: dict[str, str] = {
 }
 
 
+if TYPE_CHECKING:
+    from gateway.services.routing._automatic import AutomaticSelection
+
+
 @dataclass(frozen=True)
 class CompiledPlan:
     """An ordered plan, plus everything that was left out and why."""
@@ -150,6 +155,8 @@ class CompiledPlan:
     ``default`` selection reason, which is how "the router chose the strong model"
     and "the router did not run" stay distinguishable after the fact.
     """
+
+    automatic: AutomaticSelection | None = None
 
     @property
     def head(self) -> Attempt:
@@ -360,6 +367,7 @@ def compile_catalog_plan(
     user_id: str | None = None,
     allowlist: list[str] | None = None,
     workspace_id: uuid.UUID | None = None,
+    candidate_limit: int = MAX_CANDIDATES,
 ) -> CompiledPlan | None:
     """Turn a catalog ID into a failover plan over its offerings, best first, or ``None``.
 
@@ -371,9 +379,16 @@ def compile_catalog_plan(
     offerings = resolve_catalog_fallback(config, model_selector, user_id, workspace_id=workspace_id)
     if len(offerings) < 2:
         return None
+    if any(selector.replace(":", "/", 1) == model_selector for selector in offerings):
+        candidate_limit = min(candidate_limit, MAX_CANDIDATES)
     ordered = [(selector, "catalog") for selector in offerings]
     attempts, dropped = _resolve_candidates(
-        config, ordered, display_model=model_selector, allowlist=allowlist, workspace_id=workspace_id
+        config,
+        ordered,
+        display_model=model_selector,
+        allowlist=allowlist,
+        workspace_id=workspace_id,
+        candidate_limit=candidate_limit,
     )
     if dropped and logger.isEnabledFor(logging.DEBUG):
         logger.debug(
@@ -403,6 +418,7 @@ def _resolve_candidates(
     display_model: str,
     allowlist: list[str] | None,
     workspace_id: uuid.UUID | None,
+    candidate_limit: int = MAX_CANDIDATES,
 ) -> tuple[list[Attempt], list[DroppedCandidate]]:
     """The attempts ``ordered`` resolves to for this caller, and every candidate dropped on the way."""
     attempts: list[Attempt] = []
@@ -410,8 +426,8 @@ def _resolve_candidates(
     seen: set[str] = set()
 
     for selector, selection_reason in ordered:
-        if len(attempts) >= MAX_CANDIDATES:
-            dropped.append(DroppedCandidate(selector, "over_cap", f"exceeds the {MAX_CANDIDATES}-candidate cap"))
+        if len(attempts) >= candidate_limit:
+            dropped.append(DroppedCandidate(selector, "over_cap", f"exceeds the {candidate_limit}-candidate cap"))
             continue
         try:
             resolved = resolve_provider_selector(config, selector, workspace_id=workspace_id)
