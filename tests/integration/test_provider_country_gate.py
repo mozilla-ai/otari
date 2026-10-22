@@ -19,6 +19,13 @@ HEADERS = {API_KEY_HEADER: "Bearer test-master-key"}
 _COUNTRY_HEADER = "CF-IPCountry"
 
 
+def _client_with_alice(config: GatewayConfig) -> Generator[TestClient]:
+    for client in build_test_client(config):
+        resp = client.post(f"{API_ROOT}/users", json={"user_id": "alice"}, headers=HEADERS)
+        assert resp.status_code == 200, resp.text
+        yield client
+
+
 @pytest.fixture
 def client(postgres_url: str) -> Generator[TestClient]:
     config = GatewayConfig(
@@ -38,7 +45,7 @@ def client(postgres_url: str) -> Generator[TestClient]:
             }
         ),
     )
-    yield from build_test_client(config)
+    yield from _client_with_alice(config)
 
 
 def _chat(client: TestClient, model: str, country: str | None) -> Any:
@@ -48,12 +55,6 @@ def _chat(client: TestClient, model: str, country: str | None) -> Any:
         json={"model": model, "messages": [{"role": "user", "content": "hi"}], "user": "alice"},
         headers=headers,
     )
-
-
-@pytest.fixture(autouse=True)
-def _alice(client: TestClient) -> None:
-    resp = client.post(f"{API_ROOT}/users", json={"user_id": "alice"}, headers=HEADERS)
-    assert resp.status_code == 200, resp.text
 
 
 def test_a_listed_country_reaches_the_provider(client: TestClient) -> None:
@@ -95,3 +96,40 @@ def test_a_policy_falls_over_to_a_provider_the_country_may_reach(client: TestCli
 
     assert resp.status_code == 200, resp.text
     assert _awaited_model(mock) == "anthropic:claude-haiku-4-5"
+
+
+@pytest.fixture
+def vision_client(postgres_url: str) -> Generator[TestClient]:
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        auto_migrate=False,
+        require_pricing=False,
+        model_discovery=False,
+        providers={"openai": {"api_key": "sk-openai"}, "ollama": {"api_base": "http://ollama:11434"}},
+        provider_supported_countries={"openai": ["US"]},
+        client_country_header=_COUNTRY_HEADER,
+        vision_strategy="describe",
+        vision_describe_model="openai:gpt-4o-mini",
+    )
+    yield from _client_with_alice(config)
+
+
+@pytest.mark.parametrize(("country", "described"), [("US", True), ("FR", False)])
+def test_the_image_describe_call_stays_within_the_gate(
+    vision_client: TestClient, monkeypatch: pytest.MonkeyPatch, country: str, described: bool
+) -> None:
+    """A text-only model's image is captioned only where the vision model's provider serves the country."""
+    describe = AsyncMock(return_value=_completion("gpt-4o-mini"))
+    monkeypatch.setattr("gateway.services.vision.acompletion", describe)
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}}
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("llama3"))):
+        resp = vision_client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "ollama:llama3", "messages": [{"role": "user", "content": [image]}], "user": "alice"},
+            headers={**HEADERS, _COUNTRY_HEADER: country},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert describe.await_count == (1 if described else 0)

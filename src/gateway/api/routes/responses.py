@@ -480,6 +480,7 @@ async def create_response(
             instance=target.instance,
             workspace_id=target.file_workspace_id,
             upstream_user=target.upstream_user,
+            client_country=target.client_country,
             sandbox_requested=sandbox_requested(
                 request_body.tools,
                 config=config,

@@ -3140,6 +3140,7 @@ async def resolve_request_context(
                     ),
                     upstream_user=upstream_user,
                     hosted_credential=_hosted_credential,
+                    client_country=country_gate.country if country_gate is not None else None,
                 )
             )
             # Bill the vision describe side-call before the reservation

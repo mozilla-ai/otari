@@ -602,6 +602,7 @@ async def run_chat_completion(
             credential_workspace_id=target.credential_workspace_id,
             hosted_credential=target.hosted_credential,
             upstream_user=target.upstream_user,
+            client_country=target.client_country,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
