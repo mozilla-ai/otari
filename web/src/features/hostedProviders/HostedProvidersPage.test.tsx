@@ -820,7 +820,17 @@ describe("HostedProvidersPage", () => {
       prices: PRICES,
       sweep: {
         ...EMPTY_SWEEP,
-        providers: [{ provider: "openai", added: ["gpt-5-1017"] }],
+        providers: [
+          {
+            provider: "openai",
+            added: ["gpt-5-1017"],
+            repriced: [],
+            error: null,
+            discovery_unsupported: false,
+            credential_unreadable: false,
+            source: "database",
+          },
+        ],
       },
     })
     const user = userEvent.setup()

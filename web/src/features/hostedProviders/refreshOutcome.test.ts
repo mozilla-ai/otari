@@ -331,9 +331,9 @@ describe("modelsPreviewOutcome", () => {
       modelsPreviewOutcome({
         ...noCatalog,
         providers: [
-          { provider: "fireworks", added: ["a", "b"] },
-          { provider: "nebius", added: [] },
-          { provider: "together", added: ["c"] },
+          provider({ provider: "fireworks", added: ["a", "b"] }),
+          provider({ provider: "nebius", added: [] }),
+          provider({ provider: "together", added: ["c"] }),
         ],
       }),
     ).toBe(
