@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from gateway.core.settings.update_check import UpdateCheckSettings, preset_answer
+from gateway.core.settings.update_check import UpdateCheckSettings
 from gateway.services.update_check._schedule import (
     LONGEST_RETRY,
     daily_slot,
@@ -14,6 +14,7 @@ from gateway.services.update_check._schedule import (
     next_retry,
     release_version,
 )
+from gateway.services.update_check._service import preset_answer
 
 _NOW = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
 

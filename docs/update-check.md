@@ -12,8 +12,9 @@ again on the next visit.
 
 ## What is sent
 
-Each check is one `POST` to `https://api.otari.ai/api/v1/update-checks` with
-this body, and nothing else:
+Each check is one `POST` to `https://api.otari.ai/api/v1/update-checks` (the
+default; `update_check_url` in `config.yml`, or `OTARI_UPDATE_CHECK_URL`,
+sends it elsewhere) with this body, and nothing else:
 
 ```json
 {"version": "0.30.1", "install_id": "2f1c7e0e-8a43-4f53-9a6e-2c1d4f1e9b70"}
@@ -28,7 +29,8 @@ this body, and nothing else:
 
 The request carries no API key, no session, and nothing about users, keys,
 budgets, providers, models or traffic. It is a `POST` rather than a `GET` so the
-install id is not written into the access logs of the proxies on the way.
+install id is not part of the URL, and so not in URL access logs on the way. A
+proxy that logs request bodies would still see it.
 
 otari.ai keeps, for each install id, the days it checked and the version it ran
 that day: not the time of day, and not the address the check came from. An

@@ -1,12 +1,13 @@
 """Whether this deployment checks for new releases, sending a check when one is due, and what the last one heard."""
 
+import os
 import random
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
 from gateway.core.config import GatewayConfig
-from gateway.core.settings.update_check import preset_answer
+from gateway.core.settings.update_check import UpdateCheckSettings
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.update_check_exceptions import UpdateCheckSetInConfigError
 from gateway.log_config import logger
@@ -27,6 +28,19 @@ from gateway.version import __version__
 CLAIM_HOLD = timedelta(minutes=10)
 
 SendCheck = Callable[[str, str, uuid.UUID], Awaitable[UpdateCheckReply]]
+
+
+def preset_answer(config: UpdateCheckSettings) -> bool | None:
+    """The answer the deployment's own configuration gives, or None when an operator is to be asked.
+
+    ``DO_NOT_TRACK`` (https://consoledonottrack.com) and ``CI`` answer no, unless ``update_check`` says otherwise,
+    so a CI run and an operator who opts out of every tool at once are neither asked nor counted.
+    """
+    if config.update_check is not None:
+        return config.update_check
+    if os.environ.get("DO_NOT_TRACK", "").strip().lower() in {"1", "true", "yes"} or os.environ.get("CI"):
+        return False
+    return None
 
 
 async def _send(url: str, version: str, install_id: uuid.UUID) -> UpdateCheckReply:
