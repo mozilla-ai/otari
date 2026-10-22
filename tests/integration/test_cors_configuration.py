@@ -155,9 +155,7 @@ def test_cors_wildcard_disables_credentials(postgres_url: str, test_db: Session)
 
 
 def test_cors_preflight_allows_sdk_headers(postgres_url: str, test_db: Session) -> None:
-    """Regression: a browser app on the OpenAI JS SDK (Thunderbolt's chat) failed every
-    completion with "Disallowed CORS headers", because the SDK's x-stainless-* headers
-    were not allowed. Allowing them must not let the trace-context headers through."""
+    """The OpenAI and Anthropic JS SDK headers pass the preflight; trace-context headers still do not."""
     config = GatewayConfig(
         database_url=postgres_url,
         master_key="test-master-key",
