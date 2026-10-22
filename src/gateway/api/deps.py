@@ -1334,15 +1334,12 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
 
 
-async def caller_operates_deployment(db: Annotated[AsyncSession, Depends(get_db)], identity: CurrentIdentity) -> bool:
-    """Whether the signed-in caller operates the deployment, answered rather than enforced.
-
-    ``CurrentIdentity`` resolves the master key to the bootstrap operator, so both pass.
-    """
-    return await DeploymentUserService(db).has_administration_access(identity)
+def get_deployment_user_service(db: Annotated[AsyncSession, Depends(get_db)]) -> DeploymentUserService:
+    """Build the request's deployment user service, which answers whether a caller operates the deployment."""
+    return DeploymentUserService(db)
 
 
-CallerOperatesDeploymentDep = Annotated[bool, Depends(caller_operates_deployment)]
+DeploymentUserServiceDep = Annotated[DeploymentUserService, Depends(get_deployment_user_service)]
 
 
 def get_membership_organization_service(
