@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
 from gateway.models.traces import TraceGuardrailDefinition
-from otari_agent.domain.definitions import GateDefinition, definition_body
+from otari_agent.domain.definitions import GateDefinition, definition_body, definition_digest, gates_from_body
 from otari_agent.domain.evaluators import _command_segments, _contains_subsequence
 
 _VALID_POLICY = """\
@@ -1529,9 +1529,10 @@ def test_a_definition_whose_fingerprint_does_not_match_its_gates_is_refused(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     api_key_header = _exempt_key(client, master_key_header)
-    response = client.post(f"{API_ROOT}/hooks/guardrails", json=_definition(digest="0" * 16), headers=api_key_header)
+    response = client.post(f"{API_ROOT}/hooks/guardrails", json=_definition(digest="0" * 64), headers=api_key_header)
 
     assert response.status_code == 422
+    assert "does not match these gates" in response.text
 
 
 def test_the_master_key_cannot_store_a_definition(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -1555,7 +1556,9 @@ def test_a_key_that_may_not_export_traces_cannot_store_a_definition(
 def test_a_definition_naming_one_gate_twice_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
     body = _definition()
     body["gates"] = [*body["gates"], *body["gates"]]  # type: ignore[misc]
+    body["digest"] = definition_digest(gates_from_body(body["gates"]))  # type: ignore[arg-type]
 
     response = client.post(f"{API_ROOT}/hooks/guardrails", json=body, headers=_exempt_key(client, master_key_header))
 
     assert response.status_code == 422
+    assert "each gate_id may appear once" in response.text
