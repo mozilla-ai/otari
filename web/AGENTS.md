@@ -261,6 +261,15 @@ uncounted deliberately: the sentence said "three" while eight followed it,
 because a total in the prose has to be edited by every later addition and was
 not.
 
+**The boot is already marked, so read the marks instead of watching it.**
+`shared/telemetry/bootTiming.ts` writes `boot:bootstrap`, `ctx:current`,
+`shell:painted` and `overview:kpis` once per load. The sidebar's Overview label
+carries `elementtiming="shell"`, and the "Spend today" figure carries
+`elementtiming="overview-kpi"` once it is a number. Read
+`performance.getEntriesByType("mark")` after the page settles. A
+MutationObserver or a live observer installed during boot has slowed the boot
+it was timing here before.
+
 **Check which bundle the tab is on first.** A gateway serves the last bundle
 built into `src/gateway/static/dashboard/`, and a browser tab holds the one it
 loaded, so a measurement can describe a build from an hour ago while the source

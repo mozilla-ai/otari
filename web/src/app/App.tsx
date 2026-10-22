@@ -1,5 +1,6 @@
 import { RouterProvider } from "@tanstack/react-router"
 import { lazy, Suspense, useEffect, useState } from "react"
+import { BootTimingReport } from "@/app/BootTimingReport"
 import { PublicPageTitle } from "@/app/PublicPageTitle"
 import { router } from "@/app/router"
 import { ErrorBoundary } from "@/design-system/feedback/ErrorBoundary"
@@ -72,25 +73,33 @@ export default function App({
   // prevent, so say what happened instead.
   if (!bootstrap) {
     return (
-      <PageError
-        error={
-          new Error(
-            "Could not reach the gateway, so the dashboard does not know what it is connected to. Check that it is running, then reload.",
-          )
-        }
-      />
+      <>
+        <BootTimingReport />
+        <PageError
+          error={
+            new Error(
+              "Could not reach the gateway, so the dashboard does not know what it is connected to. Check that it is running, then reload.",
+            )
+          }
+        />
+      </>
     )
   }
 
   // Outside the provider rather than inside it, because the provider's own
   // correction memo reads `sign_in_methods` and is therefore one of the things
   // that can throw on a bootstrap this dashboard did not expect.
+  // The report sits outside the boundary too, so a page that throws is still
+  // a load that gets reported, and once.
   return (
-    <ErrorBoundary resetKey={hash}>
-      <DeploymentProvider value={normalizeBootstrap(bootstrap)}>
-        <DeploymentRoot hash={hash} />
-      </DeploymentProvider>
-    </ErrorBoundary>
+    <>
+      <BootTimingReport />
+      <ErrorBoundary resetKey={hash}>
+        <DeploymentProvider value={normalizeBootstrap(bootstrap)}>
+          <DeploymentRoot hash={hash} />
+        </DeploymentProvider>
+      </ErrorBoundary>
+    </>
   )
 }
 

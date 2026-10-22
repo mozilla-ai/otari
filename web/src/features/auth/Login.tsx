@@ -23,6 +23,7 @@ import {
   supportsPasskeys,
 } from "@/shared/helpers/webauthn"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import { BOOT_MARKS, useMarkAfterPaint } from "@/shared/telemetry/bootTiming"
 import {
   analyticsErrorCode,
   analyticsStatusCode,
@@ -225,6 +226,8 @@ function LabelRow({
  * validation can explain what to enter.
  */
 export function Login() {
+  // The signed-out half of the shell mark; `AppShellChrome` writes the other.
+  useMarkAfterPaint(BOOT_MARKS.SHELL)
   const { login, isSigningOut } = useAuth()
   const { recordEvent } = useTelemetry()
   const {
