@@ -199,6 +199,27 @@ _UNAUTHENTICATED_PATHS = frozenset(
         f"{API_ROOT}/auth/oauth/{{provider}}/callback",
     }
 )
+# Headers the official OpenAI and Anthropic JS SDKs add to every request, so a
+# browser app built on either (dangerouslyAllowBrowser) passes the preflight.
+# Named one by one rather than allowing every header, which would let a browser
+# send the trace-context headers too (see accept_incoming_trace_context).
+_SDK_CORS_HEADERS = (
+    "anthropic-beta",
+    "anthropic-dangerous-direct-browser-access",
+    "anthropic-version",
+    "x-stainless-arch",
+    "x-stainless-custom-poll-interval",
+    "x-stainless-helper",
+    "x-stainless-helper-method",
+    "x-stainless-lang",
+    "x-stainless-os",
+    "x-stainless-package-version",
+    "x-stainless-poll-helper",
+    "x-stainless-retry-count",
+    "x-stainless-runtime",
+    "x-stainless-runtime-version",
+    "x-stainless-timeout",
+)
 
 
 @dataclass(frozen=True)
@@ -1261,6 +1282,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 API_KEY_HEADER,
                 X_API_KEY_HEADER,
                 TAGS_HEADER,
+                *_SDK_CORS_HEADERS,
             ],
         )
 
