@@ -933,11 +933,12 @@ def test_a_hosted_model_priced_under_its_legacy_spelling_is_listed_once_with_its
         session.close()
     bind_model_provider(client, HostedModelProvider("mistral", models={"mistral": {"open-mistral-legacy"}}))
 
-    response = client.get(f"{API_ROOT}/models", headers=master_key_header)
-    assert response.status_code == status.HTTP_200_OK, response.text
-    listed = [model for model in response.json()["data"] if "open-mistral-legacy" in model["id"]]
-    assert len(listed) == 1, listed
-    assert listed[0]["pricing"] is not None
+    for query in ("", "?provider=mistral"):
+        response = client.get(f"{API_ROOT}/models{query}", headers=master_key_header)
+        assert response.status_code == status.HTTP_200_OK, response.text
+        listed = [model for model in response.json()["data"] if "open-mistral-legacy" in model["id"]]
+        assert len(listed) == 1, (query, listed)
+        assert listed[0]["pricing"] is not None, query
 
 
 def test_the_master_key_keeps_a_model_its_default_workspace_reaches_on_its_own_key(

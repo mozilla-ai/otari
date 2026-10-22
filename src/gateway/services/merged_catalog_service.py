@@ -367,7 +367,12 @@ async def get_pricing_map(
     )
 
     if provider_filter:
-        stmt = stmt.where(ModelPricing.model_key.startswith(f"{provider_filter}:"))
+        # Both spellings a stored key may use: the canonical ``provider:model``
+        # and the legacy ``provider/model``.
+        stmt = stmt.where(
+            ModelPricing.model_key.startswith(f"{provider_filter}:")
+            | ModelPricing.model_key.startswith(f"{provider_filter}/")
+        )
 
     if model_keys is not None:
         stmt = stmt.where(ModelPricing.model_key.in_(model_keys))
