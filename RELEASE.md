@@ -153,7 +153,7 @@ can, could publish with it. An environment's deployment policy limits it to
 
 | Environment | Secrets | Allowed refs |
 | --- | --- | --- |
-| `docker-hub` | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | `main`, `v*` tags |
+| `docker-hub` | none (OIDC, see below) | `main`, `v*` tags |
 | `homebrew-tap` | `HOMEBREW_TAP_GITHUB_TOKEN` | `main`, `v*` tags |
 | `sdk-codegen` | `CODEGEN_APP_ID`, `CODEGEN_APP_KEY` | `main`, `v*` tags |
 | `release` | `RELEASE_APP_PRIVATE_KEY` | `main` |
@@ -163,8 +163,14 @@ An organization secret with the same name would still be readable from any
 branch, so this repository must not be among the repositories an organization
 secret of that name is granted to.
 
-- `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, used by `otari-docker.yml` to push
-  the image.
+- No Docker Hub credential. `otari-docker.yml` logs in to the `mzdotai`
+  organization through a Docker Hub OIDC connection (Docker Home, Identity &
+  auth, OIDC connections) whose subject claim is
+  `repo:mozilla-ai/otari:environment:docker-hub`, so only a job in that
+  environment can push. The connection's ID is the repository variable
+  `DOCKERHUB_OIDC_CONNECTIONID`; it is not a secret. The repository's
+  description on Docker Hub is edited by hand, because updating it takes a
+  personal token with delete scope.
 - `CODEGEN_APP_ID` and `CODEGEN_APP_KEY`, the Client ID and private key of the
   codegen GitHub App. `otari-sdk-codegen.yml` uses them to open regeneration PRs
   on the SDK repos, and `sdk-regen-staleness.yml` uses them to read those PRs.
