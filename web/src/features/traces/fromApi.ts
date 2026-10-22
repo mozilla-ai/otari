@@ -77,7 +77,8 @@ function spanStatus(
   if (span.outcome === "blocked") {
     const source = span.attributes["otari.tool.decision_source"]
     return (
-      (typeof source === "string" && REFUSED_BY[source]) ||
+      (typeof source === "string" &&
+        REFUSED_BY[source.startsWith("user_") ? "user" : source]) ||
       "Blocked before it ran."
     )
   }
