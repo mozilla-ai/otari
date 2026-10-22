@@ -154,7 +154,7 @@ can, could publish with it. An environment's deployment policy limits it to
 | Environment | Secrets | Allowed refs |
 | --- | --- | --- |
 | `docker-hub` | none (OIDC, see below) | `main`, `v*` tags |
-| `homebrew-tap` | `HOMEBREW_TAP_GITHUB_TOKEN` | `main`, `v*` tags |
+| `homebrew-tap` | `RELEASE_APP_PRIVATE_KEY` | `main`, `v*` tags |
 | `sdk-codegen` | `CODEGEN_APP_ID`, `CODEGEN_APP_KEY` | `main`, `v*` tags |
 | `release` | `RELEASE_APP_PRIVATE_KEY` | `main` |
 | `platform-dispatch` | `PLATFORM_DISPATCH_APP_PRIVATE_KEY` | `main` |
@@ -174,11 +174,6 @@ secret of that name is granted to.
 - `CODEGEN_APP_ID` and `CODEGEN_APP_KEY`, the Client ID and private key of the
   codegen GitHub App. `otari-sdk-codegen.yml` uses them to open regeneration PRs
   on the SDK repos, and `sdk-regen-staleness.yml` uses them to read those PRs.
-- `HOMEBREW_TAP_GITHUB_TOKEN`, used by `otari-homebrew.yml` to push
-  `Formula/otari.rb` to `mozilla-ai/homebrew-tap`, so it needs write access to
-  that repository and nothing else. Without it the workflow's build and macOS
-  jobs still run and the rendered formula sits on the Release as `otari.rb`;
-  only the push to the tap fails.
 - `PLATFORM_DISPATCH_APP_PRIVATE_KEY`, used by `otari-tag-release.yml` to send
   events to `mozilla-ai/otari-ai`. It belongs to the `otari-notification`
   GitHub App, which must be installed on `mozilla-ai/otari-ai` with
@@ -186,10 +181,15 @@ secret of that name is granted to.
   identifies the App with `PLATFORM_DISPATCH_APP_CLIENT_ID` (a repository
   variable, not a secret).
 - `RELEASE_APP_CLIENT_ID` (a repository variable, not a secret) and
-  `RELEASE_APP_PRIVATE_KEY`, used by `otari-release.yml` and
-  `otari-tag-release.yml`. They identify the `otari-bot` GitHub App, org-owned
-  and installed on this repo alone, holding exactly `contents: write` +
-  `pull requests: write`. Each run mints its own installation token with
+  `RELEASE_APP_PRIVATE_KEY`, used by `otari-release.yml`,
+  `otari-tag-release.yml` and `otari-homebrew.yml`, which is why the key is in
+  both the `release` and `homebrew-tap` environments. They identify the
+  `otari-bot` GitHub App, org-owned and installed on this repo and on
+  `mozilla-ai/homebrew-tap`, holding exactly `contents: write` +
+  `pull requests: write`. `otari-homebrew.yml` narrows its token to the tap's
+  contents to push `Formula/otari.rb`; without the installation the build and
+  macOS jobs still run and the rendered formula sits on the Release as
+  `otari.rb`, and only the push to the tap fails. Each run mints its own installation token with
   `actions/create-github-app-token`, narrowed further to the permissions that
   job uses and revoked when the job ends, so the release PR is authored by
   `otari-bot[bot]` rather than by whichever maintainer owned a personal access
