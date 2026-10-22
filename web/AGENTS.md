@@ -21,7 +21,15 @@ foundations, components with their states, and the page archetypes as artboards.
 ## Runtime contract
 
 `src/main.tsx` fetches unauthenticated `GET /api/v1/bootstrap` before mounting
-React. Do not guess a deployment when that request fails.
+React. Do not guess a deployment when that request fails. The one exception to
+waiting belongs to the overlay, not to this build: a request policy that sets
+`keptAnswers.bootstrap` (`shared/api/requestPolicy.ts`, false here) renders the
+bootstrap kept from the previous load while the current one is read
+(`app/boot.ts`), and the current one remounts the tree when it differs. When
+the current one never arrives the kept one stays for that load and is
+forgotten, so the next load renders as unreachable. A field that varies per
+request would remount every load; `tests/unit/test_deployment_bootstrap.py`
+pins the response as the same bytes on every read.
 
 A gateway older than a bootstrap field does not send it, whatever the generated
 type promises, so `App` completes the payload once through

@@ -7,6 +7,7 @@ Unit rather than integration because the one database read the route makes runs
 on the SQLite file each test stands up, so there is no PostgreSQL to wait for.
 """
 
+import time
 from collections.abc import Generator
 from pathlib import Path
 
@@ -92,6 +93,48 @@ def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
         "mail_ready": False,
         "public_catalog": False,
         "open_signup": False,
+    }
+
+
+def test_the_bootstrap_is_the_same_bytes_on_every_read(tmp_path: Path) -> None:
+    """A dashboard that keeps the bootstrap across loads compares it with the current one.
+
+    A field that varies per request (a timestamp, a request id, a set in hash order)
+    would differ on every load, so each one would render the dashboard twice. Every
+    field is therefore a fact about configuration or the database, and every list is
+    sorted. A new field fails the pinned set below until someone has asked whether it
+    can change between two reads of an unchanged deployment.
+    """
+    config = _gateway_config(tmp_path)
+    config.public_base_url = "https://otari.example.com"
+    app = create_app(config)
+
+    with TestClient(app) as client:
+        first = client.get(f"{API_ROOT}/bootstrap")
+        time.sleep(0.01)
+        second = client.get(f"{API_ROOT}/bootstrap")
+
+    assert first.status_code == second.status_code == 200
+    assert first.content == second.content
+    body = first.json()
+    for field, value in body.items():
+        if isinstance(value, list):
+            assert value == sorted(value), field
+    assert set(body) == {
+        "surfaces",
+        "sign_in_methods",
+        "docs_url",
+        "terms_url",
+        "privacy_url",
+        "site_url",
+        "maintenance_mode",
+        "passkeys_enabled",
+        "passkeys_ready",
+        "oauth_providers",
+        "feedback_enabled",
+        "mail_ready",
+        "public_catalog",
+        "open_signup",
     }
 
 
