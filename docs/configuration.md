@@ -70,9 +70,9 @@ providers:
 
 Precedence from lowest to highest is the config file, structured environment
 config, then `OTARI_<FIELD>` values: the scalar fields, and
-`OTARI_HOSTED_PROVIDERS` as JSON. A top-level key of the structured config, and
-`OTARI_HOSTED_PROVIDERS`, replace the lower layer's value whole rather than
-merging into it. Stored runtime settings override
+`OTARI_HOSTED_PROVIDERS` and `OTARI_PROVIDER_SUPPORTED_COUNTRIES` as JSON. A
+top-level key of the structured config, and those two variables, replace the
+lower layer's value whole rather than merging into it. Stored runtime settings override
 the corresponding startup value after the database is available.
 
 ## Common settings
@@ -101,6 +101,9 @@ the corresponding startup value after the database is available.
 | `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
 | `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
+| `provider_supported_countries` | The countries each provider type serves, such as `openai: [US, DE]`. A request from another country skips that provider. Empty, the default, turns it off. See [Supported countries](#supported-countries). |
+| `client_country_header` | A header a trusted proxy sets to the client's country code, such as `CF-IPCountry`. See [Supported countries](#supported-countries). |
+| `client_country_database` | Path to a MaxMind DB country file the client address is looked up in. Needs the `geoip` extra. See [Supported countries](#supported-countries). |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
 | `streaming_first_chunk_hold_ms` | How long the gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
@@ -828,6 +831,81 @@ own end user. A row has no identifier where its request had none: usage imported
 from outside, the pass-through endpoints (embeddings, images, audio,
 moderations, batches), a request refused before Otari resolved its user, and
 every row written before Otari stored it.
+
+### Supported countries
+
+A provider may serve only some countries. OpenAI's partner program for
+gateways, for example, requires a gateway to refuse OpenAI traffic from outside
+OpenAI's [supported countries](https://platform.openai.com/docs/supported-countries).
+`provider_supported_countries` lists, per provider type, the ISO 3166-1 alpha-2
+codes that may reach it:
+
+```yaml
+provider_supported_countries:
+  openai: [US, CA, GB, DE, FR]  # copy the provider's own full list
+client_country_header: CF-IPCountry
+```
+
+A provider type with no entry serves every country, and an empty list closes
+the provider to all of them. Quote Norway's code, `"NO"`: YAML reads a bare
+`NO` as false, which is refused as no country code. As an environment variable,
+the block is a JSON object:
+`OTARI_PROVIDER_SUPPORTED_COUNTRIES='{"openai": ["US", "DE"]}'`.
+
+A request from a country not on the list, or from one no source knows, is
+treated this way:
+
+- On chat completions, Messages and Responses, a routing policy or a catalog
+  id drops that provider's candidates and falls over to the next one. A plain
+  model is refused with a `403` and the `country_not_supported` code, and so
+  is a plan with no candidate left, without the code.
+- A policy whose `knn` router embeds the prompt with a
+  `router_embedding_model` on such a provider does not embed it: the router
+  declines, and the policy serves its default target.
+- The call that describes an image for a text-only model is skipped, so the
+  image falls back to OCR or is dropped, as when no `vision_describe_model` is
+  set.
+- Embeddings, images, audio, moderations, rerank, decisions and creating a
+  batch are refused with a `403` and the `country_not_supported` code.
+  Reading a batch or its results is not checked.
+
+Every refusal except a batch's leaves an error row in usage.
+
+The list keys on who serves the call: an instance named for the provider or
+declaring its `provider_type`, a hosted provider of that type, and an
+organization's own key for it. An instance declared `openai-compatible` is a
+server that speaks OpenAI's protocol, such as vLLM or Ollama, so the `openai`
+list does not apply to it.
+
+The country comes from two sources. With both set, the header is read first and
+the file only when the header is absent.
+
+- `client_country_header` names a header that a proxy in front of Otari sets,
+  such as Cloudflare's `CF-IPCountry` or CloudFront's
+  `CloudFront-Viewer-Country`. A header that is present decides alone, so a
+  value that is no country code, such as Cloudflare's `T1` for Tor or `XX`,
+  counts as unknown. Set it only when every request reaches Otari through that proxy and
+  the proxy replaces any value a client sends. Otherwise a client picks its own
+  country.
+- `client_country_database` is the path to a MaxMind DB country file:
+  [GeoLite2 Country](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data),
+  which needs a free MaxMind account and is kept current by
+  [geoipupdate](https://github.com/maxmind/geoipupdate), or
+  [DB-IP Lite Country](https://db-ip.com/db/download/ip-to-country-lite), a
+  monthly file under CC BY 4.0 that needs no account. Otari looks up the
+  client address, which behind a proxy is the proxy's own unless
+  `forwarded_allow_ips` trusts it (see
+  [Behind a reverse proxy](deployment.md#behind-a-reverse-proxy)). A replaced
+  file is read again without a restart. The file needs the `geoip` extra
+  (`pip install gateway[geoip]`), which the Docker image installs. Otari
+  refuses to start on a file it cannot read.
+
+Otari refuses to start with a list and neither source. A private address, or
+one the file does not hold, has no country, and a listed provider refuses it.
+
+A VPN changes the country a request appears to come from, so this check does
+not replace the account and billing checks a provider may also ask for, which
+need billing data a self-hosted Otari does not hold.
 
 ## Pricing
 
