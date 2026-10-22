@@ -573,7 +573,8 @@ def test_only_a_manager_or_the_sessions_own_user_reads_what_its_spans_were_about
         finally:
             client.cookies.clear()
         assert response.status_code == status.HTTP_200_OK, response.text
-        return {span["span_id"]: span["content"] for span in response.json()["spans"]}["call-toolu_1"]
+        contents: dict[str, dict[str, str]] = {span["span_id"]: span["content"] for span in response.json()["spans"]}
+        return contents["call-toolu_1"]
 
     assert content(world["member"]) == {}
     assert content(world["admin"]) == {"command": "pytest -x"}
