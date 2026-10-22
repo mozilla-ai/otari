@@ -136,6 +136,8 @@ class AutomaticRouter:
 
     def _digest(self, value: object) -> str:
         payload = json.dumps(value, sort_keys=True, default=str).encode()
+        # Keyed, process-local fingerprints are never persisted as password verifiers.
+        # codeql[py/weak-sensitive-data-hashing]
         return hmac.new(self._salt, payload, hashlib.sha256).hexdigest()
 
     def candidate_key(self, attempt: Attempt) -> str:
