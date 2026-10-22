@@ -50,6 +50,10 @@ FROM python:3.14-slim AS runtime
 
 WORKDIR /app
 
+# pip before 26.2.2 trusts its vendored certifi, which still carries the
+# distrusted emSign roots, whatever the system trust store says.
+RUN pip install --no-cache-dir --upgrade "pip>=26.2.2"
+
 RUN useradd -m -u 1000 otari && chown otari:otari /app
 
 COPY --from=builder --chown=otari:otari /app/.venv /app/.venv
