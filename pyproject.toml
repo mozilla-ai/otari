@@ -152,6 +152,13 @@ redis = [
 metrics = [
     "prometheus-client>=0.20.0",
 ]
+# Reads the country of a request's address from a MaxMind-format file
+# (`client_country_database`), for the provider country gate. Only that
+# setting imports it, and the gateway refuses to start without it when the
+# setting is on. The Docker image installs it.
+geoip = [
+    "maxminddb>=3.0",
+]
 
 [dependency-groups]
 dev = [
@@ -160,6 +167,9 @@ dev = [
     # that pin the exposed metric families need the real library, and mypy checks
     # gateway.metrics against it rather than against its no-op fallback.
     "prometheus-client>=0.20.0",
+    # The geoip extra, for the same reason: the country lookup tests read a
+    # real MaxMind-format file.
+    "maxminddb>=3.0",
     # Validating payloads against the published code-execution contract
     # (docs/public/code-execution-openapi.yaml), in its conformance script and
     # the test that keeps the spec and the doc in agreement. Nothing at runtime

@@ -70,7 +70,7 @@ from gateway.services.code_execution.container_sweeper import run_sandbox_contai
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import FileBackends, run_file_sweeper
-from gateway.services.inference import close_decision_client, run_idempotency_sweeper
+from gateway.services.inference import close_decision_client, open_country_database, run_idempotency_sweeper
 from gateway.services.log_writer import (
     LogWriter,
     TracingLogWriter,
@@ -657,6 +657,12 @@ def _validate_metrics_support(config: GatewayConfig) -> None:
         raise ValueError(msg)
 
 
+def _validate_client_country_database(config: GatewayConfig) -> None:
+    """Refuse to start on a country file that cannot be read, rather than finding no country for every request."""
+    if config.client_country_database is not None:
+        open_country_database(config.client_country_database)
+
+
 def install_rate_limits(app: FastAPI, config: GatewayConfig) -> None:
     """Put the per-user limit and the ``rate_limits`` rules on the app, counting in the container's store.
 
@@ -1099,6 +1105,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     """Create and configure FastAPI application."""
 
     _validate_metrics_support(config)
+    _validate_client_country_database(config)
     _validate_rate_limit_store(config)
     config.validate_declared_access()
     refuse_unusable_declared_secrets(config.api_keys, config.master_key)

@@ -1,10 +1,14 @@
 """Inference request settings."""
 
+import re
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
+
+# An RFC 9110 field name (a token).
+_HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 
 
 class InferenceSettings(BaseModel):
@@ -39,6 +43,25 @@ class InferenceSettings(BaseModel):
             "Key for the digest behind the opaque end-user identifier each provider call carries. Unset, "
             "the digest is unkeyed. Must differ from OTARI_SECRET_KEY and the master key. See "
             "docs/configuration.md#end-user-identifiers."
+        ),
+    )
+
+    client_country_header: Annotated[str | None, Shown(SettingsGroup.SERVER)] = Field(
+        default=None,
+        description=(
+            "A header a trusted proxy sets to the client's ISO country code, such as Cloudflare's "
+            "CF-IPCountry. Read before client_country_database. Set it only when every request reaches "
+            "Otari through that proxy, which replaces any value a client sends: otherwise a client "
+            "picks its own country."
+        ),
+    )
+
+    client_country_database: Annotated[str | None, Shown(SettingsGroup.SERVER)] = Field(
+        default=None,
+        description=(
+            "Path to a MaxMind DB country file (GeoLite2 Country, DB-IP Lite Country) in which the "
+            "client address is looked up. A replaced file is read again without a restart. Needs the "
+            "geoip extra."
         ),
     )
 
@@ -79,3 +102,18 @@ class InferenceSettings(BaseModel):
         ge=1,
         description="How often expired idempotency records are deleted.",
     )
+
+    @field_validator("client_country_header", "client_country_database")
+    @classmethod
+    def _blank_is_off(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        return value.strip()
+
+    @field_validator("client_country_header")
+    @classmethod
+    def _validate_client_country_header(cls, value: str | None) -> str | None:
+        if value is not None and not _HEADER_NAME.fullmatch(value):
+            msg = f"client_country_header must be an HTTP header name, got {value!r}"
+            raise ValueError(msg)
+        return value

@@ -42,9 +42,10 @@ COPY any-fetch ./any-fetch
 # The e2b extra lets `sandbox_provider: e2b` work from the published image; the
 # adapter imports it only when that provider is selected. The metrics extra keeps
 # a Prometheus scrape one config flag away rather than a reinstall, and the redis
-# extra a rate limit shared across replicas. Bytecode is compiled here, or every
+# extra a rate limit shared across replicas, and the geoip extra the provider
+# country gate's address lookup. Bytecode is compiled here, or every
 # fresh container spends its first seconds compiling each dependency it imports.
-RUN UV_COMPILE_BYTECODE=1 uv sync --frozen --no-dev --extra e2b --extra metrics --extra redis
+RUN UV_COMPILE_BYTECODE=1 uv sync --frozen --no-dev --extra e2b --extra metrics --extra redis --extra geoip
 
 FROM python:3.14-slim@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1 AS runtime
 
