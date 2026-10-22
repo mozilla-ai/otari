@@ -9,13 +9,10 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CurrentIdentity,
-    MembershipListenerDep,
-    UnitOfWorkDep,
-    get_db,
+    WorkspaceServiceDep,
     verify_master_key,
 )
 from gateway.api.routes.organizations import Message
@@ -30,7 +27,6 @@ from gateway.models.tenancy import (
     WorkspaceUpdate,
 )
 from gateway.schemas.organizations import OrganizationRefusal
-from gateway.services.tenancy import WorkspaceService
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
 # every handler here happens to take one today, and a future handler that did
@@ -44,18 +40,6 @@ router = APIRouter(
 SURFACE = Surface("workspaces")
 
 WORKSPACE_ROLE_DESCRIPTION = "Role to assign in this workspace."
-
-
-def get_workspace_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    uow: UnitOfWorkDep,
-    membership_listener: MembershipListenerDep,
-) -> WorkspaceService:
-    """Build the workspace service on the request's session."""
-    return WorkspaceService(db, uow=uow, membership_listener=membership_listener)
-
-
-WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
