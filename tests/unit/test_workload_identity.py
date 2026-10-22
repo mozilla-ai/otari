@@ -5,6 +5,7 @@ nothing reaches the network.
 """
 
 import base64
+import ipaddress
 import json
 import time
 from typing import Any
@@ -28,7 +29,9 @@ from gateway.services.api_keys import (
     match_federation_rules,
     unverified_issuer,
 )
+from gateway.services.api_keys._federation import _CheckedTransport
 from gateway.services.url_safety import UnsafeURLError, validate_federation_url
+from gateway.services.web_retrieval_network import PinnedAsyncHTTPTransport, SystemAddressResolver
 
 ISSUER = "https://issuer.example.com"
 JWKS_URI = "https://issuer.example.com/keys"
@@ -383,6 +386,43 @@ async def test_the_verifier_fetches_with_the_configured_private_host_setting() -
     with pytest.raises(FederationUnavailableError):
         await FederatedTokenVerifier(issuer).verify(_token())
     assert FederatedTokenVerifier(issuer, allow_private_hosts=True).allow_private_hosts is True
+
+
+@pytest.mark.asyncio
+async def test_a_public_fetch_connects_to_the_address_it_checked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hostname is resolved once: a second answer, private this time, is never asked for."""
+    answers = iter([[ipaddress.ip_address("93.184.216.34")], [ipaddress.ip_address("10.0.0.1")]])
+
+    async def resolve(_self: object, _host: str, _port: int) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+        return next(answers)
+
+    monkeypatch.setattr(SystemAddressResolver, "resolve", resolve)
+    sent: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json={})
+
+    transport = _CheckedTransport(allow_private_hosts=False)
+    transport._transport = PinnedAsyncHTTPTransport(transport_factory=lambda: httpx.MockTransport(respond))
+    async with httpx.AsyncClient(transport=transport) as client:
+        await client.get(JWKS_URI)
+
+    assert [(r.url.host, r.headers["host"], r.extensions["sni_hostname"]) for r in sent] == [
+        ("93.184.216.34", "issuer.example.com", "issuer.example.com")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_public_fetch_refuses_a_host_that_resolves_privately(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def resolve(_self: object, _host: str, _port: int) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+        return [ipaddress.ip_address("10.0.0.1")]
+
+    monkeypatch.setattr(SystemAddressResolver, "resolve", resolve)
+
+    async with httpx.AsyncClient(transport=_CheckedTransport(allow_private_hosts=False)) as client:
+        with pytest.raises(httpx.ConnectError):
+            await client.get(JWKS_URI)
 
 
 # Issuers named by members' rules

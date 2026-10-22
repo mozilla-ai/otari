@@ -208,8 +208,13 @@ def test_a_member_cannot_give_a_rule_to_a_key_that_is_not_theirs(
 
 @pytest.mark.parametrize(
     "issuer_url",
-    ["http://issuer.example.com", "https://user:pass@issuer.example.com", "https://issuer.example.com/?q=1"],
-    ids=["http", "credentials", "query"],
+    [
+        "http://issuer.example.com",
+        "https://user:pass@issuer.example.com",
+        "https://issuer.example.com/?q=1",
+        "https://[issuer.example.com",
+    ],
+    ids=["http", "credentials", "query", "malformed"],
 )
 def test_a_members_rule_names_an_https_issuer(
     client: TestClient, master_key_header: dict[str, str], issuer_url: str

@@ -123,7 +123,10 @@ class ApiKeyConfig(BaseModel):
 
 def https_url_problem(value: str) -> str | None:
     """Why ``value`` is not an absolute https URL without credentials, a query or a fragment, or None."""
-    parts = urlsplit(value)
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return "must be an absolute https URL"
     if parts.scheme != "https" or not parts.hostname:
         return "must be an absolute https URL"
     if parts.username or parts.password or parts.query or parts.fragment:
