@@ -35,6 +35,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    environment: sdk-codegen
     steps:
       - name: Checkout Otari
         # The script authenticates via the gh CLI using the env tokens below, so

@@ -143,7 +143,25 @@ below 1.0 (`0.6.3` becomes `0.7.0`), and the major version from 1.0 on. The
 release tag. When the version is too small, it puts a warning at the top of the
 release PR body. It does not stop the release.
 
-### Prerequisites (repository secrets)
+### Prerequisites (environment secrets)
+
+Every publishing credential is an environment secret, never a repository or
+organization secret. A repository or organization secret is readable by any
+workflow on any branch, so anyone who can push a branch, or holds a token that
+can, could publish with it. An environment's deployment policy limits it to
+`main` and, where a Release triggers the workflow, `v*` tags:
+
+| Environment | Secrets | Allowed refs |
+| --- | --- | --- |
+| `docker-hub` | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | `main`, `v*` tags |
+| `homebrew-tap` | `HOMEBREW_TAP_GITHUB_TOKEN` | `main`, `v*` tags |
+| `sdk-codegen` | `CODEGEN_APP_ID`, `CODEGEN_APP_KEY` | `main`, `v*` tags |
+| `release` | `RELEASE_APP_PRIVATE_KEY` | `main` |
+| `platform-dispatch` | `PLATFORM_DISPATCH_APP_PRIVATE_KEY` | `main` |
+
+An organization secret with the same name would still be readable from any
+branch, so this repository must not be among the repositories an organization
+secret of that name is granted to.
 
 - `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, used by `otari-docker.yml` to push
   the image.
@@ -151,11 +169,10 @@ release PR body. It does not stop the release.
   codegen GitHub App. `otari-sdk-codegen.yml` uses them to open regeneration PRs
   on the SDK repos, and `sdk-regen-staleness.yml` uses them to read those PRs.
 - `HOMEBREW_TAP_GITHUB_TOKEN`, used by `otari-homebrew.yml` to push
-  `Formula/otari.rb` to `mozilla-ai/homebrew-tap`. It is the org secret mcpd
-  and cq publish with, granted per repository, so an org admin has to add this
-  repository to it. Until then the workflow's build and macOS jobs still run
-  and the rendered formula sits on the Release as `otari.rb`; only the push to
-  the tap fails.
+  `Formula/otari.rb` to `mozilla-ai/homebrew-tap`, so it needs write access to
+  that repository and nothing else. Without it the workflow's build and macOS
+  jobs still run and the rendered formula sits on the Release as `otari.rb`;
+  only the push to the tap fails.
 - `PLATFORM_DISPATCH_APP_PRIVATE_KEY`, used by `otari-tag-release.yml` to send
   events to `mozilla-ai/otari-ai`. It belongs to the `otari-notification`
   GitHub App, which must be installed on `mozilla-ai/otari-ai` with

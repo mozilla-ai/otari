@@ -32,6 +32,9 @@ env:
 jobs:
   build-and-push-image:
     runs-on: ubuntu-latest
+    # The Docker Hub credentials are environment secrets, which only main and
+    # v* tags can reach; RELEASE.md lists each publishing environment.
+    environment: docker-hub
     permissions:
       contents: read
 
@@ -101,6 +104,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-push-image
     if: github.ref == 'refs/heads/main'
+    environment: docker-hub
     permissions:
       contents: read
     steps:

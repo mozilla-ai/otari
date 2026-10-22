@@ -17,8 +17,13 @@ name: Otari Release (tag + publish)
 # A second job announces the published Release to mozilla-ai/otari-ai with a
 # repository dispatch.
 
+# pull_request_target, not pull_request: a pull_request run takes this file
+# from the pull request, so closing an unmerged PR that edits it would run the
+# edit with the release key, and its refs/pull/N/merge ref could never satisfy
+# the release environment's main-only policy. pull_request_target runs main's
+# copy on main. Nothing here checks out or runs the pull request's code.
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
     branches: [main]
 
@@ -31,8 +36,10 @@ permissions:
 jobs:
   tag-and-release:
     name: Tag and publish
+    environment: release
     if: >-
       github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
       contains(github.event.pull_request.labels.*.name, 'release')
     runs-on: ubuntu-latest
     outputs:
@@ -121,6 +128,7 @@ jobs:
     name: Announce the release to otari-ai
     needs: tag-and-release
     runs-on: ubuntu-latest
+    environment: platform-dispatch
     permissions: {}
     steps:
       - name: Generate App token

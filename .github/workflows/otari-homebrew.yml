@@ -132,6 +132,7 @@ jobs:
     needs: [build, test-formula]
     if: github.event.inputs.skip_publish != 'true'
     runs-on: ubuntu-latest
+    environment: homebrew-tap
     permissions: {}
     concurrency:
       group: otari-homebrew-tap
@@ -144,7 +145,7 @@ jobs:
         run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern otari.rb --dir dist
 
       # Same mechanics as cq's release-cli.yaml. HOMEBREW_TAP_GITHUB_TOKEN is
-      # the org secret mcpd and cq push with; RELEASE.md lists it.
+      # a homebrew-tap environment secret; RELEASE.md lists it.
       # The concurrency group only serializes runs, not release order, so the
       # tap's current version is compared first: an older release never
       # replaces a newer formula.

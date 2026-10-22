@@ -8,8 +8,9 @@ name: Otari SDK Codegen
 #
 # Pushes and opens PRs with an installation token of the codegen GitHub App.
 # The app is installed on mozilla-ai/otari-sdk-{python,ts,go,rust} with
-# Contents:write and Pull-requests:write. The repository secrets CODEGEN_APP_ID
-# (the app Client ID) and CODEGEN_APP_KEY (the app private key) mint the token.
+# Contents:write and Pull-requests:write. The sdk-codegen environment secrets
+# CODEGEN_APP_ID (the app Client ID) and CODEGEN_APP_KEY (the app private key)
+# mint the token.
 # The default GITHUB_TOKEN cannot push to other repositories.
 
 on:
@@ -36,6 +37,7 @@ permissions:
 jobs:
   codegen:
     runs-on: ubuntu-latest
+    environment: sdk-codegen
     strategy:
       fail-fast: false
       # Keep this matrix in sync with FULL_TARGETS in scripts/sdk_codegen/generate.py.
