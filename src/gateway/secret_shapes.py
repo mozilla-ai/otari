@@ -29,8 +29,9 @@ CREDENTIAL_SHAPES: tuple[re.Pattern[str], ...] = (
     # A password embedded in a URL's userinfo; the host stays readable.
     re.compile(r"(?<=://)[^/\s:@]+:[^/\s@]+(?=@)"),
     # An explicitly named credential, as it appears in a query string or an
-    # echoed request body.
-    re.compile(r"\b(?:api[_-]?key|access[_-]?token|token|secret|password)\s*[=:]\s*\S+", re.IGNORECASE),
+    # echoed request body. A ``${VAR}`` reference names where a credential
+    # comes from rather than holding one, so it stays.
+    re.compile(r"\b(?:api[_-]?key|access[_-]?token|token|secret|password)\s*[=:]\s*(?!\$\{)\S+", re.IGNORECASE),
 )
 
 

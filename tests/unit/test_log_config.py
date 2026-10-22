@@ -113,3 +113,18 @@ def test_log_secret_still_prints_the_one_time_key(configured_logger: io.StringIO
     log_config.log_secret("Save this key now:", LONG_SECRET)
 
     assert any(line.strip() == LONG_SECRET for line in configured_logger.getvalue().splitlines())
+
+
+def test_a_record_marked_as_carrying_a_credential_is_left_alone(configured_logger: io.StringIO) -> None:
+    """The console mail transport's links are the point of that transport."""
+    log_config.logger.warning(
+        "Accept: https://otari.example.com/#/accept-invitation?token=abc123", extra=log_config.CARRIES_CREDENTIAL
+    )
+
+    assert "accept-invitation?token=abc123" in configured_logger.getvalue()
+
+
+def test_a_reference_to_where_a_credential_comes_from_is_kept(configured_logger: io.StringIO) -> None:
+    log_config.logger.warning("Name the key it reads (api_key: ${OPENAI_API_KEY})")
+
+    assert "api_key: ${OPENAI_API_KEY}" in configured_logger.getvalue()

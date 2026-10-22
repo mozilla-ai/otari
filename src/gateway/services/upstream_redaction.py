@@ -10,7 +10,7 @@ and both callers import them from here.
 
 import re
 
-from gateway.core.secret_shapes import CREDENTIAL_SHAPES, REDACTION_PLACEHOLDER
+from gateway.secret_shapes import CREDENTIAL_SHAPES, REDACTION_PLACEHOLDER
 
 # Cap on an exposed upstream message. Providers occasionally echo the offending
 # request back in the error body, and a response detail is not the place for a
@@ -20,7 +20,7 @@ MAX_EXPOSED_DETAIL_CHARS = 400
 # apart its path. Each targets a shape that carries secrets rather than meaning:
 # nothing here removes text a caller needs to understand what it got wrong.
 _SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
-    # Credentials first (core/secret_shapes.py, shared with the log filter).
+    # Credentials first (secret_shapes.py, shared with the log filter).
     *CREDENTIAL_SHAPES,
     # Upstream account identifiers. A managed-model request runs on the
     # platform's own provider account, so an error naming that account would

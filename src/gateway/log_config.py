@@ -4,13 +4,17 @@ from typing import Any
 from rich.console import Console
 from rich.logging import RichHandler
 
-from gateway.core.secret_shapes import mask_credentials
+from gateway.secret_shapes import mask_credentials
 
 logger = logging.getLogger("gateway")
 
 # Not ``[redacted]``: the handler renders Rich markup, which would read that as
 # a style tag and print nothing.
 _LOG_PLACEHOLDER = "<redacted>"
+
+# Pass as ``extra`` on a record that prints a credential on purpose (the console
+# mail transport's links), which the filter then leaves alone.
+CARRIES_CREDENTIAL: dict[str, object] = {"carries_credential": True}
 
 
 class CredentialMaskingFilter(logging.Filter):
@@ -22,6 +26,8 @@ class CredentialMaskingFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
+        if getattr(record, "carries_credential", False):
+            return True
         message = record.getMessage()
         masked = mask_credentials(message, _LOG_PLACEHOLDER)
         if masked != message:
