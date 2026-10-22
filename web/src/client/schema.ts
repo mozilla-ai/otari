@@ -5941,6 +5941,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tool-settings/sandbox/credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Sandbox Credential
+         * @description Store the key this deployment's hosted sandbox provider leases sandboxes with.
+         *
+         *     Wins over the provider's environment variable (``E2B_API_KEY``), on this
+         *     worker at once and on every other within 30 seconds, so a rotated key needs
+         *     no redeploy. Refused for the ``protocol`` provider, which takes no key of
+         *     its own. Operator-gated.
+         */
+        put: operations["tool-settings-set_sandbox_credential"];
+        post?: never;
+        /**
+         * Clear Sandbox Credential
+         * @description Delete the stored sandbox key, so sandboxes are leased with the environment's key again.
+         *
+         *     Clearing a key that was never stored is not an error. Operator-gated.
+         */
+        delete: operations["tool-settings-clear_sandbox_credential"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tool-settings/{service}/test": {
         parameters: {
             query?: never;
@@ -15901,6 +15932,38 @@ export interface components {
             workspace_id: string;
         };
         /**
+         * SandboxCredentialPublic
+         * @description Where the key a hosted sandbox provider leases with comes from. Never the key itself.
+         */
+        SandboxCredentialPublic: {
+            /**
+             * Env Var
+             * @description The environment variable a deployment that stores no key is read from.
+             */
+            env_var: string;
+            /**
+             * Last4
+             * @description The key's last four characters, to tell keys apart.
+             */
+            last4?: string | null;
+            /**
+             * Source
+             * @description 'stored' for a key set here, which wins; 'environment' for the provider's own environment variable; null when there is neither and code execution fails until one is set.
+             */
+            source: ("stored" | "environment") | null;
+        };
+        /**
+         * SandboxCredentialRequest
+         * @description The key to lease hosted sandboxes with.
+         * @example {
+         *       "api_key": "e2b_0123456789abcdef"
+         *     }
+         */
+        SandboxCredentialRequest: {
+            /** Api Key */
+            api_key: string;
+        };
+        /**
          * SandboxProvider
          * @description What runs the code a code-execution tool call asks for, chosen per deployment.
          *
@@ -16906,6 +16969,8 @@ export interface components {
         ToolSettingsResponse: {
             /** Fields */
             fields: components["schemas"]["ToolSettingField"][];
+            /** @description The key a hosted sandbox_provider leases with. Null for the protocol provider, which takes none, and for a reader who does not operate the deployment. */
+            sandbox_credential?: components["schemas"]["SandboxCredentialPublic"] | null;
             /** @description What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, not editable here. Null for a reader who does not operate the deployment. */
             sandbox_provider?: components["schemas"]["SandboxProvider"] | null;
         };
@@ -28547,6 +28612,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GuardrailCatalog"];
+                };
+            };
+        };
+    };
+    "tool-settings-set_sandbox_credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SandboxCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SandboxCredentialPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "tool-settings-clear_sandbox_credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SandboxCredentialPublic"];
                 };
             };
         };

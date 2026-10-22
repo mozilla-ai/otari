@@ -372,6 +372,15 @@ one sets `sandbox_provider: e2b` instead and Otari runs the code on
 everything below is the same either way. A runnable example lives under
 `demo/code-exec/`.
 
+E2B needs an API key. Store it on the Tools page under Code execution, or with
+`PUT /api/v1/tool-settings/sandbox/credential`, and it is used for the next
+sandbox on every replica within 30 seconds, so rotating or replacing a revoked
+key needs no redeploy. A stored key wins over `E2B_API_KEY`, which serves when
+none is stored; clearing the stored key falls back to it. The key is held
+encrypted with `OTARI_SECRET_KEY` and never shown again, only its last four
+characters. With no key in either place the gateway still starts, logs an
+error, and refuses each code-execution call until one is set.
+
 ### Reusing a sandbox across requests
 
 Within one request, every code call the model makes shares one sandbox, so a

@@ -304,6 +304,8 @@ GET /api/v1/tools                                   # not yet wrapped
 GET /api/v1/tool-settings                           # not yet wrapped
 PATCH /api/v1/tool-settings                         # not yet wrapped
 POST /api/v1/tool-settings/{service}/test           # not yet wrapped
+PUT /api/v1/tool-settings/sandbox/credential       # not yet wrapped
+DELETE /api/v1/tool-settings/sandbox/credential    # not yet wrapped
 GET /api/v1/tool-settings/guardrails/profiles       # not yet wrapped
 GET /api/v1/tool-settings/guardrails/catalog        # not yet wrapped
 POST /api/v1/search                                 # not yet wrapped

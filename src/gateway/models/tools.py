@@ -582,3 +582,22 @@ class SandboxContainer(Base):
     # same workspace at the same time. Cleared when the request records its
     # lease; the timestamp releases one a crashed gateway never gave back.
     in_use_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+
+
+class SandboxCredential(Base):
+    """The key this deployment leases a hosted sandbox provider's sandboxes with, set through the dashboard.
+
+    The stored counterpart of the provider's own environment variable
+    (``E2B_API_KEY``), and it wins over it, the way a ``ProviderCredential`` wins
+    over a ``providers:`` entry: rotating the key is a write, not a redeploy.
+    One row per provider. ``encrypted_api_key`` is Fernet-encrypted with
+    ``OTARI_SECRET_KEY`` (``services/secret_box.py``) and never serialized;
+    ``last4`` is kept in clear so an operator can tell which key is set.
+    """
+
+    __tablename__ = "sandbox_credentials"
+
+    provider: Mapped[str] = mapped_column(primary_key=True)
+    encrypted_api_key: Mapped[str] = mapped_column()
+    last4: Mapped[str] = mapped_column()
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))

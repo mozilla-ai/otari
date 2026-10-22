@@ -18515,6 +18515,68 @@
         "title": "RouterStatus",
         "type": "object"
       },
+      "SandboxCredentialPublic": {
+        "description": "Where the key a hosted sandbox provider leases with comes from. Never the key itself.",
+        "properties": {
+          "env_var": {
+            "description": "The environment variable a deployment that stores no key is read from.",
+            "title": "Env Var",
+            "type": "string"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key's last four characters, to tell keys apart.",
+            "title": "Last4"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "stored",
+                  "environment"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "'stored' for a key set here, which wins; 'environment' for the provider's own environment variable; null when there is neither and code execution fails until one is set.",
+            "title": "Source"
+          }
+        },
+        "required": [
+          "source",
+          "env_var"
+        ],
+        "title": "SandboxCredentialPublic",
+        "type": "object"
+      },
+      "SandboxCredentialRequest": {
+        "description": "The key to lease hosted sandboxes with.",
+        "example": {
+          "api_key": "e2b_0123456789abcdef"
+        },
+        "properties": {
+          "api_key": {
+            "minLength": 1,
+            "title": "Api Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_key"
+        ],
+        "title": "SandboxCredentialRequest",
+        "type": "object"
+      },
       "SandboxProvider": {
         "description": "What runs the code a code-execution tool call asks for, chosen per deployment.\n\nValues are read without regard to case or surrounding whitespace.",
         "enum": [
@@ -20617,6 +20679,17 @@
             },
             "title": "Fields",
             "type": "array"
+          },
+          "sandbox_credential": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SandboxCredentialPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key a hosted sandbox_provider leases with. Null for the protocol provider, which takes none, and for a reader who does not operate the deployment."
           },
           "sandbox_provider": {
             "anyOf": [
@@ -44498,6 +44571,84 @@
           }
         ],
         "summary": "List Guardrail Profiles",
+        "tags": [
+          "tool-settings"
+        ]
+      }
+    },
+    "/api/v1/tool-settings/sandbox/credential": {
+      "delete": {
+        "description": "Delete the stored sandbox key, so sandboxes are leased with the environment's key again.\n\nClearing a key that was never stored is not an error. Operator-gated.",
+        "operationId": "tool-settings-clear_sandbox_credential",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxCredentialPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Clear Sandbox Credential",
+        "tags": [
+          "tool-settings"
+        ]
+      },
+      "put": {
+        "description": "Store the key this deployment's hosted sandbox provider leases sandboxes with.\n\nWins over the provider's environment variable (``E2B_API_KEY``), on this\nworker at once and on every other within 30 seconds, so a rotated key needs\nno redeploy. Refused for the ``protocol`` provider, which takes no key of\nits own. Operator-gated.",
+        "operationId": "tool-settings-set_sandbox_credential",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxCredentialPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Sandbox Credential",
         "tags": [
           "tool-settings"
         ]

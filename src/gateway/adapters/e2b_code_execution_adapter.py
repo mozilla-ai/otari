@@ -18,9 +18,8 @@ passing with no dev dependencies.
 
 from __future__ import annotations
 
-import os
 import posixpath
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
@@ -55,9 +54,14 @@ _RETRY_AFTER_S = "5"
 class E2BCodeExecutionAdapter(CodeExecutionPort):
     """Leases E2B sandboxes through the provider's async SDK.
 
-    Takes nothing: which sandboxes it leases is E2B's own ``E2B_API_KEY``, read
-    by the SDK, and everything a request narrows arrives through the port.
+    ``api_key`` is asked for the deployment's key on every lease, so a key
+    rotated through the dashboard is the next sandbox's without a restart.
+    Without one, the SDK reads ``E2B_API_KEY`` itself. Everything a request
+    narrows arrives through the port.
     """
+
+    def __init__(self, api_key: Callable[[], str | None] | None = None) -> None:
+        self._api_key = api_key
 
     @property
     def label(self) -> str:
@@ -86,16 +90,24 @@ class E2BCodeExecutionAdapter(CodeExecutionPort):
                 image,
             )
         sdk = _sdk()
+        credential: dict[str, str] = {}
+        if self._api_key is not None:
+            api_key = self._api_key()
+            if api_key is None:
+                logger.error("No E2B key: set one on the Tools settings page or in E2B_API_KEY")
+                raise SandboxNotReachableError("sandbox provider misconfigured")
+            credential["api_key"] = api_key
         try:
             if resume is not None:
                 # ``timeout`` on connect only ever lengthens a running sandbox's
                 # life, so this request's lease is covered whatever was left of
                 # the last one, and a paused sandbox is resumed on the way.
-                sandbox = await sdk.AsyncSandbox.connect(resume, timeout=int(session_ttl_s))
+                sandbox = await sdk.AsyncSandbox.connect(resume, timeout=int(session_ttl_s), **credential)
             else:
                 sandbox = await sdk.AsyncSandbox.create(
                     timeout=int(session_ttl_s),
                     metadata={"otari": "code-execution"},
+                    **credential,
                 )
         except sdk.NotFoundException as exc:
             if resume is None:
@@ -291,17 +303,16 @@ def _result_block(*, stdout: str = "", stderr: str = "", return_code: int = 0) -
 
 
 def verify_ready() -> None:
-    """Raise unless this process could actually lease an E2B sandbox.
+    """Raise unless this process has the SDK to lease an E2B sandbox with.
 
     Called at startup (``adapters/code_execution_adapter.verify_code_execution_ready``)
-    rather than on the request path: both of these are settled for the whole
-    deployment, and finding them per request means answering a caller with a
-    502 for something the operator could have been told at boot.
+    rather than on the request path: the extra is settled for the whole
+    deployment, and finding it per request means answering a caller with a 502
+    for something the operator could have been told at boot. The key is not
+    checked here: it can be stored through the dashboard, which the container
+    is built before, so the startup load says when there is none.
     """
     _sdk()
-    if not os.getenv("E2B_API_KEY"):
-        msg = "sandbox_provider 'e2b' requires E2B_API_KEY in the environment"
-        raise SandboxNotReachableError(msg)
 
 
 def _sdk() -> Any:

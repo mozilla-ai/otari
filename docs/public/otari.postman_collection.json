@@ -10912,6 +10912,62 @@
           }
         },
         {
+          "name": "Set Sandbox Credential",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_key\": \"e2b_0123456789abcdef\"\n}"
+            },
+            "description": "Store the key this deployment's hosted sandbox provider leases sandboxes with.\n\nWins over the provider's environment variable (``E2B_API_KEY``), on this\nworker at once and on every other within 30 seconds, so a rotated key needs\nno redeploy. Refused for the ``protocol`` provider, which takes no key of\nits own. Operator-gated.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tool-settings",
+                "sandbox",
+                "credential"
+              ],
+              "raw": "{{baseUrl}}/api/v1/tool-settings/sandbox/credential"
+            }
+          }
+        },
+        {
+          "name": "Clear Sandbox Credential",
+          "request": {
+            "description": "Delete the stored sandbox key, so sandboxes are leased with the environment's key again.\n\nClearing a key that was never stored is not an error. Operator-gated.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tool-settings",
+                "sandbox",
+                "credential"
+              ],
+              "raw": "{{baseUrl}}/api/v1/tool-settings/sandbox/credential"
+            }
+          }
+        },
+        {
           "name": "Test Service",
           "request": {
             "body": {

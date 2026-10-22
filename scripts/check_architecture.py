@@ -1686,6 +1686,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/code_execution/sandbox_container_repository.py",
         "baseline": (),
     },
+    "gateway.models.tools.SandboxCredential": {
+        "repository": "gateway/repositories/tools/sandbox_credential_repository.py",
+        "baseline": (),
+    },
     "gateway.models.tools.SearchToolCredential": {
         "repository": "gateway/repositories/tools/search_tool_repository.py",
         "baseline": ("gateway/services/search_tool_store_service.py",),

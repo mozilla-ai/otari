@@ -11,6 +11,7 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { CONTROL_LANE, SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { AdvancedRows } from "@/features/tools/AdvancedRows"
+import { SandboxCredentialRow } from "@/features/tools/SandboxCredentialRow"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
 import type { FieldCopy } from "@/features/tools/ToolSettingRows"
 import { ToolSettingRow } from "@/features/tools/ToolSettingRows"
@@ -277,8 +278,8 @@ function SandboxProviderRow({ provider }: { provider: "protocol" | "e2b" }) {
       configKey="sandbox_provider"
       help={
         provider === "e2b"
-          ? "E2B runs the code. Set with sandbox_provider and E2B_API_KEY at startup."
-          : "A sandbox you run. To use E2B instead, set sandbox_provider: e2b and E2B_API_KEY, then restart."
+          ? "E2B runs the code. Set with sandbox_provider at startup."
+          : "A sandbox you run. To use E2B instead, set sandbox_provider: e2b and restart."
       }
       control={
         <span className="text-caption text-foreground">
@@ -514,9 +515,15 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                 group.pricingPage && isOperator ? (
                   <PricingLinkRow to={group.pricingPage} />
                 ) : null
+              const sandboxCredential = data?.sandbox_credential
               const providerRow =
                 service.key === "sandbox" && sandboxProvider ? (
-                  <SandboxProviderRow provider={sandboxProvider} />
+                  <>
+                    <SandboxProviderRow provider={sandboxProvider} />
+                    {sandboxCredential ? (
+                      <SandboxCredentialRow credential={sandboxCredential} />
+                    ) : null}
+                  </>
                 ) : null
               if (
                 fields.length === 0 &&

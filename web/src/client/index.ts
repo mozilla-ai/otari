@@ -407,6 +407,8 @@ export type ManagedTool = Schemas["ManagedTool"]
 export type ToolsResponse = Schemas["ToolsResponse"]
 export type ToolSettingField = Schemas["ToolSettingField"]
 export type ToolSettingsResponse = Schemas["ToolSettingsResponse"]
+export type SandboxCredentialPublic = Schemas["SandboxCredentialPublic"]
+export type SandboxCredentialRequest = Schemas["SandboxCredentialRequest"]
 export type UpdateToolSettingsRequest = Schemas["UpdateToolSettingsRequest"]
 export type TestServiceResponse = Schemas["TestServiceResponse"]
 

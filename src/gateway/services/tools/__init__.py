@@ -36,6 +36,9 @@ search fields onto a provider. ``build_web_provider_client`` builds the client t
 are called through, one per app, and ``WebToolFailure`` is what a failed web tool call may show its caller.
 ``OTARI_TOOL_CALLS_FIELD`` is where a Chat Completions response reports the gateway's web tool calls, and
 ``without_otari_tool_calls`` takes it back off the messages a client sends.
+``sandbox_api_key`` is the key a hosted sandbox provider's sandboxes are leased with, stored or from the
+environment, ``store_sandbox_api_key`` and ``clear_sandbox_api_key`` change the stored one, and
+``sandbox_credential_status`` says which one is in use.
 ``WEB_SEARCH_TOOL_NAME``, ``WEB_FETCH_TOOL_NAME`` and the two tool definitions name the web tools to the model,
 and ``retargeted_tool_choice`` points a forced ``tool_choice`` at the search tool a declaration was renamed to.
 """
@@ -81,6 +84,17 @@ from gateway.services.tools._native import (
 )
 from gateway.services.tools._provider_tools import provider_tools
 from gateway.services.tools._registry import BUILTIN_TOOLS, native_rendering
+from gateway.services.tools._sandbox_credential import (
+    SANDBOX_KEY_ENV,
+    SandboxCredentialStatus,
+    clear_sandbox_api_key,
+    load_sandbox_credentials_at_startup,
+    reset_sandbox_credential_cache,
+    run_sandbox_credential_refresher,
+    sandbox_api_key,
+    sandbox_credential_status,
+    store_sandbox_api_key,
+)
 from gateway.services.tools._search_provider_catalog import search_provider_catalog
 from gateway.services.tools._search_tool_connection import (
     check_test_input,
@@ -242,6 +256,15 @@ __all__ = [
     "instance_to_test",
     "run_connection_test",
     "unsaved_instance_to_test",
+    "SANDBOX_KEY_ENV",
+    "SandboxCredentialStatus",
+    "clear_sandbox_api_key",
+    "load_sandbox_credentials_at_startup",
+    "reset_sandbox_credential_cache",
+    "run_sandbox_credential_refresher",
+    "sandbox_api_key",
+    "sandbox_credential_status",
+    "store_sandbox_api_key",
     "WEB_FETCH_TOOL_NAME",
     "WEB_RETRIEVAL_RESULT_MAX_BYTES",
     "WEB_SEARCH_NATIVE_TYPE_PREFIX",
