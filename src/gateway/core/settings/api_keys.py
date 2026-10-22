@@ -198,9 +198,9 @@ class ApiKeySettings(BaseModel):
     federation_member_rules: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=False,
         description=(
-            "Let a member give their own API keys federation rules naming any public https issuer. A member's "
-            "rule authenticates only through the token exchange that names it, never as a bare identity token, so "
-            "it cannot claim another tenant's workload. Off by default."
+            "Let an organization's owners and admins give their own API keys federation rules naming any public "
+            "https issuer. Such a rule authenticates only through the token exchange that names it, never as a bare "
+            "identity token, so it cannot claim another tenant's workload. Off by default."
         ),
     )
 

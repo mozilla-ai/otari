@@ -3144,21 +3144,22 @@ export interface paths {
         };
         /**
          * List Own Federation Rules
-         * @description List the identities that may authenticate as one of the caller's own keys, oldest first.
+         * @description List the identities that may authenticate as a key, oldest first.
          *
-         *     Includes any rule the deployment operator gave the key, which ``member_managed`` tells apart.
+         *     The caller's own key, or for the deployment operator any key in their active organization. Includes any rule
+         *     the operator gave the key on ``/api/v1/keys``, which ``member_managed`` tells apart.
          */
         get: operations["organization-keys-list_own_federation_rules"];
         put?: never;
         /**
          * Create Own Federation Rule
-         * @description Let an OpenID Connect identity token stand in for one of the caller's own keys, through the token exchange.
+         * @description Let an OpenID Connect identity token stand in for a key, through the token exchange.
          *
-         *     Needs ``federation_member_rules``, else 403. The issuer may be any https URL; its signing keys are fetched only
-         *     from a public host. The rule matches only in ``POST /api/v1/oauth/token`` naming its id, never as a bare identity
-         *     token, so it lets a workload act as this key and no other: a rule naming another tenant's workload gives that
-         *     workload nothing it did not ask for. That is no more than the caller could do by handing the workload the key's
-         *     secret, which is why their own key is all it takes. A rule this key already holds answers 409.
+         *     Needs ``federation_member_rules``, else 403, and an organization owner or admin acting on their own key, or the
+         *     deployment operator on any key in their active organization, else 403. The issuer may be any https URL; its
+         *     signing keys are fetched only from a public host. The rule matches only in ``POST /api/v1/oauth/token`` naming
+         *     its id, never as a bare identity token, so it lets a workload act as this key and no other: a rule naming another
+         *     tenant's workload gives that workload nothing it did not ask for. A rule this key already holds answers 409.
          */
         post: operations["organization-keys-create_own_federation_rule"];
         delete?: never;
@@ -3179,10 +3180,10 @@ export interface paths {
         post?: never;
         /**
          * Delete Own Federation Rule
-         * @description Remove a federation rule from one of the caller's own keys. Tokens it matched stop with the next request.
+         * @description Remove a federation rule from a key. Tokens it matched stop with the next request.
          *
-         *     Works whether or not ``federation_member_rules`` is on, so a member can always take back what they granted, and
-         *     on a rule the operator gave the key too, as deleting the key itself would.
+         *     The caller's own key whatever their role, or for the deployment operator any key in their active organization.
+         *     Works whether or not ``federation_member_rules`` is on, so a rule can always be taken back.
          */
         delete: operations["organization-keys-delete_own_federation_rule"];
         options?: never;
@@ -9816,7 +9817,7 @@ export interface components {
             docs_url: string | null;
             /**
              * Federation Member Rules
-             * @description Whether a member may give their own API keys federation rules (the federation_member_rules setting), so the dashboard offers workload identity on a member's key.
+             * @description Whether an organization's owners and admins may give their own API keys federation rules (the federation_member_rules setting), so the dashboard offers workload identity on their keys.
              */
             federation_member_rules: boolean;
             /**

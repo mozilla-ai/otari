@@ -142,7 +142,7 @@ export function FederationRulesDialog({
                 <li key={rule.id} className="flex items-start gap-3 py-3">
                   <div className="flex min-w-0 flex-1 flex-col gap-1">
                     <p className="break-all text-body">{ruleIdentity(rule)}</p>
-                    <p className="break-all text-caption text-muted">
+                    <p className="break-all text-caption">
                       {rule.issuer} · {rule.audience}
                     </p>
                     {rule.member_managed ? null : (
@@ -161,7 +161,6 @@ export function FederationRulesDialog({
                         icon={FiTrash2}
                         label="Delete rule"
                         ariaLabel={`Delete rule for ${ruleIdentity(rule)}`}
-                        isDanger
                         onPress={() => setPendingDelete(rule)}
                       />
                     </RowActionRow>

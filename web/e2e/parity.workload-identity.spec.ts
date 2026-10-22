@@ -2,14 +2,14 @@ import { expect, test } from "@playwright/test"
 import { API_ROOT } from "@/shared/api/client"
 import { authHeaders, expectOk, gotoRoute } from "./helpers"
 
-// A member, not the operator: the operator's `/keys` take only the deployment's
-// own issuers, and federation_member_rules (on in e2e/otari.yml) is what lets a
-// member name one on their own key.
-test("a member gives their own key a federation rule and reads its setup", async ({
+// An organization admin, not the operator: federation_member_rules (on in
+// e2e/otari.yml) is what lets an owner or admin give their own key a rule
+// naming any public issuer.
+test("an organization admin gives their own key a federation rule and reads its setup", async ({
   browser,
   page,
 }) => {
-  const email = `workload-member-${Date.now()}@example.com`
+  const email = `workload-admin-${Date.now()}@example.com`
   const password = "workload-password"
 
   const workspaces = await page.request.get(
@@ -25,7 +25,7 @@ test("a member gives their own key a federation rule and reads its setup", async
       headers: authHeaders,
       data: {
         email,
-        role: "member",
+        role: "admin",
         workspace_assignments: [{ workspace_id: workspace.id }],
       },
     },

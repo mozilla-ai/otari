@@ -5938,7 +5938,7 @@
             "title": "Docs Url"
           },
           "federation_member_rules": {
-            "description": "Whether a member may give their own API keys federation rules (the federation_member_rules setting), so the dashboard offers workload identity on a member's key.",
+            "description": "Whether an organization's owners and admins may give their own API keys federation rules (the federation_member_rules setting), so the dashboard offers workload identity on their keys.",
             "title": "Federation Member Rules",
             "type": "boolean"
           },
@@ -34913,7 +34913,7 @@
     },
     "/api/v1/organizations/me/keys/{key_id}/federation-rules": {
       "get": {
-        "description": "List the identities that may authenticate as one of the caller's own keys, oldest first.\n\nIncludes any rule the deployment operator gave the key, which ``member_managed`` tells apart.",
+        "description": "List the identities that may authenticate as a key, oldest first.\n\nThe caller's own key, or for the deployment operator any key in their active organization. Includes any rule\nthe operator gave the key on ``/api/v1/keys``, which ``member_managed`` tells apart.",
         "operationId": "organization-keys-list_own_federation_rules",
         "parameters": [
           {
@@ -34966,7 +34966,7 @@
         ]
       },
       "post": {
-        "description": "Let an OpenID Connect identity token stand in for one of the caller's own keys, through the token exchange.\n\nNeeds ``federation_member_rules``, else 403. The issuer may be any https URL; its signing keys are fetched only\nfrom a public host. The rule matches only in ``POST /api/v1/oauth/token`` naming its id, never as a bare identity\ntoken, so it lets a workload act as this key and no other: a rule naming another tenant's workload gives that\nworkload nothing it did not ask for. That is no more than the caller could do by handing the workload the key's\nsecret, which is why their own key is all it takes. A rule this key already holds answers 409.",
+        "description": "Let an OpenID Connect identity token stand in for a key, through the token exchange.\n\nNeeds ``federation_member_rules``, else 403, and an organization owner or admin acting on their own key, or the\ndeployment operator on any key in their active organization, else 403. The issuer may be any https URL; its\nsigning keys are fetched only from a public host. The rule matches only in ``POST /api/v1/oauth/token`` naming\nits id, never as a bare identity token, so it lets a workload act as this key and no other: a rule naming another\ntenant's workload gives that workload nothing it did not ask for. A rule this key already holds answers 409.",
         "operationId": "organization-keys-create_own_federation_rule",
         "parameters": [
           {
@@ -35027,7 +35027,7 @@
     },
     "/api/v1/organizations/me/keys/{key_id}/federation-rules/{rule_id}": {
       "delete": {
-        "description": "Remove a federation rule from one of the caller's own keys. Tokens it matched stop with the next request.\n\nWorks whether or not ``federation_member_rules`` is on, so a member can always take back what they granted, and\non a rule the operator gave the key too, as deleting the key itself would.",
+        "description": "Remove a federation rule from a key. Tokens it matched stop with the next request.\n\nThe caller's own key whatever their role, or for the deployment operator any key in their active organization.\nWorks whether or not ``federation_member_rules`` is on, so a rule can always be taken back.",
         "operationId": "organization-keys-delete_own_federation_rule",
         "parameters": [
           {

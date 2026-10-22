@@ -10,7 +10,9 @@ The issuer's discovery document and keys are served by a stub, so nothing reache
 """
 
 import time
-from collections.abc import Generator
+import uuid
+from collections.abc import Callable, Generator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
 
@@ -21,10 +23,13 @@ from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choi
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from jwt.algorithms import RSAAlgorithm
+from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.settings.api_keys import FederationIssuer
+from gateway.models.tenancy import DashboardSession, OrganizationMember, User, WorkspaceMember
 from gateway.services.api_keys import FederatedTokenVerifier
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import generate_secret_key
 
 from .conftest import MODEL_NAME, build_test_client
@@ -195,15 +200,77 @@ def test_a_token_from_another_issuer_does_not_match_a_members_rule(
     assert exchanged.json()["error"] == "invalid_grant"
 
 
-def test_a_member_cannot_give_a_rule_to_a_key_that_is_not_theirs(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
-    created = client.post(KEYS, json={"key_name": "someone-else", "user_id": "someone-else"}, headers=master_key_header)
-    assert created.status_code == 200, created.text
+def _session(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session], role: str
+) -> dict[str, str]:
+    """A dashboard session for a new identity holding ``role`` in the default organization and its workspace."""
+    organization_id = uuid.UUID(_organization_id(client, master_key_header))
+    listed = client.get(f"{API_ROOT}/workspaces?skip=0&limit=1", headers=master_key_header)
+    workspace_id = uuid.UUID(listed.json()["data"][0]["id"])
+    token = f"otari-sess-{role}-{uuid.uuid4()}"
+    session = db_session_factory()
+    try:
+        user = User(
+            email=f"{role}-{uuid.uuid4()}@example.test", full_name=role.title(), active_organization_id=organization_id
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        session.add(OrganizationMember(organization_id=organization_id, user_id=user.id, role=role, status="active"))
+        session.add(WorkspaceMember(workspace_id=workspace_id, user_id=user.id, role="member", status="active"))
+        session.add(
+            DashboardSession(
+                token_hash=hash_session_token(token),
+                user_id=user.id,
+                created_at=datetime.now(UTC),
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    return {"Cookie": f"{SESSION_COOKIE_NAME}={token}"}
 
-    refused = _own_rule(client, master_key_header, created.json()["id"])
+
+@pytest.mark.parametrize(("role", "expected"), [("owner", 201), ("admin", 201), ("member", 403)])
+def test_an_owner_or_admin_gives_their_own_key_a_rule_and_a_member_cannot(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    role: str,
+    expected: int,
+) -> None:
+    caller = _session(client, master_key_header, db_session_factory, role)
+    key_id = _own_key(client, caller)
+
+    assert _own_rule(client, caller, key_id).status_code == expected
+
+
+def test_an_admin_cannot_give_a_rule_to_a_colleagues_key(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    colleague = _session(client, master_key_header, db_session_factory, "member")
+    admin = _session(client, master_key_header, db_session_factory, "admin")
+
+    refused = _own_rule(client, admin, _own_key(client, colleague))
 
     assert refused.status_code == 404
+
+
+def test_the_operator_gives_a_rule_to_any_key_in_their_organization(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    member = _session(client, master_key_header, db_session_factory, "member")
+    key_id = _own_key(client, member)
+
+    created = _own_rule(client, master_key_header, key_id)
+
+    assert created.status_code == 201, created.text
+    # The member cannot add a rule, but sees the one on their key and may take it back.
+    listed = client.get(f"{OWN_KEYS}/{key_id}/federation-rules", headers=member)
+    assert [rule["id"] for rule in listed.json()] == [created.json()["id"]]
+    deleted = client.delete(f"{OWN_KEYS}/{key_id}/federation-rules/{created.json()['id']}", headers=member)
+    assert deleted.status_code == 204
 
 
 @pytest.mark.parametrize(

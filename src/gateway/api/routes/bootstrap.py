@@ -208,8 +208,8 @@ class DeploymentBootstrap(BaseModel):
     feedback_enabled: bool = Field(description="Whether this deployment accepts deliberate feedback submissions.")
     federation_member_rules: bool = Field(
         description=(
-            "Whether a member may give their own API keys federation rules (the federation_member_rules "
-            "setting), so the dashboard offers workload identity on a member's key."
+            "Whether an organization's owners and admins may give their own API keys federation rules (the "
+            "federation_member_rules setting), so the dashboard offers workload identity on their keys."
         )
     )
     mail_ready: bool = Field(

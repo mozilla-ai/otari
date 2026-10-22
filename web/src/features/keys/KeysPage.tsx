@@ -59,6 +59,7 @@ import {
   useRotateKey,
   useUpdateKey,
 } from "@/shared/api/apiKeys"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { useUsers } from "@/shared/api/users"
 import { formatDate } from "@/shared/helpers/format"
 import {
@@ -1289,10 +1290,14 @@ export function KeysPage() {
 
   const [pendingRegenerate, setPendingRegenerate] = useState<ApiKey>()
   const [federating, setFederating] = useState<ApiKey>()
-  // Only on the member surface: an operator's rules on `/keys` take only the
-  // deployment's federation_issuers, which this page cannot list.
+  // Organization owners and admins on their own keys, which are all this
+  // surface lists to them, and the operator on any key in the organization.
+  // The server enforces the same; this only keeps a member from being offered
+  // a form that would answer 403.
+  const role = useOrganizationContext().data?.role
   const canFederate =
-    useDeployment().federation_member_rules && !isDeploymentWide
+    useDeployment().federation_member_rules &&
+    (isDeploymentWide || role === "owner" || role === "admin")
   const [pendingDelete, setPendingDelete] = useState<ApiKey>()
   const [lastAction, setLastAction] = useState<string>()
   // Still load-bearing, though `confirmRef` goes unused: a menu closes on choice,

@@ -804,14 +804,20 @@ describe("KeysPage", () => {
   })
 
   it.each([
-    ["the deployment does not let members manage rules", false, false],
-    ["the caller operates the deployment", true, true],
-  ])(
+    [
+      "the deployment does not let organizations manage rules",
+      false,
+      "owner",
+      false,
+    ],
+    ["the caller is a member", true, "member", false],
+  ] as const)(
     "offers no workload identity when %s",
-    async (_case, federationMemberRules, deploymentOperator) => {
+    async (_case, federationMemberRules, role, deploymentOperator) => {
       mockApi({
         keys: [apiKey({ id: "key-1", key_name: "ci-bot" })],
         deploymentOperator,
+        role,
       })
       const user = userEvent.setup()
       renderPage(
@@ -831,22 +837,29 @@ describe("KeysPage", () => {
     },
   )
 
-  it("opens a member's key's federation rules from its menu", async () => {
-    mockApi({
-      keys: [apiKey({ id: "key-1", key_name: "ci-bot" })],
-      deploymentOperator: false,
-    })
-    const user = userEvent.setup()
-    renderPage(<KeysPage />, bootstrap({ federation_member_rules: true }))
+  it.each([
+    ["an admin's own key", "admin", false],
+    ["any key, for the operator", "member", true],
+  ] as const)(
+    "opens the federation rules of %s from its menu",
+    async (_case, role, deploymentOperator) => {
+      mockApi({
+        keys: [apiKey({ id: "key-1", key_name: "ci-bot" })],
+        deploymentOperator,
+        role,
+      })
+      const user = userEvent.setup()
+      renderPage(<KeysPage />, bootstrap({ federation_member_rules: true }))
 
-    const row = (await screen.findByText("ci-bot")).closest("tr")!
-    await chooseAction(user, row, "Workload identity")
+      const row = (await screen.findByText("ci-bot")).closest("tr")!
+      await chooseAction(user, row, "Workload identity")
 
-    const dialog = await screen.findByRole("dialog", {
-      name: "Workload identity",
-    })
-    expect(within(dialog).getByText("ci-bot")).toBeInTheDocument()
-  })
+      const dialog = await screen.findByRole("dialog", {
+        name: "Workload identity",
+      })
+      expect(within(dialog).getByText("ci-bot")).toBeInTheDocument()
+    },
+  )
 
   it("regenerates a secret after an explicit confirm", async () => {
     mockApi({

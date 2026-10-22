@@ -126,51 +126,47 @@ export function useDeleteKey() {
   })
 }
 
-// The identity tokens that may stand in for one key's secret. Under the same
-// prefix as the key: a member's rule on `/organizations/me/keys`, an operator's
-// on `/keys`, which also says which issuers the gateway accepts for it.
-function federationRulesPath(base: string, keyId: string): string {
-  return `${base}/${encodeURIComponent(keyId)}/federation-rules`
+// The identity tokens that may stand in for one key's secret. Always the
+// organization's route, operator included: a rule added there names any public
+// issuer and matches only in the token exchange, where the operator's own
+// `/keys` route takes only the deployment's federation_issuers.
+function federationRulesPath(keyId: string): string {
+  return `/organizations/me/keys/${encodeURIComponent(keyId)}/federation-rules`
 }
 
 export function useFederationRules(keyId: string) {
-  const scope = useKeysScope()
   return useQuery({
-    queryKey: [FEDERATION_RULES, scope.base, keyId],
-    queryFn: () =>
-      apiFetch<FederationRule[]>(federationRulesPath(scope.base, keyId)),
-    enabled: scope.isReady,
+    queryKey: [FEDERATION_RULES, keyId],
+    queryFn: () => apiFetch<FederationRule[]>(federationRulesPath(keyId)),
   })
 }
 
 export function useAddFederationRule(keyId: string) {
   const queryClient = useQueryClient()
-  const scope = useKeysScope()
   return useMutation({
     mutationFn: (body: CreateFederationRuleRequest) =>
-      apiFetch<FederationRule>(federationRulesPath(scope.base, keyId), {
+      apiFetch<FederationRule>(federationRulesPath(keyId), {
         method: "POST",
         body: JSON.stringify(body),
       }),
     onSuccess: () =>
       void queryClient.invalidateQueries({
-        queryKey: [FEDERATION_RULES, scope.base, keyId],
+        queryKey: [FEDERATION_RULES, keyId],
       }),
   })
 }
 
 export function useDeleteFederationRule(keyId: string) {
   const queryClient = useQueryClient()
-  const scope = useKeysScope()
   return useMutation({
     mutationFn: (ruleId: string) =>
       apiFetch<void>(
-        `${federationRulesPath(scope.base, keyId)}/${encodeURIComponent(ruleId)}`,
+        `${federationRulesPath(keyId)}/${encodeURIComponent(ruleId)}`,
         { method: "DELETE" },
       ),
     onSuccess: () =>
       void queryClient.invalidateQueries({
-        queryKey: [FEDERATION_RULES, scope.base, keyId],
+        queryKey: [FEDERATION_RULES, keyId],
       }),
   })
 }

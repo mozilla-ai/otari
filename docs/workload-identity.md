@@ -308,8 +308,10 @@ with its own refresh.
 On a deployment shared by several organizations, one list of trusted issuers
 does not fit every tenant, and the operator should not have to write every
 tenant's rules. With `federation_member_rules: true` (or
-`OTARI_FEDERATION_MEMBER_RULES=true`), a member gives their own key a rule,
-naming the issuer on the rule itself.
+`OTARI_FEDERATION_MEMBER_RULES=true`), an organization's owners and admins give
+their own keys rules, naming the issuer on the rule itself, and the deployment
+operator can give one to any key in their active organization. A plain member
+cannot add a rule, but can list and delete the rules on their own keys.
 
 In the dashboard, open **API keys**, choose **Workload identity…** from the
 key's actions menu, and add a rule with the issuer, the audience your workload
@@ -335,7 +337,8 @@ curl -X POST "https://otari.example.com/api/v1/organizations/me/keys/$KEY_ID/fed
 
 `GET` on the same path lists the key's rules and `DELETE .../{rule_id}`
 removes one. The key must be the caller's own, as on the rest of
-`/api/v1/organizations/me/keys`; anyone else's answers 404.
+`/api/v1/organizations/me/keys`, and anyone else's answers 404, except for the
+deployment operator. Adding a rule as a plain member answers 403.
 
 A member's rule differs from the operator's in three ways, and each is what
 keeps one tenant's rule from reaching another tenant's workload:
