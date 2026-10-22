@@ -863,25 +863,25 @@ class RequestPrices:
     is in flight applies from the next request on.
     """
 
-    def __init__(self, organization_id: uuid.UUID | None) -> None:
+    def __init__(self, organization_id: uuid.UUID | None, repository: OrganizationModelPricingRepository) -> None:
         self.organization_id = organization_id
+        self._repository = repository
         self._resolved: dict[tuple[str | None, str, bool], ResolvedPricing | None] = {}
 
     async def estimate_candidates(
         self,
-        db: AsyncSession,
         candidates: Sequence[tuple[str, str]],
         estimate: Callable[[ModelPricing], Decimal],
     ) -> dict[str, Decimal | None]:
         """Estimate each candidate at this request's rates, retaining unknown prices."""
-        await self.prime(db, candidates)
+        await self.prime(candidates)
         costs: dict[str, Decimal | None] = {}
         for provider, model in candidates:
-            resolved = await self.resolve(db, provider, model)
+            resolved = self._resolved[provider, model, False]
             costs[f"{provider}:{model}"] = estimate(resolved.pricing) if resolved is not None else None
         return costs
 
-    async def prime(self, db: AsyncSession, candidates: Sequence[tuple[str, str]]) -> None:
+    async def prime(self, candidates: Sequence[tuple[str, str]]) -> None:
         """Resolve a catalog's locally credentialed candidates in two batched reads.
 
         Same precedence and provenance as resolve_model_pricing. These entries
@@ -895,9 +895,10 @@ class RequestPrices:
         now = normalize_effective_at(None)
         forms = {(provider, model): pricing_key_forms(f"{provider}:{model}") for provider, model in pending}
         keys = {key for values in forms.values() for key in values}
-        repository = OrganizationModelPricingRepository(db)
-        overrides = await repository.applicable_rows(self.organization_id, keys, now) if self.organization_id else {}
-        stored = await repository.deployment_rows(keys, now)
+        overrides = (
+            await self._repository.applicable_rows(self.organization_id, keys, now) if self.organization_id else {}
+        )
+        stored = await self._repository.deployment_rows(keys, now)
         for provider, model in pending:
             candidates_keys = forms[provider, model]
             override = next((overrides[key] for key in candidates_keys if key in overrides), None)

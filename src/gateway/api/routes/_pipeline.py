@@ -73,6 +73,7 @@ from gateway.api.deps import (
     ToolPorts,
     get_automatic_router,
     get_budget_service,
+    get_request_prices,
     verify_api_key_or_master_key,
 )
 from gateway.api.request_id import set_request_id
@@ -2186,7 +2187,7 @@ async def move_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) ->
             attempt,
             estimate_inputs=ctx.estimate_inputs,
             price_of=_request_price_of(
-                ctx.db, ctx.prices if ctx.prices is not None else RequestPrices(ctx.organization_id)
+                ctx.db, ctx.prices if ctx.prices is not None else get_request_prices(ctx.db, ctx.organization_id)
             ),
         )
     except ProviderSpendCeilingExceededError as exc:
@@ -2260,7 +2261,7 @@ async def _grow_reservation(
     """
     if ctx.reservation is None or ctx.estimate_inputs is None:
         return
-    prices = ctx.prices if ctx.prices is not None else RequestPrices(ctx.organization_id)
+    prices = ctx.prices if ctx.prices is not None else get_request_prices(ctx.db, ctx.organization_id)
     resolved = await prices.resolve(ctx.db, instance, model, deployment_paid=deployment_paid)
     pricing = resolved.pricing if resolved is not None else None
     # `require_pricing` is a billing safety gate: it refuses a request the gateway
@@ -2733,7 +2734,7 @@ async def resolve_request_context(
     # A policy name, or a catalog ID with several offerings, resolves to a plan.
     # Everything below keys on the plan's head candidate, as it would on a plain model.
     organization_id = await organization_for_workspace_id(db, workspace_id)
-    prices = RequestPrices(organization_id)
+    prices = get_request_prices(db, organization_id)
     plan = await _compile_request_plan(
         adapter=adapter,
         db=db,
@@ -2754,7 +2755,6 @@ async def resolve_request_context(
     if plan is not None and AutomaticRouter.accepts(plan, model, config.automatic_routing):
         automatic_router = get_automatic_router(raw_request)
         costs = await prices.estimate_candidates(
-            db,
             [(candidate.instance, candidate.model) for candidate in plan.attempts],
             partial(
                 estimate_cost,

@@ -1369,6 +1369,7 @@ def test_a_provider_the_port_does_not_serve_is_asked_once_for_all_its_models() -
 
 
 def test_batched_request_prices_match_single_lookup_and_keep_payer_isolation() -> None:
+    from gateway.repositories.pricing import OrganizationModelPricingRepository
     from gateway.services.pricing_service import RequestPrices, resolve_model_pricing
 
     async def scenario(session: AsyncSession) -> None:
@@ -1381,11 +1382,11 @@ def test_batched_request_prices_match_single_lookup_and_keep_payer_isolation() -
         other_id = await _organization(session, "other")
         await _override(session, other_id, model_key="openai:missing", rate=1)
         candidates = [("openai", name) for name in ("gpt-4o", "legacy", "dual", "missing")]
-        prices = RequestPrices(organization_id)
+        prices = RequestPrices(organization_id, OrganizationModelPricingRepository(session))
         with patch.object(session, "execute", wraps=session.execute) as execute:
-            await prices.prime(session, candidates)
+            await prices.prime(candidates)
             assert execute.await_count == 2
-            await prices.prime(session, candidates)
+            await prices.prime(candidates)
             for provider, model in candidates:
                 await prices.resolve(session, provider, model)
             assert execute.await_count == 2

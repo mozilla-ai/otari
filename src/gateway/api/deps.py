@@ -102,6 +102,7 @@ from gateway.services.organizations import InvitationMailLimit, UserAccess
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
+from gateway.services.pricing_service import RequestPrices
 from gateway.services.providers import (
     HostedProviderService,
     HostedSources,
@@ -1757,6 +1758,11 @@ VisibleWorkspacesDep = Annotated[VisibleWorkspaces, Depends(get_visible_workspac
 async def get_organization_trace_scope(visible: VisibleWorkspacesDep) -> TraceScope:
     """The workspaces of their active organization this caller may read traces in."""
     return TraceScope.workspaces(visible.workspace_ids)
+
+
+def get_request_prices(db: AsyncSession, organization_id: uuid.UUID | None) -> RequestPrices:
+    """Build the request pricing cache with its batched pricing repository."""
+    return RequestPrices(organization_id, OrganizationModelPricingRepository(db))
 
 
 def get_automatic_router(request: Request) -> AutomaticRouter:
