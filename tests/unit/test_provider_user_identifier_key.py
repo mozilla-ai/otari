@@ -11,22 +11,14 @@ from gateway.main import _validate_provider_user_identifier_key
 _KEY = "k" * 32
 
 
-def test_the_identifier_is_on_by_default_and_warns_without_a_key(caplog: pytest.LogCaptureFixture) -> None:
+def test_a_missing_key_warns(caplog: pytest.LogCaptureFixture) -> None:
     config = GatewayConfig()
 
-    assert config.provider_user_identifier_enabled is True
     assert config.provider_user_identifier_key is None
     with caplog.at_level(logging.WARNING, logger="gateway"):
         _validate_provider_user_identifier_key(config)
 
     assert "OTARI_PROVIDER_USER_IDENTIFIER_KEY" in caplog.text
-
-
-def test_no_warning_while_the_identifier_is_off(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.WARNING, logger="gateway"):
-        _validate_provider_user_identifier_key(GatewayConfig(provider_user_identifier_enabled=False))
-
-    assert "OTARI_PROVIDER_USER_IDENTIFIER_KEY" not in caplog.text
 
 
 def test_a_short_key_is_refused() -> None:

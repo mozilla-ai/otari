@@ -51,7 +51,6 @@ describe("the base telemetry seam", () => {
     expect(
       telemetry.identify({
         actorId: "member-1",
-        sessionType: "local_operator",
         organizationId: "org-1",
         organizationName: "Default Organization",
         role: "owner",

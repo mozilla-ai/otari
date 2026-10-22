@@ -527,30 +527,30 @@ def test_a_visitor_reads_the_catalog_only_while_it_is_public(
 
 
 @pytest.fixture
-def hosted_public_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
+def deployment_public_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
     mcs.clear_catalog_cache()
     try:
-        yield from build_test_client(_config(postgres_url, public_catalog=True, mode="hosted"))
+        yield from build_test_client(_config(postgres_url, public_catalog=True))
     finally:
         mcs.clear_catalog_cache()
 
 
-def test_a_visitor_in_hosted_mode_reads_the_deployments_own_instances(
-    hosted_public_client: TestClient, master_header: dict[str, str]
+def test_a_visitor_reads_the_deployments_own_instances(
+    deployment_public_client: TestClient, master_header: dict[str, str]
 ) -> None:
-    """What ``public_catalog`` publishes where ``providers:`` is process-global.
+    """What ``public_catalog`` publishes of the configured instances.
 
-    Hosted mode keys provider credentials on the instance name alone, so the
-    configured instances are the deployment's own rather than any tenant's, and
-    that is exactly what a visitor is shown: the same deployment rates, the same
-    ``deployment`` credential, and nothing an organization holds.
+    ``providers:`` is process-global, so the configured instances are the
+    deployment's own rather than any tenant's, and that is exactly what a visitor
+    is shown: the same deployment rates, the same ``deployment`` credential, and
+    nothing an organization holds.
     """
-    _price(hosted_public_client, master_header, _NEBIUS_GLM, 0.5, 2.0)
+    _price(deployment_public_client, master_header, _NEBIUS_GLM, 0.5, 2.0)
 
-    body = _get(hosted_public_client, f"{API_ROOT}/catalog/models")
+    body = _get(deployment_public_client, f"{API_ROOT}/catalog/models")
     assert [model["id"] for model in body["models"]] == ["z-ai/glm-5.3"]
 
-    detail = _get(hosted_public_client, f"{API_ROOT}/catalog/models/z-ai/glm-5.3")
+    detail = _get(deployment_public_client, f"{API_ROOT}/catalog/models/z-ai/glm-5.3")
     assert [offering["provider"] for offering in detail["offerings"]] == ["nebius"]
     offering = detail["offerings"][0]
     assert offering["credential"] == "deployment"
@@ -558,8 +558,8 @@ def test_a_visitor_in_hosted_mode_reads_the_deployments_own_instances(
     assert offering["usage_30d"] is None
 
 
-def test_a_visitor_in_hosted_mode_reads_the_hosted_models_too(
-    hosted_public_client: TestClient, master_header: dict[str, str]
+def test_a_visitor_reads_the_hosted_models_too(
+    deployment_public_client: TestClient, master_header: dict[str, str]
 ) -> None:
     """The models the deployment pays for are its own offerings, so a visitor sees them.
 
@@ -567,17 +567,17 @@ def test_a_visitor_in_hosted_mode_reads_the_hosted_models_too(
     the port does not advertise stays off the list, as it does for a tenant.
     """
     model_provider = HostedModelProvider("groq", models={"groq": ["glm-5.3"]})
-    bind_model_provider(hosted_public_client, model_provider)
-    _price(hosted_public_client, master_header, "groq:glm-5.3", 0.4, 1.6)
-    _price(hosted_public_client, master_header, "groq:glm-4.7", 0.3, 1.2)
+    bind_model_provider(deployment_public_client, model_provider)
+    _price(deployment_public_client, master_header, "groq:glm-5.3", 0.4, 1.6)
+    _price(deployment_public_client, master_header, "groq:glm-4.7", 0.3, 1.2)
 
-    body = _get(hosted_public_client, f"{API_ROOT}/catalog/models")
+    body = _get(deployment_public_client, f"{API_ROOT}/catalog/models")
     selectors = {selector for model in body["models"] for selector in model["selectors"]}
     assert "groq:glm-5.3" in selectors
     assert "groq:glm-4.7" not in selectors
 
     model_id = next(model["id"] for model in body["models"] if "groq:glm-5.3" in model["selectors"])
-    detail = _get(hosted_public_client, f"{API_ROOT}/catalog/models/{model_id}")
+    detail = _get(deployment_public_client, f"{API_ROOT}/catalog/models/{model_id}")
     offering = next(offering for offering in detail["offerings"] if offering["selector"] == "groq:glm-5.3")
     assert offering["credential"] == "hosted"
     assert offering["price_source"] == "deployment"

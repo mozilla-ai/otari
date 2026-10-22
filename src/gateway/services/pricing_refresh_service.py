@@ -549,7 +549,7 @@ async def _apply_persisted_snapshots(session: AsyncSession, active_row: PricingS
 
 
 async def load_persisted_price_snapshot(session: AsyncSession) -> None:
-    """Load the accepted models.dev snapshots during standalone startup."""
+    """Load the accepted models.dev snapshots during startup."""
 
     active_row = await _get_active_snapshot_row(session)
     if active_row is None:

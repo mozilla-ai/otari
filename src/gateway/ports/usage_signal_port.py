@@ -18,9 +18,7 @@ with the default ``single`` strategy that means committed, and with ``batch``
 only queued, so a row may still be dropped when its flush fails. A row the
 writer refused is not reported. A request that
 failed over writes one row per attempt and is therefore reported once per
-attempt; ``request_group_id`` ties them together. A hybrid gateway writes no
-usage rows here, so nothing is reported on one; its usage goes to its control
-plane instead.
+attempt; ``request_group_id`` ties them together.
 
 The facts carry no organization, which the row does not record (an adapter
 resolves it from ``workspace_id``), and no caller content: no error message,

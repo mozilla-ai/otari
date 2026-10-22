@@ -80,34 +80,23 @@ def test_no_injection_for_non_streaming() -> None:
     assert "stream_options" not in kwargs
 
 
-def test_hybrid_stream_forces_usage_when_client_disabled_it() -> None:
-    kwargs = chat._ADAPTER.prepare_stream_kwargs(
-        {"stream_options": {"include_usage": False, "custom_field": "value"}},
-        require_usage=True,
-    )
-    assert kwargs["stream_options"] == {"include_usage": True, "custom_field": "value"}
-
-
-def test_standalone_stream_preserves_disabled_usage() -> None:
+def test_stream_preserves_disabled_usage() -> None:
     kwargs = chat._ADAPTER.prepare_stream_kwargs(
         {"stream_options": {"include_usage": False}},
-        require_usage=False,
     )
     assert kwargs["stream_options"]["include_usage"] is False
 
 
-def test_standalone_stream_preserves_empty_options() -> None:
+def test_stream_preserves_empty_options() -> None:
     kwargs = chat._ADAPTER.prepare_stream_kwargs(
         {"stream_options": {}},
-        require_usage=False,
     )
     assert kwargs["stream_options"] == {}
 
 
-def test_standalone_stream_preserves_custom_options_without_usage() -> None:
+def test_stream_preserves_custom_options_without_usage() -> None:
     kwargs = chat._ADAPTER.prepare_stream_kwargs(
         {"stream_options": {"custom_field": "value"}},
-        require_usage=False,
     )
     assert kwargs["stream_options"] == {"custom_field": "value"}
 

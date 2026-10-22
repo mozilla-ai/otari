@@ -1,4 +1,4 @@
-"""Accepting an organization invitation (standalone mode only).
+"""Accepting an organization invitation.
 
 Deliberately public: the person following an emailed link holds no master
 key and no session, and the token in the link is their whole proof of

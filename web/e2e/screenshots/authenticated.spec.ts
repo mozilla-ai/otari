@@ -126,6 +126,16 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "admin-hosted-providers",
     heading: /hosted providers/i,
   },
+  {
+    route: "/admin/web-search",
+    name: "admin-web-search-pricing",
+    heading: /web search pricing/i,
+  },
+  {
+    route: "/admin/code-execution",
+    name: "admin-code-execution-pricing",
+    heading: /code execution pricing/i,
+  },
   // Reached from the account menu rather than the rail, and covered here all
   // the same: what this matrix is for is how a page renders on a phone and in
   // the dark, which does not depend on which control opens it.
@@ -608,9 +618,3 @@ test.describe("the domain dialog", () => {
     await captureScreenshot(page, "organization-domains-claim-dialog")
   })
 })
-
-// No capture for the organization provider-key dialog. Its page is gated on the
-// `organization_providers` surface, which only a hosted deployment publishes
-// (bootstrap.py's HOSTED_SURFACES), and this suite boots a standalone gateway,
-// so the route answers with "Providers is not available here". Covering it
-// would mean a third gateway in the harness rather than a test.

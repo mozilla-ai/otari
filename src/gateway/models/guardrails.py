@@ -104,8 +104,7 @@ class OrganizationGuardrailDefinition(Base):
     possibly-divergent copies with no safe automatic answer, and that asymmetry
     is what settles it.
 
-    Organization-keyed, not deployment-global. A row that served every tenant
-    could not be reached from ``HOSTED_SURFACES`` at all (#818).
+    Organization-keyed, not deployment-global, so each tenant manages its own (#818).
 
     The runner builds these rows and holds the vendor clients ready
     (``services/tenancy/organization_guardrail_runner``), and a mandate pointing
@@ -240,7 +239,7 @@ class OrganizationGuardrail(Base):
     # whatever its scope says, so an organization can stop a guardrail without
     # losing the credential and the workspace list it took to set up.
     enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
-    # The inheritance rule otari#654 asks for, and the hosted plane's
+    # The inheritance rule otari#654 asks for, and otari-ai's
     # ``is_org_default`` under a name that says what it does: true means every
     # workspace of the organization runs this, including one created tomorrow,
     # and the scope rows below are not consulted. False means it runs only in
@@ -260,7 +259,7 @@ class OrganizationGuardrailWorkspace(Base):
     """One workspace an organization guardrail is scoped to.
 
     Membership only: a row means "this guardrail runs in this workspace", and
-    its absence means it does not. The hosted plane instead carries a
+    its absence means it does not. otari-ai instead carries a
     ``disabled`` flag on the equivalent row and admits three states, two of
     which resolve to off; there is nothing here for a third state to record,
     because the scope is the organization's to set and a workspace has no veto

@@ -22,7 +22,6 @@ import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import {
   bootstrap,
   callerOrganizationMembership,
-  HOSTED_SURFACES,
   organizationContext,
   pendingOrganizationInvitation,
 } from "@/tests/fixtures"
@@ -178,7 +177,6 @@ function renderShell(
 }
 
 const SETTINGS_WITH_PRICING: GatewaySettings = {
-  mode: "standalone",
   version: "1.0.0",
   model_discovery: true,
   default_pricing: true,
@@ -404,6 +402,20 @@ describe("AppShell responsive layout", () => {
     expect(aside.className).toContain("w-full")
     expect(aside.className).toContain("top-14")
     expect(container.querySelector(".fixed.inset-0")).toBeNull()
+  })
+
+  it("ends the page with room for a control fixed to the corner", async () => {
+    const { container } = await renderShell()
+
+    // A superset sets `--shell-corner-clearance` while it pins something to the
+    // bottom-right corner, so the end of a page can scroll out from under it.
+    const content = container.querySelector("#main-content > div")!
+    expect(content.className).toContain(
+      "pb-[calc(1.25rem+var(--shell-corner-clearance))]",
+    )
+    expect(content.className).toContain(
+      "md:pb-[calc(1.5rem+var(--shell-corner-clearance))]",
+    )
   })
 
   it("marks the drawer inert while closed so its links leave the tab order", async () => {
@@ -685,20 +697,13 @@ describe("AppShell surface gating", () => {
       ),
     ).toBeNull()
     expect(screen.getByText("General")).toBeInTheDocument()
-    // Guardrails sits in General, so the Gateway group holds nothing in this
-    // build and is not drawn. It stays declared for an overlay's Gateways, a
-    // row this registry does not declare at all (otari#737).
-    expect(screen.queryByText("Gateway")).toBeNull()
   })
 
-  it("puts the hosted deployment's own Providers row in that same place", async () => {
+  it("sends the organization's own Providers row to its provider keys", async () => {
     mockMatchMedia(false)
     // The registry test reads the declaration and the page's own tests render
-    // it without a rail, so nothing else asserts the hosted rail draws it.
-    await renderShell(
-      bootstrap({ deployment_type: "hosted", surfaces: HOSTED_SURFACES }),
-      { url: "/organization/members" },
-    )
+    // it without a rail, so nothing else asserts the rail draws it.
+    await renderShell(bootstrap(), { url: "/organization/members" })
     const sidebar = screen.getByRole("navigation", { name: "Sidebar" })
     const providers = await within(sidebar).findByRole("link", {
       name: "Providers",
@@ -828,9 +833,7 @@ describe("AppShell entitlement gating", () => {
     // The other half of that split, and the reason the page may call
     // `useDeploymentAdminAccess()` with no surface gate of its own: the route
     // declares `surface: "admin"`, so a deployment that does not host it never
-    // reaches the page at all, and the caller axis is never asked. A hybrid
-    // gateway does not even get this far, since `App` hands it `HybridLanding`
-    // rather than the router.
+    // reaches the page at all, and the caller axis is never asked.
     await renderShell(bootstrap({ surfaces: ["models"] }), {
       url: "/admin/accounts",
       operator: true,
@@ -1255,7 +1258,7 @@ describe("AppShell entitlement gating", () => {
     mockMatchMedia(false)
     await renderShell()
 
-    // Standalone provisions one organization and most deployments keep exactly
+    // First boot provisions one organization and most deployments keep exactly
     // that, so naming it on every page is a segment that never disambiguates
     // anything; the scope switcher names the active one where it matters.
     const crumb = await screen.findByLabelText("Breadcrumb")
@@ -1384,21 +1387,6 @@ describe("AppShell entitlement gating", () => {
     expect(await screen.findByLabelText("Breadcrumb")).toHaveTextContent(
       "Default workspace",
     )
-  })
-
-  it("leads the trail with the organization when a deployment can hold several", async () => {
-    mockMatchMedia(false)
-    // A standalone deployment leaves the organization out of the trail whether
-    // or not the caller belongs to a second, so `hosted` is what exercises this:
-    // `OTARI_MODE=hosted` is the mode a multi-tenant deployment runs in, and
-    // bootstrap.py reports `deployment_type: "hosted"` for it.
-    await renderShell(bootstrap({ deployment_type: "hosted" }))
-
-    const crumb = await screen.findByLabelText("Breadcrumb")
-    // The organization's name comes from the membership context, so the trail
-    // renders before it can lead with one.
-    await within(crumb).findByText("Default Organization")
-    expect(crumb).toHaveTextContent("Overview")
   })
 
   it("drops a nested destination whose own surface the deployment lacks", async () => {

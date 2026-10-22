@@ -71,7 +71,7 @@ export function deploymentManagedPrefixes(
  * organization's to price.
  *
  * The deployment operator is exempt, because they are the party that pays. That
- * is what keeps a standalone deployment, whose single administrator is also its
+ * is what keeps a single-tenant deployment, whose administrator is also its
  * only tenant, pricing its own models exactly as before.
  *
  * Both halves of the server's rule

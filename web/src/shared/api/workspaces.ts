@@ -174,7 +174,7 @@ export function useWorkspaceBudgetDefaults(workspaceId: string | null) {
  * Every workspace's budget defaults, as one list.
  *
  * A fan-out rather than one call: defaults are only served per workspace
- * (`/workspaces/{id}/member-budget-policies`), and a standalone deployment
+ * (`/workspaces/{id}/member-budget-policies`), and a deployment usually
  * has few workspaces, so N small cached reads beat adding a route. Each shares
  * the cache entry `useWorkspaceBudgetDefaults` uses, so opening a workspace
  * afterwards costs nothing.

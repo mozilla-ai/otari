@@ -18,8 +18,7 @@ from gateway.models.money import UsdRate
 PRICING_UNITS: tuple[str, ...] = ("tokens", "requests", "images")
 
 # The counts an attempt reports in a unit other than tokens, keyed by meter. They
-# are the keys of ``billing_meters`` on the row a count settles, and of ``units``
-# in a hybrid gateway's usage report.
+# are the keys of ``billing_meters`` on the row a count settles.
 UNIT_METERS: tuple[str, ...] = ("requests", "search_units", "images")
 
 # The largest count one attempt may report under any meter.
@@ -46,7 +45,7 @@ OPERATOR_ORIGIN = "operator"
 
 # Which rung of the ladder answered for a rate a reader is shown, in the order
 # ``pricing_service.find_model_pricing`` walks. One vocabulary, because the
-# Models page, the offered-models panel and a standalone response's inline
+# Models page, the offered-models panel and a response's inline
 # ``pricing_source`` name the same rungs, and two spellings of one rung read as
 # two different facts. ``defaults`` is plural for the dataset it comes from, and
 # is not the ``default`` that ``ModelObject.pricing_source`` uses internally for

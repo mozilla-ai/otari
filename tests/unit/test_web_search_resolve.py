@@ -7,7 +7,7 @@ import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -31,7 +31,6 @@ from gateway.services.tools._web_search import _resolve
 from gateway.types.tool_charges import ORGANIZATION_KEY_LABEL_PREFIX, InstanceRateKey
 
 _ORG = WebToolCredentialSource.ORG
-_HYBRID = WebToolCredentialSource.HYBRID
 _EXA = {"provider": "exa", "api_key": "exa-instance-key"}
 _FAKE = {"provider": "fake"}
 _SEARXNG = {"provider": "searxng", "api_base": "http://searxng:8080"}
@@ -167,12 +166,6 @@ _SEARCH_CASES = [
             "timeout": 15.0,
         },
         policy=_policy(credential=WebSearchCredential(provider="exa", source=_ORG, api_key="exa-org-key")),
-    ),
-    _SearchCase(
-        "the control plane's credential, which settles nothing here",
-        {},
-        {"provider": "exa", "api_key": "exa-peer-key", "label": None, "rate_keys": ()},
-        policy=_policy(credential=WebSearchCredential(provider="exa", source=_HYBRID, api_key="exa-peer-key")),
     ),
     _SearchCase(
         "a credential's own endpoint",
@@ -451,7 +444,7 @@ def test_a_result_says_whether_a_credential_or_an_instance_serves_it() -> None:
 
 def test_a_credential_for_a_provider_this_gateway_cannot_call_is_ignored(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.WARNING, logger="gateway")
-    credential = WebSearchCredential(provider="unheard-of", source=_HYBRID, api_key="key-of-the-peer")
+    credential = WebSearchCredential(provider="unheard-of", source=_ORG, api_key="key-of-the-org")
 
     resolved = resolve_search(
         GatewayConfig(search_tools={"test": _FAKE}),
@@ -463,18 +456,18 @@ def test_a_credential_for_a_provider_this_gateway_cannot_call_is_ignored(caplog:
     assert resolved is not None
     assert resolved.name == "test"
     assert "unheard-of" in _warnings(caplog)
-    assert "key-of-the-peer" not in _warnings(caplog)
+    assert "key-of-the-org" not in _warnings(caplog)
 
 
 @pytest.mark.parametrize(
     "credential",
     [
         WebSearchCredential(provider="exa", source=_ORG),
-        WebSearchCredential(provider="exa", source=_HYBRID, api_key=""),
+        WebSearchCredential(provider="exa", source=_ORG, api_key=""),
         WebSearchCredential(provider="tavily", source=_ORG),
-        WebSearchCredential(provider="searxng", source=_HYBRID),
-        WebSearchCredential(provider="searxng", source=_HYBRID, api_base=" / "),
-        WebSearchCredential(provider="tavily", source=_HYBRID, api_key="k", api_base="https://tavily-proxy.example"),
+        WebSearchCredential(provider="searxng", source=_ORG),
+        WebSearchCredential(provider="searxng", source=_ORG, api_base=" / "),
+        WebSearchCredential(provider="tavily", source=_ORG, api_key="k", api_base="https://tavily-proxy.example"),
     ],
     ids=[
         "exa-without-key",
@@ -497,16 +490,6 @@ def test_a_credential_its_provider_cannot_be_called_with_is_refused(
     with pytest.raises(WebSearchCredentialRefusedError):
         resolve_search(config, None, requested="exa", request_options=None, direct_credential=credential)
     assert credential.provider in refused.value.message
-
-
-def test_a_credentials_source_counts_by_value() -> None:
-    """One built from data, its source a plain string, is still the control plane's."""
-    credential = WebSearchCredential(provider="exa", source=cast(WebToolCredentialSource, "hybrid"), api_key="k")
-
-    resolved = resolve_search(GatewayConfig(), _policy(credential=credential), requested=None, request_options=None)
-
-    assert resolved is not None
-    assert (resolved.label, resolved.rate_keys) == (None, ())
 
 
 def test_a_resolved_search_never_prints_its_key_endpoint_or_options() -> None:
@@ -672,7 +655,7 @@ def test_a_credentials_options_the_provider_refuses_are_dropped_and_its_operator
     caplog.set_level(logging.WARNING, logger="gateway")
     credential = WebSearchCredential(
         provider="fake",
-        source=_HYBRID,
+        source=_ORG,
         options={"nope": "secret-value", "max_results": 0, "account": "the-orgs-account"},
     )
 
@@ -681,7 +664,7 @@ def test_a_credentials_options_the_provider_refuses_are_dropped_and_its_operator
     assert dict(resolved.options) == {"account": "the-orgs-account"}
     assert "'nope'" in _warnings(caplog)
     assert "'max_results'" in _warnings(caplog)
-    assert "control plane" in _warnings(caplog)
+    assert "organization's key" in _warnings(caplog)
     assert "secret-value" not in _warnings(caplog)
 
 
@@ -787,12 +770,6 @@ _FETCH_CASES = [
         policy=_policy(fetch_credential=_ORG_FETCH),
     ),
     _FetchCase(
-        "the control plane's fetch key",
-        {},
-        {"provider": "exa", "api_key": "exa-peer", "api_base": "https://api.exa.ai", "label": None, "rate_keys": ()},
-        policy=_policy(fetch_credential=WebFetchCredential(provider="exa", source=_HYBRID, api_key="exa-peer")),
-    ),
-    _FetchCase(
         "a search instance's fetch_tool over the fetch key, for enrichment",
         {"search_tools": {"test": {**_FAKE, "fetch_tool": "exa-fetch"}}, "fetch_tools": {"exa-fetch": _EXA_FETCH}},
         {"name": "exa-fetch", "label": "exa:exa-fetch"},
@@ -822,7 +799,7 @@ _FETCH_CASES = [
         "a fetch key on builtin is ignored",
         {},
         {"name": "builtin_fetch"},
-        policy=_policy(fetch_credential=WebFetchCredential(provider="builtin", source=_HYBRID)),
+        policy=_policy(fetch_credential=WebFetchCredential(provider="builtin", source=_ORG)),
     ),
 ]
 

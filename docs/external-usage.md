@@ -4,9 +4,6 @@ Otari can record usage that it did not proxy, such as subscription-backed coding
 agents or another instrumented application. Imported events appear in Activity
 and Usage with their source and an API-equivalent cost estimate.
 
-This feature is available in standalone and hosted control planes. A hybrid
-gateway has no local usage database or import API.
-
 ## Enforcement boundary
 
 Imported usage is retrospective. It is never reserved against a budget, never

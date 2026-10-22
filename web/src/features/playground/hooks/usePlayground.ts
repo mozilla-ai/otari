@@ -585,7 +585,7 @@ export function usePlayground() {
     setIsComparing(next)
     if (next) {
       // Both columns start empty, which is where this port departs from the
-      // hosted original: that one kept panel A's transcript. Each model is sent
+      // otari.ai original: that one kept panel A's transcript. Each model is sent
       // its own panel's history, so a column carrying an earlier conversation
       // answers a different prompt from the one beside it, and the rating would
       // be a judgment over an unequal contest. A saved transcript is still in

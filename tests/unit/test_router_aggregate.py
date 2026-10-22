@@ -14,8 +14,8 @@ from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute, iter_route_contexts
 
 from gateway.api.main import _register_contributed_routers, _register_core_routers, register_routers
-from gateway.api.routes import hosted_mode, otlp, retired_root
-from gateway.container import RouterContribution, build_container
+from gateway.api.routes import otlp, retired_root
+from gateway.container import build_container
 from gateway.core.config import API_ROOT, OTLP_ROOT, GatewayConfig
 
 Operations = Counter[tuple[str, str]]
@@ -34,29 +34,25 @@ def _operations(app: FastAPI) -> Operations:
     return Counter((path, method) for path, route in _api_routes(app) for method in route.methods or ())
 
 
-def _standalone() -> GatewayConfig:
+def _gateway_config() -> GatewayConfig:
     """A config that does not read the machine it runs on.
 
-    A bare ``GatewayConfig()`` takes four routing decisions from the ambient
-    environment: the mode (three routers or sixty), whether a search provider
-    and a gateway token mount the web-search backend, and whether a bootstrap
-    contributes routers. Both sides of the comparisons below shift together
-    under each of those, so the test stays green while covering a different
+    A bare ``GatewayConfig()`` takes routing decisions from the ambient
+    environment, such as whether a bootstrap contributes routers. Both sides of the
+    comparisons below shift together under it, so the test stays green while covering a different
     surface than it names, which is worse than failing.
     """
     return GatewayConfig(
-        mode="standalone",
         bootstrap=None,
         web_search_provider=None,
-        web_search_backend_token=None,
     )
 
 
 def _mounted_on(aggregate: APIRouter) -> Operations:
     """Mount the gateway onto ``aggregate`` and report the operations that reach an app."""
-    config = _standalone()
+    config = _gateway_config()
     _register_core_routers(aggregate, config, ())
-    _register_contributed_routers(aggregate, build_container(config.bootstrap, workspace_listener=None))
+    _register_contributed_routers(aggregate, build_container(config.bootstrap))
 
     app = FastAPI()
     app.include_router(aggregate)
@@ -73,10 +69,10 @@ def test_a_prefix_on_the_aggregate_moves_every_route() -> None:
 
 def test_register_routers_hands_the_app_the_aggregate_and_its_siblings() -> None:
     app = FastAPI()
-    app.state.container = build_container(None, workspace_listener=None)
+    app.state.container = build_container(None)
     app.state.enabled_features = ()
 
-    register_routers(app, _standalone())
+    register_routers(app, _gateway_config())
 
     siblings = FastAPI()
     siblings.include_router(otlp.router, prefix=OTLP_ROOT)
@@ -87,7 +83,7 @@ def test_register_routers_hands_the_app_the_aggregate_and_its_siblings() -> None
 def _mount_order(config: GatewayConfig) -> list[str]:
     """Every operation the app serves, in the order Starlette will try to match it."""
     app = FastAPI()
-    app.state.container = build_container(config.bootstrap, workspace_listener=None)
+    app.state.container = build_container(config.bootstrap)
     app.state.enabled_features = ()
     register_routers(app, config)
     return [path for path, _ in _api_routes(app)]
@@ -103,7 +99,7 @@ def test_a_fixed_route_is_matched_before_the_catch_all_that_would_swallow_it() -
     with the wrong body, no error anywhere, and a counted-operations check
     cannot see it because the set of routes did not change.
     """
-    order = _mount_order(_standalone())
+    order = _mount_order(_gateway_config())
 
     def first(path: str) -> int:
         assert path in order, f"{path} is not mounted, so the check below would hold vacuously"
@@ -113,43 +109,3 @@ def test_a_fixed_route_is_matched_before_the_catch_all_that_would_swallow_it() -
     assert first(f"{API_ROOT}/models/metadata") < first(f"{API_ROOT}/models/{{model_id:path}}")
     assert first(f"{API_ROOT}/pricing/refresh") < first(f"{API_ROOT}/pricing/{{model_key:path}}")
     assert first(f"{API_ROOT}/search-tools/providers") < first(f"{API_ROOT}/search-tools/{{name}}")
-
-
-def test_a_contributed_route_is_matched_before_a_mode_stub() -> None:
-    """The mode stubs are catch-alls over whole prefixes, so they are mounted last.
-
-    An overlay that contributes a route under a stubbed prefix has made a
-    choice, and a fallback must not overrule it. Move the stub above the
-    contributed routers and every such route answers "manage this via the
-    platform" instead, with the suite still green.
-    """
-    contributed = APIRouter()
-
-    @contributed.get("/chat/overlay-probe")
-    async def overlay_probe() -> dict[str, str]:
-        return {"ok": "yes"}
-
-    container = build_container(None, workspace_listener=None)
-    container.contribute_router(RouterContribution(capability="probe", router=contributed))
-
-    app = FastAPI()
-    app.state.container = container
-    app.state.enabled_features = ()
-    register_routers(app, GatewayConfig(mode="hosted", bootstrap=None))
-    routes = _api_routes(app)
-
-    # The probe sits under /chat, which the hosted stub claims with a catch-all.
-    probe = next(i for i, (path, _) in enumerate(routes) if path.endswith("/chat/overlay-probe"))
-
-    stubs = [i for i, (_, route) in enumerate(routes) if route.endpoint.__module__ == hosted_mode.__name__]
-    served = [
-        i
-        for i, (path, route) in enumerate(routes)
-        if route.endpoint.__module__ != hosted_mode.__name__ and path.startswith(API_ROOT)
-    ]
-    assert stubs, "no mode stub was mounted, so this check would hold vacuously"
-    assert served, "nothing else was mounted, so this check would hold vacuously"
-    assert min(stubs) > max(served), (
-        "a mode stub is mounted ahead of a route the deployment actually serves, so the stub will answer for it"
-    )
-    assert probe < min(stubs), "the stub is ahead of a contributed route, so it will answer for it"

@@ -27,7 +27,6 @@ from fastapi.testclient import TestClient
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.settings.pricing import PricingConfig
-from gateway.main import create_app
 from gateway.models.routing import RoutingConfig
 
 from .conftest import build_test_client
@@ -863,30 +862,6 @@ def test_explain_says_the_router_decides_at_request_time(client: TestClient) -> 
     assert body["router_candidates"] == [CHEAP, STRONG]
     assert body["selection_reason"] == "default"
     assert body["is_dynamic"] is True
-
-
-def test_a_learned_policy_is_refused_in_hybrid_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Hybrid mode resolves models upstream, so a local policy name is not a model
-    # the platform knows. Guarded here because the router is the newest reason
-    # someone might reach for a policy.
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    config = GatewayConfig(
-        mode="hybrid",
-        platform={"base_url": "http://platform.test/api/v1"},
-        routing=RoutingConfig.model_validate(
-            {"policies": {"smart": {"select": [{"router": "knn", "candidates": [CHEAP, STRONG]}, {"default": STRONG}]}}}
-        ),
-    )
-    app = create_app(config)
-    with TestClient(app) as hybrid_client:
-        resp = hybrid_client.post(
-            f"{API_ROOT}/chat/completions",
-            json={"model": "smart", "messages": [{"role": "user", "content": "hi"}]},
-            headers={"Authorization": "Bearer user_token"},
-        )
-
-    assert resp.status_code == 400
-    assert "hybrid mode" in resp.json()["detail"]
 
 
 def test_a_policy_with_no_learned_pool_reports_zero(client: TestClient) -> None:

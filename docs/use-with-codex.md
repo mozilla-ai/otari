@@ -1,7 +1,7 @@
 # Use with Codex
 
 Codex can call Otari as a custom model provider over the Responses API. Otari
-serves `POST /api/v1/responses` in standalone and hybrid modes.
+serves `POST /api/v1/responses`.
 
 ## Route Codex through Otari
 
@@ -60,7 +60,7 @@ Responses features Codex may use, such as tool types other than `function`; see
 Codex works best on a provider with a native Responses API.
 
 `GET /api/v1/models` lists the models a key can use, both on otari.ai and on a
-standalone gateway. Hybrid model IDs come from the connected control plane.
+self-run gateway.
 
 ## Model metadata
 
@@ -87,8 +87,8 @@ documentation. See the official configuration reference above.
 ## Import Codex usage without routing
 
 Codex can export direct OpenAI usage to Otari over OTLP. This is for sessions
-that do not already route through Otari. Send it to a standalone or hosted
-gateway; hybrid gateways do not serve the OTLP endpoints.
+that do not already route through Otari. Send it to any Otari
+gateway.
 
 Create a dedicated API key with `exclude_from_budget: true`, then configure the
 HTTP logs exporter with the full Otari logs path:

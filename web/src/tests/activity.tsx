@@ -76,7 +76,6 @@ export function operatorContext(): Response {
       created_at: new Date().toISOString(),
       updated_at: null,
     },
-    byo_provider_keys_allowed: true,
     deployment_operator: true,
     provider_key_encryption_available: true,
     workspace_memberships: [],
@@ -254,7 +253,6 @@ export function mockApi(
             created_at: new Date().toISOString(),
             updated_at: null,
           },
-          byo_provider_keys_allowed: true,
           deployment_operator: opts.deploymentOperator ?? true,
           provider_key_encryption_available: true,
           workspace_memberships: opts.workspace

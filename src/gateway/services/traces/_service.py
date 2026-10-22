@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from collections import defaultdict
 from collections.abc import Sequence
@@ -10,12 +11,19 @@ from decimal import Decimal
 from typing import Any
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions.traces_exceptions import RequestTraceNotFoundError, TraceAmbiguousError, TraceNotFoundError
-from gateway.models.traces import Trace, TraceSpan
+from gateway.exceptions.traces_exceptions import (
+    GuardrailDigestMismatchError,
+    RequestTraceNotFoundError,
+    TraceAmbiguousError,
+    TraceNotFoundError,
+)
+from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
+from gateway.services.traces._collector import CALL_ID_DIGEST, call_id_digest
 from gateway.services.traces._reading import MAX_SPANS_PER_READ, trace_view
 from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
+    GuardrailDefinition,
     SpanRecord,
     TraceBucket,
     TraceBucketGrain,
@@ -28,6 +36,7 @@ from gateway.types.traces import (
     TraceWrite,
     WriteResult,
 )
+from otari_agent.domain.definitions import GateDefinition, definition_digest, gates_from_body
 
 # The most buckets one series read returns: 90 days by the hour.
 MAX_SERIES_BUCKETS = 90 * 24
@@ -46,6 +55,7 @@ class TraceService:
         self._uow = uow
         self._traces = repositories.traces
         self._spans = repositories.spans
+        self._definitions = repositories.definitions
 
     async def write(self, traces: Sequence[TraceWrite]) -> WriteResult:
         """Store these traces' spans, creating each trace on its first span.
@@ -126,11 +136,30 @@ class TraceService:
                 raise TraceAmbiguousError(trace_id)
             row = rows[0]
             spans = await self._spans.for_trace(row.workspace_id, row.trace_id, limit=span_limit + 1)
+            records = tuple(_span_record(span) for span in spans[:span_limit])
+            digests = {
+                digest for span in records if isinstance(digest := span.attributes.get("otari.policy.digest"), str)
+            }
+            definitions = await self._definitions.for_digests(row.workspace_id, digests)
             return TraceDetail(
                 summary=_summary(row),
-                spans=tuple(_span_record(span) for span in spans[:span_limit]),
+                spans=records,
                 truncated=len(spans) > span_limit,
+                definitions=tuple(_definition(definition) for definition in definitions),
             )
+
+    async def record_definition(self, workspace_id: uuid.UUID, gates: Sequence[GateDefinition], digest: str) -> str:
+        """Store this version of a workspace's agent guardrail, once, and return its fingerprint.
+
+        The fingerprint is recomputed from the gates and must match the one sent,
+        so a version is never stored under another's name. Raises
+        ``GuardrailDigestMismatchError`` when it does not.
+        """
+        if definition_digest(gates) != digest:
+            raise GuardrailDigestMismatchError()
+        async with self._uow:
+            await self._definitions.insert_absent(workspace_id, digest, [dataclasses.asdict(gate) for gate in gates])
+        return digest
 
     async def series(
         self, scope: TraceScope, filters: TraceFilter, *, bucket: TraceBucketGrain
@@ -281,6 +310,13 @@ def _span_values(trace: TraceWrite, span: SpanRecord) -> dict[str, Any]:
     }
 
 
+def _stored_call_id(row: TraceSpan) -> str | None:
+    """A row's tool call id, digested on read where an older version stored the id as the client sent it."""
+    if row.tool_call_id is None or CALL_ID_DIGEST.fullmatch(row.tool_call_id):
+        return row.tool_call_id
+    return call_id_digest(row.workspace_id, row.tool_call_id)
+
+
 def _span_record(row: TraceSpan) -> SpanRecord:
     return SpanRecord(
         span_id=row.span_id,
@@ -306,12 +342,16 @@ def _span_record(row: TraceSpan) -> SpanRecord:
         cost_snapshot=row.cost_snapshot,
         tool_name=row.tool_name,
         tool_type=row.tool_type,
-        tool_call_id=row.tool_call_id,
+        tool_call_id=_stored_call_id(row),
         request_id=row.request_id,
         otel_trace_id=row.otel_trace_id,
         otel_span_id=row.otel_span_id,
         attributes=row.attributes or {},
     )
+
+
+def _definition(row: TraceGuardrailDefinition) -> GuardrailDefinition:
+    return GuardrailDefinition(digest=row.digest, gates=gates_from_body(row.gates))
 
 
 def _summary(row: Trace) -> TraceSummary:

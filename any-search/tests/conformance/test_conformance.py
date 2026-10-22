@@ -55,6 +55,11 @@ def _replay(provider: str, case: str) -> Callable[[httpx.Request], httpx.Respons
 
 # A provider that signals no error inside a successful response leaves "in_body_error" out.
 SCENARIOS: dict[str, dict[Case, Scenario]] = {
+    "deepseek": {
+        "normal": Scenario(handler=_replay("deepseek", "normal")),
+        "empty": Scenario(handler=_replay("deepseek", "empty")),
+        "error": Scenario(handler=_replay("deepseek", "error")),
+    },
     "exa": {
         "normal": Scenario(handler=_replay("exa", "normal")),
         "empty": Scenario(handler=_replay("exa", "empty")),

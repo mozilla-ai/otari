@@ -243,18 +243,17 @@ def test_a_request_whose_tenancy_will_not_resolve_is_refused_rather_than_uncheck
 ) -> None:
     """The fail-closed arm, on the one input that proves the tenancy is unresolvable.
 
-    Unreachable today, since `resolve_workspace_id` always answers and falls
-    back to the default workspace. Pinned because what it guards is an
-    enforcement decision: falling through would serve a request its organization
-    requires a blocking guardrail on, unchecked, with nothing to notice.
+    Unreachable while every workspace row has an organization. Pinned because
+    what it guards is an enforcement decision: falling through would serve a
+    request its organization requires a blocking guardrail on, unchecked.
     """
     monkeypatch.setenv("OTARI_GUARDRAILS_URL", _DEPLOYMENT_URL)
     _mandate(client, master_key_header, profile="prompt-injection", mode="block", applies_to_all_workspaces=True)
 
-    async def no_workspace(*_args: Any, **_kwargs: Any) -> None:
+    async def no_organization(*_args: Any, **_kwargs: Any) -> None:
         return None
 
-    monkeypatch.setattr("gateway.api.routes._pipeline.resolve_workspace_id", no_workspace)
+    monkeypatch.setattr("gateway.api.routes._pipeline.organization_for_workspace_id", no_organization)
     guardrails = _Guardrails(valid=True)
 
     response = _post(client, api_key_header, _REQUEST, guardrails, monkeypatch)

@@ -30,6 +30,9 @@ from decimal import Decimal
 from types import MappingProxyType
 from typing import Literal
 
+from otari_agent.domain.definitions import GateDefinition
+from otari_agent.domain.policy import MAX_GATE_ID_LENGTH
+
 # The longest id the tables hold: a gateway request id (a UUID, 36), an OTel
 # trace id (32 hex) or span id (16 hex), and the hashes derived from them.
 TRACE_ID_MAX_LENGTH = 64
@@ -53,8 +56,10 @@ SpanOrigin = Literal["gateway", "otlp"]
 SPAN_ORIGINS: tuple[SpanOrigin, ...] = ("gateway", "otlp")
 
 # ``unknown`` is a client-run tool whose result no later request has carried yet.
-SpanOutcome = Literal["ok", "error", "unknown"]
-SPAN_OUTCOMES: tuple[SpanOutcome, ...] = ("ok", "error", "unknown")
+# ``blocked`` is work a guardrail stopped on purpose: the guardrail doing its job,
+# so it is never counted as an error.
+SpanOutcome = Literal["ok", "error", "unknown", "blocked"]
+SPAN_OUTCOMES: tuple[SpanOutcome, ...] = ("ok", "error", "unknown", "blocked")
 
 # The signal that grouped a trace's requests into one session. ``none`` is a request
 # that named no session, which is a trace of its own: the gateway never infers that
@@ -106,6 +111,16 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.mcp.tool_count": int,
     "otari.tool_loop.round": int,
     "otari.harness.version": str,
+    "otari.tool.decision": str,
+    "otari.tool.decision_source": str,
+    "otari.tool.succeeded": bool,
+    "otari.gate.id": str,
+    "otari.gate.type": str,
+    "otari.gate.origin": str,
+    "otari.gate.outcome": str,
+    "otari.gate.moment": str,
+    "otari.gate.blocked": bool,
+    "otari.policy.digest": str,
 }
 # The allowlisted attributes OTel defines as an array of strings. Each is stored as
 # its elements joined by LIST_SEPARATOR, so every stored attribute stays a scalar,
@@ -126,6 +141,11 @@ class InvalidSpanError(ValueError):
 def is_identifier(value: str) -> bool:
     """Whether a client-supplied name is safe to store as it is."""
     return IDENTIFIER_PATTERN.fullmatch(value) is not None and not any(pattern.search(value) for pattern in _NOT_A_NAME)
+
+
+def is_gate_id(value: object) -> bool:
+    """Whether a value is a gate id a guardrail could declare, which is held to that rule, not the identifier one."""
+    return isinstance(value, str) and 0 < len(value) <= MAX_GATE_ID_LENGTH
 
 
 def is_identifier_list(value: str) -> bool:
@@ -194,7 +214,7 @@ class SpanRecord:
         _check_choice("kind", self.kind, SPAN_KINDS)
         _check_choice("origin", self.origin, SPAN_ORIGINS)
         _check_choice("outcome", self.outcome, SPAN_OUTCOMES)
-        for name in ("span_id", "parent_span_id", "request_id", "otel_trace_id", "otel_span_id"):
+        for name in ("span_id", "parent_span_id", "request_id", "otel_trace_id", "otel_span_id", "tool_call_id"):
             _check_id(name, getattr(self, name))
         if not (self.origin == "gateway" and self.kind == "step" and is_endpoint(self.name)):
             _check_identifier("name", self.name)
@@ -205,7 +225,6 @@ class SpanRecord:
             "provider",
             "tool_name",
             "tool_type",
-            "tool_call_id",
         ):
             _check_identifier(name, getattr(self, name))
         # Copied before it is checked and frozen after, so the mapping a caller still
@@ -217,7 +236,10 @@ class SpanRecord:
                 raise InvalidSpanError("attributes may only hold allowlisted keys")
             if type(value) is not expected:
                 raise InvalidSpanError(f"attribute {key} must be a {expected.__name__}")
-            if isinstance(value, str) and not (
+            if key == "otari.gate.id":
+                if not is_gate_id(value):
+                    raise InvalidSpanError(f"attribute {key} must be a gate id")
+            elif isinstance(value, str) and not (
                 is_identifier_list(value) if key in LIST_ATTRIBUTES else is_identifier(value)
             ):
                 raise InvalidSpanError(f"attribute {key} must be identifier-shaped")
@@ -365,13 +387,23 @@ class TracePage:
 
 
 @dataclass(frozen=True)
+class GuardrailDefinition:
+    """One version of an agent guardrail, by the fingerprint its gate spans name."""
+
+    digest: str
+    gates: tuple[GateDefinition, ...]
+
+
+@dataclass(frozen=True)
 class TraceDetail:
     """A trace and its spans, in start order.
 
     ``truncated`` says the trace holds more spans than the read was allowed to
     return, so a caller never mistakes a cut-off trace for a short one.
+    ``definitions`` are the guardrail versions its gate spans name, those stored.
     """
 
     summary: TraceSummary
     spans: tuple[SpanRecord, ...]
     truncated: bool
+    definitions: tuple[GuardrailDefinition, ...] = ()

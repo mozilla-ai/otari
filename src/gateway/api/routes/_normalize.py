@@ -190,6 +190,7 @@ async def normalize_request_messages(
     user_id: str | None,
     instance: str | None = None,
     workspace_id: uuid.UUID | None = None,
+    upstream_user: str | None = None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
@@ -228,6 +229,7 @@ async def normalize_request_messages(
             files=files,
             user_id=user_id,
             workspace_id=workspace_id,
+            upstream_user=upstream_user,
             sandbox_requested=sandbox_requested,
             provider_container=provider_container,
         )

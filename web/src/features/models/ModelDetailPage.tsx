@@ -382,7 +382,7 @@ export function ModelDetailView({
   // at deployment-wide pages.
   const operator = useDeploymentOperator(!publicView)
   const isOperator = !publicView && operator.isOperator
-  // Includes an operator: on a standalone deployment they are also the single
+  // Includes an operator: on a single-tenant deployment they are also the
   // organization's owner, and excluding them would leave the one caller who can
   // set a rate without the link to set it.
   const canOverride = !publicView && canManage(organization.data)

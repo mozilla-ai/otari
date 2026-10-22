@@ -131,7 +131,7 @@ export function WorkspaceSwitcher({
   const isSwitchable = organizationRows.length > 1
   // Absent rather than shown empty: a permanent row reading "0 invitations"
   // would be chrome for something that is almost always nothing. A failed or
-  // unserved read (an older gateway, a hybrid one) lands here as "nothing
+  // unserved read (an older gateway) lands here as "nothing
   // waiting" too, which is the right way for chrome to fail. A caller with no
   // organization keeps the row, because the inbox is their one way in.
   const invitationCount = pendingInvitations.data?.length ?? 0

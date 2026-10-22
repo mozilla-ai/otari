@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
-import httpx
 import pytest
 from any_llm.types.completion import (
     ChatCompletion,
@@ -54,10 +53,7 @@ from openai.types.responses import (
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 from sqlalchemy.orm import Session
 
-from conftest import InstallControlPlane
-from gateway.api.deps import reset_config
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.database import reset_db
 from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import SandboxFileEntry
 from gateway.services.mcp_client import MCPToolCallOutcome
@@ -75,7 +71,7 @@ from gateway.services.web_retrieval_backend import WebRetrievalBackend
 from gateway.services.web_retrieval_policy import canonicalize_web_url
 from gateway.types.code_execution import ResultBlock
 
-from .conftest import MODEL_NAME, app_for
+from .conftest import MODEL_NAME
 
 _MCP_TOOL = "lookup"
 _MCP_SERVER = {"name": "docs", "url": "http://127.0.0.1:9999/mcp"}
@@ -862,94 +858,3 @@ def test_responses_stream_runs_all_four_and_announces_the_builtins(
     assert done == ["web_search_call", "code_interpreter_call"], (
         "a gateway-run call leaked, or a built-in went unannounced"
     )
-
-
-# ---------- hybrid ----------
-
-
-@pytest.fixture
-def platform_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    app = app_for(
-        GatewayConfig(
-            mode="hybrid",
-            web_fetch_enabled=True,
-            provider_user_identifier_enabled=False,
-            platform={"base_url": "http://platform.test/api/v1"},
-        )
-    )
-    with TestClient(app) as client:
-        yield client
-    reset_config()
-    reset_db()
-
-
-@dataclass
-class _ControlPlane:
-    """What a hybrid gateway asked its control plane, by path."""
-
-    calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
-
-    def bodies(self, suffix: str) -> list[dict[str, Any]]:
-        return [body for url, body in self.calls if url.endswith(suffix)]
-
-
-@pytest.fixture
-def control_plane(control_plane_transport: InstallControlPlane) -> _ControlPlane:
-    seen = _ControlPlane()
-
-    async def answer(url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> httpx.Response:
-        seen.calls.append((url, body))
-        if url.endswith("/gateway/provider-keys/resolve"):
-            attempt = {
-                "attempt_id": "att-combined",
-                "position": 0,
-                "provider": "openai",
-                "model": "gpt-4o-mini",
-                "api_key": "sk-platform-key",
-                "api_base": "https://api.openai.com/v1",
-                "managed": True,
-            }
-            return httpx.Response(
-                200, json={"request_id": "req-combined", "fallback_enabled": False, "attempts": [attempt]}
-            )
-        if url.endswith("/gateway/code-execution/resolve"):
-            return httpx.Response(200, json={"enabled": True})
-        if url.endswith("/gateway/web-search/resolve"):
-            return httpx.Response(200, json={"enabled": True, "authorized_tools": ["web_search", "web_fetch"]})
-        return httpx.Response(204)
-
-    control_plane_transport(answer)
-    return seen
-
-
-@pytest.mark.parametrize("stream", [False, True])
-def test_hybrid_runs_all_four_with_each_resolve_and_report_unchanged(
-    platform_client: TestClient, control_plane: _ControlPlane, backends: _Backends, stream: bool
-) -> None:
-    names = ["web_search", "web_fetch", "code_execution", _MCP_TOOL]
-    rounds: list[Any] = (
-        [_streamed_chat_round(names), _streamed_chat_answer()] if stream else [_completion(names), _completion(None)]
-    )
-    with _scripted("gateway.services.mcp_loop.acompletion", rounds) as sent:
-        response = platform_client.post(
-            f"{API_ROOT}/chat/completions",
-            json={
-                "model": "anything",
-                "messages": [{"role": "user", "content": "research and compute"}],
-                "tools": [_SEARCH, _FETCH, _CODE],
-                "mcp_servers": [_MCP_SERVER],
-                "stream": stream,
-            },
-            headers={"Authorization": "Bearer user_test_token"},
-        )
-
-    assert response.status_code == 200, response.text
-    assert _ran(backends) == set(names)
-    assert len(sent) == 2
-    assert {tool["function"]["name"] for tool in sent[0]["tools"]} == set(names)
-    # Each tool's policy is resolved once, in the shape it has when declared alone.
-    assert control_plane.bodies("/gateway/code-execution/resolve") == [{}]
-    assert control_plane.bodies("/gateway/web-search/resolve") == [{"requested_tools": ["web_search", "web_fetch"]}]
-    reports = control_plane.bodies("/gateway/usage")
-    assert [(report["correlation_id"], report["status"]) for report in reports] == [("att-combined", "success")]

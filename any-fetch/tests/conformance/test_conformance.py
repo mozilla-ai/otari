@@ -56,8 +56,13 @@ def _replay(provider: str, case: str) -> Callable[[httpx.Request], httpx.Respons
     return handler
 
 
-# A provider that signals no error inside a successful response leaves "in_body_error" out.
+# A provider that signals no error inside a successful response leaves "in_body_error" out. Only one
+# in NO_EMPTY_PAGE, which fails the call rather than answer a page with no text, leaves "empty" out.
 SCENARIOS: dict[str, dict[Case, Scenario]] = {
+    "deepseek": {
+        "normal": Scenario(handler=_replay("deepseek", "normal")),
+        "error": Scenario(handler=_replay("deepseek", "error")),
+    },
     "exa": {
         "normal": Scenario(handler=_replay("exa", "normal")),
         "empty": Scenario(handler=_replay("exa", "empty")),
@@ -76,6 +81,9 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "error": Scenario(handler=_replay("tabstack", "error")),
     },
 }
+
+# Seen live: the entries test_live.py marks missing_page="fails".
+NO_EMPTY_PAGE = {"deepseek"}
 
 PROVIDERS = AnyFetch.get_supported_providers()
 # The test tier answers from memory, and builtin is the host's.
@@ -138,8 +146,9 @@ def _exception_texts(exc: BaseException | None) -> list[str]:
 
 def test_every_provider_has_scenarios() -> None:
     assert sorted([*SCENARIOS, "builtin"]) == PROVIDERS
-    for cases in SCENARIOS.values():
-        assert {"normal", "empty", "error"} <= cases.keys()
+    for provider, cases in SCENARIOS.items():
+        assert {"normal", "error"} <= cases.keys()
+        assert ("empty" in cases) == (provider not in NO_EMPTY_PAGE)
 
 
 def test_builtin_before_registration_is_a_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:

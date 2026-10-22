@@ -91,7 +91,7 @@ derived type is the set rather than `string[]`: `THEME_PREFERENCES` in
 
 Three words mean specific things here and are not interchangeable:
 
-- A **surface** is the deployment axis: a group of management APIs a standalone gateway
+- A **surface** is the deployment axis: a group of management APIs a gateway
   serves. It comes from `GET /v1/bootstrap` through `useSurfaces()`.
 - A **capability** is the entitlement axis: what a build or a customer is licensed for, from
   `useEntitlements()`.

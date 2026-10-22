@@ -27,6 +27,7 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from any_llm import LLMProvider
@@ -77,6 +78,16 @@ def _no_ambient_provider_keys(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_pricing_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the unpriced-upstream warning off the session double, which holds no pricing rows."""
+
+    async def _skip(*_args: object) -> None:
+        return None
+
+    monkeypatch.setattr(pipeline, "_warn_if_hosted_upstream_is_unpriced", _skip)
+
+
 class RecordingPort:
     """A stand-in for an overlay-bound adapter, recording what it was asked."""
 
@@ -125,30 +136,27 @@ class RecordingPort:
 
 def _plain_build_port() -> ModelProviderPort:
     """The adapter a build with no overlay actually runs, via the composition root."""
-    return build_container(workspace_listener=None).resolve(ModelProviderPort, None)
+    return build_container().resolve(ModelProviderPort, None)
 
 
 def _plain_build_billing() -> BillingPort:
     """The billing adapter a build with no overlay runs, via the composition root."""
-    return build_container(workspace_listener=None).resolve(BillingPort, None)
+    return build_container().resolve(BillingPort, None)
 
 
 def _ctx(
     *,
     resolved_provider: ResolvedProvider | None,
     organization_id: uuid.UUID | None = ORGANIZATION_ID,
-    workspace_id: uuid.UUID | None = WORKSPACE_ID,
+    workspace_id: uuid.UUID = WORKSPACE_ID,
     plan: Any = None,
     config: GatewayConfig | None = None,
 ) -> pipeline.RequestContext:
     return pipeline.RequestContext(
         config=config or GatewayConfig(),
-        db=None,
-        uow=None,
+        db=cast(AsyncSession, AsyncMock()),
+        uow=cast(Any, AsyncMock()),
         log_writer=cast(Any, object()),
-        hybrid_mode=False,
-        route=None,
-        user_token=None,
         api_key_id=None,
         user_id="user-1",
         rate_limit_info=None,
@@ -195,7 +203,7 @@ def _assert_refused_as_unconfigured(
 ) -> None:
     assert exc_info.value.status_code == 424
     assert (exc_info.value.headers or {}).get(ERROR_CODE_HEADER) == PROVIDER_NOT_CONFIGURED
-    assert "${OPENAI_API_KEY}" in str(exc_info.value.detail)
+    assert "'openai'" in str(exc_info.value.detail)
     assert len(released) == 1
     assert [(row["status_code"], row["provider"], row["model"]) for row in rejections] == [(424, "openai", "gpt-4o")]
 
@@ -457,7 +465,7 @@ async def test_client_args_alone_does_not_shadow_a_real_key() -> None:
 async def test_request_without_an_organization_is_asked_as_one_no_restriction_names() -> None:
     """Served on what is restricted to no organization, so the port is asked for exactly that."""
     port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
-    ctx = _ctx(resolved_provider=_uncredentialed(), organization_id=None, workspace_id=None)
+    ctx = _ctx(resolved_provider=_uncredentialed(), organization_id=None)
 
     result = await _dispatch(ctx, port)
 
@@ -927,15 +935,9 @@ async def test_an_admission_that_does_not_commit_becomes_a_503(monkeypatch: pyte
     async def _commit_failed(_session: object) -> bool:
         return False
 
-    async def _no_pricing_check(*_args: object) -> None:
-        return None
-
     monkeypatch.setattr(pipeline, "release_session", _commit_failed)
-    # A session would otherwise send the unpriced-upstream warning to the database.
-    monkeypatch.setattr(pipeline, "_warn_if_hosted_upstream_is_unpriced", _no_pricing_check)
     billing = RecordingBilling()
     ctx = _ctx(resolved_provider=_uncredentialed())
-    ctx.db = cast(AsyncSession, object())
 
     with pytest.raises(HTTPException) as exc_info:
         await _dispatch_billed(ctx, _hosted_port(), cast(BillingPort, billing))

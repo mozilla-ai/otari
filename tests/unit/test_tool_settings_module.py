@@ -346,6 +346,7 @@ def test_a_searxng_tool_with_its_own_api_base_is_not_reported() -> None:
         ({BUILTIN_FETCH: {"provider": "fake"}}, "its name is reserved"),
         ({"none": {"provider": "fake"}}, "its name is reserved"),
         ({"Builtin_Fetch": {"provider": "fake"}}, "its name is reserved"),
+        ({"*": {"provider": "fake"}}, "its name is reserved"),
         ({"a/b": {"provider": "fake"}}, "must not contain '/'"),
     ],
 )
@@ -420,6 +421,12 @@ def test_a_search_entry_named_builtin_fetch_loads_beside_the_implicit_instance(
     assert BUILTIN_FETCH in effective_search_instances(config)
     assert effective_fetch_instances(config)[BUILTIN_FETCH].provider == "builtin"
     assert f"search_tools.{BUILTIN_FETCH} breaks the instance rules" in _warnings(caplog, config)
+
+
+def test_a_search_entry_named_like_the_every_tool_entry_breaks_the_rules(caplog: pytest.LogCaptureFixture) -> None:
+    """``*`` in ``allowed_tools`` grants every search tool, so no instance may take that name."""
+    config = GatewayConfig(search_tools={"*": _EXA})
+    assert "search_tools.* breaks the instance rules" in _warnings(caplog, config)
 
 
 # --------------------------------------------------------------------------- #

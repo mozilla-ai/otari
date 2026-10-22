@@ -6,19 +6,13 @@
  * copies would drift into two dialects of the same call, and an operator who
  * followed one and then the other would be told to authenticate two ways.
  *
- * The base URL is usually the browser's own origin, because the gateway serving
- * this dashboard is also the gateway serving the API: whatever address reached
- * this page is an address that reaches `/chat/completions`, which is more
- * reliable than anything a server behind a proxy could report about itself.
- *
- * A hosted control plane breaks that, which is what `resolveSnippetBaseUrl`
- * below exists for: it serves the dashboard and is deliberately not where
- * inference belongs (otari#823, otari#822), so it publishes the data-plane
- * gateway's address on `/bootstrap` and the snippets are built from that.
+ * The base URL is where the dashboard's own API requests go, because the gateway
+ * answering them is also the gateway serving inference; see
+ * `resolveSnippetBaseUrl`.
  */
 
-import type { DeploymentBootstrap } from "@/client"
 import { API_ROOT } from "@/shared/api/client"
+import { requestPolicy } from "@/shared/api/overlayRequestPolicy"
 
 /** Stands in for a model when the deployment has none to name yet. */
 export const SNIPPET_MODEL_PLACEHOLDER = "your-model"
@@ -174,37 +168,22 @@ export function buildAgentPrompt({
 }
 
 /**
- * Where a snippet should send its request, or undefined when nothing here knows.
+ * Where a snippet should send its request: the origin the dashboard's own API
+ * requests reach.
  *
- * Three deployments, two answers. A standalone gateway and a hybrid one both
- * serve the API at the address that served this page, so the browser's own
- * origin is the answer and is more trustworthy than anything the server could
- * say about itself from behind a proxy. A hosted control plane is the exception
- * the whole function exists for: it serves this dashboard, and customer
- * inference belongs on the data-plane gateway rather than on it, so it has to
- * name that address itself (`data_plane_url` on `/bootstrap`).
- *
- * Undefined when a hosted deployment names none. Falling back to the origin
- * there is the bug this replaces: it hands somebody a runnable command aimed at
- * the one host their traffic should not reach. A placeholder host would be no
- * better, since nobody reading it can know what to put in its place, so the
- * caller shows no snippet and says why. Undefined and never `""`, so that a
- * caller cannot build `curl /api/v1/chat/completions` out of an origin that is not
- * there; this is the boundary where the bootstrap's `null` becomes the absent
- * value the rest of the tree branches on.
- *
- * `data_plane_url` is read whichever mode published it, but only a hosted
- * deployment does: `bootstrap.py` answers null for standalone and hybrid even
- * when the setting is present, because each of those serves its own API. The
- * trailing slash is trimmed again here because this is the value the gateway
- * published, not the value it validated.
+ * That is the browser's own origin, which is more trustworthy than anything the
+ * server could say about itself from behind a proxy, unless the request policy
+ * names another. A build whose one dashboard reaches several deployments serves
+ * the page from one host and sends every request to the deployment chosen, so a
+ * snippet aimed at the page's host would miss the deployment the key was
+ * issued on.
  */
-export function resolveSnippetBaseUrl(
-  deployment: Pick<DeploymentBootstrap, "deployment_type" | "data_plane_url">,
-  origin: string = typeof window === "undefined" ? "" : window.location.origin,
-): string | undefined {
-  const configured = deployment.data_plane_url?.trim().replace(/\/+$/, "")
-  if (configured) return configured
-  if (deployment.deployment_type === "hosted") return undefined
-  return origin.trim().replace(/\/+$/, "") || undefined
+export function resolveSnippetBaseUrl(origin: string = apiOrigin()): string {
+  return origin.trim().replace(/\/+$/, "")
+}
+
+function apiOrigin(): string {
+  const { origin } = requestPolicy()
+  if (origin) return origin
+  return typeof window === "undefined" ? "" : window.location.origin
 }

@@ -20,8 +20,7 @@ Two disjoint addressing schemes decide it, and the split is
   contributes the models it advertises there, or ``provider:*`` when it
   advertises no roster.
 
-An organization holding no BYO key still gets every configured instance, which on
-a standalone deployment is the whole catalog.
+An organization holding no BYO key still gets every configured instance.
 
 The scope also answers one thing the allow-list cannot. Aliases and stored
 policies are workspace-scoped rows, and the catalog reads them for a workspace
@@ -53,7 +52,6 @@ from gateway.services.provider_kwargs import provider_key
 from gateway.services.tenancy.authorization import VisibleWorkspaceScope, resolve_visible_workspace_scope
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, has_credential, key_is_usable
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.workspace_scope import lookup_default_workspace_id, organization_for_workspace_id
 
 
@@ -91,6 +89,9 @@ class SessionCatalogScope:
     Empty for a caller with no offered models, which is every caller on a
     deployment where nobody has adopted any.
     """
+
+    hosted_keys: frozenset[str] = frozenset()
+    """Selectors the deployment's hosted providers switched on for this caller, listed like ``offered_keys``."""
 
 
 async def resolve_hosted_models(
@@ -336,11 +337,7 @@ async def resolve_session_catalog_scope(
 
     NOTE: this never answers unrestricted, so a caller should decide that for a deployment operator first.
     """
-    services = (
-        organizations
-        if organizations is not None
-        else OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
-    )
+    services = organizations if organizations is not None else OrganizationService(db, membership_listener=None)
     allowlist = {f"{instance}:*" for instance in config.providers}
     try:
         scope = await resolve_visible_workspace_scope(db, user=user, organizations=services)
@@ -393,6 +390,9 @@ async def resolve_session_catalog_scope(
         # key, which says the organization may reach everything that provider
         # serves and nothing about which of them to list.
         offered_keys=frozenset(entry for entry in byo_allowlist if not entry.endswith(":*")),
+        hosted_keys=frozenset(
+            entry for entry in hosted_allowlist_entries(hosted_models, reachable_hosted) if not entry.endswith(":*")
+        ),
     )
 
 

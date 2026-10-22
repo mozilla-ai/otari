@@ -21,6 +21,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -29,6 +30,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.models.pricing import ModelPricing
 from gateway.models.provider_keys import (
     OrgProviderKey,
     OrgProviderKeyModel,
@@ -36,6 +38,7 @@ from gateway.models.provider_keys import (
     WorkspaceProviderModelRestriction,
 )
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
+from gateway.services import merged_catalog_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
@@ -843,6 +846,99 @@ def test_an_unadvertised_model_is_withheld_from_the_operator_and_the_master_key(
     assert response.status_code == status.HTTP_200_OK, response.text
     assert {model["id"] for model in response.json()["data"]} == set(_ALL_MODELS) - {_OPENAI_OTHER}
     assert port.asked_for[-1] is None, "the master key asks for the deployment-wide answer"
+
+
+def test_a_hosted_model_switched_on_unpriced_is_listed_for_every_caller_it_serves(
+    client: TestClient, master_key_header: dict[str, str], world: _World
+) -> None:
+    """Nothing prices it and nothing dials the hosted provider, so the roster is what lists it.
+
+    A config.yml provider copied onto a hosted provider is exactly this: its
+    models are switched on and, on a deployment that prices nothing, unpriced.
+    """
+    unpriced = "mistral:open-mistral-free"
+    bind_model_provider(client, HostedModelProvider("mistral", models={"mistral": {"open-mistral-free"}}))
+
+    for who in ("alpha_member", "beta_member", "alpha_owner", "superuser", "beta_root"):
+        listed = _listing_as(client, world, who)
+        assert unpriced in listed, who
+        assert listed[unpriced]["pricing"] is None, who
+        # The roster is the deployment's whole say on the provider: the priced
+        # model it switched off stays withheld.
+        assert _MISTRAL_MODEL not in listed, who
+
+    response = client.get(f"{API_ROOT}/models", headers=master_key_header)
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert unpriced in {model["id"] for model in response.json()["data"]}
+
+
+def test_with_require_pricing_on_a_hosted_model_is_listed_only_once_a_default_prices_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    world: _World,
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dispatch refuses a hosted model nothing prices, so the catalog does not offer it.
+
+    An organization's override does not admit it either, which leaves the
+    models.dev default as the one rate that can.
+    """
+    monkeypatch.setattr(test_config, "require_pricing", True)
+    monkeypatch.setattr(merged_catalog_service, "default_pricing_enabled", lambda: True)
+    monkeypatch.setattr(
+        merged_catalog_service,
+        "default_model_pricing",
+        lambda provider, model, as_of: (
+            ModelPricing(
+                model_key=f"{provider}:{model}", input_price_per_million=Decimal(1), output_price_per_million=Decimal(2)
+            )
+            if model == "open-mistral-defaulted"
+            else None
+        ),
+    )
+    roster = {"open-mistral-free", "open-mistral-defaulted"}
+    bind_model_provider(client, HostedModelProvider("mistral", models={"mistral": roster}))
+
+    for who in ("alpha_member", "beta_member", "superuser"):
+        listed = _listing_as(client, world, who)
+        assert "mistral:open-mistral-free" not in listed, who
+        assert listed["mistral:open-mistral-defaulted"]["pricing_source"] == "default", who
+
+    response = client.get(f"{API_ROOT}/models", headers=master_key_header)
+    assert response.status_code == status.HTTP_200_OK, response.text
+    ids = {model["id"] for model in response.json()["data"]}
+    assert "mistral:open-mistral-free" not in ids
+    assert "mistral:open-mistral-defaulted" in ids
+
+
+def test_a_hosted_model_priced_under_its_legacy_spelling_is_listed_once_with_its_rate(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    world: _World,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    session = db_session_factory()
+    try:
+        session.add(
+            ModelPricing(
+                model_key="mistral/open-mistral-legacy",
+                input_price_per_million=Decimal(1),
+                output_price_per_million=Decimal(2),
+                effective_at=datetime.now(UTC) - timedelta(days=1),
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    bind_model_provider(client, HostedModelProvider("mistral", models={"mistral": {"open-mistral-legacy"}}))
+
+    for query in ("", "?provider=mistral"):
+        response = client.get(f"{API_ROOT}/models{query}", headers=master_key_header)
+        assert response.status_code == status.HTTP_200_OK, response.text
+        listed = [model for model in response.json()["data"] if "open-mistral-legacy" in model["id"]]
+        assert len(listed) == 1, (query, listed)
+        assert listed[0]["pricing"] is not None, query
 
 
 def test_the_master_key_keeps_a_model_its_default_workspace_reaches_on_its_own_key(

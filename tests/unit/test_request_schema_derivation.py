@@ -231,6 +231,7 @@ def test_sensitive_params_are_stripped_before_forwarding() -> None:
             "temperature": 0.5,
             "api_key": "sk-leak",
             "provider": "evil",
+            "client_args": {"base_url": "https://attacker.example"},
             "extra_body": {},
             "extra_headers": {"OpenAI-Project": "proj_other"},
             "extra_query": {"api-version": "preview"},

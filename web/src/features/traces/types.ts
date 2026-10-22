@@ -1,6 +1,8 @@
 // Shapes after Langfuse's trace and observation records (see
 // LANGFUSE-LICENSE.md), filled from the trace API by `fromApi.ts`.
 
+import type { TraceGateSummary } from "@/client"
+
 import type { GatewayEvent } from "./gateway"
 
 // GUARDRAIL and MCP are the gateway's own work, which Langfuse has no type for.
@@ -47,6 +49,8 @@ export interface Trace {
   /** Absent until the session's spans have loaded. */
   gateway?: {
     events: GatewayEvent[]
+    /** Each gate a coding agent's hook reported, the ones that did something first. */
+    gates: TraceGateSummary[]
     /** Empty when the session's requests named no key. */
     apiKeyId: string
     cost: number
