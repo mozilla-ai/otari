@@ -50,8 +50,8 @@ def _filters(
         uuid.UUID | None,
         Query(description="Only sessions in this workspace. Narrows the caller's scope; never widens it."),
     ] = None,
-    start: Annotated[datetime | None, Query(description="Last activity at or after this instant (ISO 8601).")] = None,
-    end: Annotated[datetime | None, Query(description="Last activity before this instant (ISO 8601).")] = None,
+    start: Annotated[datetime | None, Query(description="Sessions active at or after this instant (ISO 8601).")] = None,
+    end: Annotated[datetime | None, Query(description="Sessions started before this instant (ISO 8601).")] = None,
     user_id: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description="Owning users.")] = None,
     api_key_id: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description="API keys.")] = None,
     harness: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description="Agent harnesses.")] = None,
@@ -122,7 +122,7 @@ def build_trace_router(router: APIRouter, scope_dependency: Callable[..., Any]) 
         """Count the sessions active in each bucket, split by whether they failed.
 
         A session is active from its start to its last activity, so a long one counts in every bucket it ran
-        through. Here ``start`` and ``end`` bound the buckets, not last activity: a session that began before
+        through. Here ``start`` and ``end`` bound the buckets: a session that began before
         ``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are
         aligned to their size in UTC and only the populated ones are returned. A session failed when it holds an
         unrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so

@@ -41,11 +41,10 @@ from gateway.types.traces import (
 )
 from otari_agent.domain.definitions import GateDefinition, definition_digest, gates_from_body
 
-# The most buckets one series read returns: 90 days by the hour. Each bucket is
-# joined against every session it overlaps, so the finer ones are held to fewer:
-# 12 hours by the minute, 2.5 days in 5-minute buckets, 15 days by the half hour.
-MAX_SERIES_BUCKETS = 90 * 24
-MAX_FINE_SERIES_BUCKETS = 720
+# The most buckets one series read returns, each joined against every session it
+# overlaps. A dashboard preset asks for at most 60; its "All", by the day, keeps
+# the newest two years.
+MAX_SERIES_BUCKETS = 720
 
 
 class TraceService:
@@ -176,20 +175,17 @@ class TraceService:
         A session is active from its start to its last activity, so it counts in
         every bucket it overlaps. The window is the filters' (or the sessions'
         own, from the first start to the last activity), cut into buckets aligned
-        to their size in UTC, the newest :data:`MAX_SERIES_BUCKETS` of them
-        (:data:`MAX_FINE_SERIES_BUCKETS` below an hour).
+        to their size in UTC, the newest :data:`MAX_SERIES_BUCKETS` of them.
         """
         grain = TRACE_BUCKET_DURATION[bucket]
-        limit = MAX_FINE_SERIES_BUCKETS if grain < TRACE_BUCKET_DURATION["hour"] else MAX_SERIES_BUCKETS
         async with self._uow:
             oldest, newest = await self._traces.activity_bounds(_workspace_ids(scope), filters)
             if oldest is None or newest is None:
                 return ()
             lower = filters.start or oldest
             upper = filters.end or newest + timedelta(microseconds=1)
-            rows = await self._traces.count_active(
-                _workspace_ids(scope), filters, starts=_bucket_starts(lower, upper, grain, limit), grain=grain
-            )
+            starts = _bucket_starts(lower, upper, grain, MAX_SERIES_BUCKETS)
+            rows = await self._traces.count_active(_workspace_ids(scope), filters, starts=starts, grain=grain)
             return tuple(
                 TraceBucket(bucket=start.strftime("%Y-%m-%dT%H:%M:%SZ"), succeeded=ok, failed=bad)
                 for start, ok, bad in rows

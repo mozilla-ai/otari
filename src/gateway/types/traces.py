@@ -339,9 +339,10 @@ class TraceScope:
 class TraceFilter:
     """What narrows a read, inside its scope.
 
-    Every field narrows; an unset field does not filter. ``start`` is inclusive
-    and ``end`` exclusive, and both apply to a trace's last activity. A naive
-    bound means UTC. Several values in a tuple match any of them. ``workspace_ids``
+    Every field narrows; an unset field does not filter. ``start`` and ``end``
+    keep the traces active in ``[start, end)``: last active at or after ``start``
+    and started before ``end``, so a session still running past ``end`` stays in.
+    A naive bound means UTC. Several values in a tuple match any of them. ``workspace_ids``
     narrows inside the scope like every other field: a workspace outside the scope
     matches nothing, never widens it.
     """

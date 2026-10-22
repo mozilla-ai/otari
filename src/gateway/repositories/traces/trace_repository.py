@@ -361,7 +361,7 @@ def _conditions(query: TraceFilter) -> list[ColumnElement[bool]]:
     if (lower := utc_bound(query.start)) is not None:
         conditions.append(Trace.last_activity_at >= lower)
     if (upper := utc_bound(query.end)) is not None:
-        conditions.append(Trace.last_activity_at < upper)
+        conditions.append(Trace.started_at < upper)
     if query.user_ids:
         conditions.append(Trace.user_id.in_(list(query.user_ids)))
     if query.api_key_ids:

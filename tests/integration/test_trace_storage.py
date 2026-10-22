@@ -257,6 +257,26 @@ async def test_search_pages_newest_activity_first_and_filters(
     assert windowed == 2
 
 
+async def test_a_window_lists_the_sessions_active_in_it_as_the_series_counts_them(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    """A session still running past the window's end is listed, as the chart counts it."""
+    workspace, _ = tenants
+    await store.write(
+        (
+            _write(workspace, "spanning", _span("start", minutes=0), _span("later", minutes=30)),
+            _write(workspace, "before", _span("only", minutes=5)),
+            _write(workspace, "after", _span("only", minutes=20)),
+        )
+    )
+    window = TraceFilter(start=_T0 + timedelta(minutes=10), end=_T0 + timedelta(minutes=20))
+
+    page = await store.search(TraceScope.deployment(), window, limit=10, offset=0)
+
+    assert [item.trace_id for item in page.items] == ["spanning"]
+    assert await store.count(TraceScope.deployment(), window) == 1
+
+
 async def test_a_search_finds_any_part_of_the_id_harness_or_user_in_any_case(
     store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
 ) -> None:

@@ -4060,7 +4060,7 @@ export interface paths {
          * @description Count the sessions active in each bucket, split by whether they failed.
          *
          *     A session is active from its start to its last activity, so a long one counts in every bucket it ran
-         *     through. Here ``start`` and ``end`` bound the buckets, not last activity: a session that began before
+         *     through. Here ``start`` and ``end`` bound the buckets: a session that began before
          *     ``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are
          *     aligned to their size in UTC and only the populated ones are returned. A session failed when it holds an
          *     unrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so
@@ -6099,7 +6099,7 @@ export interface paths {
          * @description Count the sessions active in each bucket, split by whether they failed.
          *
          *     A session is active from its start to its last activity, so a long one counts in every bucket it ran
-         *     through. Here ``start`` and ``end`` bound the buckets, not last activity: a session that began before
+         *     through. Here ``start`` and ``end`` bound the buckets: a session that began before
          *     ``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are
          *     aligned to their size in UTC and only the populated ones are returned. A session failed when it holds an
          *     unrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so
@@ -25558,9 +25558,9 @@ export interface operations {
                 order?: "asc" | "desc";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -25606,9 +25606,9 @@ export interface operations {
             query?: {
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -25686,9 +25686,9 @@ export interface operations {
                 bucket?: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -28768,9 +28768,9 @@ export interface operations {
                 order?: "asc" | "desc";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -28816,9 +28816,9 @@ export interface operations {
             query?: {
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -28896,9 +28896,9 @@ export interface operations {
                 bucket?: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;

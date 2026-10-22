@@ -194,6 +194,9 @@ content; any other member reads the session with every span's content empty.
 `/series` counts the sessions active in each bucket of a window: a session is
 active from its start to its last activity, so a long one counts in every bucket
 it ran through. `bucket` is `1m`, `5m`, `30m`, `hour`, `6h` or `day`.
+Every read takes the window the same way: `start` and `end` keep the sessions
+active between them (last active at or after `start`, started before `end`), so a
+session still running past `end` is listed in the window it was counted in.
 
 A list read narrows to one workspace with `workspace_id`, inside the caller's
 scope and never beyond it. `q` matches the start of a session's trace id or of
