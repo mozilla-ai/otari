@@ -111,6 +111,27 @@ session running through Codex's own Code Mode receives no `PreToolUse` dispatch
 for a shell or `apply_patch` call wrapped in JS (openai/codex#23411, open
 upstream), so only the `Stop` event reaches it.
 
+### pi
+
+pi is wired by the pi-otari extension, not by a settings file:
+
+```bash
+otari hook setup --harness pi
+```
+
+installs the extension (`pi install npm:@mozilla-ai/pi-otari`) rather than
+writing a hook file, and writes nothing under `.claude` or `.codex`. If `pi` is
+not on `PATH` it prints those install instructions instead. If `pi list` already
+shows the extension it says so; otherwise it asks before installing. Inside a Git
+repository it also offers the same starter `.otari/guardrails.yml` as the other
+harnesses; outside one it installs the extension only. The extension
+calls `otari hook --harness pi` with pi's own tool names (`bash`, `read`,
+`edit`, `write`) and `tool_input` (`command` or `path`). An `edit` or `write`
+path is an edit target, a `read` path is a read target, and a `bash` command is
+a command. On `Stop` the extension sends the session's commands as
+`bash_commands`; pi's session file is never parsed. Exit codes and output are
+the same as for Claude Code.
+
 ## Writing a gate
 
 A gate is one mapping under `gates:` in a guardrail file:
@@ -419,7 +440,7 @@ CLAUDE.md where that is the only doc:
 otari guardrails generate
 ```
 
-It resolves a locally installed model CLI (`claude -p` or `codex exec`), names
+It resolves a locally installed model CLI (`claude -p`, `codex exec` or `pi -p`), names
 it and asks for confirmation before sending the doc anywhere, asks it to propose
 gates for the rules that look mechanically checkable, then walks the proposals
 one at a time: accept, reject, edit, or quit. Nothing is written for a skipped or
