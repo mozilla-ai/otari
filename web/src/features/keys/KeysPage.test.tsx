@@ -1183,6 +1183,7 @@ describe("KeysPage", () => {
             request_limit: null,
             budget_duration_sec: null,
             reset_alignment: "calendar_month",
+            applied_to: [],
             ceiling_count: 0,
             created_at: "2026-01-01T00:00:00+00:00",
             updated_at: "2026-01-01T00:00:00+00:00",
@@ -2134,7 +2135,7 @@ describe("KeysPage", () => {
         screen.queryByRole("columnheader", { name: "Owner" }),
       ).not.toBeInTheDocument()
       expect(
-        screen.queryByRole("link", { name: /Spend & budgets/ }),
+        screen.queryByRole("link", { name: /Budgets/ }),
       ).not.toBeInTheDocument()
     })
 

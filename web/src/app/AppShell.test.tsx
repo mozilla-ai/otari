@@ -684,7 +684,7 @@ describe("AppShell surface gating", () => {
       "Workspaces",
       "Members & roles",
       "Email domains",
-      "Spend & budgets",
+      "Budgets",
       "Providers",
       "Guardrails",
       "Org settings",
