@@ -739,7 +739,36 @@ characters (`openssl rand -base64 32`) to key the digest. Without it the digest
 is unkeyed, so the same workspace id and user give the same identifier on any
 deployment, and Otari logs a warning at startup. Otari refuses to start when the
 key equals the master key or an `OTARI_SECRET_KEY` key. Rotating it gives every
-user a new identifier.
+user a new identifier: a block a provider placed on an old identifier stops
+landing, and the provider's history for that user starts again. Rotate it only
+when the key has leaked.
+
+#### Tracing an identifier back
+
+A provider that reports abuse names the identifier, and it is a one-way digest.
+Each usage row stores the identifier its request's provider calls carry, in the
+indexed `usage_logs.safety_identifier` column, so the database answers who it
+was:
+
+```sql
+SELECT workspace_id, user_id, api_key_id,
+       MIN(timestamp) AS first_seen, MAX(timestamp) AS last_seen,
+       COUNT(DISTINCT request_group_id) AS requests
+FROM usage_logs
+WHERE safety_identifier = '<identifier>'
+GROUP BY workspace_id, user_id, api_key_id;
+```
+
+The rows keep an identifier after a key rotation, so an old one still traces.
+For a Gemini label, which is cut to 63 characters, match the prefix:
+`WHERE safety_identifier LIKE '<label>%'`.
+
+The rows hold the user behind the key, not the tag the caller sent. When the
+identifier came from a tag, the customer that owns the workspace maps it to their
+own end user. A row has no identifier where its request had none: usage imported
+from outside, the pass-through endpoints (embeddings, images, audio,
+moderations, batches), a request refused before Otari resolved its user, and
+every row written before Otari stored it.
 
 ## Pricing
 
