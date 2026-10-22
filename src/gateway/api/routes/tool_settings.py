@@ -59,6 +59,7 @@ from gateway.core.settings.tools import validate_default_tool
 from gateway.log_config import logger
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tools import SandboxProvider
+from gateway.schemas.tools import SandboxCredentialPublic, SandboxCredentialRequest
 from gateway.services.guardrail_catalog import (
     BuiltInGuardrailCatalog,
     GuardrailCatalog,
@@ -143,19 +144,6 @@ class ToolSettingField(BaseModel):
     options: list[str] | None = None
 
 
-class SandboxCredentialPublic(BaseModel):
-    """Where the key a hosted sandbox provider leases with comes from. Never the key itself."""
-
-    source: Literal["stored", "environment"] | None = Field(
-        description=(
-            "'stored' for a key set here, which wins; 'environment' for the provider's own environment "
-            "variable; null when there is neither and code execution fails until one is set."
-        )
-    )
-    last4: str | None = Field(default=None, description="The key's last four characters, to tell keys apart.")
-    env_var: str = Field(description="The environment variable a deployment that stores no key is read from.")
-
-
 class ToolSettingsResponse(BaseModel):
     """The effective value of every editable tool/guardrail field."""
 
@@ -174,14 +162,6 @@ class ToolSettingsResponse(BaseModel):
             "none, and for a reader who does not operate the deployment."
         ),
     )
-
-
-class SandboxCredentialRequest(BaseModel):
-    """The key to lease hosted sandboxes with."""
-
-    model_config = ConfigDict(json_schema_extra={"example": {"api_key": "e2b_0123456789abcdef"}})
-
-    api_key: str = Field(min_length=1)
 
 
 class UpdateToolSettingsRequest(BaseModel):

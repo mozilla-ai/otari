@@ -209,7 +209,7 @@ def backends(monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig, tmp_pa
     monkeypatch.chdir(tmp_path)
     seen = _Backends()
     with (
-        patch("gateway.container.build_code_execution_port", new=lambda _config: seen.port),
+        patch("gateway.container.build_code_execution_port", new=lambda _config, **_kwargs: seen.port),
         patch("gateway.api.routes._pipeline.MCPClientPool", new=_fake_mcp_pool(seen)),
         patch.object(WebRetrievalBackend, "_search", new=seen.searches),
         patch.object(WebFetchService, "fetch", new=seen.fetches),

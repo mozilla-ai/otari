@@ -254,15 +254,6 @@ def _start_reservation_sweeper(config: GatewayConfig, _container: Container) -> 
     )
 
 
-def _start_sandbox_credential_refresher(
-    config: GatewayConfig, _container: Container
-) -> Coroutine[Any, Any, None] | None:
-    """Return the stored sandbox key refresh, or None where no hosted provider leases with one."""
-    if config.effective_sandbox_provider() not in SANDBOX_KEY_ENV:
-        return None
-    return run_sandbox_credential_refresher()
-
-
 def _resolve_file_store(config: GatewayConfig, container: Container) -> FileStoragePort | None:
     """Build the file store, or start without one where files are off and it cannot be built.
 
@@ -486,7 +477,11 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker(
         "search tool", lambda config, _container: run_search_tool_refresher(config), reset_search_tool_cache
     ),
-    _LifespanWorker("sandbox credential", _start_sandbox_credential_refresher, reset_sandbox_credential_cache),
+    _LifespanWorker(
+        "sandbox credential",
+        lambda _config, _container: run_sandbox_credential_refresher(),
+        reset_sandbox_credential_cache,
+    ),
     # No reset: the stored rules live on the config, which the startup load rebuilds.
     _LifespanWorker("rate limit rule", lambda config, _container: run_rate_limit_refresher(config)),
     _LifespanWorker("price snapshot", lambda _config, _container: run_price_snapshot_refresher()),
