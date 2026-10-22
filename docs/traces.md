@@ -211,7 +211,9 @@ own):
 
 Calls made together share these equally, since a request reports how much its
 context grew, not how much of that each result was. An `Agent` call also carries
-what its subagent's requests cost, which is exact.
+what its subagent's requests cost, which is exact. The estimate assumes one
+main model per context, so in a session that switches models with `/model`
+partway through, the calls around the switch get rougher estimates.
 
 **Cost by tool** adds the estimates up for the session: each tool's calls and
 cost, and its share of the session. A subagent's calls are listed under the

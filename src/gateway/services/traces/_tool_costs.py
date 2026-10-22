@@ -23,6 +23,7 @@ Only requests the usage ledger priced by the token carry the rates this needs,
 so a session recorded before they were kept has no estimates.
 """
 
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -154,14 +155,15 @@ def tool_costs(spans: Sequence[SpanRecord]) -> tuple[ToolCost, ...]:
     subagents = _subagent_costs(spans, by_id)
     # Each call by the request that asked for it (the last to start before it) and
     # the one that read its result (the first to start after it ended).
+    starts = {context: [request.start for request in requests] for context, requests in contexts.items()}
     placed: list[tuple[SpanRecord, list[_Request], int, int]] = []
     for span in sorted((s for s in spans if s.kind == "tool" and s.start_time is not None), key=_start):
-        requests = contexts.get(_context_of(span, by_id), [])
+        context = _context_of(span, by_id)
+        requests, started = contexts.get(context, []), starts.get(context, [])
         assert span.start_time is not None
-        caller = next((i for i in range(len(requests) - 1, -1, -1) if requests[i].start <= span.start_time), None)
-        ended = span.end_time or span.start_time
-        reader = next((i for i in range(len(requests)) if requests[i].start >= ended), None)
-        if caller is not None and reader is not None and reader > caller:
+        caller = bisect_right(started, span.start_time) - 1
+        reader = bisect_left(started, span.end_time or span.start_time)
+        if caller >= 0 and reader < len(requests) and reader > caller:
             placed.append((span, requests, caller, reader))
     calls_by_caller: dict[tuple[int, int], int] = defaultdict(int)
     calls_by_reader: dict[tuple[int, int], int] = defaultdict(int)

@@ -180,3 +180,21 @@ def test_a_session_whose_requests_were_not_priced_by_the_token_has_no_estimates(
         )
         == ()
     )
+
+
+def test_a_request_starting_as_a_call_starts_asked_for_it_and_one_starting_as_it_ends_read_its_result() -> None:
+    [cost] = tool_costs(
+        [
+            _turn(),
+            _request("r0", -1, written=8_000, output=50),
+            _request("r1", 0, written=10_000, output=200),
+            # Starts with r1 and ends as r2 starts.
+            _tool("read", 0),
+            _request("r2", 1, read=10_000, written=4_200),
+            _request("r3", 2, read=14_200),
+        ]
+    )
+
+    assert cost.calling == Decimal(200) * Decimal(15) / Decimal(1_000_000)
+    assert cost.result_tokens == 4_000
+    assert cost.later_requests == 1
