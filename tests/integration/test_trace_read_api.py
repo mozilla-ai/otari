@@ -1052,3 +1052,38 @@ def test_platform_break_glass_is_off_by_default_and_reaches_any_organization_whe
     # Not on the organization owners' own log: theirs lists owners' openings.
     assert _as(client, world["outsider"], "GET", "/organizations/me/traces/audit/break-glass").json()["items"] == []
     assert _as(client, world["admin"], "POST", path, json=body).status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_removing_a_member_from_the_organization_ends_their_shares_so_a_return_revives_none(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    share = _as(
+        client,
+        world["member"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "organization_admins"},
+    ).json()
+    with db_session_factory() as session:
+        member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+        membership = session.scalars(
+            select(OrganizationMember).where(col(OrganizationMember.user_id) == member.id)
+        ).one()
+        membership_id = membership.id
+
+    removed = _as(client, world["admin"], "DELETE", f"/organizations/me/members/{membership_id}")
+    assert removed.status_code == status.HTTP_200_OK, removed.text
+
+    with db_session_factory() as session:
+        stored = session.get(TraceContentShare, uuid.UUID(share["id"]))
+        assert stored is not None and stored.revoked_at is not None
+        # Back in the organization, the share stays ended.
+        session.get(OrganizationMember, membership_id).status = "active"
+        session.commit()
+    assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
