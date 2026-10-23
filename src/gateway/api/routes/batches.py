@@ -24,7 +24,7 @@ from gateway.api.deps import (
     model_provider_port_on,
     verify_api_key_or_master_key,
 )
-from gateway.api.routes._helpers import resolve_user_id
+from gateway.api.routes._helpers import country_gate_for, country_not_supported, resolve_user_id
 from gateway.api.routes._pipeline import (
     FUNDS_CHECK_UNAVAILABLE_DETAIL,
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
@@ -495,6 +495,9 @@ async def create_batch(
             detail=refusal.detail,
             headers=error_headers(refusal.code),
         )
+    country_gate = country_gate_for(config, raw_request)
+    if country_gate is not None and country_gate.refuses(config, resolved.instance):
+        raise country_not_supported(country_gate, request.model)
 
     # Validate provider supports batch operations
     provider_class = AnyLLM.get_provider_class(provider)

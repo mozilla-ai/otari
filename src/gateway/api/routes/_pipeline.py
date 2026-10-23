@@ -83,7 +83,7 @@ from gateway.api.routes._attempts import (
     PrepareKwargs,
     walk_attempts,
 )
-from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
+from gateway.api.routes._helpers import apply_input_guardrails, country_gate_for, resolve_user_id
 from gateway.api.routes._idempotency import (
     IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL,
     IDEMPOTENCY_KEY_REUSED_DETAIL,
@@ -113,6 +113,7 @@ from gateway.core.env import otari_env
 from gateway.core.error_codes import (
     BUDGET_EXCEEDED,
     CONTEXT_LENGTH_EXCEEDED,
+    COUNTRY_NOT_SUPPORTED,
     INSUFFICIENT_FUNDS,
     INVALID_MODEL,
     PRICING_REQUIRED,
@@ -282,6 +283,7 @@ from gateway.services.provider_kwargs import (
     with_failover_retries,
 )
 from gateway.services.providers import (
+    CountryGate,
     UnknownHostedUpstreamError,
     dispatch_on_hosted_credential,
     hosted_credential_for,
@@ -2338,6 +2340,7 @@ async def _compile_request_plan(
     request_id: str | None = None,
     tags: dict[str, str] | None = None,
     safety_identifier: str | None = None,
+    country_gate: CountryGate | None = None,
 ) -> CompiledPlan | None:
     """Compile ``model`` into a plan when it names a policy or a catalog ID with several offerings, else ``None``.
 
@@ -2353,7 +2356,9 @@ async def _compile_request_plan(
     """
     spec = resolve_effective_policy(config, model, user_id, workspace_id=workspace_id)
     if spec is None:
-        return compile_catalog_plan(config, model, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id)
+        return compile_catalog_plan(
+            config, model, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id, country_gate=country_gate
+        )
 
     budget = BudgetState()
     if needs_budget_state(spec) and user_id is not None:
@@ -2379,6 +2384,7 @@ async def _compile_request_plan(
             allowlist=allowlist,
             signal=routing_signal() if routing_signal is not None else None,
             workspace_id=workspace_id,
+            country_gate=country_gate,
         )
 
     try:
@@ -2392,6 +2398,7 @@ async def _compile_request_plan(
             budget=budget,
             router_ordering=router_ordering,
             workspace_id=workspace_id,
+            country_gate=country_gate,
         )
     except NoEligibleCandidatesError as exc:
         logger.warning("%s", exc.operator_detail)
@@ -2725,6 +2732,7 @@ async def resolve_request_context(
     # capability detection needs the underlying implementation, so keep both.
     gate_instance: str | None
     gate_impl: LLMProvider | None
+    country_gate = country_gate_for(config, raw_request)
     # A policy name, or a catalog ID with several offerings, resolves to a plan.
     # Everything below keys on the plan's head candidate, as it would on a plain model.
     plan = await _compile_request_plan(
@@ -2743,6 +2751,7 @@ async def resolve_request_context(
         request_id=request_id,
         tags=tags,
         safety_identifier=upstream_user,
+        country_gate=country_gate,
     )
     if plan is not None:
         head = plan.head
@@ -2837,6 +2846,28 @@ async def resolve_request_context(
             )
             kind = ErrorKind.NOT_FOUND if refusal.status_code == status.HTTP_404_NOT_FOUND else ErrorKind.PERMISSION
             raise adapter.error(refusal.status_code, refusal.detail, kind, headers=error_headers(refusal.code))
+
+    # A plan dropped such candidates when it compiled; a plain model is refused here.
+    if country_gate is not None and gate_instance is not None and country_gate.refuses(config, gate_instance):
+        detail = country_gate.refusal_detail(model)
+        await log_gateway_rejection(
+            db=db,
+            log_writer=log_writer,
+            api_key_id=api_key_id,
+            user_id=user_id,
+            model=gate_model,
+            provider=gate_instance,
+            endpoint=adapter.endpoint,
+            detail=detail,
+            status_code=status.HTTP_403_FORBIDDEN,
+            started_at=started_at,
+            request_id=request_id,
+            tags=tags,
+            safety_identifier=upstream_user,
+        )
+        raise adapter.error(
+            status.HTTP_403_FORBIDDEN, detail, ErrorKind.PERMISSION, headers=error_headers(COUNTRY_NOT_SUPPORTED)
+        )
 
     if idempotency is not None and session_principal is None:
         try:
@@ -3064,6 +3095,7 @@ async def resolve_request_context(
                         tuple(attempt.provider for attempt in plan.attempts) if plan is not None else (gate_impl,)
                     ),
                     upstream_user=upstream_user,
+                    client_country=country_gate.country if country_gate is not None else None,
                 )
             )
             # Bill the vision describe side-call before the reservation

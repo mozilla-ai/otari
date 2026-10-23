@@ -676,6 +676,7 @@ Anthropic answers it, whose message names each failing field.
 | `model_not_allowed` | 403 | The key may not use the model | |
 | `model_not_serving` | 403 | The organization offers the model on a provider key, with its serving switch off | |
 | `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model | |
+| `country_not_supported` | 403 | `provider_supported_countries` closes the model's provider to the country the request comes from, or the country is unknown. See [Supported countries](configuration.md#supported-countries) | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
 | `unsupported_content` | 400 | The provider refused content the request carries because the model does not accept it, such as an image sent to a text-only model. Sent only when Otari recognizes the provider's wording for that refusal; a refusal worded otherwise stays a `400` carrying the provider's message and no code. `detail` names the model where it can. A routing policy moves on to its next candidate first, and answers with this code when every candidate gave a refusal Otari recognizes | |
 | `all_candidates_rejected` | 400 | Every model a routing policy or a catalog ID tried rejected the request as invalid | |

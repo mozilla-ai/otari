@@ -18,7 +18,9 @@ class NormalizationTarget:
     ``candidate_providers`` is the provider of every candidate the request may
     dispatch to, head first, which is what the code-execution executor decides against.
     ``upstream_user`` is the end-user identifier the request's provider calls carry,
-    which a side-call the normalizer makes carries too.
+    which a side-call the normalizer makes carries too. ``client_country`` is the
+    country the request comes from, None when no source knows it, which keeps such
+    a side-call within ``provider_supported_countries``.
     """
 
     user_id: str
@@ -29,3 +31,4 @@ class NormalizationTarget:
     workspace_executor: CodeExecutor | None
     candidate_providers: tuple[LLMProvider | None, ...]
     upstream_user: str | None
+    client_country: str | None = None

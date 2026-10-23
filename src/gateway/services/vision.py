@@ -15,7 +15,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.inference import chat_user_fields
 from gateway.services.provider_kwargs import require_declared_credential, resolve_provider_selector
-from gateway.services.providers import acompletion
+from gateway.services.providers import CountryGate, acompletion
 
 _DESCRIBE_PROMPT = (
     "You are assisting a text-only language model that cannot see images. "
@@ -27,12 +27,14 @@ _DESCRIBE_PROMPT = (
 
 
 async def describe_image(
-    config: GatewayConfig, image_data_url: str, *, upstream_user: str | None
+    config: GatewayConfig, image_data_url: str, *, upstream_user: str | None, client_country: str | None = None
 ) -> tuple[str | None, CompletionUsage | None]:
     """Caption an image, returning ``(description, usage)``.
 
     ``upstream_user`` is the end-user identifier of the request the image came
     from, which the call carries in the field the vision model's provider reads.
+    ``client_country`` is the country that request comes from: a vision model
+    whose provider ``provider_supported_countries`` closes to it is not called.
 
     ``description`` is ``None`` (no configured model, or a failed side-call) to
     signal the caller to fall back to its configured strategy (OCR or
@@ -46,6 +48,9 @@ async def describe_image(
         return None, None
 
     resolved = resolve_provider_selector(config, model)
+    if CountryGate(client_country).refuses(config, resolved.instance):
+        logger.info("vision describe via %s skipped: its provider does not serve the request's country", model)
+        return None, None
     provider, model_name = resolved.provider, resolved.model
     provider_kwargs = resolved.kwargs
     user_fields = chat_user_fields(provider, upstream_user) if upstream_user is not None else {}
