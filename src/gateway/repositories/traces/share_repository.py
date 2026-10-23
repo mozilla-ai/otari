@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, case, func, select, update
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import TraceContentRead, TraceContentShare
@@ -42,13 +42,18 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
         return share
 
     async def for_trace(
-        self, workspace_id: uuid.UUID, trace_id: str, *, limit: int, offset: int = 0
+        self, workspace_id: uuid.UUID, trace_id: str, *, now: datetime, limit: int, offset: int = 0
     ) -> Sequence[TraceContentShare]:
-        """A page of the shares the session has had, newest first."""
+        """A page of the shares the session has had: the running ones first, then the rest, newest first in each.
+
+        Running first, so however many ended shares a session gathers, the ones that
+        still let someone read are on the first page.
+        """
+        running = and_(TraceContentShare.revoked_at.is_(None), TraceContentShare.expires_at > now)
         result = await self.db.execute(
             select(TraceContentShare)
             .where(TraceContentShare.workspace_id == workspace_id, TraceContentShare.trace_id == trace_id)
-            .order_by(TraceContentShare.created_at.desc(), TraceContentShare.id)
+            .order_by(case((running, 0), else_=1), TraceContentShare.created_at.desc(), TraceContentShare.id)
             .limit(limit)
             .offset(offset)
         )

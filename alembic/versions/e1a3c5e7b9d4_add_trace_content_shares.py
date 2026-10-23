@@ -60,9 +60,11 @@ def upgrade() -> None:
     )
     op.create_index("ix_trace_content_reads_share_id", "trace_content_reads", ["share_id"])
     op.create_index("ix_trace_content_reads_reader_user_id", "trace_content_reads", ["reader_user_id"])
+    op.create_index("ix_trace_content_reads_share_read_at", "trace_content_reads", ["share_id", "read_at"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_trace_content_reads_share_read_at", table_name="trace_content_reads")
     op.drop_index("ix_trace_content_reads_reader_user_id", table_name="trace_content_reads")
     op.drop_index("ix_trace_content_reads_share_id", table_name="trace_content_reads")
     op.drop_table("trace_content_reads")

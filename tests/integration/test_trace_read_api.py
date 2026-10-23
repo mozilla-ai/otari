@@ -896,3 +896,38 @@ def test_removing_a_member_from_the_workspace_ends_their_shares_at_once(
     with db_session_factory() as session:
         stored = session.get(TraceContentShare, uuid.UUID(share["id"]))
         assert stored is not None and stored.revoked_at is not None
+
+
+def test_a_running_share_is_on_the_first_page_however_many_ended_ones_follow_it(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    path = "/organizations/me/traces/s-one/shares"
+    running = _as(client, world["member"], "POST", path, json={"audience": "organization_admins"}).json()
+    with db_session_factory() as session:
+        owner = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+        workspace_id = _workspace_id(db_session_factory, "One")
+        now = datetime.now(UTC)
+        session.add_all(
+            TraceContentShare(
+                workspace_id=workspace_id,
+                trace_id="s-one",
+                audience="organization_admins",
+                shared_by_user_id=owner.id,
+                created_at=now + timedelta(minutes=n + 1),
+                expires_at=now + timedelta(days=1),
+                revoked_at=now,
+            )
+            for n in range(25)
+        )
+        session.commit()
+
+    page = _as(client, world["member"], "GET", path).json()
+
+    assert page["items"][0]["id"] == running["id"] and page["items"][0]["active"] is True
+    assert len(page["items"]) == 20 and page["has_more"] is True
