@@ -383,7 +383,7 @@ async def agent_telemetry_summary(
     session_label: str | None = Query(default=None, description=_SESSION_DESC),
     bucket: Bucket = Query(default="day", description=_BUCKET_DESC),
 ) -> AgentTelemetrySummary:
-    """What the coding agent produced in a window, and what it cost (standalone).
+    """What the coding agent produced in a window, and what it cost.
 
     Range-bounded like `/api/v1/usage/summary` (default last 30 days, hard-capped),
     so the aggregates stay served by the timestamp index. Returns the outcome
@@ -527,7 +527,7 @@ async def count_agent_telemetry(
     api_key_id: _ApiKeyFilter = None,
     name: str | None = Query(default=None, description=_NAME_DESC),
 ) -> AgentTelemetryCount:
-    """Total agent_telemetry rows matching the given filters (standalone).
+    """Total agent_telemetry rows matching the given filters.
 
     The filter set mirrors the purge endpoint's, so this sizes exactly what a
     "delete all N matching" would remove. Behavioral and metric rows are counted
@@ -548,7 +548,7 @@ async def agent_telemetry_series(
     name: str | None = Query(default=None, description=_NAME_DESC),
     bucket: Bucket = Query(default="day", description=_BUCKET_DESC),
 ) -> AgentTelemetryGroupedSeries:
-    """Row volume over time, split by user or API key (standalone).
+    """Row volume over time, split by user or API key.
 
     Mirrors `/api/v1/usage/series`: same window bounds and bucket-grid cap, the top
     groups as their own series with the remainder folded into a reconciling
@@ -601,7 +601,7 @@ async def delete_agent_telemetry_rows(
     request: AgentTelemetryDeleteRequest,
     storage: TelemetryStoragePortDep,
 ) -> AgentTelemetryDeleteResult:
-    """Delete agent_telemetry rows by explicit ids or by filter (standalone).
+    """Delete agent_telemetry rows by explicit ids or by filter.
 
     Target either an explicit selection (`ids`) or everything matching a filter
     (`by_filter: true` plus optional `user_id` / `api_key_id` / `name` / date

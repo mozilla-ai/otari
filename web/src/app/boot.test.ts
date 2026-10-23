@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import { loadDeployment } from "./boot"
 
-const BOOTSTRAP = { deployment_type: "standalone" } as WireBootstrap
+const BOOTSTRAP: WireBootstrap = { surfaces: [] }
 
 describe("loadDeployment", () => {
   it("reads the bootstrap once the request policy is settled", async () => {

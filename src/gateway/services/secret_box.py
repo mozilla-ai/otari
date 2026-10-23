@@ -13,6 +13,7 @@ so a key can be rotated by prepending a new one and re-encrypting stored rows
 over time. Generate one with :func:`generate_secret_key`.
 """
 
+import functools
 import re
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
@@ -75,6 +76,13 @@ def get_secret_box() -> MultiFernet:
     keys = _load_keys()
     if not keys:
         raise SecretBoxUnavailableError("OTARI_SECRET_KEY is not set; it is required to store provider credentials.")
+    return _box_for(tuple(keys))
+
+
+# Keyed on the keys themselves, so a changed OTARI_SECRET_KEY builds a new box
+# while a read that opens many rows builds one.
+@functools.lru_cache(maxsize=1)
+def _box_for(keys: tuple[str, ...]) -> MultiFernet:
     try:
         fernets = [Fernet(key.encode()) for key in keys]
     except (ValueError, TypeError):

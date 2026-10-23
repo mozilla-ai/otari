@@ -109,6 +109,28 @@ provider's metadata and each native option with its type, allowed values, defaul
 description, then exits without fetching. `builtin` needs a host, so it fails from the command
 line, though `--describe builtin` works.
 
+## DeepSeek
+
+`deepseek` calls DeepSeek's [Fetch API](https://api-docs.deepseek.com/api/fetch),
+`POST /v1/tools/fetch`, with the key in a bearer header, read from `DEEPSEEK_API_KEY` when not
+passed. It fetches one page per call and returns its title and its text as markdown. It takes the
+URL and nothing else, so there are no native options. DeepSeek has no length cap, so `max_chars`
+cuts the text it returns and sets `text_truncated`, and without `max_chars` the whole page comes
+back. `final_url` is the URL asked for, since DeepSeek follows a redirect without saying where it
+ended, so `reports_final_url` is false: a caller cannot check where a redirect DeepSeek followed
+led. `content_type` is empty. DeepSeek reports no cost and no date.
+
+A failed call raises `ProviderError` with DeepSeek's HTTP status, tagged with the `error.type` of
+its OpenAI-shaped body, or its `error.code` when there is no type; the message is never read. A
+page DeepSeek cannot turn into markdown fails the call with a 404 tagged `not_found_error`, and the
+answer does not say why. That was seen for a page that does not exist, a site's 500, a private
+address, a PDF, a zero-byte file and HTML with an empty body, so DeepSeek never returns an empty
+page, and a missing page never comes back as the site's own error page.
+
+Every field read from a successful answer is checked: a `title` or a `content` that is missing or
+not a string raises `ProviderError` with the tag `unexpected_response`. DeepSeek documents both as
+always present. Fields the adapter does not read are ignored.
+
 ## Exa
 
 `exa` calls Exa's [`POST /contents`](https://exa.ai/docs/reference/get-contents) for the URL,

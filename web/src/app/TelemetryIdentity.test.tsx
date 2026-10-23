@@ -47,14 +47,13 @@ describe("TelemetryIdentity", () => {
   it("names the actor and the organization together", async () => {
     setTelemetryConsent("granted")
 
-    renderIdentity(bootstrap({ session_type: "local_operator" }), {
+    renderIdentity(bootstrap(), {
       role: "owner",
     })
 
     await waitFor(() => {
       expect(identify).toHaveBeenCalledWith({
         actorId: "22222222-2222-2222-2222-222222222222",
-        sessionType: "local_operator",
         organizationId: "11111111-1111-1111-1111-111111111111",
         organizationName: "Default Organization",
         role: "owner",

@@ -110,6 +110,20 @@ def test_an_entry_is_copied_onto_a_hosted_provider_and_served_by_it(
         assert db.execute(select(ConfiguredProviderImport.name)).scalars().all() == ["openai-eu"]
 
 
+def test_a_copied_entry_keeps_its_models_in_the_catalog(start: Start, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The copy is no longer discovered as a configured instance, and nothing prices its models."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+
+    with start() as client:
+        listed = client.get(f"{API_ROOT}/models", headers=MASTER)
+        catalog = client.get(f"{API_ROOT}/catalog/models", headers=MASTER)
+
+    assert listed.status_code == 200, listed.text
+    assert "openai-eu:gpt-4o" in {model["id"] for model in listed.json()["data"]}
+    assert catalog.status_code == 200, catalog.text
+    assert "openai-eu:gpt-4o" in {selector for model in catalog.json()["models"] for selector in model["selectors"]}
+
+
 def test_a_copied_entry_removed_on_the_page_stays_removed(
     start: Start, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:

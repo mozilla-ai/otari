@@ -45,8 +45,7 @@ class HostedCredential:
     """A resolved, deployment-owned connection that can serve one candidate.
 
     ``response_provider`` is the upstream name usage and telemetry key on, which
-    may differ from the public managed name the caller asked for, matching
-    ``provider`` on a resolve attempt (``docs/hybrid-mode-protocol.md``).
+    may differ from the public managed name the caller asked for.
 
     Returned only when the credential is actually usable. A build that cannot
     serve a candidate (its own credential for it is absent, disabled, or

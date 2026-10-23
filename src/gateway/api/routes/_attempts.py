@@ -1,30 +1,16 @@
 """Walk an ordered list of attempts, returning the first that succeeds.
 
 This is the executor half of routing: something upstream decides *which*
-candidates to try and in what order (a local routing policy, or the platform's
-resolve response in hybrid mode), and this module tries them. It makes no
-selection decisions of its own, which is the property that keeps the data plane
-free of routing logic (see ARCHITECTURE.md).
+candidates to try and in what order (a routing policy), and this module tries them. It makes no
+selection decisions of its own.
 
 It deliberately does **not** settle the budget. A reservation is per request,
 not per attempt, so the caller reserves once, calls this, and reconciles or
 refunds once against the attempt that actually served the request. Settling in
 here would double-charge a chain.
 
-Relationship to :func:`gateway.api.routes._platform.run_platform_attempts`: that
-one is the hybrid-mode walker, coupled to the platform's ``ResolvedAttempt``
-shape and its per-attempt upstream reporting. This one is credential-agnostic
-(:class:`gateway.types.attempt.Attempt` carries an opaque ``kwargs`` dict), so a
-locally resolved attempt with no API key at all works. The two share the error
-classification and the terminal-status mapping, so a failure looks the same to a
-caller whichever walker produced it. Hybrid stays on its own walker for now;
-moving it here is a follow-up guarded by the settlement characterization tests in
-``tests/unit/test_pipeline_settlement.py``.
-
-Import direction: this module imports ``_platform`` for the shared classifier and
-status mapping, and ``_pipeline`` imports this one. ``_platform`` already defers
-its own import of ``_pipeline`` to break a pre-existing cycle, so this adds no
-new edge.
+Import direction: ``_pipeline`` imports this module, so the provider-error
+classifier it needs from there is imported where it is called.
 """
 
 from __future__ import annotations
@@ -38,18 +24,27 @@ from typing import Any, TypeVar
 from fastapi import HTTPException, status
 
 from gateway.api.routes._attempt_metrics import record_abandoned_attempt
-from gateway.api.routes._platform import (
-    _provider_failure_http_exc,
-    get_shared_rejection,
+from gateway.api.routes._helpers import with_retry_hint
+from gateway.core.error_codes import (
+    ALL_CANDIDATES_REJECTED,
+    CONTEXT_LENGTH_EXCEEDED,
+    PROVIDER_CREDENTIAL_REJECTED,
+    UNSUPPORTED_CONTENT,
+    error_code_of,
+    error_headers,
 )
 from gateway.log_config import logger
 from gateway.services.inference import (
     is_empty_completion,
     is_provider_billing_error,
+    is_provider_credential_rejection,
     upstream_exception_shape,
 )
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
-from gateway.services.provider_kwargs import missing_credential
+from gateway.services.provider_kwargs import (
+    missing_credential,
+    no_candidate_configured_detail,
+)
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 from gateway.types.attempt import Attempt
@@ -62,6 +57,109 @@ ALL_ATTEMPTS_TIMED_OUT_DETAIL = "All upstream providers timed out"
 # describe internals to the caller. The compiler raises a specific 403/400 for
 # every *expected* way a plan can end up empty, so reaching this is a defect.
 EMPTY_PLAN_DETAIL = "Routing produced no candidate to try"
+
+
+def provider_failure_http_exc(
+    exc: BaseException,
+    *,
+    fallback_detail: str,
+) -> HTTPException:
+    """Build the terminal HTTPException for a failed attempt.
+
+    Uses the shared provider-error classifier for a specific-but-safe status
+    (400/404/429/504), and falls back to a 502 whose detail says what happened
+    upstream, or is ``fallback_detail`` when the failure has no signal we can
+    safely surface.
+    """
+    # Deferred import: _pipeline imports this module, so importing it at module
+    # scope would be circular.
+    from gateway.api.routes._pipeline import classify_provider_error, provider_error_headers, provider_failure_detail
+
+    mapping = classify_provider_error(exc)
+    if mapping is not None:
+        return HTTPException(
+            status_code=mapping.status_code,
+            detail=mapping.detail,
+            headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
+        )
+    return HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail=provider_failure_detail(exc, fallback_detail),
+        headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
+    )
+
+
+def all_attempts_rejected_detail(tried: int) -> str:
+    """400 detail for a request every attempt rejected as invalid."""
+    return f"No model accepted the request ({tried} attempts). Check the request parameters."
+
+
+def prompt_too_long_for_every_attempt_detail(tried: int) -> str:
+    """400 detail for a prompt every attempt rejected as too long."""
+    return f"The prompt is too long for every model tried ({tried} attempts)."
+
+
+def no_attempt_accepts_images_detail(tried: int) -> str:
+    """400 detail for a request carrying an image that no attempt's model accepts."""
+    return f"None of the models tried accepts image content ({tried} attempts)."
+
+
+def no_attempt_served_detail(tried: int) -> str:
+    """502 detail for a request no attempt could serve, because none of them knew the model."""
+    return f"No model could serve the request ({tried} attempts)."
+
+
+def no_credential_accepted_detail(tried: int) -> str:
+    """424 detail for a request whose every attempt lacked a credential or had it rejected by the provider."""
+    return f"No provider accepted the gateway's credentials for this request ({tried} attempts)."
+
+
+def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | None:
+    """The answer for attempts that all rejected the request alike, or ``None`` when they failed differently.
+
+    The detail is the gateway's own, because one provider's message does not explain why the whole plan failed.
+    """
+    if len(errors) < 2:
+        return None
+    missing = [entry for entry in map(missing_credential, errors) if entry is not None]
+    if len(missing) == len(errors):
+        return HTTPException(
+            status_code=missing[0].status_code,
+            detail=no_candidate_configured_detail(missing),
+            headers=error_headers(missing[0].code),
+        )
+    rejected = sum(1 for error in errors if is_provider_credential_rejection(error))
+    if rejected and rejected + len(missing) == len(errors):
+        return HTTPException(
+            status_code=status.HTTP_424_FAILED_DEPENDENCY,
+            detail=no_credential_accepted_detail(len(errors)),
+            headers=error_headers(PROVIDER_CREDENTIAL_REJECTED),
+        )
+    answers = [provider_failure_http_exc(error, fallback_detail="") for error in errors]
+    statuses = {answer.status_code for answer in answers}
+    if statuses == {status.HTTP_404_NOT_FOUND}:
+        return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=no_attempt_served_detail(len(errors)))
+    if statuses != {status.HTTP_400_BAD_REQUEST}:
+        return None
+    if {error_code_of(answer.headers) for answer in answers} == {CONTEXT_LENGTH_EXCEEDED}:
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=prompt_too_long_for_every_attempt_detail(len(errors)),
+            headers=error_headers(CONTEXT_LENGTH_EXCEEDED),
+        )
+    if {error_code_of(answer.headers) for answer in answers} == {UNSUPPORTED_CONTENT}:
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=no_attempt_accepts_images_detail(len(errors)),
+            headers=error_headers(UNSUPPORTED_CONTENT),
+        )
+    # NOTE: Some 400s are the gateway's fault, such as a provider rejecting a model ID it does not serve.
+    # The status cannot tell them apart, so such a plan blames the request.
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=all_attempts_rejected_detail(len(errors)),
+        headers=error_headers(ALL_CANDIDATES_REJECTED),
+    )
 
 
 # Turns one candidate's call kwargs into what it is sent. It takes the
@@ -196,7 +294,7 @@ async def walk_attempts(
     awaited when the candidate fails and the walk moves on, so a failed
     candidate does not keep what it was admitted with.
 
-    Lock-in semantics, matching the hybrid walker: once ``mark_locked_in`` has
+    Lock-in semantics: once ``mark_locked_in`` has
     fired, a later failure on that attempt terminates the request instead of
     falling through, because a tool-use loop's intermediate state (provider
     specific tool-call ids, reasoning blocks) cannot be replayed on a different
@@ -332,7 +430,7 @@ async def walk_attempts(
             if locked_in or not retryable:
                 if on_terminal is not None:
                     on_terminal(attempt)
-                raise _provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
+                raise provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
             failures.append(AttemptFailure(attempt.position, attempt.instance, attempt.model, error_class, exc))
             unabsorbed = (attempt, exc)
             if drop_admission is not None:
@@ -370,7 +468,7 @@ async def walk_attempts(
         detail = "LLM provider timeout" if single else ALL_ATTEMPTS_TIMED_OUT_DETAIL
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=detail) from last_exc
     if single and last_exc is not None:
-        raise _provider_failure_http_exc(last_exc, fallback_detail="LLM provider error") from last_exc
+        raise provider_failure_http_exc(last_exc, fallback_detail="LLM provider error") from last_exc
     if (rejection := get_shared_rejection([failure.error for failure in failures])) is not None:
         raise rejection from last_exc
     raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=ALL_ATTEMPTS_FAILED_DETAIL) from last_exc

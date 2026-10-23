@@ -2,10 +2,10 @@
 
 import uuid
 from collections.abc import Collection, Sequence
-from dataclasses import astuple, dataclass
+from dataclasses import astuple, dataclass, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, Literal, Never, cast
+from typing import Any, Never, cast
 
 from sqlalchemy import (
     BigInteger,
@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Uuid,
     and_,
+    bindparam,
     case,
     column,
     delete,
@@ -23,6 +24,7 @@ from sqlalchemy import (
     func,
     or_,
     select,
+    text,
     tuple_,
     update,
     values,
@@ -32,8 +34,9 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import InstrumentedAttribute
 
-from gateway.core.sql import LIKE_ESCAPE, bucket_expr, canonical_bucket, contains_pattern, dialect_name, utc_bound
+from gateway.core.sql import LIKE_ESCAPE, contains_pattern, dialect_name, utc_bound
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.models.base import UtcDateTime
 from gateway.models.traces import Trace
 from gateway.repositories.base_repository import BaseRepository
 from gateway.types.traces import TraceFilter, TraceSort
@@ -235,42 +238,50 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
         )
         return result.scalar_one()
 
-    async def bucket_counts(
+    async def activity_bounds(
+        self, workspace_ids: Collection[uuid.UUID] | None, query: TraceFilter
+    ) -> tuple[datetime | None, datetime | None]:
+        """Return the first start and the last activity of the matching sessions, whatever their time window."""
+        conditions = _scoped(workspace_ids, _conditions(replace(query, start=None, end=None)))
+        row = (
+            await self.db.execute(
+                select(func.min(Trace.started_at), func.max(Trace.last_activity_at)).where(*conditions)
+            )
+        ).one()
+        return utc_bound(row[0]), utc_bound(row[1])
+
+    async def count_active(
         self,
         workspace_ids: Collection[uuid.UUID] | None,
         query: TraceFilter,
         *,
-        bucket: Literal["hour", "day"],
-        limit: int,
-    ) -> list[tuple[str, int, int]]:
-        """Return ``(bucket, succeeded, failed)`` per populated bucket of trace start, oldest first.
+        starts: Sequence[datetime],
+        grain: timedelta,
+    ) -> list[tuple[datetime, int, int]]:
+        """Return ``(bucket start, succeeded, failed)`` for each bucket a matching session overlaps, oldest first.
 
+        One join of the buckets against the sessions, so the counting stays in the
+        database however many there are; a session outside the buckets is never read.
+        The filter's own time window is not applied: the buckets are the window.
         A trace failed when it holds an error that fails its session, as the writer counted them.
-        Only buckets within ``limit`` of the newest trace's: traces started before
-        that are never read, so an unbounded window costs no more than a bounded one.
         """
-        conditions = _scoped(workspace_ids, _conditions(query))
-        newest = utc_bound(await self.db.scalar(select(func.max(Trace.started_at)).where(*conditions)))
-        if newest is None:
+        if not starts:
             return []
-        # The start of the oldest bucket that can be returned, so no bucket is counted in part.
-        newest_bucket = newest.replace(minute=0, second=0, microsecond=0)
-        if bucket == "day":
-            newest_bucket = newest_bucket.replace(hour=0)
-        floor = newest_bucket - (limit - 1) * _GRAIN[bucket]
-        key = bucket_expr(dialect_name(self.db), bucket, Trace.started_at).label("bucket")
+        conditions = _scoped(workspace_ids, _conditions(replace(query, start=None, end=None)))
+        buckets = _bucket_rows(starts, grain)
         failed = func.sum(case((Trace.failing_error_count > 0, 1), else_=0))
         result = await self.db.execute(
-            select(key, func.count(), failed)
-            .where(*conditions, Trace.started_at >= floor)
-            .group_by(key)
-            .order_by(key.desc())
-            .limit(limit)
+            select(buckets.c.bucket_start, func.count(), failed)
+            .select_from(buckets)
+            .join(
+                Trace,
+                and_(Trace.started_at < buckets.c.bucket_end, Trace.last_activity_at >= buckets.c.bucket_start),
+            )
+            .where(*conditions, Trace.last_activity_at >= starts[0], Trace.started_at < starts[-1] + grain)
+            .group_by(buckets.c.bucket_start)
+            .order_by(buckets.c.bucket_start)
         )
-        rows = [
-            (canonical_bucket(row[0], bucket), int(row[1]) - int(row[2] or 0), int(row[2] or 0)) for row in result.all()
-        ]
-        return rows[::-1]
+        return [(row[0], int(row[1]) - int(row[2] or 0), int(row[2] or 0)) for row in result.all()]
 
     async def find(
         self, workspace_ids: Collection[uuid.UUID] | None, trace_id: str, *, workspace_id: uuid.UUID | None = None
@@ -309,7 +320,26 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
         return int(result.rowcount or 0)
 
 
-_GRAIN = {"hour": timedelta(hours=1), "day": timedelta(days=1)}
+def _bucket_rows(starts: Sequence[datetime], grain: timedelta) -> Any:
+    """The buckets as a ``(bucket_start, bucket_end)`` table to join against.
+
+    Written as text because SQLite refuses the column list SQLAlchemy puts on a
+    ``VALUES`` alias; both engines name a ``VALUES`` table's columns ``column1``,
+    ``column2``, so one spelling serves both. Every value is a bound parameter.
+    """
+    rows = ", ".join(f"(:start_{index}, :end_{index})" for index in range(len(starts)))
+    bounds = [
+        bindparam(f"{edge}_{index}", value, type_=UtcDateTime())
+        for index, start in enumerate(starts)
+        for edge, value in (("start", start), ("end", start + grain))
+    ]
+    return (
+        # Aliased: PostgreSQL before 16 refuses an unnamed VALUES in FROM.
+        text(f"SELECT column1 AS bucket_start, column2 AS bucket_end FROM (VALUES {rows}) AS bucket_values")  # noqa: S608 - placeholders only
+        .bindparams(*bounds)
+        .columns(column("bucket_start", UtcDateTime()), column("bucket_end", UtcDateTime()))
+        .subquery("buckets")
+    )
 
 
 def _scoped(
@@ -324,14 +354,18 @@ def _scoped(
 
 
 def _conditions(query: TraceFilter) -> list[ColumnElement[bool]]:
-    """Build the conditions a query narrows by. An unset value adds none."""
-    conditions: list[ColumnElement[bool]] = []
+    """Build the conditions a query narrows by. An unset value adds none.
+
+    A session matches only once it holds a span: a request's cost can reach it before
+    its spans do, or with none to follow (a logs-only import), and that alone is nothing to show.
+    """
+    conditions: list[ColumnElement[bool]] = [Trace.span_count > 0]
     if query.workspace_ids:
         conditions.append(Trace.workspace_id.in_(list(query.workspace_ids)))
     if (lower := utc_bound(query.start)) is not None:
         conditions.append(Trace.last_activity_at >= lower)
     if (upper := utc_bound(query.end)) is not None:
-        conditions.append(Trace.last_activity_at < upper)
+        conditions.append(Trace.started_at < upper)
     if query.user_ids:
         conditions.append(Trace.user_id.in_(list(query.user_ids)))
     if query.api_key_ids:

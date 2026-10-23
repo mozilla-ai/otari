@@ -3,14 +3,19 @@
 A provider-native code execution keeps what it wrote in the provider's container
 and answers with the provider's file ID.
 The provider does not keep it for long: OpenAI discards a container 20 minutes after its last use.
+Gemini is the exception, answering with the bytes themselves, which are stored
+and named by an ID of Otari's own (``store_inline_outputs``).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import base64
+import binascii
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import timedelta
 from typing import Any
 
+from anthropic.types import CodeExecutionOutputBlock
 from any_llm import LLMProvider
 
 from gateway.types.provider_file import ProviderFile
@@ -105,6 +110,89 @@ def produced_files_for(dialect: str, obj: Any) -> list[ProviderFile]:
             return responses_produced_files(_field(obj, "response"))
         return responses_produced_files(obj)
     return []
+
+
+# Stores one inline output's bytes and returns the file ID it is served under, or ``None``.
+InlineOutputStore = Callable[[bytes, str], Awaitable[str | None]]
+
+
+def _decoded(data: Any) -> bytes | None:
+    if not isinstance(data, str) or not data:
+        return None
+    try:
+        return base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+
+async def _store_messages_outputs(block: Any, store: InlineOutputStore) -> None:
+    """Swap a ``code_execution_tool_result``'s ``inline_outputs`` for ``code_execution_output`` file blocks.
+
+    The Messages bridge carries what Gemini's code produced as bytes on an extra
+    field, because Anthropic's shape names a produced file by an ID only a file
+    store can mint. This is that store, so the caller gets the shape Anthropic's
+    own replies have. An output that could not be stored stays on
+    ``inline_outputs``, as the bytes on Chat Completions do.
+    """
+    if _field(block, "type") != "code_execution_tool_result":
+        return
+    result = _field(block, "content")
+    extra = result if isinstance(result, dict) else getattr(result, "__pydantic_extra__", None)
+    if not isinstance(extra, dict) or not isinstance(outputs := extra.get("inline_outputs"), list):
+        return
+    produced: list[CodeExecutionOutputBlock] = []
+    unstored: list[Any] = []
+    for output in outputs:
+        data = _decoded(_field(output, "data"))
+        file_id = await store(data, str(_field(output, "mime_type") or "")) if data is not None else None
+        if file_id is None:
+            unstored.append(output)
+        else:
+            produced.append(CodeExecutionOutputBlock(type="code_execution_output", file_id=file_id))
+    if unstored:
+        extra["inline_outputs"] = unstored
+    else:
+        del extra["inline_outputs"]
+    if not produced:
+        return
+    if isinstance(result, dict):
+        result["content"] = [*(result.get("content") or []), *(output.model_dump() for output in produced)]
+    else:
+        result.content = [*(result.content or []), *produced]
+
+
+async def _store_chat_outputs(extra_content: Any, store: InlineOutputStore) -> None:
+    """Swap the bytes on Gemini's ``code_execution_output`` items for the file ID they are stored under."""
+    google = extra_content.get("google") if isinstance(extra_content, dict) else None
+    items = google.get("code_execution") if isinstance(google, dict) else None
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict) or item.get("type") != "code_execution_output":
+            continue
+        data = _decoded(item.get("data"))
+        file_id = await store(data, str(item.get("mime_type") or "")) if data is not None else None
+        if file_id is not None:
+            item.pop("data", None)
+            item["file_id"] = file_id
+
+
+async def store_inline_outputs(dialect: str, obj: Any, store: InlineOutputStore) -> None:
+    """Store the files a completed reply, or one streamed event, of ``dialect`` carries inline, in place.
+
+    Only Gemini returns produced files as bytes, on Chat Completions (on the
+    ``code_execution`` items in ``extra_content``) and on Messages (on the
+    ``code_execution_tool_result`` blocks the bridge builds, whole in a stream's
+    ``content_block_start``).
+    """
+    if dialect == "messages":
+        blocks = (
+            [_field(obj, "content_block")] if _field(obj, "type") == "content_block_start" else _field(obj, "content")
+        )
+        for block in blocks or []:
+            await _store_messages_outputs(block, store)
+    elif dialect == "chat":
+        for choice in _field(obj, "choices") or []:
+            holder = _field(choice, "message") or _field(choice, "delta")
+            await _store_chat_outputs(_field(holder, "extra_content"), store)
 
 
 def minimum_copy_lifetime(provider: LLMProvider) -> timedelta:

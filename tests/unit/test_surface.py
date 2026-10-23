@@ -3,10 +3,8 @@
 import importlib
 import pkgutil
 
-import pytest
-
 import gateway.api.routes
-from gateway.api.routes.bootstrap import _DECLARED_SURFACES, HOSTED_SURFACES, STANDALONE_SURFACES
+from gateway.api.routes.bootstrap import _DECLARED_SURFACES, SURFACES
 from gateway.core.surface import Surface
 
 
@@ -24,18 +22,16 @@ def test_every_route_module_surface_is_listed_in_bootstrap() -> None:
 
 def test_the_surface_lists_are_spelled_out() -> None:
     """Literal lists, so adding or dropping a surface anywhere fails here."""
-    assert sorted(STANDALONE_SURFACES) == [
+    assert sorted(SURFACES) == [
         "admin",
         "budgets",
-        # The deployment's own upstream credentials, on either edition.
+        # The deployment's own upstream credentials.
         "hosted_providers",
         "keys",
         "models",
-        # Keyed on the organization on either edition, so neither withholds it.
         "organization_guardrails",
         "organization_providers",
-        # Where the organization is narrower than the deployment, which a
-        # standalone deployment serving several of them is too.
+        # Where the organization is narrower than the deployment.
         "organization_usage",
         "organizations",
         "playground",
@@ -47,30 +43,3 @@ def test_the_surface_lists_are_spelled_out() -> None:
         "users",
         "workspaces",
     ]
-    assert sorted(HOSTED_SURFACES) == [
-        "admin",
-        "budgets",
-        "hosted_providers",
-        "keys",
-        "models",
-        "organization_guardrails",
-        "organization_providers",
-        "organization_usage",
-        "organizations",
-        # Declared on both, and withheld at publish time by a hosted deployment
-        # that has no ``data_plane_url`` to forward a completion to. This roster
-        # is the topology axis, which is why the configuration one is not in it.
-        "playground",
-        "pricing",
-        "routing",
-        "settings",
-        "tools",
-        "usage",
-        "users",
-        "workspaces",
-    ]
-
-
-def test_a_surface_no_deployment_publishes_is_refused() -> None:
-    with pytest.raises(ValueError, match="published by no deployment"):
-        Surface("orphan", standalone=False, hosted=False)

@@ -1,4 +1,4 @@
-"""Password recovery: request a reset link, then complete it (standalone mode only).
+"""Password recovery: request a reset link, then complete it.
 
 A separate router from ``auth_password.py`` sharing its URL prefix on purpose:
 that router carries a router-wide ``Depends(verify_master_key)``, and both

@@ -1,6 +1,6 @@
 """Outgoing mail settings, and the operator's way to prove they work.
 
-Two endpoints under ``/api/v1/settings``, operator-gated and standalone-only like
+Two endpoints under ``/api/v1/settings``, operator-gated like
 the rest of the management API:
 
 * ``GET /api/v1/settings/mail`` reports which transport (if any) this deployment

@@ -16,7 +16,6 @@ from gateway.core.config import API_ROOT
 from gateway.models.tenancy import Organization, User
 from gateway.repositories.tenancy import OrganizationMemberRepository, OrganizationRepository, UserRepository
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 _ENDPOINT = f"{API_ROOT}/organizations/me/members"
 
@@ -51,7 +50,7 @@ async def _member(
 
 
 def _service(db: AsyncSession) -> OrganizationService:
-    return OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    return OrganizationService(db, membership_listener=None)
 
 
 @pytest.mark.asyncio

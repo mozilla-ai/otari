@@ -1,6 +1,6 @@
 """The maintenance-mode switch: freeze and unfreeze dashboard sign-ins.
 
-Two endpoints under ``/api/v1/settings``, operator-gated and standalone-only like
+Two endpoints under ``/api/v1/settings``, operator-gated like
 the rest of the management API. The state itself, and why it is stored the way
 it is, belongs to ``services/maintenance_mode_service.py``.
 

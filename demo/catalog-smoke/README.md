@@ -2,7 +2,7 @@
 
 A hand-run demo, not a CI gate: nothing runs this, and unlike
 `scripts/oss_edition_smoke.py` it wants `uv`, `pnpm` and a dashboard build. It
-puts a standalone gateway on your machine, reachable from the LAN, with three
+puts a gateway on your machine, reachable from the LAN, with three
 people to sign in as. Bring your own provider keys; the catalog is empty until
 you do.
 

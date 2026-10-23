@@ -110,11 +110,14 @@ def test_which_models_are_asked_for_a_chat_completion(model_id: str, output_moda
     [
         ("bad key AIzaSyA-1234567890abcdefghijklmnopqrstu", "bad key [redacted]"),
         ("refused Authorization: Bearer abc.def-ghi", "refused Authorization: [redacted]"),
-        (
-            "GET https://api.example.com/v1/models?key=s3cr3t&alt=json failed",
-            "GET https://api.example.com/v1/models[redacted]&alt=json failed",
-        ),
-        ("POST /v1?api_key=s3cr3t", "POST /v1[redacted]"),
+        ("GET https://api.example.com/v1/models?key=s3cr3t&alt=json failed", "GET [redacted] failed"),
+        ("POST /v1?api_key=s3cr3t", "POST /v1?[redacted]"),
+        ("invalid key gsk_abcdefghijklmnopqrstuv1234", "invalid key [redacted]"),
+        ("rejected xai-abcdefghijklmnop1234", "rejected [redacted]"),
+        ("key 0123456789abcdef0123456789abcdef refused", "key [redacted] refused"),
+        ("Basic dXNlcjpwYXNzd29yZA== rejected", "[redacted] rejected"),
+        ("body api_key: hunter2hunter2", "body [redacted]"),
+        ("otari tk_abcdefghijklmnop", "otari [redacted]"),
     ],
 )
 @pytest.mark.asyncio
@@ -125,3 +128,14 @@ async def test_other_credential_shapes_are_not_stored(message: str, stored: str)
     outcome = await _run(refuse)
 
     assert outcome.error == stored
+
+
+@pytest.mark.asyncio
+async def test_an_echoed_request_is_stored_as_the_error_class() -> None:
+    async def refuse(**_kwargs: Any) -> object:
+        msg = 'bad request: {"messages": [{"role": "user", "content": "ping"}]}'
+        raise _StatusError(msg, 400)
+
+    outcome = await _run(refuse)
+
+    assert outcome.error == "_StatusError"

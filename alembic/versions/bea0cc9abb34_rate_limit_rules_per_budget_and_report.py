@@ -6,7 +6,7 @@ accept ``budget``. The constraint is replaced through a batch rebuild, since
 SQLite cannot alter one in place.
 
 Revision ID: bea0cc9abb34
-Revises: 6c3606e98ed9
+Revises: c8e0f2a4b6d3
 Create Date: 2026-10-17
 """
 
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "bea0cc9abb34"
-down_revision: str | Sequence[str] | None = "6c3606e98ed9"
+down_revision: str | Sequence[str] | None = "c8e0f2a4b6d3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

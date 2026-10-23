@@ -13,7 +13,6 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type {
   ApiKey,
   Budget,
-  DeploymentBootstrap,
   MembershipRole,
   OrganizationBudget,
   ScopedBudget,
@@ -46,6 +45,7 @@ function user(overrides: Partial<User> = {}): User {
     reserved_requests: 0,
     budget_id: null,
     allowed_models: null,
+    allowed_tools: null,
     budget_started_at: null,
     next_budget_reset_at: null,
     blocked: false,
@@ -269,7 +269,6 @@ function mockApi(
             created_at: "2026-01-01T00:00:00+00:00",
             updated_at: null,
           },
-          byo_provider_keys_allowed: true,
           deployment_operator: opts.deploymentOperator ?? true,
           provider_key_encryption_available: true,
           workspace_memberships: [],
@@ -291,16 +290,12 @@ function mockApi(
     })
 }
 
-function renderPage(
-  ui: ReactElement,
-  deployment: DeploymentBootstrap = bootstrap(),
-) {
+function renderPage(ui: ReactElement, deployment = bootstrap()) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  // The page reads the deployment's surfaces to decide whether it may name key
-  // owners from the organization roster, and links to the pages that own a key's
-  // budget, so it needs both the deployment context and a router around it.
+  // The page links to the pages that own a key's budget, so it needs a router
+  // around it.
   return renderWithRouter(
     <QueryClientProvider client={client}>
       <DeploymentProvider value={deployment}>{ui}</DeploymentProvider>
@@ -589,60 +584,6 @@ describe("KeysPage", () => {
     expect(document.body.textContent).not.toContain(NEW_SECRET)
   })
 
-  /** Mint a key and open the one-time reveal, which is where the snippets live. */
-  async function revealANewKey(deployment?: DeploymentBootstrap) {
-    mockApi({ keys: [] })
-    const person = userEvent.setup()
-    renderPage(<KeysPage />, deployment)
-
-    await screen.findByText("No API keys yet")
-    await person.click(
-      screen.getByRole("button", { name: "Create your first key" }),
-    )
-    await person.type(screen.getByLabelText("Name"), "deploy-key")
-    await person.type(screen.getByPlaceholderText(/Pick a user/), "alice")
-    await person.keyboard("{Escape}")
-    await person.click(screen.getByRole("button", { name: "Create key" }))
-
-    return within(
-      await screen.findByRole("alert", {
-        name: /API key created|New secret for/,
-      }),
-    )
-  }
-
-  it("sends the snippet at the data plane a hosted deployment published", async () => {
-    // The control plane serves this dashboard and is deliberately not where
-    // inference belongs (otari#822), so the origin is the one address the
-    // snippet must not name.
-    const dialog = await revealANewKey(
-      bootstrap({
-        deployment_type: "hosted",
-        data_plane_url: "https://gateway.otari.ai",
-      }),
-    )
-
-    const curl = dialog.getByLabelText("curl") as HTMLTextAreaElement
-    expect(curl.value).toContain(
-      `https://gateway.otari.ai${API_ROOT}/chat/completions`,
-    )
-    expect(curl.value).not.toContain(window.location.origin)
-  })
-
-  it("shows no snippet when a hosted deployment published no data plane", async () => {
-    // Withheld rather than aimed at this host: a placeholder would be a URL
-    // nobody reading it could replace, and the origin would be the bug itself.
-    const dialog = await revealANewKey(
-      bootstrap({ deployment_type: "hosted", data_plane_url: null }),
-    )
-
-    expect(dialog.getByLabelText("Secret key")).toBeInTheDocument()
-    expect(dialog.queryByLabelText("curl")).not.toBeInTheDocument()
-    expect(
-      dialog.getByText(/has not published the gateway address/),
-    ).toBeInTheDocument()
-  })
-
   it("keeps the reveal up through a stray Escape; only the save button dismisses it", async () => {
     // The reveal is a strip on the page now rather than a modal, so there is no
     // Esc handler to suppress and no backdrop to click. What still has to hold
@@ -861,6 +802,64 @@ describe("KeysPage", () => {
       await screen.findByRole("menuitem", { name: /^Delete/ }),
     ).not.toHaveAttribute("aria-disabled", "true")
   })
+
+  it.each([
+    [
+      "the deployment does not let organizations manage rules",
+      false,
+      "owner",
+      false,
+    ],
+    ["the caller is a member", true, "member", false],
+  ] as const)(
+    "offers no workload identity when %s",
+    async (_case, federationMemberRules, role, deploymentOperator) => {
+      mockApi({
+        keys: [apiKey({ id: "key-1", key_name: "ci-bot" })],
+        deploymentOperator,
+        role,
+      })
+      const user = userEvent.setup()
+      renderPage(
+        <KeysPage />,
+        bootstrap({ federation_member_rules: federationMemberRules }),
+      )
+
+      const row = (await screen.findByText("ci-bot")).closest("tr")!
+      await user.click(
+        within(row).getByRole("button", { name: /^Actions for / }),
+      )
+      await screen.findByRole("menuitem", { name: /^Edit/ })
+
+      expect(
+        screen.queryByRole("menuitem", { name: /^Workload identity/ }),
+      ).not.toBeInTheDocument()
+    },
+  )
+
+  it.each([
+    ["an admin's own key", "admin", false],
+    ["any key, for the operator", "member", true],
+  ] as const)(
+    "opens the federation rules of %s from its menu",
+    async (_case, role, deploymentOperator) => {
+      mockApi({
+        keys: [apiKey({ id: "key-1", key_name: "ci-bot" })],
+        deploymentOperator,
+        role,
+      })
+      const user = userEvent.setup()
+      renderPage(<KeysPage />, bootstrap({ federation_member_rules: true }))
+
+      const row = (await screen.findByText("ci-bot")).closest("tr")!
+      await chooseAction(user, row, "Workload identity")
+
+      const dialog = await screen.findByRole("dialog", {
+        name: "Workload identity",
+      })
+      expect(within(dialog).getByText("ci-bot")).toBeInTheDocument()
+    },
+  )
 
   it("regenerates a secret after an explicit confirm", async () => {
     mockApi({
@@ -1719,6 +1718,65 @@ describe("KeysPage", () => {
         (init?.method ?? "") === "POST",
     )
     expect(JSON.parse(String(post?.[1]?.body)).allowed_models).toEqual([])
+  })
+
+  it("posts the search tool access apart from the model access", async () => {
+    const fetchMock = mockApi({ keys: [] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "No tool" }))
+    await user.click(screen.getByRole("button", { name: "Create key" }))
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) =>
+        String(u).endsWith(`${API_ROOT}/keys`) &&
+        (init?.method ?? "") === "POST",
+    )
+    const body = JSON.parse(String(post?.[1]?.body))
+    expect(body.allowed_tools).toEqual([])
+    expect(body.allowed_models).toBeNull()
+  })
+
+  it("shows the access it will send after Advanced is hidden and reopened", async () => {
+    const fetchMock = mockApi({ keys: [] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "No tool" }))
+    await user.click(screen.getByRole("button", { name: "Block all" }))
+    await user.click(screen.getByRole("button", { name: "Hide advanced" }))
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+
+    expect(
+      screen.getByText(/search tool on \/v1\/search until you change/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/model until you change this access/),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Create key" }))
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) =>
+        String(u).endsWith(`${API_ROOT}/keys`) &&
+        (init?.method ?? "") === "POST",
+    )
+    const body = JSON.parse(String(post?.[1]?.body))
+    expect(body.allowed_tools).toEqual([])
+    expect(body.allowed_models).toEqual([])
   })
 
   it("disables Create when 'Only selected' has no models (never a silent deny-all)", async () => {

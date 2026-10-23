@@ -109,7 +109,7 @@ class ProviderCredential(Base):
         """Serialize for the API. Never includes the secret, only ``last4``.
 
         ``client_args`` is masked by key name the same way
-        ``OrgProviderKey.to_public`` masks its own: a standalone Bedrock instance
+        ``OrgProviderKey.to_public`` masks its own: a Bedrock instance
         keeps its ``aws_secret_access_key`` there, so the field this table holds
         in clear is as much a credential as ``encrypted_api_key`` is, and it must
         not round-trip over the API either.

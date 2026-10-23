@@ -337,7 +337,11 @@ def test_a_deployment_paid_stream_is_charged_once_after_it_ends(
         (
             "/messages",
             {"max_tokens": 16, "messages": [{"role": "user", "content": "Hi"}]},
-            lambda detail: {"detail": {"type": "error", "error": {"type": "invalid_request_error", "message": detail}}},
+            lambda detail: {
+                "type": "error",
+                "error": {"type": "invalid_request_error", "message": detail},
+                "code": INSUFFICIENT_FUNDS,
+            },
         ),
         ("/responses", {"input": "Hi"}, lambda detail: {"detail": detail, "code": INSUFFICIENT_FUNDS}),
     ],

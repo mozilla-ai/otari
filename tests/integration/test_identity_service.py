@@ -25,7 +25,6 @@ from gateway.repositories.tenancy import OrganizationDomainRepository, Organizat
 from gateway.services.identity import IdentityService
 from gateway.services.mail import Mailer
 from gateway.services.tenancy import DomainAutoJoinListener, OrganizationService, forget_unproven_access
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 from .tenancy_helpers import create_member, create_organization, membership_writes
 
@@ -42,7 +41,7 @@ def _service_with(
         uow,
         IdentityRepositories.on(uow),
         identity_provider=policy,
-        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+        organizations=OrganizationService(db, membership_listener=None),
         sign_in_listener=DomainAutoJoinListener(OrganizationDomainRepository(uow), OrganizationMemberRepository(uow)),
         session_ttl_hours=1,
         terms_url=terms_url,

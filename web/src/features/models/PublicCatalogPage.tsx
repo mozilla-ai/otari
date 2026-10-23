@@ -1,4 +1,3 @@
-import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { ModelCatalogView } from "@/features/models/ModelCatalogPage"
 import { ModelDetailView } from "@/features/models/ModelDetailPage"
 import { PublicCatalogBar } from "@/features/models/PublicCatalogBar"
@@ -18,10 +17,6 @@ export function PublicCatalogPage({ modelId }: { modelId?: string }) {
     <div className="flex min-h-full flex-col">
       <PublicCatalogBar onList={!modelId} />
       <main className="mx-auto flex w-full max-w-[112.5rem] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
-        <InfoBanner>
-          This is the deployment's public catalog. Sign in to see the rates your
-          organization is charged and to set prices.
-        </InfoBanner>
         {modelId ? (
           <ModelDetailView modelId={modelId} publicView />
         ) : (

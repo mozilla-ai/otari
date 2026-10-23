@@ -27,13 +27,6 @@ async def test_commits_so_the_connection_returns_to_the_pool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_hybrid_mode_has_no_session_to_release() -> None:
-    # Hybrid mode resolves credentials over HTTP and is handed no session at
-    # all, so this must not assume one.
-    assert await release_session(None) is False
-
-
-@pytest.mark.asyncio
 async def test_a_failed_commit_does_not_fail_the_request() -> None:
     # The request is about to reach the provider. Losing it because the
     # connection could not be handed back early would be a worse outcome than

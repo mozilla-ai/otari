@@ -13,7 +13,6 @@ import {
   buildPythonSnippet,
   resolveSnippetBaseUrl,
 } from "@/shared/helpers/requestSnippets"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { providerModelId } from "./modelKey"
 
@@ -42,8 +41,7 @@ export function UseModelDrawer({
   isOpen: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const deployment = useDeployment()
-  const baseUrl = resolveSnippetBaseUrl(deployment)
+  const baseUrl = resolveSnippetBaseUrl()
   // "Let the gateway choose" is only a choice where the gateway has indexed the
   // model; without an id to send, the request has to name a provider, so the
   // first offering stands as the default rather than an option that would
@@ -69,7 +67,7 @@ export function UseModelDrawer({
       ]
     : offeringOptions
   const input = {
-    baseUrl: baseUrl ?? "",
+    baseUrl,
     apiKey: "$OTARI_API_KEY",
     model: sendAs,
   }
@@ -169,38 +167,29 @@ export function UseModelDrawer({
 
               <section className="flex flex-col gap-2">
                 <h3 className="text-title">3. Make your first request</h3>
-                {baseUrl === undefined ? (
-                  <p className="text-sm text-muted">
-                    This deployment has not published its gateway address, so
-                    there is no request to copy yet.
-                  </p>
-                ) : (
-                  <>
-                    <TabRow>
-                      <Tab
-                        isActive={language === "curl"}
-                        onPress={() => setLanguage("curl")}
-                      >
-                        cURL
-                      </Tab>
-                      <Tab
-                        isActive={language === "python"}
-                        onPress={() => setLanguage("python")}
-                      >
-                        Python (Otari SDK)
-                      </Tab>
-                    </TabRow>
-                    <CopyField
-                      label={language === "curl" ? "cURL" : "Python"}
-                      value={
-                        language === "curl"
-                          ? buildCurlSnippet(input)
-                          : buildPythonSnippet(input)
-                      }
-                      isMultiline
-                    />
-                  </>
-                )}
+                <TabRow>
+                  <Tab
+                    isActive={language === "curl"}
+                    onPress={() => setLanguage("curl")}
+                  >
+                    cURL
+                  </Tab>
+                  <Tab
+                    isActive={language === "python"}
+                    onPress={() => setLanguage("python")}
+                  >
+                    Python (Otari SDK)
+                  </Tab>
+                </TabRow>
+                <CopyField
+                  label={language === "curl" ? "cURL" : "Python"}
+                  value={
+                    language === "curl"
+                      ? buildCurlSnippet(input)
+                      : buildPythonSnippet(input)
+                  }
+                  isMultiline
+                />
               </section>
             </Drawer.Body>
           </Drawer.Dialog>

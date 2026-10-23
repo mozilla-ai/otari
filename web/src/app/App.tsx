@@ -1,6 +1,5 @@
 import { RouterProvider } from "@tanstack/react-router"
 import { lazy, Suspense, useEffect, useState } from "react"
-import { HybridLanding } from "@/app/HybridLanding"
 import { PublicPageTitle } from "@/app/PublicPageTitle"
 import { router } from "@/app/router"
 import { ErrorBoundary } from "@/design-system/feedback/ErrorBoundary"
@@ -99,28 +98,11 @@ export default function App({
  * Which of this deployment's roots renders, decided from the bootstrap and
  * (for one of them) the URL, rather than the route table: signing in is the
  * one decision no route gets to make, and accepting an invitation is one no
- * *session* gets to require. No page below here reads the deployment mode
- * again.
+ * *session* gets to require.
  */
 function DeploymentRoot({ hash }: { hash: string }) {
-  const { deployment_type, session_type, public_catalog, open_signup } =
-    useDeployment()
+  const { public_catalog, open_signup } = useDeployment()
   const { isAuthenticated } = useAuth()
-
-  // A hybrid gateway is data-plane only: otari.ai owns its organizations,
-  // credentials, routing, budgets and usage, and a second management UI beside
-  // that one is what the deployment contract rules out. Hosted otari.ai serves
-  // the same dashboard as standalone, so it falls through. Checked first: a
-  // hybrid gateway holds no tenancy state, so an invitation link reaching one
-  // is a link this deployment cannot honor, and the landing page's own
-  // explanation is more useful here than a page that would just 404.
-  if (deployment_type === "hybrid") {
-    return (
-      <PublicPageTitle page="Gateway">
-        <HybridLanding />
-      </PublicPageTitle>
-    )
-  }
 
   // The one URL every visitor may reach without a session or the master key:
   // the recipient of an emailed invitation holds neither. Every route under
@@ -182,13 +164,8 @@ function DeploymentRoot({ hash }: { hash: string }) {
     )
   }
 
-  // Any deployment that issues a session needs one before the shell renders.
-  // Only the local operator signs in *here*, since a hosted session is minted by
-  // otari.ai's own flow, so a hosted deployment reaching this line is a routing
-  // bug to fix when that half lands. Gating on "issues no session" rather than on
-  // "issues this one" is what makes that bug a wrong screen instead of an
-  // unauthenticated shell whose every query 401s in a loop.
-  if (session_type !== "none" && !isAuthenticated) {
+  // The shell renders only behind a session.
+  if (!isAuthenticated) {
     return (
       <PublicPageTitle page="Sign in">
         <Login />

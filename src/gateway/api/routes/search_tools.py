@@ -13,7 +13,7 @@ Config-file tools stay honored and stay read-only here; they are reported by the
 list endpoint so the dashboard can show every tool a request could name, not just
 the editable ones.
 
-Operator-gated and standalone-only (the router is not mounted in hybrid). URL
+Operator-gated. URL
 validation is structural, matching ``/api/v1/tool-settings`` rather than the provider
 SSRF gate: the backend this most often points at is a SearXNG sidecar on a
 private address, which a deny-private gate would refuse.

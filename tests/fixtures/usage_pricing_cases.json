@@ -1,5 +1,5 @@
 {
-  "description": "What one successful pass-through attempt costs at a rate. Shared by otari's settlement tests and otari.ai's, so both editions are held to one table. Rates are per million: tokens, requests or images. A token rate read the legacy way on image generation is raw USD per image. Every expected cost is worked out by hand from the rate and the counts, not generated from the code. An expected value of null means the rate prices nothing the attempt reported.",
+  "description": "What one successful pass-through attempt costs at a rate. Shared by otari's settlement tests and otari.ai's, so both editions are held to one table. Rates are per million: tokens, requests or images. A token rate on image generation is read as raw USD per image. Every expected cost is worked out by hand from the rate and the counts, not generated from the code. An expected value of null means the rate prices nothing the attempt reported.",
   "cases": [
     {
       "name": "a requests rate bills the requests count",
@@ -11,7 +11,6 @@
       "units": {
         "requests": 1
       },
-      "legacy": false,
       "expected": {
         "cost": "0.002000",
         "meters": {
@@ -40,7 +39,6 @@
       "units": {
         "search_units": 3
       },
-      "legacy": false,
       "expected": {
         "cost": "0.006000",
         "meters": {
@@ -67,7 +65,6 @@
         "output": 500
       },
       "units": {},
-      "legacy": false,
       "expected": {
         "cost": "0.005000",
         "meters": {
@@ -94,7 +91,6 @@
         "output": 0
       },
       "units": {},
-      "legacy": true,
       "expected": {
         "cost": "0.005000",
         "meters": {
@@ -120,7 +116,6 @@
       "units": {
         "images": 2
       },
-      "legacy": true,
       "expected": {
         "cost": "0.002000",
         "meters": {
@@ -147,7 +142,6 @@
         "requests": 2,
         "search_units": 5
       },
-      "legacy": false,
       "expected": {
         "cost": "0.004000",
         "meters": {
@@ -173,7 +167,6 @@
       "units": {
         "requests": 0
       },
-      "legacy": false,
       "expected": {
         "cost": "0.000000",
         "meters": {},
@@ -190,7 +183,6 @@
       "units": {
         "requests": 1
       },
-      "legacy": false,
       "expected": {
         "cost": "0.000000",
         "meters": {},
@@ -207,7 +199,6 @@
       "units": {
         "requests": 1
       },
-      "legacy": false,
       "expected": {
         "cost": "0.000000",
         "meters": {},
@@ -224,7 +215,6 @@
       "units": {
         "requests": 3
       },
-      "legacy": false,
       "expected": {
         "cost": "0.000001",
         "meters": {
@@ -250,7 +240,6 @@
       "units": {
         "seconds": 30
       },
-      "legacy": false,
       "expected": {
         "cost": "0.002000",
         "meters": {
@@ -276,7 +265,6 @@
       "units": {
         "images": 2
       },
-      "legacy": false,
       "expected": {
         "cost": "0.080000",
         "meters": {
@@ -302,7 +290,6 @@
       "units": {
         "images": 1
       },
-      "legacy": true,
       "expected": {
         "cost": "0.040000",
         "meters": {
@@ -328,7 +315,6 @@
       "units": {
         "images": 1000000
       },
-      "legacy": false,
       "expected": {
         "cost": "40000.000000",
         "meters": {
@@ -354,7 +340,6 @@
       "units": {
         "images": 0
       },
-      "legacy": false,
       "expected": {
         "cost": "0.000000",
         "meters": {},
@@ -372,7 +357,6 @@
         "output": 0
       },
       "units": {},
-      "legacy": true,
       "expected": null
     },
     {
@@ -385,44 +369,10 @@
       "units": {
         "requests": 1
       },
-      "legacy": true,
       "expected": null
     },
     {
-      "name": "a token rate prices a token-billed image on its tokens, never at the rate per image",
-      "rate": {
-        "unit": "tokens",
-        "input": "5",
-        "output": "40"
-      },
-      "tokens": {
-        "input": 50,
-        "output": 4160
-      },
-      "units": {
-        "images": 1
-      },
-      "legacy": false,
-      "expected": {
-        "cost": "0.166650"
-      }
-    },
-    {
-      "name": "a token rate prices nothing for an image that reported no tokens",
-      "rate": {
-        "unit": "tokens",
-        "input": "5",
-        "output": "40"
-      },
-      "tokens": null,
-      "units": {
-        "images": 1
-      },
-      "legacy": false,
-      "expected": null
-    },
-    {
-      "name": "the legacy reading prices a token rate on an image endpoint per image",
+      "name": "a token rate on an image endpoint is read per image",
       "rate": {
         "unit": "tokens",
         "input": "0.04",
@@ -435,7 +385,6 @@
       "units": {
         "images": 2
       },
-      "legacy": true,
       "expected": {
         "cost": "0.080000",
         "meters": {
@@ -452,7 +401,7 @@
       }
     },
     {
-      "name": "a token rate prices a token-billed transcription on its tokens",
+      "name": "a token rate on a per-request endpoint is read per request",
       "rate": {
         "unit": "tokens",
         "input": "2.5",
@@ -465,26 +414,6 @@
       "units": {
         "requests": 1
       },
-      "legacy": false,
-      "expected": {
-        "cost": "0.003500"
-      }
-    },
-    {
-      "name": "the legacy reading prices a token rate on a per-request endpoint per request",
-      "rate": {
-        "unit": "tokens",
-        "input": "2.5",
-        "output": "10"
-      },
-      "tokens": {
-        "input": 1000,
-        "output": 100
-      },
-      "units": {
-        "requests": 1
-      },
-      "legacy": true,
       "expected": {
         "cost": "0.000003",
         "meters": {
@@ -514,7 +443,6 @@
       "units": {
         "search_units": 1
       },
-      "legacy": true,
       "expected": {
         "cost": "0.050000"
       }
@@ -530,7 +458,6 @@
       "units": {
         "search_units": 1
       },
-      "legacy": true,
       "expected": null
     },
     {
@@ -545,7 +472,6 @@
         "output": 0
       },
       "units": {},
-      "legacy": false,
       "expected": {
         "cost": "0.002000"
       }
@@ -562,7 +488,6 @@
         "output": 0
       },
       "units": {},
-      "legacy": false,
       "expected": null
     },
     {
@@ -575,7 +500,6 @@
       "units": {
         "requests": 1
       },
-      "legacy": true,
       "expected": null
     }
   ]

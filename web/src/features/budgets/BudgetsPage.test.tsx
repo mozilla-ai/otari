@@ -29,6 +29,7 @@ function testUser(user_id: string): User {
     reserved_requests: 0,
     budget_id: null,
     allowed_models: null,
+    allowed_tools: null,
     budget_started_at: null,
     next_budget_reset_at: null,
     blocked: false,

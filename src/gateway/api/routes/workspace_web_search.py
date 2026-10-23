@@ -1,4 +1,4 @@
-"""Per-workspace web-access configuration (standalone mode only).
+"""Per-workspace web-access configuration.
 
 The deployment-wide search backend (its URL, its engines, its purpose hint)
 stays on ``/api/v1/tool-settings``, and the tools ``POST /api/v1/search`` dispatches to

@@ -1354,39 +1354,3 @@ def test_recorded_batch_list_hides_foreign_without_metadata(
     ids = [item["id"] for item in resp.json()["data"]]
     assert own_id in ids
     assert foreign_id not in ids
-
-
-# ---------------------------------------------------------------------------
-# Hybrid mode — batch endpoints not registered
-# ---------------------------------------------------------------------------
-
-
-def test_batch_endpoints_not_in_hybrid_mode(
-    postgres_url: str,
-    monkeypatch: Any,
-) -> None:
-    """Batch endpoints return 404 in hybrid mode."""
-    from gateway.core.config import GatewayConfig
-    from gateway.main import create_app
-
-    monkeypatch.setenv("OTARI_AI_TOKEN", "test-platform-token")
-
-    platform_config = GatewayConfig(
-        database_url=postgres_url,
-        master_key="test-master-key",
-        host="127.0.0.1",
-        port=8000,
-        auto_migrate=False,
-        platform={"base_url": "http://localhost:9000"},
-    )
-
-    app = create_app(platform_config)
-    with TestClient(app) as platform_client:
-        resp = platform_client.post(
-            f"{API_ROOT}/batches",
-            json=_create_batch_body(),
-            headers={"Authorization": "Bearer test-master-key"},
-        )
-        # In hybrid mode, batch routes are not registered, so we get 404
-        # (chat is always registered but batches are standalone-only)
-        assert resp.status_code == 404

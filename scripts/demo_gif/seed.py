@@ -1,4 +1,4 @@
-"""Seed a realistic-looking standalone gateway for the README dashboard GIF.
+"""Seed a realistic-looking gateway for the README dashboard GIF.
 
 Populates an organization with members (each linked to the gateway user their
 keys and budget attach to), budgets, named API keys, model pricing, and ~26k

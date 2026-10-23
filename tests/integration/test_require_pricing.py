@@ -13,8 +13,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import update
+from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, OrganizationModelPricing
 
 from .conftest import build_test_client
 
@@ -329,3 +332,128 @@ def test_missing_pricing_rejection_row_carries_the_request_tags(strict_pricing_c
 
     rows = c.get(f"{API_ROOT}/usage", params={"tag": "purpose:chat"}, headers=_MASTER_HEADER).json()
     assert [row["status_code"] for row in rows] == [402]
+
+
+# --------------------------------------------------------------------------- #
+# The gateway's own tools in the loop, checked against the rows that settle them
+# --------------------------------------------------------------------------- #
+
+# The fixture's one search instance is the in-loop default, so an in-loop search
+# runs on it and settles under its own search price first, then ``otari:web_search``.
+_SEARCH_INSTANCE = "fake-search"
+
+
+def _price(client: TestClient, model_key: str, *, kind: str = "model") -> None:
+    resp = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "kind": kind,
+            "model_key": model_key,
+            "input_price_per_million": 10_000.0,
+            "output_price_per_million": 0.0,
+        },
+        headers=_MASTER_HEADER,
+    )
+    assert resp.status_code in {200, 201}, resp.text
+
+
+def _override(client: TestClient, db: Session, model_key: str, *, origin: str) -> None:
+    """The organization's own rate for ``model_key``, written with ``origin``.
+
+    The master key writes it as the deployment's operator, so an organization's
+    own write is that row with its origin changed.
+    """
+    created = client.post(
+        f"{API_ROOT}/organizations/me/pricing",
+        json={"model_key": model_key, "input_price_per_million": 10_000.0, "output_price_per_million": 0.0},
+        headers=_MASTER_HEADER,
+    )
+    assert created.status_code == 201, created.text
+    db.execute(
+        update(OrganizationModelPricing).where(OrganizationModelPricing.model_key == model_key).values(origin=origin)
+    )
+    db.commit()
+
+
+def _in_loop(client: TestClient, tool: str, provider: AsyncMock) -> Any:
+    """A chat request on a priced model that declares ``tool``, its tool loop's model calls answered by ``provider``."""
+    client.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    _price(client, "openai:gpt-4o")
+    with patch("gateway.services.mcp_loop.acompletion", new=provider):
+        return client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "openai:gpt-4o", "messages": _MESSAGES, "user": "priced-user", "tools": [{"type": tool}]},
+            headers=_MASTER_HEADER,
+        )
+
+
+@pytest.mark.parametrize(
+    ("tool", "instance", "kind"),
+    [("otari_web_search", _SEARCH_INSTANCE, "search"), ("otari_web_fetch", "builtin_fetch", "fetch")],
+)
+def test_an_in_loop_tool_priced_only_under_its_instances_row_is_served(
+    strict_pricing_client: TestClient, tool: str, instance: str, kind: str
+) -> None:
+    """The instance's row prices its calls at settlement, so the check at admission lets them through."""
+    _price(strict_pricing_client, instance, kind=kind)
+    provider = AsyncMock(side_effect=RuntimeError("provider down"))
+
+    resp = _in_loop(strict_pricing_client, tool, provider)
+
+    assert resp.status_code != 402, resp.text
+    provider.assert_awaited()
+
+
+@pytest.mark.parametrize(("path", "body"), _COMPLETION_BODIES)
+def test_an_unpriced_in_loop_search_is_refused_naming_its_row_with_its_code(
+    strict_pricing_client: TestClient, path: str, body: dict[str, Any]
+) -> None:
+    """Refused before any model call, in each dialect, the way an unpriced model is."""
+    c = strict_pricing_client
+    c.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    _price(c, "openai:gpt-4o")
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock()) as chat_loop:
+        resp = c.post(
+            f"{API_ROOT}/{path}",
+            json={**body, "model": "openai:gpt-4o", "user": "priced-user", "tools": [{"type": "otari_web_search"}]},
+            headers=_MASTER_HEADER,
+        )
+
+    assert resp.status_code == 402, resp.text
+    assert resp.headers["Otari-Error-Code"] == "pricing_required"
+    assert "otari:web_search" in resp.text
+    chat_loop.assert_not_called()
+
+
+def test_the_in_loop_refusal_carries_its_code_in_the_body_too(strict_pricing_client: TestClient) -> None:
+    resp = _in_loop(strict_pricing_client, "otari_web_fetch", AsyncMock())
+
+    assert resp.status_code == 402, resp.text
+    assert resp.json()["code"] == "pricing_required"
+    assert "otari:web_fetch" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize(("origin", "served"), [(API_ORIGIN, False), (OPERATOR_ORIGIN, True)])
+def test_only_the_operators_override_prices_an_in_loop_search_on_an_instance(
+    strict_pricing_client: TestClient, test_db: Session, origin: str, served: bool
+) -> None:
+    """The deployment pays the instance's provider, so an organization's own rate does not price the call."""
+    _override(strict_pricing_client, test_db, "otari:web_search", origin=origin)
+
+    resp = _in_loop(strict_pricing_client, "otari_web_search", AsyncMock(side_effect=RuntimeError("provider down")))
+
+    assert (resp.status_code != 402) is served, resp.text
+
+
+def test_an_organizations_override_still_prices_a_search_on_the_legacy_settings(
+    strict_pricing_client: TestClient, test_db: Session
+) -> None:
+    """The old backend records its calls with no label, so any organization override prices them."""
+    _override(strict_pricing_client, test_db, "otari:web_search", origin=API_ORIGIN)
+    provider = AsyncMock(side_effect=RuntimeError("provider down"))
+
+    with patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}):
+        resp = _in_loop(strict_pricing_client, "otari_web_search", provider)
+
+    assert resp.status_code != 402, resp.text
+    provider.assert_awaited()

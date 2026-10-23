@@ -7,6 +7,8 @@ import type {
   GuardrailCatalog,
   OrganizationGuardrail,
   OrganizationGuardrailTestResult,
+  SandboxCredentialPublic,
+  SandboxCredentialRequest,
   SearchProviderInfo,
   SearchToolsResponse,
   StoredSearchTool,
@@ -84,13 +86,54 @@ export function useUpdateToolSettings() {
   })
 }
 
+// The key a hosted sandbox provider leases with. Never read back: the answer is
+// where it comes from and its last four, which the settings query carries.
+function useSandboxCredentialWrite<TVariables>(
+  request: (variables: TVariables) => Promise<SandboxCredentialPublic>,
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: request,
+    onSuccess: (credential) => {
+      queryClient.setQueryData<ToolSettingsResponse>([TOOL_SETTINGS], (old) =>
+        old ? { ...old, sandbox_credential: credential } : old,
+      )
+    },
+  })
+}
+
+export function useSetSandboxCredential() {
+  return useSandboxCredentialWrite((body: SandboxCredentialRequest) =>
+    apiFetch<SandboxCredentialPublic>("/tool-settings/sandbox/credential", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  )
+}
+
+export function useClearSandboxCredential() {
+  return useSandboxCredentialWrite(() =>
+    apiFetch<SandboxCredentialPublic>("/tool-settings/sandbox/credential", {
+      method: "DELETE",
+    }),
+  )
+}
+
 // Search tools served by POST /v1/search: the editable rows plus the read-only
 // config-file entries, so the page can show every tool a caller could name.
-export function useSearchTools() {
+// `fetch` lists the fetch instances instead, `builtin_fetch` among them.
+export function useSearchTools(
+  kind: "search" | "fetch" = "search",
+  enabled = true,
+) {
   return useQuery({
-    queryKey: [SEARCH_TOOLS],
-    queryFn: () => apiFetch<SearchToolsResponse>("/search-tools"),
+    queryKey: [SEARCH_TOOLS, kind],
+    queryFn: () =>
+      apiFetch<SearchToolsResponse>(
+        kind === "search" ? "/search-tools" : "/search-tools?kind=fetch",
+      ),
     staleTime: 60_000,
+    enabled,
   })
 }
 

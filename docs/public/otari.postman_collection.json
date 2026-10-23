@@ -10,7 +10,7 @@
     "type": "bearer"
   },
   "info": {
-    "description": "otari management + inference collection, generated from the OpenAPI spec by scripts/generate_postman.py. Stopgap client for driving a running Otari server until the web UI lands.\n\nSet the `baseUrl` and `otariKey` collection variables (or override them with a Postman environment). Auth is sent as an `Authorization: Bearer <otariKey>` header on every request via collection-level auth. The web-search backend request is the exception: it is one gateway calling another and reads `gatewayToken` instead, the serving deployment's `web_search_backend_token`.",
+    "description": "otari management + inference collection, generated from the OpenAPI spec by scripts/generate_postman.py. Stopgap client for driving a running Otari server until the web UI lands.\n\nSet the `baseUrl` and `otariKey` collection variables (or override them with a Postman environment). Auth is sent as an `Authorization: Bearer <otariKey>` header on every request via collection-level auth.",
     "name": "otari API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -156,7 +156,7 @@
         {
           "name": "Delete Agent Telemetry Rows",
           "request": {
-            "description": "Delete agent_telemetry rows by explicit ids or by filter (standalone).\n\nTarget either an explicit selection (`ids`) or everything matching a filter\n(`by_filter: true` plus optional `user_id` / `api_key_id` / `name` / date\nrange). A selection matching zero rows succeeds with `deleted: 0`.\nMaster-key only.",
+            "description": "Delete agent_telemetry rows by explicit ids or by filter.\n\nTarget either an explicit selection (`ids`) or everything matching a filter\n(`by_filter: true` plus optional `user_id` / `api_key_id` / `name` / date\nrange). A selection matching zero rows succeeds with `deleted: 0`.\nMaster-key only.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -175,7 +175,7 @@
         {
           "name": "Count Agent Telemetry",
           "request": {
-            "description": "Total agent_telemetry rows matching the given filters (standalone).\n\nThe filter set mirrors the purge endpoint's, so this sizes exactly what a\n\"delete all N matching\" would remove. Behavioral and metric rows are counted\ntogether: neither this nor the purge distinguishes them. Master-key only.",
+            "description": "Total agent_telemetry rows matching the given filters.\n\nThe filter set mirrors the purge endpoint's, so this sizes exactly what a\n\"delete all N matching\" would remove. Behavioral and metric rows are counted\ntogether: neither this nor the purge distinguishes them. Master-key only.",
             "header": [],
             "method": "GET",
             "url": {
@@ -227,7 +227,7 @@
         {
           "name": "Agent Telemetry Series",
           "request": {
-            "description": "Row volume over time, split by user or API key (standalone).\n\nMirrors `/api/v1/usage/series`: same window bounds and bucket-grid cap, the top\ngroups as their own series with the remainder folded into a reconciling\n``other``, and sparse points (populated cells only). Counts rows, not spend,\nso it charts telemetry volume rather than cost. Master-key only.",
+            "description": "Row volume over time, split by user or API key.\n\nMirrors `/api/v1/usage/series`: same window bounds and bucket-grid cap, the top\ngroups as their own series with the remainder folded into a reconciling\n``other``, and sparse points (populated cells only). Counts rows, not spend,\nso it charts telemetry volume rather than cost. Master-key only.",
             "header": [],
             "method": "GET",
             "url": {
@@ -291,7 +291,7 @@
         {
           "name": "Agent Telemetry Summary",
           "request": {
-            "description": "What the coding agent produced in a window, and what it cost (standalone).\n\nRange-bounded like `/api/v1/usage/summary` (default last 30 days, hard-capped),\nso the aggregates stay served by the timestamp index. Returns the outcome\ntotals (commits, pull requests, lines changed, active time), the behavioral\ncounts already captured from the logs signal (tool calls and their mix, tool\naccept/reject, turns, API errors), the recorded spend over the same scope,\nand the derived per-unit measures: cost per commit / pull request / line,\nspend per active hour, acceptance rate, turns per session, and error rate.\nEach measure is null rather than an error when its denominator is zero.\nFilterable by user, API key, and `session_label`, so cost per outcome can be\nread for one agent session as well as for a whole window.\n\nThe spend side is every usage row in scope, not only the agent's: unfiltered,\nthat includes traffic from clients that never reported telemetry, so a\nper-outcome measure read over a whole deployment answers \"what did this\ndeployment spend per commit\", not \"what did the agent spend per commit\".\nFilter by user, API key, or session to divide only the matching spend.\n\nOutcome metrics are stored exactly as the agent reported them, so a\ncumulative counter is converted to a window increment here, at read time,\ndiffed per series generation: a re-exported total adds nothing, and a counter\nreset never reads as negative work. Master-key only.",
+            "description": "What the coding agent produced in a window, and what it cost.\n\nRange-bounded like `/api/v1/usage/summary` (default last 30 days, hard-capped),\nso the aggregates stay served by the timestamp index. Returns the outcome\ntotals (commits, pull requests, lines changed, active time), the behavioral\ncounts already captured from the logs signal (tool calls and their mix, tool\naccept/reject, turns, API errors), the recorded spend over the same scope,\nand the derived per-unit measures: cost per commit / pull request / line,\nspend per active hour, acceptance rate, turns per session, and error rate.\nEach measure is null rather than an error when its denominator is zero.\nFilterable by user, API key, and `session_label`, so cost per outcome can be\nread for one agent session as well as for a whole window.\n\nThe spend side is every usage row in scope, not only the agent's: unfiltered,\nthat includes traffic from clients that never reported telemetry, so a\nper-outcome measure read over a whole deployment answers \"what did this\ndeployment spend per commit\", not \"what did the agent spend per commit\".\nFilter by user, API key, or session to divide only the matching spend.\n\nOutcome metrics are stored exactly as the agent reported them, so a\ncumulative counter is converted to a window increment here, at read time,\ndiffed per series generation: a re-exported total adds nothing, and a counter\nreset never reads as negative work. Master-key only.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1480,7 +1480,7 @@
         {
           "name": "Get Bootstrap",
           "request": {
-            "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.\nThat is also why ``sign_in_methods`` is answered here rather than behind a\ncredential, and it publishes nothing an unauthenticated caller could not\nalready learn by trying both credentials against the sign-in endpoint.\n\nThe database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``\nmarker, and the identity it names, to answer whether *that* identity holds a\npassword (#702). It runs only in standalone mode: a hybrid gateway has no session to describe,\nand ``get_db_if_needed`` hands it no session to read one from.",
+            "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.\nThat is also why ``sign_in_methods`` is answered here rather than behind a\ncredential, and it publishes nothing an unauthenticated caller could not\nalready learn by trying both credentials against the sign-in endpoint.\n\nThe database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``\nmarker, and the identity it names, to answer whether *that* identity holds a\npassword (#702).",
             "header": [],
             "method": "GET",
             "url": {
@@ -2866,6 +2866,40 @@
               "raw": "{{baseUrl}}/api/v1/hooks/check"
             }
           }
+        },
+        {
+          "name": "Record Guardrail Definition",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"digest\": \"string\",\n  \"gates\": [\n    {\n      \"gate_id\": \"string\",\n      \"gate_type\": \"command\",\n      \"enforcement\": \"required\",\n      \"origin\": \"repo\",\n      \"runs\": [\n        \"pre_tool_use.edit_target\"\n      ],\n      \"message\": \"string\"\n    }\n  ]\n}"
+            },
+            "description": "Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.\n\n`otari hook` sends this once per version, the first time it reports a check\nagainst it. The fingerprint is recomputed from the gates, and one that does\nnot match the one sent is refused, so a version cannot be stored under\nanother's name. Sending a version again changes nothing. It is stored in the\nAPI key's workspace, beside that key's traces, and takes the same key a trace\nexport does: a budget-exempt API key, never the master key.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hooks",
+                "guardrails"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hooks/guardrails"
+            }
+          }
         }
       ],
       "name": "hooks"
@@ -3572,7 +3606,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"end_user_budget_ids\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"max_end_users\": 0,\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"allowed_tools\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"end_user_budget_ids\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"max_end_users\": 0,\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
             "description": "Create a new API key in the caller's organization.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.\n\n``workspace_id`` names a workspace in the caller's organization, and omitting\nit mints into that organization's default workspace. A key resolves that\norganization's provider credentials and bills there, so minting into another\norganization's workspace would spend its budget on its credentials.",
             "header": [
@@ -3632,7 +3666,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"end_user_budget_ids\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"max_end_users\": 0,\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"allowed_tools\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"end_user_budget_ids\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"max_end_users\": 0,\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
             },
             "description": "Update an API key in the caller's organization.\n\nRequires master key authentication.",
             "header": [
@@ -4203,7 +4237,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"messages\": [\n    {}\n  ],\n  \"max_tokens\": 0\n}"
             },
-            "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
+            "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search.",
             "header": [
               {
                 "key": "Content-Type",
@@ -4236,7 +4270,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"messages\": [\n    {}\n  ]\n}"
             },
-            "description": "Anthropic ``/v1/messages/count_tokens``-compatible endpoint.\n\nReturns ``{\"input_tokens\": N}`` without contacting an upstream provider:\ncounting is local, so there is no budget reservation, pricing, or usage\nlogging. Authentication mirrors :func:`create_message` \u2014 hybrid mode\nresolves the caller's token against the platform, standalone mode validates\nthe API key \u2014 so the endpoint is not an open token-counting oracle.",
+            "description": "Anthropic ``/v1/messages/count_tokens``-compatible endpoint.\n\nReturns ``{\"input_tokens\": N}`` without contacting an upstream provider:\ncounting is local, so there is no budget reservation, pricing, or usage\nlogging. Authentication mirrors :func:`create_message`, validating the API\nkey, so the endpoint is not an open token-counting oracle.",
             "header": [
               {
                 "key": "Content-Type",
@@ -4428,7 +4462,7 @@
               },
               "raw": "{\n  \"assertion\": \"<identity token>\",\n  \"federation_rule_id\": \"7d0c7a52-9a2e-4b55-8f3a-2f1f6c0d2a11\",\n  \"grant_type\": \"urn:ietf:params:oauth:grant-type:jwt-bearer\",\n  \"organization_id\": \"5b3f8e0e-1c2d-4e7f-9a8b-0c1d2e3f4a5b\"\n}"
             },
-            "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must verify against an issuer on ``federation_issuers`` and match the federation rule\n``federation_rule_id`` names. ``organization_id``, ``workspace_id`` and ``service_account_id``, where set, must\nbe the UUIDs of the rule's key's organization and workspace and the key's id. The access token authenticates as\nthat key until ``expires_in`` runs out, the rule is deleted or the key stops passing its checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
+            "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:\none on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,\nwhere set, must be the UUID of the rule's key's organization. ``workspace_id`` and ``service_account_id`` are\naccepted and ignored, so a client configured for Anthropic needs only its rule and organization changed. The\naccess token authenticates as that key until ``expires_in`` runs out, the rule is deleted or the key stops passing\nits checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
             "header": [
               {
                 "key": "Content-Type",
@@ -5482,7 +5516,7 @@
               },
               "raw": "{\n  \"agent_type\": \"Explore\",\n  \"description\": \"Find the budget reservation code\",\n  \"harness\": \"claude-code\",\n  \"parent_model\": \"claude-opus-5\",\n  \"prompt\": \"Find where budgets are reserved before dispatch and report the call chain.\",\n  \"session_id\": \"bf05abe2-5ff2-4eb0-8459-ab578d5c9468\",\n  \"tool_use_id\": \"toolu_01Ab3dEfGh\"\n}"
             },
-            "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nA standalone deployment asks the decision model `agent_recommender_model`\nnames to choose among `agent_recommender_candidates` for Claude Code and\namong the request's own `candidates` for pi; a hosted build may bind a\nrecommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
+            "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nBy default the deployment asks the decision model `agent_recommender_model`\nnames to choose among `agent_recommender_candidates` for Claude Code and\namong the request's own `candidates` for pi; a bootstrap may bind a\nrecommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
             "header": [
               {
                 "key": "Content-Type",
@@ -6265,7 +6299,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"allowed_tools\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
             "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). The secret is returned once.",
             "header": [
@@ -6300,7 +6334,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"allowed_tools\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
             },
             "description": "Update one of the caller's own API keys.",
             "header": [
@@ -6356,6 +6390,116 @@
                 {
                   "description": "path parameter",
                   "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Own Federation Rules",
+          "request": {
+            "description": "List the identities that may authenticate as a key, oldest first.\n\nThe caller's own key, or for the deployment operator any key in their active organization. Includes any rule\nthe operator gave the key on ``/api/v1/keys``, which ``member_managed`` tells apart.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "keys",
+                ":key_id",
+                "federation-rules"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/keys/:key_id/federation-rules",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Own Federation Rule",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"audience\": \"https://otari.example.com\",\n  \"email\": \"hackbot-api@my-project.iam.gserviceaccount.com\",\n  \"issuer\": \"https://accounts.google.com\"\n}"
+            },
+            "description": "Let an OpenID Connect identity token stand in for a key, through the token exchange.\n\nNeeds ``federation_member_rules``, else 403, and an organization owner or admin acting on their own key, or the\ndeployment operator on any key in their active organization, else 403. The issuer may be any https URL; its\nsigning keys are fetched only from a public host. The rule matches only in ``POST /api/v1/oauth/token`` naming\nits id, never as a bare identity token, so it lets a workload act as this key and no other: a rule naming another\ntenant's workload gives that workload nothing it did not ask for. A rule this key already holds answers 409.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "keys",
+                ":key_id",
+                "federation-rules"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/keys/:key_id/federation-rules",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Own Federation Rule",
+          "request": {
+            "description": "Remove a federation rule from a key. Tokens it matched stop with the next request.\n\nThe caller's own key whatever their role, or for the deployment operator any key in their active organization.\nWorks whether or not ``federation_member_rules`` is on, so a rule can always be taken back.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "keys",
+                ":key_id",
+                "federation-rules",
+                ":rule_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/keys/:key_id/federation-rules/:rule_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "rule_id",
                   "value": ""
                 }
               ]
@@ -7379,13 +7523,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -7457,13 +7601,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -7542,7 +7686,7 @@
         {
           "name": "Trace Series",
           "request": {
-            "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+            "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7571,13 +7715,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -8206,7 +8350,7 @@
         {
           "name": "List Org Web Search Keys",
           "request": {
-            "description": "List the caller's organization's web search keys. Organization owners and admins only.",
+            "description": "List the caller's organization's web search and fetch keys. Organization owners and admins only.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8254,9 +8398,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"api_key\": \"<your Tavily API key>\",\n  \"name\": \"production\",\n  \"provider\": \"tavily\"\n}"
+              "raw": "{\n  \"api_key\": \"<your Exa API key>\",\n  \"kind\": \"search\",\n  \"name\": \"production\",\n  \"provider\": \"exa\"\n}"
             },
-            "description": "Add a web search key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key searches with it rather than with the deployment's search.",
+            "description": "Add a search or fetch key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key of a kind uses it for that kind's calls rather than the deployment's instance.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8289,9 +8433,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"api_key\": \"string\",\n  \"name\": \"string\"\n}"
+              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"name\": \"string\",\n  \"options\": {}\n}"
             },
-            "description": "Rename a web search key or replace its secret. Organization owners and admins only.",
+            "description": "Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.\n\nIts kind and provider are fixed.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8325,7 +8469,7 @@
         {
           "name": "Delete Org Web Search Key",
           "request": {
-            "description": "Delete an archived web search key. Organization owners and admins only.",
+            "description": "Delete an archived key. Organization owners and admins only.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -8354,7 +8498,7 @@
         {
           "name": "Archive Org Web Search Key",
           "request": {
-            "description": "Take a web search key out of use. Organization owners and admins only.",
+            "description": "Take a key out of use. Organization owners and admins only.",
             "header": [],
             "method": "POST",
             "url": {
@@ -8384,7 +8528,7 @@
         {
           "name": "Set Org Default Web Search Key",
           "request": {
-            "description": "Make a web search key its provider's organization default. Organization owners and admins only.",
+            "description": "Make a key the organization's default of its kind, in place of the previous one.\n\nOrganization owners and admins only.",
             "header": [],
             "method": "POST",
             "url": {
@@ -8414,7 +8558,7 @@
         {
           "name": "Restore Org Web Search Key",
           "request": {
-            "description": "Put an archived web search key back in use. Organization owners and admins only.",
+            "description": "Put an archived key back in use. Organization owners and admins only.",
             "header": [],
             "method": "POST",
             "url": {
@@ -8444,7 +8588,7 @@
         {
           "name": "List Workspace Web Search Keys",
           "request": {
-            "description": "The organization's web search keys as this workspace sees them, and which one it searches with.\n\nAny member of the workspace may read it. ``is_effective`` is decided across every key, not only this page.",
+            "description": "The organization's keys as this workspace sees them, and which of each kind it uses.\n\nAny member of the workspace may read it. ``is_effective`` is decided across every key, not only this page,\nand ``search_provider`` and ``fetch_provider`` say what the workspace's searches and fetches run on.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8495,7 +8639,7 @@
               },
               "raw": "{\n  \"is_default\": true\n}"
             },
-            "description": "Pin a web search key as this workspace's own, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins. Answers with the list's first page.",
+            "description": "Pin a key as this workspace's own for its kind, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins. Answers with the list's first page.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8614,7 +8758,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"messages\": [\n    {}\n  ]\n}"
             },
-            "description": "Run one chat completion for the signed-in caller.\n\nStreaming and non-streaming both, identically to ``POST\n/api/v1/chat/completions``: this resolves the principal and then calls the\nvery same handler. The request is billed to the caller's own attribution\nuser in the workspace they named (or their organization's default), against\nthat user's budget, and writes the ordinary usage row with no ``api_key_id``,\nbecause there was no key.\n\nThe body is ``ChatCompletionRequest`` unchanged, so the page sends the same\nrequest an SDK would and a model, tool or parameter the gateway gains is\navailable here the day it lands. The workspace rides in the query string\nrather than in the body for that reason: a field added to the body would\nalso have to be added to the pipeline's strip list, and a gateway-internal\nfield that is not stripped is forwarded to the provider as a call kwarg.\n\n``user`` in the body is the one field the pipeline will not read here: spend\nbinds to the session's own attribution user, derived and never accepted.\n\nOn a hosted control plane there is no local pipeline to call, so the same\nprincipal is forwarded to the data-plane gateway instead\n(:func:`_dispatch_to_data_plane`). The request and the response are the same\neither way.",
+            "description": "Run one chat completion for the signed-in caller.\n\nStreaming and non-streaming both, identically to ``POST\n/api/v1/chat/completions``: this resolves the principal and then calls the\nvery same handler. The request is billed to the caller's own attribution\nuser in the workspace they named (or their organization's default), against\nthat user's budget, and writes the ordinary usage row with no ``api_key_id``,\nbecause there was no key.\n\nThe body is ``ChatCompletionRequest`` unchanged, so the page sends the same\nrequest an SDK would and a model, tool or parameter the gateway gains is\navailable here the day it lands. The workspace rides in the query string\nrather than in the body for that reason: a field added to the body would\nalso have to be added to the pipeline's strip list, and a gateway-internal\nfield that is not stripped is forwarded to the provider as a call kwarg.\n\n``user`` and ``safety_identifier`` in the body are the fields the pipeline\nwill not read here: spend and the provider's end-user identifier both bind\nto the session's own attribution user, derived and never accepted.",
             "header": [
               {
                 "key": "Content-Type",
@@ -9158,7 +9302,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"model_key\": \"string\",\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0\n}"
+              "raw": "{\n  \"model_key\": \"string\"\n}"
             },
             "description": "Set or update pricing for a model.\n\nRejects an alias or a routing policy: pricing, budgets, and usage all key on\nthe model a request resolves to, so a row stored under either name would\nnever be read.",
             "header": [
@@ -9946,7 +10090,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"input\": null\n}"
             },
-            "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
+            "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search.",
             "header": [
               {
                 "key": "Content-Type",
@@ -10704,7 +10848,7 @@
               },
               "raw": "{\n  \"web_search_max_results\": 5,\n  \"web_search_url\": \"http://searxng:8080\"\n}"
             },
-            "description": "Persist and apply tool/guardrail setting changes.\n\nUses ``model_fields_set`` so an explicit ``null`` clears a field while an\nomitted field is left unchanged. Operator-gated and standalone-only.",
+            "description": "Persist and apply tool/guardrail setting changes.\n\nUses ``model_fields_set`` so an explicit ``null`` clears a field while an\nomitted field is left unchanged. Operator-gated.",
             "header": [
               {
                 "key": "Content-Type",
@@ -10749,7 +10893,7 @@
         {
           "name": "List Guardrail Profiles",
           "request": {
-            "description": "List the guardrail profiles this deployment's guardrails service has built.\n\nWhat an organization guardrail's ``profile`` may name, with the\n``validate_kwargs`` each one accepts, so the dashboard offers a picker and\ntyped fields instead of a free-text box beside an unrendered dict. The\nprofiles come from the service itself and the parameter schemas from the\n``any_guardrail`` registry; neither is a list kept in this repository. See\n`gateway.services.guardrail_catalog`.\n\nReports ``available: false`` with a reason rather than an error when the\nservice is unconfigured, unreachable, or older than its ``/profiles``\nendpoint, because a guardrails outage must not also break the page that\nconfigures guardrails.\n\nRead against ``guardrails_url``, which is the deployment's own service. An\nentry that carries an endpoint of its own is not probed: that URL is\ncaller-supplied and fetching it here would make this a way to have the\ngateway request an address of the caller's choosing.\n\nNot on ``verify_catalog_reader``, despite being a catalog read: that plane is\nthe three deployment-describing reads a data-plane key may also make, and\nadmitting a key here would let any workspace credential dial the deployment's\nguardrails service. This is a management read, so it takes the router's own gate.",
+            "description": "List the guardrail profiles this deployment's guardrails service has built.\n\nWhat an organization guardrail's ``profile`` may name, with the\n``validate_kwargs`` each one accepts, so the dashboard offers a picker and\ntyped fields instead of a free-text box beside an unrendered dict. The\nprofiles come from the service itself and the parameter schemas from the\n``any_guardrail`` registry; neither is a list kept in this repository. See\n`gateway.services.guardrail_catalog`.\n\nReports ``available: false`` with a reason rather than an error when the\nservice is unconfigured, unreachable, or older than its ``/profiles``\nendpoint, because a guardrails outage must not also break the page that\nconfigures guardrails.\n\nRead against ``guardrails_url``, which is the deployment's own service. An\nentry that carries an endpoint of its own is not probed: that URL is\ncaller-supplied and fetching it here would make this a way to have the\ngateway request an address of the caller's choosing.\n\nNot on ``verify_catalog_reader``, despite being a catalog read: that gate\nadmits any API key to the deployment-describing reads, and admitting a key\nhere would let any workspace credential dial the deployment's guardrails\nservice. This is a management read, so it takes the router's own gate.",
             "header": [],
             "method": "GET",
             "url": {
@@ -10764,6 +10908,62 @@
                 "profiles"
               ],
               "raw": "{{baseUrl}}/api/v1/tool-settings/guardrails/profiles"
+            }
+          }
+        },
+        {
+          "name": "Set Sandbox Credential",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_key\": \"e2b_0123456789abcdef\"\n}"
+            },
+            "description": "Store the key this deployment's hosted sandbox provider leases sandboxes with.\n\nWins over the provider's environment variable (``E2B_API_KEY``), on this\nworker at once and on every other within 30 seconds, so a rotated key needs\nno redeploy. Refused for the ``protocol`` provider, which takes no key of\nits own. Operator-gated.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tool-settings",
+                "sandbox",
+                "credential"
+              ],
+              "raw": "{{baseUrl}}/api/v1/tool-settings/sandbox/credential"
+            }
+          }
+        },
+        {
+          "name": "Clear Sandbox Credential",
+          "request": {
+            "description": "Delete the stored sandbox key, so sandboxes are leased with the environment's key again.\n\nClearing a key that was never stored is not an error. Operator-gated.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tool-settings",
+                "sandbox",
+                "credential"
+              ],
+              "raw": "{{baseUrl}}/api/v1/tool-settings/sandbox/credential"
             }
           }
         },
@@ -10885,13 +11085,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -10961,13 +11161,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -11044,7 +11244,7 @@
         {
           "name": "Trace Series",
           "request": {
-            "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+            "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
             "header": [],
             "method": "GET",
             "url": {
@@ -11071,13 +11271,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -11301,7 +11501,7 @@
         {
           "name": "Delete Usage Rows",
           "request": {
-            "description": "Delete imported usage rows by explicit ids or by filter (standalone).\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /\n``status`` / date range / ``priced``). Only imported rows\n(``counts_toward_budget = false``) are ever removed: enforced gateway rows and\nthe spend ledger (``users.spend``) are untouched, so a delete can never desync a\nbudget. Master-key only.",
+            "description": "Delete imported usage rows by explicit ids or by filter.\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /\n``status`` / date range / ``priced``). Only imported rows\n(``counts_toward_budget = false``) are ever removed: enforced gateway rows and\nthe spend ledger (``users.spend``) are untouched, so a delete can never desync a\nbudget. Master-key only.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -11453,7 +11653,7 @@
               },
               "raw": "{\n  \"source\": \"string\",\n  \"events\": [\n    {\n      \"source_event_id\": \"string\",\n      \"timestamp\": \"2024-01-01T00:00:00Z\",\n      \"provider\": \"string\",\n      \"model\": \"string\"\n    }\n  ]\n}"
             },
-            "description": "Ingest a batch of externally-observed usage events (standalone).\n\nAuthenticated with either an API key or the master key. Usage binds to the\nauthenticated principal: an API key attributes to its own user (and stamps its\nid on the rows); the master key may name any user via ``user_id``. Records\nsubscription-backed usage (e.g. Claude Code) as usage-log rows tagged with their\n``source``, priced at the effective API rate for each event's timestamp.\nImported usage is real cost, but never counts toward budgets or mutates\n``users.spend`` (it is retrospective, so it cannot be reserved). Idempotent by\n``(source, source_event_id)``. The payload is content-free; any\nprompt/completion/tool field is rejected (422), not stored.",
+            "description": "Ingest a batch of externally-observed usage events.\n\nAuthenticated with either an API key or the master key. Usage binds to the\nauthenticated principal: an API key attributes to its own user (and stamps its\nid on the rows); the master key may name any user via ``user_id``. Records\nsubscription-backed usage (e.g. Claude Code) as usage-log rows tagged with their\n``source``, priced at the effective API rate for each event's timestamp.\nImported usage is real cost, but never counts toward budgets or mutates\n``users.spend`` (it is retrospective, so it cannot be reserved). Idempotent by\n``(source, source_event_id)``. The payload is content-free; any\nprompt/completion/tool field is rejected (422), not stored.",
             "header": [
               {
                 "key": "Content-Type",
@@ -11498,7 +11698,7 @@
         {
           "name": "Get Request Settlement",
           "request": {
-            "description": "Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).\n\nThis is how a caller recovers the cost of a request whose response never\ncarried one: a stream that failed or was disconnected mid-response, or a\nrequest that errored. An API key sees only the requests it made; the master\nkey sees any. Returns 404 until the request has settled (its rows are written\nby a background writer, so a lookup made the instant a stream closes can\nprecede them), and for an id that is unknown or belongs to another key, with\nno way to tell those apart. A stream that ended before the provider reported\nusage, and ran no gateway tools, writes no row, so its id stays 404.",
+            "description": "Look up a request's settled cost by the ``Otari-Request-ID`` it was sent.\n\nThis is how a caller recovers the cost of a request whose response never\ncarried one: a stream that failed or was disconnected mid-response, or a\nrequest that errored. An API key sees only the requests it made; the master\nkey sees any. Returns 404 until the request has settled (its rows are written\nby a background writer, so a lookup made the instant a stream closes can\nprecede them), and for an id that is unknown or belongs to another key, with\nno way to tell those apart. A stream that ended before the provider reported\nusage, and ran no gateway tools, writes no row, so its id stays 404.",
             "header": [],
             "method": "GET",
             "url": {
@@ -11665,7 +11865,7 @@
               },
               "raw": "{\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0\n}"
             },
-            "description": "Set the cost of imported usage rows from manual per-1M rates (standalone).\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed\nfrom each row's own token counts at the supplied ``input`` / ``output`` /\n``cache_read`` / ``cache_write`` per-1M rates (manual rates, not a recompute from\nconfigured pricing). Only imported rows (``counts_toward_budget = false``) are\ntouched, so ``users.spend`` is never affected. Master-key only.",
+            "description": "Set the cost of imported usage rows from manual per-1M rates.\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed\nfrom each row's own token counts at the supplied ``input`` / ``output`` /\n``cache_read`` / ``cache_write`` per-1M rates (manual rates, not a recompute from\nconfigured pricing). Only imported rows (``counts_toward_budget = false``) are\ntouched, so ``users.spend`` is never affected. Master-key only.",
             "header": [
               {
                 "key": "Content-Type",
@@ -11955,7 +12155,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"alias\": \"string\",\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"blocked\": false,\n  \"budget_id\": \"string\",\n  \"metadata\": {}\n}"
+              "raw": "{\n  \"alias\": \"string\",\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"allowed_tools\": [\n    \"string\"\n  ],\n  \"blocked\": false,\n  \"budget_id\": \"string\",\n  \"metadata\": {}\n}"
             },
             "description": "Update a user in the caller's organization.",
             "header": [
@@ -12057,74 +12257,6 @@
         }
       ],
       "name": "users"
-    },
-    {
-      "item": [
-        {
-          "name": "Web Search",
-          "request": {
-            "description": "Run one search through this deployment's configured search provider.\n\nThe declared query params are the ``provider_options`` keys the providers\nunderstand. Everything else the caller sends, ``format`` and ``engines``\nincluded, is ignored rather than forwarded: the bag is opaque to the gateway\nthat filled it, so passing it upstream unread would let a workspace set\nprovider request fields this deployment never chose.",
-            "header": [
-              {
-                "key": "X-Gateway-Token",
-                "value": "{{gatewayToken}}"
-              }
-            ],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "web-search",
-                "search"
-              ],
-              "query": [
-                {
-                  "description": "The search query.",
-                  "disabled": false,
-                  "key": "q",
-                  "value": ""
-                },
-                {
-                  "description": "",
-                  "disabled": true,
-                  "key": "max_results",
-                  "value": ""
-                },
-                {
-                  "description": "",
-                  "disabled": true,
-                  "key": "search_depth",
-                  "value": ""
-                },
-                {
-                  "description": "",
-                  "disabled": true,
-                  "key": "topic",
-                  "value": ""
-                },
-                {
-                  "description": "",
-                  "disabled": true,
-                  "key": "time_range",
-                  "value": ""
-                },
-                {
-                  "description": "",
-                  "disabled": true,
-                  "key": "include_answer",
-                  "value": ""
-                }
-              ],
-              "raw": "{{baseUrl}}/api/v1/web-search/search?q=&max_results=&search_depth=&topic=&time_range=&include_answer="
-            }
-          }
-        }
-      ],
-      "name": "web-search"
     },
     {
       "item": [
@@ -12334,7 +12466,7 @@
         {
           "name": "Add Workspace Member",
           "request": {
-            "description": "Add an existing organization member to a workspace.",
+            "description": "Add an existing organization member to a workspace.\n\nThe 404 for a workspace deleted during the add describes PostgreSQL. SQLite does not name the\nforeign key it enforced, so it surfaces that race as a 500.",
             "header": [],
             "method": "POST",
             "url": {
@@ -13240,11 +13372,6 @@
     },
     {
       "key": "otariKey",
-      "type": "string",
-      "value": ""
-    },
-    {
-      "key": "gatewayToken",
       "type": "string",
       "value": ""
     }

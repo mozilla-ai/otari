@@ -185,7 +185,7 @@ function LabelRow({
 /**
  * The sign-in screen, rendering whichever credential this deployment accepts.
  *
- * A standalone gateway takes the master key until an operator claims it by
+ * A gateway takes the master key until an operator claims it by
  * setting a password (mozilla-ai/otari-ai#1716), and takes a password from
  * whichever identity holds one, whenever one does. The gateway publishes both
  * facts in the bootstrap's `sign_in_methods`, so the form is chosen from that

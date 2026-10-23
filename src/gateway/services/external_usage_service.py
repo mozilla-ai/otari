@@ -20,6 +20,7 @@ import functools
 import re
 import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, NamedTuple
@@ -31,7 +32,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
-from gateway.core.metered_pricing import BillableUsage, ChargeLine, billable_usage, price_billable_usage
+from gateway.core.metered_pricing import (
+    BillableUsage,
+    ChargeLine,
+    billable_usage,
+    effective_rates,
+    price_billable_usage,
+    priced_per_request,
+)
 from gateway.core.sql import INGEST_LOCK_TIMEOUT_MS, insert_ignoring_duplicates
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
@@ -289,6 +297,37 @@ def claude_usage_events(
             )
         )
     return [event for event in events if event is not None]
+
+
+@dataclass(frozen=True)
+class PricedEvent:
+    """An imported event as it was priced, for the session it names to show what it cost."""
+
+    source_event_id: str
+    session_label: str
+    timestamp: datetime
+    cost: Decimal
+    source: str
+    # USD per million tokens on each meter (``input``, ``output``, ``cache_read``,
+    # ``cache_write``) for this event, a threshold tier applied; a cache meter with
+    # no rate of its own bills at the input rate. Empty for a flat per-request rate.
+    rates: Mapping[str, Decimal]
+
+
+def _rates(pricing: ModelPricing, usage: BillableUsage) -> dict[str, Decimal]:
+    if priced_per_request(pricing):
+        return {}
+    try:
+        rates = effective_rates(pricing, usage.total_input_tokens)
+    except ValueError:
+        return {}
+    cache_read, cache_write = rates.cache_read_price_per_million, rates.cache_write_price_per_million
+    return {
+        "input": rates.input_price_per_million,
+        "output": rates.output_price_per_million,
+        "cache_read": rates.input_price_per_million if cache_read is None else cache_read,
+        "cache_write": rates.input_price_per_million if cache_write is None else cache_write,
+    }
 
 
 class ExternalIngestError(BaseModel):
@@ -575,8 +614,12 @@ async def ingest_external_events(
     api_key: APIKey | None,
     is_master_key: bool,
     reject_user_mismatch: bool,
+    priced: list[PricedEvent] | None = None,
 ) -> ExternalIngestResult:
     """Validate, price, and persist a batch of imported usage events.
+
+    ``priced`` collects every priced event that names a session, a duplicate
+    included, since the caller's own record of it is idempotent too.
 
     Attribution binds to the authenticated principal: the master key may name any
     user, an API key binds usage to its own user (and stamps its id on the rows).
@@ -669,7 +712,19 @@ async def ingest_external_events(
         # there is no budget to protect here. A model with no configured price simply
         # records cost=null (the row still lands); add pricing later to see the cost.
         pricing = _resolve_pricing(pricing_index, event.provider, event.model, event.timestamp)
-        rows.append(_build_row(request.source, target_user, event, pricing, api_key_id, usage_workspace_id))
+        row = _build_row(request.source, target_user, event, pricing, api_key_id, usage_workspace_id)
+        rows.append(row)
+        if priced is not None and row.cost is not None and event.session_label:
+            priced.append(
+                PricedEvent(
+                    event.source_event_id,
+                    event.session_label,
+                    event.timestamp,
+                    row.cost,
+                    request.source,
+                    _rates(pricing, _build_usage(event)) if pricing is not None else {},
+                )
+            )
 
     await _insert_rows(db, request.source, rows, result)
 

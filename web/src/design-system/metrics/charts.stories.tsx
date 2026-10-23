@@ -62,6 +62,16 @@ const STACK: StackedPoint[] = DAYS.map((x, index) => ({
   failed: index % 4 === 0 ? 90 : 12,
 }))
 
+// Counts so small that recharts would split them into halves.
+const FEW: StackedPoint[] = DAYS.map((x, index) => ({
+  x,
+  sessions: index % 3 === 0 ? 1 : 0,
+}))
+
+const FEW_SERIES: SeriesDef[] = [
+  { key: "sessions", label: "Sessions", color: "var(--color-chart-cat-1)" },
+]
+
 const STACK_SERIES: SeriesDef[] = [
   { key: "succeeded", label: "Succeeded", color: "var(--color-chart-cat-1)" },
   { key: "refused", label: "Refused", color: "var(--color-chart-cat-2)" },
@@ -272,6 +282,33 @@ export const AxisDensity: Story = {
             showYAxis
             xTickInterval={xTickInterval}
             yTickCount={yTickCount}
+          />
+        </div>
+      ))}
+    </div>
+  ),
+}
+
+/**
+ * `integerY` keeps the y axis to whole numbers, for a chart of counts. A strip
+ * whose busiest bar holds one session otherwise labels a tick "0.5".
+ */
+export const IntegerAxis: Story = {
+  render: () => (
+    <div className="flex w-[48rem] flex-col gap-6">
+      {([false, true] as const).map((integerY) => (
+        <div key={String(integerY)} className="flex flex-col gap-1">
+          <span className="text-overline">integerY {String(integerY)}</span>
+          <TrendChart
+            data={FEW}
+            series={FEW_SERIES}
+            formatValue={count}
+            formatXTick={day}
+            ariaLabel={`Sessions per day, integerY ${integerY}`}
+            height={90}
+            showYAxis
+            yTickCount={3}
+            integerY={integerY}
           />
         </div>
       ))}

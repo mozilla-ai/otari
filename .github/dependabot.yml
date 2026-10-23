@@ -15,6 +15,13 @@ updates:
           - "minor"
           - "patch"
 
+  # The Dockerfile's base images are pinned by digest, which goes stale the same
+  # way a pinned action SHA does; Dependabot moves the digest when the tag does.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
   # Python dependencies resolved through uv. The ecosystem must be "uv", not
   # "pip": the pip ecosystem does not understand uv.lock, so it would leave the
   # lockfile (the thing CI and the Docker image actually install from, both via

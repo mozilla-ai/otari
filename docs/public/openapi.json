@@ -1590,6 +1590,57 @@
         "title": "Annotations",
         "type": "object"
       },
+      "AnthropicError": {
+        "description": "What went wrong, in Anthropic's terms.",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "description": "Anthropic's error type, such as `invalid_request_error` or `rate_limit_error`.",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "message"
+        ],
+        "title": "AnthropicError",
+        "type": "object"
+      },
+      "AnthropicErrorResponse": {
+        "description": "Anthropic's error envelope, which every error on a Messages route is answered in.",
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The refusal's `Otari-Error-Code`, where it has one.",
+            "title": "Code"
+          },
+          "error": {
+            "$ref": "#/components/schemas/AnthropicError"
+          },
+          "type": {
+            "const": "error",
+            "default": "error",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "AnthropicErrorResponse",
+        "type": "object"
+      },
       "AnthropicFileDeleted": {
         "description": "Anthropic's answer to a delete.",
         "properties": {
@@ -3890,6 +3941,18 @@
             ],
             "title": "Response Format"
           },
+          "safety_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A stable identifier for the end user behind the request, used as the tag the provider's end-user identifier is derived from. Wins over `user` for that, and is never sent upstream. The dashboard's Playground ignores it.",
+            "title": "Safety Identifier"
+          },
           "seed": {
             "anyOf": [
               {
@@ -3922,7 +3985,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.",
+            "description": "Optional caller-supplied label for a run, experiment or conversation, which names the session the request's trace is grouped under. Stripped before the request is forwarded upstream to the provider.",
             "title": "Session Label"
           },
           "stop": {
@@ -4691,6 +4754,21 @@
             "description": "Model allow-list: null = any model, [] = deny all, or canonical instance:model entries (with instance:* / instance:prefix* wildcards).",
             "title": "Allowed Models"
           },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Search tool allow-list for POST /api/v1/search: null = inherit the user's, [] = no tool, or search tool names ('*' for every search tool). A model wildcard never grants a tool.",
+            "title": "Allowed Tools"
+          },
           "capture_agent_telemetry": {
             "anyOf": [
               {
@@ -4845,6 +4923,20 @@
             ],
             "title": "Allowed Models"
           },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
+          },
           "capture_agent_telemetry": {
             "anyOf": [
               {
@@ -4992,6 +5084,7 @@
           "expires_at",
           "is_active",
           "allowed_models",
+          "allowed_tools",
           "exclude_from_budget",
           "reject_user_mismatch",
           "capture_agent_telemetry",
@@ -5021,6 +5114,21 @@
             ],
             "description": "Model allow-list: null = any model your user default allows, [] = deny all, or canonical instance:model entries. A key can only narrow your own model access, never broaden it.",
             "title": "Allowed Models"
+          },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Search tool allow-list for POST /api/v1/search: null = inherit your own, [] = no tool, or search tool names ('*' for every search tool). A key can only narrow your own tool access.",
+            "title": "Allowed Tools"
           },
           "capture_agent_telemetry": {
             "anyOf": [
@@ -5339,6 +5447,21 @@
             ],
             "description": "Default model access-list this user's keys inherit; null = unrestricted, [] = deny all",
             "title": "Allowed Models"
+          },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Default search tool access-list this user's keys inherit: null = the tools allowed_models grants, [] = no tool, or search tool names ('*' for every search tool).",
+            "title": "Allowed Tools"
           },
           "blocked": {
             "default": false,
@@ -5802,28 +5925,6 @@
       "DeploymentBootstrap": {
         "description": "What the dashboard shell needs before it can render anything.",
         "properties": {
-          "data_plane_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Where this deployment's inference traffic belongs, when it is not served here. The mirror of management_url: that one says where management lives when this deployment is not the control plane, this one says where the data plane is when this deployment is not it. Set only by a hosted control plane, which serves the dashboard but not inference (otari#822); null for standalone and hybrid, both of which serve inference at the address that reached this page. Not a human link target like management_url: it is the gateway's bare address, which the dashboard suffixes with the API root to build its request snippets. So it must carry no API root anywhere (a value ending in /api/v1, or a whole endpoint like /api/v1/chat/completions, renders that path twice) and no credential, since this response is unauthenticated. This gateway refuses both at startup; any deployment serving this contract should publish the same shape. Null on a hosted deployment means unconfigured, and the dashboard then shows no snippet rather than one naming this host.",
-            "title": "Data Plane Url"
-          },
-          "deployment_type": {
-            "description": "Which deployment serves this URL. 'standalone' owns its own data and serves one tenant; 'hosted' owns its own data and serves many (otari.ai, or any deployment run as a control plane), which is why its management surfaces are the per-organization ones; 'hybrid' is a gateway attached to otari.ai, which is data-plane only and holds no management surface of its own.",
-            "enum": [
-              "standalone",
-              "hosted",
-              "hybrid"
-            ],
-            "title": "Deployment Type",
-            "type": "string"
-          },
           "docs_url": {
             "anyOf": [
               {
@@ -5836,35 +5937,28 @@
             "description": "Where this deployment's documentation lives, when it is not docs.otari.ai. Set, the dashboard's Documentation links open it in a new tab; null, they open https://docs.otari.ai/. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.",
             "title": "Docs Url"
           },
+          "federation_member_rules": {
+            "description": "Whether an organization's owners and admins may give their own API keys federation rules (the federation_member_rules setting), so the dashboard offers workload identity on their keys.",
+            "title": "Federation Member Rules",
+            "type": "boolean"
+          },
           "feedback_enabled": {
             "description": "Whether this deployment accepts deliberate feedback submissions.",
             "title": "Feedback Enabled",
             "type": "boolean"
           },
           "mail_ready": {
-            "description": "Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this control plane sends carries such a link, which is why this is one flag and not one per feature. False for a hybrid gateway, whose control plane is otari.ai and which sends no mail of its own.",
+            "description": "Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this deployment sends carries such a link, which is why this is one flag and not one per feature.",
             "title": "Mail Ready",
             "type": "boolean"
           },
           "maintenance_mode": {
-            "description": "Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the management API and the data plane are unaffected. False for a hybrid gateway, which issues no session.",
+            "description": "Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the API is unaffected.",
             "title": "Maintenance Mode",
             "type": "boolean"
           },
-          "management_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.",
-            "title": "Management Url"
-          },
           "oauth_providers": {
-            "description": "OAuth providers this deployment can sign somebody in with, sorted, one entry per provider with a client ID, a client secret and a public_base_url to build a redirect URI from. The sign-in screen renders a button per entry and none at all when the list is empty, so a provider nobody configured is absent rather than offered and then refused. Additive to sign_in_methods rather than part of it: an OAuth sign-in coexists with whichever typed credential is current, the way a passkey does. Empty for a hybrid gateway, which issues no session.",
+            "description": "OAuth providers this deployment can sign somebody in with, sorted, one entry per provider with a client ID, a client secret and a public_base_url to build a redirect URI from. The sign-in screen renders a button per entry and none at all when the list is empty, so a provider nobody configured is absent rather than offered and then refused. Additive to sign_in_methods rather than part of it: an OAuth sign-in coexists with whichever typed credential is current, the way a passkey does.",
             "items": {
               "type": "string"
             },
@@ -5872,17 +5966,17 @@
             "type": "array"
           },
           "open_signup": {
-            "description": "Whether POST /api/v1/auth/signup creates an account for an address nobody has added yet, each with an organization of its own, or only lets an address an admin already put on the roster set its password. The signup page reads as registration or as claiming an invitation accordingly, and the sign-in screen links to it with the wording that matches. False for a hybrid gateway, which holds no identities.",
+            "description": "Whether POST /api/v1/auth/signup creates an account for an address nobody has added yet, each with an organization of its own, or only lets an address an admin already put on the roster set its password. The signup page reads as registration or as claiming an invitation accordingly, and the sign-in screen links to it with the wording that matches.",
             "title": "Open Signup",
             "type": "boolean"
           },
           "passkeys_enabled": {
-            "description": "Whether this deployment offers passkeys at all (the passkeys_enabled setting). False means the passkey routes are not mounted and the dashboard hides its passkey page, which is a different answer from passkeys_ready: a deployment that merely has not configured a relying party is ready for nobody yet but still shows the page that says so. False for a hybrid gateway, which issues no session of its own.",
+            "description": "Whether this deployment offers passkeys at all (the passkeys_enabled setting). False means the passkey routes are not mounted and the dashboard hides its passkey page, which is a different answer from passkeys_ready: a deployment that merely has not configured a relying party is ready for nobody yet but still shows the page that says so.",
             "title": "Passkeys Enabled",
             "type": "boolean"
           },
           "passkeys_ready": {
-            "description": "Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them. False for a hybrid gateway, which issues no session of its own.",
+            "description": "Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them.",
             "title": "Passkeys Ready",
             "type": "boolean"
           },
@@ -5900,22 +5994,12 @@
           },
           "public_catalog": {
             "default": false,
-            "description": "Whether the model catalog is served to a visitor with no session: GET /api/v1/catalog/models answers anonymously and the dashboard renders Models ahead of sign-in. False for a hybrid gateway, which serves no catalog of its own.",
+            "description": "Whether the model catalog is served to a visitor with no session: GET /api/v1/catalog/models answers anonymously and the dashboard renders Models ahead of sign-in.",
             "title": "Public Catalog",
             "type": "boolean"
           },
-          "session_type": {
-            "description": "The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone operator sign-in (see sign_in_methods for which credential it currently accepts), 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.",
-            "enum": [
-              "local_operator",
-              "hosted_user",
-              "none"
-            ],
-            "title": "Session Type",
-            "type": "string"
-          },
           "sign_in_methods": {
-            "description": "How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; past that it stays the credential for the management API but is no longer a dashboard login. 'password' is offered while any active identity holds one, which is not the same question and not always the later half of it: a member can hold a password on a deployment whose operator never claimed it, so both typed credentials can appear together. 'passkey' appears alongside either when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.",
+            "description": "How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; past that it stays the credential for the management API but is no longer a dashboard login. 'password' is offered while any active identity holds one, which is not the same question and not always the later half of it: a member can hold a password on a deployment whose operator never claimed it, so both typed credentials can appear together. 'passkey' appears alongside either when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. The login page renders from this rather than trying a credential to find out.",
             "items": {
               "enum": [
                 "master_key",
@@ -5940,7 +6024,7 @@
             "title": "Site Url"
           },
           "surfaces": {
-            "description": "Management API groups this deployment serves, sorted, which is what its dashboard pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis, and this is the deployment (topology) axis. Empty for a hybrid gateway.",
+            "description": "Management API groups this deployment serves, sorted, which is what its dashboard pages gate on: a fixed set plus one for each enabled feature. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis.",
             "items": {
               "type": "string"
             },
@@ -5961,11 +6045,7 @@
           }
         },
         "required": [
-          "deployment_type",
-          "session_type",
           "surfaces",
-          "management_url",
-          "data_plane_url",
           "docs_url",
           "terms_url",
           "privacy_url",
@@ -5977,6 +6057,7 @@
           "oauth_providers",
           "open_signup",
           "feedback_enabled",
+          "federation_member_rules",
           "mail_ready"
         ],
         "title": "DeploymentBootstrap",
@@ -6667,7 +6748,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced",
+            "description": "Which rate priced the request: `organization`, `deployment` or `defaults`; absent when it was not priced",
             "title": "Pricing Source"
           },
           "prompt_tokens": {
@@ -7370,7 +7451,7 @@
             "title": "Email"
           },
           "issuer": {
-            "description": "The token's 'iss', one of the deployment's federation_issuers.",
+            "description": "The token's 'iss'. On an operator's rule, one of the deployment's federation_issuers; on a member's own key, any https issuer, whose discovery document and signing keys are fetched only from a public host.",
             "maxLength": 512,
             "minLength": 1,
             "title": "Issuer",
@@ -7433,6 +7514,11 @@
             "title": "Issuer",
             "type": "string"
           },
+          "member_managed": {
+            "description": "Whether a member gave the rule to their own key: it then matches only in the token exchange.",
+            "title": "Member Managed",
+            "type": "boolean"
+          },
           "subject": {
             "anyOf": [
               {
@@ -7452,6 +7538,7 @@
           "audience",
           "subject",
           "email",
+          "member_managed",
           "created_at"
         ],
         "title": "FederationRulePublic",
@@ -7523,7 +7610,7 @@
                 "type": "null"
               }
             ],
-            "description": "When set, the id of the rule's key.",
+            "description": "Ignored. Accepted so that a client configured for Anthropic's service account id is not refused.",
             "title": "Service Account Id"
           },
           "workspace_id": {
@@ -7535,7 +7622,7 @@
                 "type": "null"
               }
             ],
-            "description": "When set, the UUID of the rule's key's workspace.",
+            "description": "Ignored. Accepted so that a client configured for Anthropic's workspace id is not refused.",
             "title": "Workspace Id"
           }
         },
@@ -7565,6 +7652,76 @@
           "expires_in"
         ],
         "title": "FederationTokenResponse",
+        "type": "object"
+      },
+      "GateDefinitionRequest": {
+        "additionalProperties": false,
+        "description": "One gate of a guardrail version: what it is, when it runs, and what it says when it fails.",
+        "properties": {
+          "enforcement": {
+            "enum": [
+              "required",
+              "advisory"
+            ],
+            "title": "Enforcement",
+            "type": "string"
+          },
+          "gate_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Gate Id",
+            "type": "string"
+          },
+          "gate_type": {
+            "enum": [
+              "command",
+              "command_if_changed",
+              "judge",
+              "path",
+              "verifier"
+            ],
+            "title": "Gate Type",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 4096,
+            "title": "Message",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "repo",
+              "user"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "runs": {
+            "items": {
+              "enum": [
+                "pre_tool_use.edit_target",
+                "pre_tool_use.read_target",
+                "pre_tool_use.command",
+                "stop.working_tree",
+                "stop.session",
+                "stop.verifier"
+              ],
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "gate_id",
+          "gate_type",
+          "enforcement",
+          "origin",
+          "runs",
+          "message"
+        ],
+        "title": "GateDefinitionRequest",
         "type": "object"
       },
       "GateResultResponse": {
@@ -7606,6 +7763,130 @@
         "title": "GateResultResponse",
         "type": "object"
       },
+      "GateSummaryPublic": {
+        "description": "How often one agent guardrail gate ran in a session, by what it decided.",
+        "properties": {
+          "blocked": {
+            "description": "Checks where the gate stopped the agent.",
+            "title": "Blocked",
+            "type": "integer"
+          },
+          "enforcement": {
+            "anyOf": [
+              {
+                "enum": [
+                  "required",
+                  "advisory"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enforcement"
+          },
+          "flagged": {
+            "description": "Checks an advisory gate failed; the agent went ahead.",
+            "title": "Flagged",
+            "type": "integer"
+          },
+          "gate_id": {
+            "title": "Gate Id",
+            "type": "string"
+          },
+          "gate_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "From the guardrail's definition, when it was sent.",
+            "title": "Gate Type"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the gate says when it fails, from the guardrail's definition.",
+            "title": "Message"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "enum": [
+                  "repo",
+                  "user"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the gate is the repository's (.otari/) or the user's own (~/.otari/).",
+            "title": "Origin"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "integer"
+          },
+          "refused": {
+            "description": "Checks where the gate could not decide and held the agent anyway.",
+            "title": "Refused",
+            "type": "integer"
+          },
+          "runs": {
+            "description": "The moments the gate runs at (pre_tool_use.edit_target, stop.session, ...).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The check to open first: the earliest that did anything but pass. Null for a gate that never ran.",
+            "title": "Span Id"
+          },
+          "undecided": {
+            "description": "Checks where the gate could not decide; the agent went ahead unchecked.",
+            "title": "Undecided",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "gate_id",
+          "passed",
+          "blocked",
+          "flagged",
+          "refused",
+          "undecided",
+          "span_id",
+          "gate_type",
+          "enforcement",
+          "message",
+          "runs",
+          "origin"
+        ],
+        "title": "GateSummaryPublic",
+        "type": "object"
+      },
       "GatewaySettings": {
         "description": "Operator-facing runtime settings surfaced to the dashboard.\n\nThe top-level flags are kept for the callers that read them directly\n(pricing warnings, the models/providers pages); ``config`` is the full\nread-only view with the settable/startup-only marking.",
         "properties": {
@@ -7629,10 +7910,6 @@
             "title": "Master Key Source",
             "type": "string"
           },
-          "mode": {
-            "title": "Mode",
-            "type": "string"
-          },
           "model_discovery": {
             "title": "Model Discovery",
             "type": "boolean"
@@ -7652,7 +7929,6 @@
           }
         },
         "required": [
-          "mode",
           "version",
           "model_discovery",
           "default_pricing",
@@ -7774,6 +8050,44 @@
           "profile"
         ],
         "title": "GuardrailConfig",
+        "type": "object"
+      },
+      "GuardrailDefinitionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Digest",
+            "type": "string"
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/GateDefinitionRequest"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Gates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "digest",
+          "gates"
+        ],
+        "title": "GuardrailDefinitionRequest",
+        "type": "object"
+      },
+      "GuardrailDefinitionResponse": {
+        "properties": {
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest"
+        ],
+        "title": "GuardrailDefinitionResponse",
         "type": "object"
       },
       "GuardrailParameterSpec": {
@@ -9815,6 +10129,20 @@
             ],
             "title": "Allowed Models"
           },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
+          },
           "capture_agent_telemetry": {
             "anyOf": [
               {
@@ -9985,6 +10313,7 @@
           "expires_at",
           "is_active",
           "allowed_models",
+          "allowed_tools",
           "exclude_from_budget",
           "reject_user_mismatch",
           "capture_agent_telemetry",
@@ -10493,7 +10822,7 @@
             "type": "string"
           },
           "server_revision": {
-            "description": "An opaque revision of the stored server's URL, credential, enabled state and allowlist. It detects Otari-side and platform-side configuration changes only: a remote server that changes its own catalog or a tool's behavior behind an unchanged URL will not move it.",
+            "description": "An opaque revision of the stored server's URL, credential, enabled state and allowlist. It detects Otari-side configuration changes only: a remote server that changes its own catalog or a tool's behavior behind an unchanged URL will not move it.",
             "title": "Server Revision",
             "type": "string"
           },
@@ -10538,6 +10867,20 @@
               }
             ],
             "title": "Allowed Models"
+          },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
           },
           "blocked": {
             "title": "Blocked",
@@ -10848,7 +11191,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.",
+            "description": "Optional caller-supplied label for a run, experiment or conversation, which names the session the request's trace is grouped under. Stripped before the request is forwarded upstream to the provider.",
             "title": "Session Label"
           },
           "stop_sequences": {
@@ -10978,6 +11321,27 @@
           "max_tokens"
         ],
         "title": "MessagesRequest",
+        "type": "object"
+      },
+      "ModelArchitecture": {
+        "description": "What a model reads and writes, in OpenRouter's ``architecture`` shape.",
+        "properties": {
+          "input_modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Input Modalities",
+            "type": "array"
+          },
+          "output_modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Output Modalities",
+            "type": "array"
+          }
+        },
+        "title": "ModelArchitecture",
         "type": "object"
       },
       "ModelListResponse": {
@@ -11198,6 +11562,16 @@
       "ModelObject": {
         "description": "OpenAI-compatible model object.",
         "properties": {
+          "architecture": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelArchitecture"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "context_window": {
             "anyOf": [
               {
@@ -11233,6 +11607,17 @@
             ],
             "title": "Max Output Tokens"
           },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
           "object": {
             "default": "model",
             "title": "Object",
@@ -11256,6 +11641,20 @@
             "default": "none",
             "title": "Pricing Source",
             "type": "string"
+          },
+          "supported_parameters": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supported Parameters"
           }
         },
         "required": [
@@ -12346,14 +12745,46 @@
       "OrgWebSearchKeyCreateRequest": {
         "description": "What a caller sends to add a key. The service keeps only its ciphertext and ``last4``.",
         "example": {
-          "api_key": "<your Tavily API key>",
+          "api_key": "<your Exa API key>",
+          "kind": "search",
           "name": "production",
-          "provider": "tavily"
+          "provider": "exa"
         },
         "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's endpoint, when not its own. Must be https when the key carries an API key.",
+            "title": "Api Base"
+          },
           "api_key": {
-            "minLength": 1,
-            "title": "Api Key",
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required unless the provider takes no key.",
+            "title": "Api Key"
+          },
+          "kind": {
+            "default": "search",
+            "description": "Whether the key serves the search tool or the fetch tool, and enrichment. Fixed once created.",
+            "enum": [
+              "search",
+              "fetch"
+            ],
+            "title": "Kind",
             "type": "string"
           },
           "name": {
@@ -12362,8 +12793,21 @@
             "title": "Name",
             "type": "string"
           },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider options, under the names the provider catalog lists for the provider.",
+            "title": "Options"
+          },
           "provider": {
-            "description": "The search provider the key is for: tavily or brave.",
+            "description": "The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, lists for the key's kind, other than searxng, or tavily or brave for a search key.",
             "maxLength": 255,
             "title": "Provider",
             "type": "string"
@@ -12371,8 +12815,7 @@
         },
         "required": [
           "provider",
-          "name",
-          "api_key"
+          "name"
         ],
         "title": "OrgWebSearchKeyCreateRequest",
         "type": "object"
@@ -12380,6 +12823,17 @@
       "OrgWebSearchKeyPublic": {
         "description": "One key as the API shows it: never the key itself, only ``last4``.",
         "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
           "archived_at": {
             "anyOf": [
               {
@@ -12406,6 +12860,14 @@
             "title": "Is Org Default",
             "type": "boolean"
           },
+          "kind": {
+            "enum": [
+              "search",
+              "fetch"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
           "last4": {
             "anyOf": [
               {
@@ -12420,6 +12882,19 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key's provider options, with any value whose name looks like a secret masked.",
+            "title": "Options"
           },
           "organization_id": {
             "format": "uuid",
@@ -12443,7 +12918,7 @@
             "title": "Updated At"
           },
           "usable": {
-            "description": "False when this deployment cannot decrypt the stored key, so no search uses it. It is still listed, because replacing or deleting it is what fixes it.",
+            "description": "False when this deployment cannot decrypt the stored key, so no call uses it. It is still listed, because replacing or deleting it is what fixes it.",
             "title": "Usable",
             "type": "boolean"
           }
@@ -12451,6 +12926,7 @@
         "required": [
           "id",
           "organization_id",
+          "kind",
           "provider",
           "name",
           "is_org_default",
@@ -12461,8 +12937,20 @@
         "type": "object"
       },
       "OrgWebSearchKeyUpdateRequest": {
-        "description": "A partial update: only what is set is applied.",
+        "description": "A partial update: only what is set is applied, and ``null`` clears ``api_base`` or ``options``.\n\n``kind`` is fixed once a key is created, so sending it is refused.",
         "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
           "api_key": {
             "anyOf": [
               {
@@ -12486,6 +12974,18 @@
               }
             ],
             "title": "Name"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
           }
         },
         "title": "OrgWebSearchKeyUpdateRequest",
@@ -13693,11 +14193,6 @@
       "OrganizationMembershipContextPublic": {
         "description": "An organization plus the caller's standing in it.\n\nWhat every tenancy page reads first: which organization it is looking at,\nand what the caller may do there.",
         "properties": {
-          "byo_provider_keys_allowed": {
-            "default": false,
-            "title": "Byo Provider Keys Allowed",
-            "type": "boolean"
-          },
           "caller": {
             "anyOf": [
               {
@@ -15792,6 +16287,18 @@
             "title": "Output Price Per Million",
             "type": "number"
           },
+          "price_per_request": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD for each request, for a rate in requests; null for any other unit.",
+            "title": "Price Per Request"
+          },
           "pricing_tiers": {
             "items": {
               "$ref": "#/components/schemas/PricingTier"
@@ -17412,7 +17919,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced",
+            "description": "Which rate priced the request: `organization`, `deployment` or `defaults`; absent when it was not priced",
             "title": "Pricing Source"
           },
           "search_units": {
@@ -17901,7 +18408,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.",
+            "description": "Optional caller-supplied label for a run, experiment or conversation, which names the session the request's trace is grouped under. Stripped before the request is forwarded upstream to the provider.",
             "title": "Session Label"
           },
           "store": {
@@ -18128,6 +18635,68 @@
           "policies"
         ],
         "title": "RouterStatus",
+        "type": "object"
+      },
+      "SandboxCredentialPublic": {
+        "description": "Where the key a hosted sandbox provider leases with comes from. Never the key itself.",
+        "properties": {
+          "env_var": {
+            "description": "The environment variable a deployment that stores no key is read from.",
+            "title": "Env Var",
+            "type": "string"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key's last four characters, to tell keys apart.",
+            "title": "Last4"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "stored",
+                  "environment"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "'stored' for a key set here, which wins; 'environment' for the provider's own environment variable; null when there is neither and code execution fails until one is set.",
+            "title": "Source"
+          }
+        },
+        "required": [
+          "source",
+          "env_var"
+        ],
+        "title": "SandboxCredentialPublic",
+        "type": "object"
+      },
+      "SandboxCredentialRequest": {
+        "description": "The key to lease hosted sandboxes with.",
+        "example": {
+          "api_key": "e2b_0123456789abcdef"
+        },
+        "properties": {
+          "api_key": {
+            "minLength": 1,
+            "title": "Api Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_key"
+        ],
+        "title": "SandboxCredentialRequest",
         "type": "object"
       },
       "SandboxProvider": {
@@ -19305,6 +19874,19 @@
             "title": "Output Price Per Million",
             "type": "number"
           },
+          "price_per_request": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not combined with token prices.",
+            "title": "Price Per Request"
+          },
           "pricing_tiers": {
             "anyOf": [
               {
@@ -19333,9 +19915,7 @@
           }
         },
         "required": [
-          "model_key",
-          "input_price_per_million",
-          "output_price_per_million"
+          "model_key"
         ],
         "title": "SetPricingRequest",
         "type": "object"
@@ -19399,7 +19979,7 @@
         "type": "object"
       },
       "SpanPublic": {
-        "description": "One span of a session. Content is never part of a span.",
+        "description": "One span of a session. Its content is empty unless the deployment keeps content.",
         "properties": {
           "approximate": {
             "description": "True when the start was inferred rather than measured.",
@@ -19449,6 +20029,14 @@
             ],
             "description": "Input tokens written to the prompt cache.",
             "title": "Cache Write Tokens"
+          },
+          "content": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the deployment keeps content and the agent sent it. Empty otherwise.",
+            "title": "Content",
+            "type": "object"
           },
           "cost": {
             "anyOf": [
@@ -19577,7 +20165,8 @@
             "enum": [
               "ok",
               "error",
-              "unknown"
+              "unknown",
+              "blocked"
             ],
             "title": "Outcome",
             "type": "string"
@@ -19721,7 +20310,8 @@
           "request_id",
           "otel_trace_id",
           "otel_span_id",
-          "attributes"
+          "attributes",
+          "content"
         ],
         "title": "SpanPublic",
         "type": "object"
@@ -20117,6 +20707,80 @@
         "title": "ToolChargeLine",
         "type": "object"
       },
+      "ToolCostPublic": {
+        "description": "An estimate of what one tool call cost, from the model requests either side of it.",
+        "properties": {
+          "calling": {
+            "description": "Its share of the output of the request that called it.",
+            "title": "Calling",
+            "type": "number"
+          },
+          "calls_sharing_request": {
+            "description": "Tool calls the request that called it made, sharing its output.",
+            "title": "Calls Sharing Request",
+            "type": "integer"
+          },
+          "calls_sharing_result": {
+            "description": "Tool calls whose results arrived together, sharing that growth.",
+            "title": "Calls Sharing Result",
+            "type": "integer"
+          },
+          "later_requests": {
+            "description": "The later requests that read its result again.",
+            "title": "Later Requests",
+            "type": "integer"
+          },
+          "rereading": {
+            "description": "Reading its result again in later requests, until the context was compacted.",
+            "title": "Rereading",
+            "type": "number"
+          },
+          "result_tokens": {
+            "description": "About how many tokens its result added to the context.",
+            "title": "Result Tokens",
+            "type": "integer"
+          },
+          "span_id": {
+            "title": "Span Id",
+            "type": "string"
+          },
+          "subagent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What a subagent the call ran cost, exactly.",
+            "title": "Subagent"
+          },
+          "total": {
+            "title": "Total",
+            "type": "number"
+          },
+          "writing": {
+            "description": "Writing its result into the context, on the next request.",
+            "title": "Writing",
+            "type": "number"
+          }
+        },
+        "required": [
+          "span_id",
+          "total",
+          "calling",
+          "writing",
+          "rereading",
+          "result_tokens",
+          "later_requests",
+          "calls_sharing_request",
+          "calls_sharing_result",
+          "subagent"
+        ],
+        "title": "ToolCostPublic",
+        "type": "object"
+      },
       "ToolMeter": {
         "additionalProperties": true,
         "description": "One gateway-run tool's call counts on a request.\n\nA TypedDict rather than a model, and every key optional, so a stored entry\nserializes back as it was written: a model with defaults would put\n``\"unit_rate\": null`` on every tool that has never been priced.",
@@ -20232,6 +20896,17 @@
             "title": "Fields",
             "type": "array"
           },
+          "sandbox_credential": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SandboxCredentialPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key a hosted sandbox_provider leases with. Null for the protocol provider, which takes none, and for a reader who does not operate the deployment."
+          },
           "sandbox_provider": {
             "anyOf": [
               {
@@ -20281,12 +20956,12 @@
             "type": "string"
           },
           "failed": {
-            "description": "Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.",
+            "description": "Sessions active in the bucket that hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.",
             "title": "Failed",
             "type": "integer"
           },
           "succeeded": {
-            "description": "Sessions that started in the bucket and did not fail.",
+            "description": "Sessions active in the bucket that did not fail.",
             "title": "Succeeded",
             "type": "integer"
           }
@@ -20314,6 +20989,14 @@
       },
       "TraceDetailPublic": {
         "properties": {
+          "gates": {
+            "description": "Each agent guardrail gate a coding agent's hook reported, the ones that did something first.",
+            "items": {
+              "$ref": "#/components/schemas/GateSummaryPublic"
+            },
+            "title": "Gates",
+            "type": "array"
+          },
           "spans": {
             "items": {
               "$ref": "#/components/schemas/SpanPublic"
@@ -20331,6 +21014,14 @@
           },
           "summary": {
             "$ref": "#/components/schemas/TraceSummaryPublic"
+          },
+          "tool_costs": {
+            "description": "An estimate for each tool call between two priced model requests, in the order they were made.",
+            "items": {
+              "$ref": "#/components/schemas/ToolCostPublic"
+            },
+            "title": "Tool Costs",
+            "type": "array"
           },
           "truncated": {
             "description": "True when the session holds more spans than one read returns.",
@@ -20350,7 +21041,9 @@
           "state",
           "turns",
           "spans",
-          "truncated"
+          "truncated",
+          "gates",
+          "tool_costs"
         ],
         "title": "TraceDetailPublic",
         "type": "object"
@@ -20380,7 +21073,11 @@
         "properties": {
           "bucket": {
             "enum": [
+              "1m",
+              "5m",
+              "30m",
               "hour",
+              "6h",
               "day"
             ],
             "title": "Bucket",
@@ -20800,6 +21497,20 @@
             ],
             "title": "Allowed Models"
           },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
+          },
           "capture_agent_telemetry": {
             "anyOf": [
               {
@@ -20963,6 +21674,20 @@
               }
             ],
             "title": "Allowed Models"
+          },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
           },
           "capture_agent_telemetry": {
             "anyOf": [
@@ -21497,7 +22222,7 @@
                 "type": "null"
               }
             ],
-            "description": "A search instance whose provider any-search serves, or 'none' to turn in-loop search off.",
+            "description": "A search instance whose provider any-search serves, or 'none' to turn off the deployment's own in-loop search, which an organization key still serves.",
             "title": "Web Search Default Tool"
           },
           "web_search_engines": {
@@ -21610,6 +22335,20 @@
               }
             ],
             "title": "Allowed Models"
+          },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
           },
           "blocked": {
             "anyOf": [
@@ -23167,6 +23906,20 @@
             ],
             "title": "Allowed Models"
           },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
+          },
           "blocked": {
             "title": "Blocked",
             "type": "boolean"
@@ -23279,6 +24032,7 @@
           "reserved_requests",
           "budget_id",
           "allowed_models",
+          "allowed_tools",
           "budget_started_at",
           "next_budget_reset_at",
           "blocked",
@@ -23500,71 +24254,6 @@
           "count"
         ],
         "title": "WebAuthnCredentialsPublic",
-        "type": "object"
-      },
-      "WebSearchBackendResponse": {
-        "description": "A SearXNG-compatible ``/search`` body.",
-        "properties": {
-          "results": {
-            "items": {
-              "$ref": "#/components/schemas/WebSearchBackendResult"
-            },
-            "title": "Results",
-            "type": "array"
-          }
-        },
-        "required": [
-          "results"
-        ],
-        "title": "WebSearchBackendResponse",
-        "type": "object"
-      },
-      "WebSearchBackendResult": {
-        "description": "One hit, in the shape ``WebSearchBackend`` reads off a SearXNG response.",
-        "properties": {
-          "content": {
-            "default": "",
-            "title": "Content",
-            "type": "string"
-          },
-          "extracted_content": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The page's own text, when the provider returned it, so the caller can skip fetching the page.",
-            "title": "Extracted Content"
-          },
-          "published_date": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The provider's own recency string for the page, forwarded unparsed. Declared so a search over this hop renders the same date an in-process one does.",
-            "title": "Published Date"
-          },
-          "title": {
-            "default": "",
-            "title": "Title",
-            "type": "string"
-          },
-          "url": {
-            "title": "Url",
-            "type": "string"
-          }
-        },
-        "required": [
-          "url"
-        ],
-        "title": "WebSearchBackendResult",
         "type": "object"
       },
       "WorkspaceActivationPublic": {
@@ -25003,7 +25692,7 @@
         "type": "object"
       },
       "WorkspaceWebSearchKeyOverrideRequest": {
-        "description": "Tri-state: an omitted flag keeps its value.\n\nPinning a key re-enables it and unpins any other key of the workspace, and turning a\nkey off unpins it. Sending both flags true is refused. Both false deletes the override.",
+        "description": "Tri-state: an omitted flag keeps its value.\n\nPinning a key re-enables it and unpins the workspace's other key of its kind, and turning a\nkey off unpins it. Sending both flags true is refused. Both false deletes the override.",
         "example": {
           "is_default": true
         },
@@ -25043,14 +25732,22 @@
             "type": "boolean"
           },
           "is_default": {
-            "description": "The workspace pinned this key as its own.",
+            "description": "The workspace pinned this key as its own for its kind.",
             "title": "Is Default",
             "type": "boolean"
           },
           "is_effective": {
-            "description": "This is the key the workspace's searches use.",
+            "description": "This is the key the workspace's calls of its kind use.",
             "title": "Is Effective",
             "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "search",
+              "fetch"
+            ],
+            "title": "Kind",
+            "type": "string"
           },
           "last4": {
             "anyOf": [
@@ -25089,6 +25786,7 @@
         "required": [
           "org_web_search_key_id",
           "workspace_id",
+          "kind",
           "provider",
           "name",
           "is_default",
@@ -25112,6 +25810,30 @@
             },
             "title": "Data",
             "type": "array"
+          },
+          "fetch_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider the workspace's fetch tool runs on, and the enrichment of its search hits unless the search's instance names a fetch instance of its own: its effective fetch key's, else the deployment's default fetch instance's, which is builtin for the built-in fetcher.",
+            "title": "Fetch Provider"
+          },
+          "search_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider the workspace's searches run on: its effective search key's, else the deployment's default search's. Null when nothing searches for it.",
+            "title": "Search Provider"
           }
         },
         "required": [
@@ -25211,12 +25933,6 @@
         "description": "Enter your API key here (sent as Otari-Key header).",
         "in": "header",
         "name": "Otari-Key",
-        "type": "apiKey"
-      },
-      "GatewayTokenAuth": {
-        "description": "A deployment's own data-plane gateway identifies itself here. Not an API key: no key or session opens these paths, and no application holds this credential.",
-        "in": "header",
-        "name": "X-Gateway-Token",
         "type": "apiKey"
       },
       "XApiKeyAuth": {
@@ -25468,7 +26184,7 @@
     },
     "/api/v1/agent-telemetry": {
       "delete": {
-        "description": "Delete agent_telemetry rows by explicit ids or by filter (standalone).\n\nTarget either an explicit selection (`ids`) or everything matching a filter\n(`by_filter: true` plus optional `user_id` / `api_key_id` / `name` / date\nrange). A selection matching zero rows succeeds with `deleted: 0`.\nMaster-key only.",
+        "description": "Delete agent_telemetry rows by explicit ids or by filter.\n\nTarget either an explicit selection (`ids`) or everything matching a filter\n(`by_filter: true` plus optional `user_id` / `api_key_id` / `name` / date\nrange). A selection matching zero rows succeeds with `deleted: 0`.\nMaster-key only.",
         "operationId": "agent-telemetry-delete_agent_telemetry_rows",
         "requestBody": {
           "content": {
@@ -25518,7 +26234,7 @@
     },
     "/api/v1/agent-telemetry/count": {
       "get": {
-        "description": "Total agent_telemetry rows matching the given filters (standalone).\n\nThe filter set mirrors the purge endpoint's, so this sizes exactly what a\n\"delete all N matching\" would remove. Behavioral and metric rows are counted\ntogether: neither this nor the purge distinguishes them. Master-key only.",
+        "description": "Total agent_telemetry rows matching the given filters.\n\nThe filter set mirrors the purge endpoint's, so this sizes exactly what a\n\"delete all N matching\" would remove. Behavioral and metric rows are counted\ntogether: neither this nor the purge distinguishes them. Master-key only.",
         "operationId": "agent-telemetry-count_agent_telemetry",
         "parameters": [
           {
@@ -25660,7 +26376,7 @@
     },
     "/api/v1/agent-telemetry/series": {
       "get": {
-        "description": "Row volume over time, split by user or API key (standalone).\n\nMirrors `/api/v1/usage/series`: same window bounds and bucket-grid cap, the top\ngroups as their own series with the remainder folded into a reconciling\n``other``, and sparse points (populated cells only). Counts rows, not spend,\nso it charts telemetry volume rather than cost. Master-key only.",
+        "description": "Row volume over time, split by user or API key.\n\nMirrors `/api/v1/usage/series`: same window bounds and bucket-grid cap, the top\ngroups as their own series with the remainder folded into a reconciling\n``other``, and sparse points (populated cells only). Counts rows, not spend,\nso it charts telemetry volume rather than cost. Master-key only.",
         "operationId": "agent-telemetry-agent_telemetry_series",
         "parameters": [
           {
@@ -25833,7 +26549,7 @@
     },
     "/api/v1/agent-telemetry/summary": {
       "get": {
-        "description": "What the coding agent produced in a window, and what it cost (standalone).\n\nRange-bounded like `/api/v1/usage/summary` (default last 30 days, hard-capped),\nso the aggregates stay served by the timestamp index. Returns the outcome\ntotals (commits, pull requests, lines changed, active time), the behavioral\ncounts already captured from the logs signal (tool calls and their mix, tool\naccept/reject, turns, API errors), the recorded spend over the same scope,\nand the derived per-unit measures: cost per commit / pull request / line,\nspend per active hour, acceptance rate, turns per session, and error rate.\nEach measure is null rather than an error when its denominator is zero.\nFilterable by user, API key, and `session_label`, so cost per outcome can be\nread for one agent session as well as for a whole window.\n\nThe spend side is every usage row in scope, not only the agent's: unfiltered,\nthat includes traffic from clients that never reported telemetry, so a\nper-outcome measure read over a whole deployment answers \"what did this\ndeployment spend per commit\", not \"what did the agent spend per commit\".\nFilter by user, API key, or session to divide only the matching spend.\n\nOutcome metrics are stored exactly as the agent reported them, so a\ncumulative counter is converted to a window increment here, at read time,\ndiffed per series generation: a re-exported total adds nothing, and a counter\nreset never reads as negative work. Master-key only.",
+        "description": "What the coding agent produced in a window, and what it cost.\n\nRange-bounded like `/api/v1/usage/summary` (default last 30 days, hard-capped),\nso the aggregates stay served by the timestamp index. Returns the outcome\ntotals (commits, pull requests, lines changed, active time), the behavioral\ncounts already captured from the logs signal (tool calls and their mix, tool\naccept/reject, turns, API errors), the recorded spend over the same scope,\nand the derived per-unit measures: cost per commit / pull request / line,\nspend per active hour, acceptance rate, turns per session, and error rate.\nEach measure is null rather than an error when its denominator is zero.\nFilterable by user, API key, and `session_label`, so cost per outcome can be\nread for one agent session as well as for a whole window.\n\nThe spend side is every usage row in scope, not only the agent's: unfiltered,\nthat includes traffic from clients that never reported telemetry, so a\nper-outcome measure read over a whole deployment answers \"what did this\ndeployment spend per commit\", not \"what did the agent spend per commit\".\nFilter by user, API key, or session to divide only the matching spend.\n\nOutcome metrics are stored exactly as the agent reported them, so a\ncumulative counter is converted to a window increment here, at read time,\ndiffed per series generation: a re-exported total adds nothing, and a counter\nreset never reads as negative work. Master-key only.",
         "operationId": "agent-telemetry-agent_telemetry_summary",
         "parameters": [
           {
@@ -27491,7 +28207,7 @@
     },
     "/api/v1/bootstrap": {
       "get": {
-        "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.\nThat is also why ``sign_in_methods`` is answered here rather than behind a\ncredential, and it publishes nothing an unauthenticated caller could not\nalready learn by trying both credentials against the sign-in endpoint.\n\nThe database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``\nmarker, and the identity it names, to answer whether *that* identity holds a\npassword (#702). It runs only in standalone mode: a hybrid gateway has no session to describe,\nand ``get_db_if_needed`` hands it no session to read one from.",
+        "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.\nThat is also why ``sign_in_methods`` is answered here rather than behind a\ncredential, and it publishes nothing an unauthenticated caller could not\nalready learn by trying both credentials against the sign-in endpoint.\n\nThe database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``\nmarker, and the identity it names, to answer whether *that* identity holds a\npassword (#702).",
         "operationId": "bootstrap-get_bootstrap",
         "responses": {
           "200": {
@@ -28321,7 +29037,7 @@
         "operationId": "chat-chat_completions",
         "parameters": [
           {
-            "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
+            "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
             "in": "header",
             "name": "Idempotency-Key",
             "required": false,
@@ -28334,7 +29050,7 @@
                   "type": "null"
                 }
               ],
-              "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
+              "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
               "title": "Idempotency-Key"
             }
           },
@@ -29935,6 +30651,56 @@
           }
         ],
         "summary": "Check Policy",
+        "tags": [
+          "hooks"
+        ]
+      }
+    },
+    "/api/v1/hooks/guardrails": {
+      "post": {
+        "description": "Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.\n\n`otari hook` sends this once per version, the first time it reports a check\nagainst it. The fingerprint is recomputed from the gates, and one that does\nnot match the one sent is refused, so a version cannot be stored under\nanother's name. Sending a version again changes nothing. It is stored in the\nAPI key's workspace, beside that key's traces, and takes the same key a trace\nexport does: a budget-exempt API key, never the master key.",
+        "operationId": "hooks-record_guardrail_definition",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailDefinitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailDefinitionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Record Guardrail Definition",
         "tags": [
           "hooks"
         ]
@@ -32240,11 +33006,11 @@
     },
     "/api/v1/messages": {
       "post": {
-        "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
+        "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search.",
         "operationId": "messages-create_message",
         "parameters": [
           {
-            "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
+            "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
             "in": "header",
             "name": "Idempotency-Key",
             "required": false,
@@ -32257,7 +33023,7 @@
                   "type": "null"
                 }
               ],
-              "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
+              "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
               "title": "Idempotency-Key"
             }
           },
@@ -32299,15 +33065,25 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "4XX": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/AnthropicErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request was refused."
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicErrorResponse"
+                }
+              }
+            },
+            "description": "The request failed."
           }
         },
         "security": [
@@ -32326,7 +33102,7 @@
     },
     "/api/v1/messages/count_tokens": {
       "post": {
-        "description": "Anthropic ``/v1/messages/count_tokens``-compatible endpoint.\n\nReturns ``{\"input_tokens\": N}`` without contacting an upstream provider:\ncounting is local, so there is no budget reservation, pricing, or usage\nlogging. Authentication mirrors :func:`create_message` \u2014 hybrid mode\nresolves the caller's token against the platform, standalone mode validates\nthe API key \u2014 so the endpoint is not an open token-counting oracle.",
+        "description": "Anthropic ``/v1/messages/count_tokens``-compatible endpoint.\n\nReturns ``{\"input_tokens\": N}`` without contacting an upstream provider:\ncounting is local, so there is no budget reservation, pricing, or usage\nlogging. Authentication mirrors :func:`create_message`, validating the API\nkey, so the endpoint is not an open token-counting oracle.",
         "operationId": "messages-count_message_tokens",
         "requestBody": {
           "content": {
@@ -32349,15 +33125,25 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "4XX": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/AnthropicErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request was refused."
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicErrorResponse"
+                }
+              }
+            },
+            "description": "The request failed."
           }
         },
         "security": [
@@ -32633,7 +33419,7 @@
     },
     "/api/v1/oauth/token": {
       "post": {
-        "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must verify against an issuer on ``federation_issuers`` and match the federation rule\n``federation_rule_id`` names. ``organization_id``, ``workspace_id`` and ``service_account_id``, where set, must\nbe the UUIDs of the rule's key's organization and workspace and the key's id. The access token authenticates as\nthat key until ``expires_in`` runs out, the rule is deleted or the key stops passing its checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
+        "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:\none on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,\nwhere set, must be the UUID of the rule's key's organization. ``workspace_id`` and ``service_account_id`` are\naccepted and ignored, so a client configured for Anthropic needs only its rule and organization changed. The\naccess token authenticates as that key until ``expires_in`` runs out, the rule is deleted or the key stops passing\nits checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
         "operationId": "oauth-exchange_token",
         "requestBody": {
           "content": {
@@ -34422,6 +35208,173 @@
           }
         ],
         "summary": "Update Own Key",
+        "tags": [
+          "organization-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/keys/{key_id}/federation-rules": {
+      "get": {
+        "description": "List the identities that may authenticate as a key, oldest first.\n\nThe caller's own key, or for the deployment operator any key in their active organization. Includes any rule\nthe operator gave the key on ``/api/v1/keys``, which ``member_managed`` tells apart.",
+        "operationId": "organization-keys-list_own_federation_rules",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FederationRulePublic"
+                  },
+                  "title": "Response Organization-Keys-List Own Federation Rules",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Own Federation Rules",
+        "tags": [
+          "organization-keys"
+        ]
+      },
+      "post": {
+        "description": "Let an OpenID Connect identity token stand in for a key, through the token exchange.\n\nNeeds ``federation_member_rules``, else 403, and an organization owner or admin acting on their own key, or the\ndeployment operator on any key in their active organization, else 403. The issuer may be any https URL; its\nsigning keys are fetched only from a public host. The rule matches only in ``POST /api/v1/oauth/token`` naming\nits id, never as a bare identity token, so it lets a workload act as this key and no other: a rule naming another\ntenant's workload gives that workload nothing it did not ask for. A rule this key already holds answers 409.",
+        "operationId": "organization-keys-create_own_federation_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FederationRuleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FederationRulePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Own Federation Rule",
+        "tags": [
+          "organization-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/keys/{key_id}/federation-rules/{rule_id}": {
+      "delete": {
+        "description": "Remove a federation rule from a key. Tokens it matched stop with the next request.\n\nThe caller's own key whatever their role, or for the deployment operator any key in their active organization.\nWorks whether or not ``federation_member_rules`` is on, so a rule can always be taken back.",
+        "operationId": "organization-keys-delete_own_federation_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Own Federation Rule",
         "tags": [
           "organization-keys"
         ]
@@ -36871,7 +37824,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -36885,12 +37838,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -36904,7 +37857,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -37101,7 +38054,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -37115,12 +38068,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -37134,7 +38087,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -37359,7 +38312,7 @@
     },
     "/api/v1/organizations/me/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+        "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
         "operationId": "organization-traces-trace_series",
         "parameters": [
           {
@@ -37369,7 +38322,11 @@
             "schema": {
               "default": "hour",
               "enum": [
+                "1m",
+                "5m",
+                "30m",
                 "hour",
+                "6h",
                 "day"
               ],
               "title": "Bucket",
@@ -37396,7 +38353,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -37410,12 +38367,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -37429,7 +38386,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -39266,7 +40223,7 @@
     },
     "/api/v1/organizations/me/web-search-keys": {
       "get": {
-        "description": "List the caller's organization's web search keys. Organization owners and admins only.",
+        "description": "List the caller's organization's web search and fetch keys. Organization owners and admins only.",
         "operationId": "web-search-keys-list_org_web_search_keys",
         "parameters": [
           {
@@ -39345,7 +40302,7 @@
         ]
       },
       "post": {
-        "description": "Add a web search key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key searches with it rather than with the deployment's search.",
+        "description": "Add a search or fetch key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key of a kind uses it for that kind's calls rather than the deployment's instance.",
         "operationId": "web-search-keys-create_org_web_search_key",
         "requestBody": {
           "content": {
@@ -39395,7 +40352,7 @@
     },
     "/api/v1/organizations/me/web-search-keys/{key_id}": {
       "delete": {
-        "description": "Delete an archived web search key. Organization owners and admins only.",
+        "description": "Delete an archived key. Organization owners and admins only.",
         "operationId": "web-search-keys-delete_org_web_search_key",
         "parameters": [
           {
@@ -39438,7 +40395,7 @@
         ]
       },
       "patch": {
-        "description": "Rename a web search key or replace its secret. Organization owners and admins only.",
+        "description": "Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.\n\nIts kind and provider are fixed.",
         "operationId": "web-search-keys-update_org_web_search_key",
         "parameters": [
           {
@@ -39500,7 +40457,7 @@
     },
     "/api/v1/organizations/me/web-search-keys/{key_id}/archive": {
       "post": {
-        "description": "Take a web search key out of use. Organization owners and admins only.",
+        "description": "Take a key out of use. Organization owners and admins only.",
         "operationId": "web-search-keys-archive_org_web_search_key",
         "parameters": [
           {
@@ -39552,7 +40509,7 @@
     },
     "/api/v1/organizations/me/web-search-keys/{key_id}/default": {
       "post": {
-        "description": "Make a web search key its provider's organization default. Organization owners and admins only.",
+        "description": "Make a key the organization's default of its kind, in place of the previous one.\n\nOrganization owners and admins only.",
         "operationId": "web-search-keys-set_org_default_web_search_key",
         "parameters": [
           {
@@ -39604,7 +40561,7 @@
     },
     "/api/v1/organizations/me/web-search-keys/{key_id}/restore": {
       "post": {
-        "description": "Put an archived web search key back in use. Organization owners and admins only.",
+        "description": "Put an archived key back in use. Organization owners and admins only.",
         "operationId": "web-search-keys-restore_org_web_search_key",
         "parameters": [
           {
@@ -39717,7 +40674,7 @@
     },
     "/api/v1/playground/chat/completions": {
       "post": {
-        "description": "Run one chat completion for the signed-in caller.\n\nStreaming and non-streaming both, identically to ``POST\n/api/v1/chat/completions``: this resolves the principal and then calls the\nvery same handler. The request is billed to the caller's own attribution\nuser in the workspace they named (or their organization's default), against\nthat user's budget, and writes the ordinary usage row with no ``api_key_id``,\nbecause there was no key.\n\nThe body is ``ChatCompletionRequest`` unchanged, so the page sends the same\nrequest an SDK would and a model, tool or parameter the gateway gains is\navailable here the day it lands. The workspace rides in the query string\nrather than in the body for that reason: a field added to the body would\nalso have to be added to the pipeline's strip list, and a gateway-internal\nfield that is not stripped is forwarded to the provider as a call kwarg.\n\n``user`` in the body is the one field the pipeline will not read here: spend\nbinds to the session's own attribution user, derived and never accepted.\n\nOn a hosted control plane there is no local pipeline to call, so the same\nprincipal is forwarded to the data-plane gateway instead\n(:func:`_dispatch_to_data_plane`). The request and the response are the same\neither way.",
+        "description": "Run one chat completion for the signed-in caller.\n\nStreaming and non-streaming both, identically to ``POST\n/api/v1/chat/completions``: this resolves the principal and then calls the\nvery same handler. The request is billed to the caller's own attribution\nuser in the workspace they named (or their organization's default), against\nthat user's budget, and writes the ordinary usage row with no ``api_key_id``,\nbecause there was no key.\n\nThe body is ``ChatCompletionRequest`` unchanged, so the page sends the same\nrequest an SDK would and a model, tool or parameter the gateway gains is\navailable here the day it lands. The workspace rides in the query string\nrather than in the body for that reason: a field added to the body would\nalso have to be added to the pipeline's strip list, and a gateway-internal\nfield that is not stripped is forwarded to the provider as a call kwarg.\n\n``user`` and ``safety_identifier`` in the body are the fields the pipeline\nwill not read here: spend and the provider's end-user identifier both bind\nto the session's own attribution user, derived and never accepted.",
         "operationId": "playground-playground_chat_completions",
         "parameters": [
           {
@@ -42064,11 +43021,11 @@
     },
     "/api/v1/responses": {
       "post": {
-        "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
+        "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search.",
         "operationId": "responses-create_response",
         "parameters": [
           {
-            "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
+            "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
             "in": "header",
             "name": "Idempotency-Key",
             "required": false,
@@ -42081,7 +43038,7 @@
                   "type": "null"
                 }
               ],
-              "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
+              "description": "A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response.",
               "title": "Idempotency-Key"
             }
           },
@@ -42444,7 +43401,7 @@
     },
     "/api/v1/routing/recommend": {
       "post": {
-        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nA standalone deployment asks the decision model `agent_recommender_model`\nnames to choose among `agent_recommender_candidates` for Claude Code and\namong the request's own `candidates` for pi; a hosted build may bind a\nrecommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
+        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nBy default the deployment asks the decision model `agent_recommender_model`\nnames to choose among `agent_recommender_candidates` for Claude Code and\namong the request's own `candidates` for pi; a bootstrap may bind a\nrecommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
         "operationId": "routing-recommend_model_for_agent",
         "requestBody": {
           "content": {
@@ -43744,7 +44701,7 @@
         ]
       },
       "patch": {
-        "description": "Persist and apply tool/guardrail setting changes.\n\nUses ``model_fields_set`` so an explicit ``null`` clears a field while an\nomitted field is left unchanged. Operator-gated and standalone-only.",
+        "description": "Persist and apply tool/guardrail setting changes.\n\nUses ``model_fields_set`` so an explicit ``null`` clears a field while an\nomitted field is left unchanged. Operator-gated.",
         "operationId": "tool-settings-update_tool_settings",
         "requestBody": {
           "content": {
@@ -43824,7 +44781,7 @@
     },
     "/api/v1/tool-settings/guardrails/profiles": {
       "get": {
-        "description": "List the guardrail profiles this deployment's guardrails service has built.\n\nWhat an organization guardrail's ``profile`` may name, with the\n``validate_kwargs`` each one accepts, so the dashboard offers a picker and\ntyped fields instead of a free-text box beside an unrendered dict. The\nprofiles come from the service itself and the parameter schemas from the\n``any_guardrail`` registry; neither is a list kept in this repository. See\n`gateway.services.guardrail_catalog`.\n\nReports ``available: false`` with a reason rather than an error when the\nservice is unconfigured, unreachable, or older than its ``/profiles``\nendpoint, because a guardrails outage must not also break the page that\nconfigures guardrails.\n\nRead against ``guardrails_url``, which is the deployment's own service. An\nentry that carries an endpoint of its own is not probed: that URL is\ncaller-supplied and fetching it here would make this a way to have the\ngateway request an address of the caller's choosing.\n\nNot on ``verify_catalog_reader``, despite being a catalog read: that plane is\nthe three deployment-describing reads a data-plane key may also make, and\nadmitting a key here would let any workspace credential dial the deployment's\nguardrails service. This is a management read, so it takes the router's own gate.",
+        "description": "List the guardrail profiles this deployment's guardrails service has built.\n\nWhat an organization guardrail's ``profile`` may name, with the\n``validate_kwargs`` each one accepts, so the dashboard offers a picker and\ntyped fields instead of a free-text box beside an unrendered dict. The\nprofiles come from the service itself and the parameter schemas from the\n``any_guardrail`` registry; neither is a list kept in this repository. See\n`gateway.services.guardrail_catalog`.\n\nReports ``available: false`` with a reason rather than an error when the\nservice is unconfigured, unreachable, or older than its ``/profiles``\nendpoint, because a guardrails outage must not also break the page that\nconfigures guardrails.\n\nRead against ``guardrails_url``, which is the deployment's own service. An\nentry that carries an endpoint of its own is not probed: that URL is\ncaller-supplied and fetching it here would make this a way to have the\ngateway request an address of the caller's choosing.\n\nNot on ``verify_catalog_reader``, despite being a catalog read: that gate\nadmits any API key to the deployment-describing reads, and admitting a key\nhere would let any workspace credential dial the deployment's guardrails\nservice. This is a management read, so it takes the router's own gate.",
         "operationId": "tool-settings-list_guardrail_profiles",
         "responses": {
           "200": {
@@ -43847,6 +44804,84 @@
           }
         ],
         "summary": "List Guardrail Profiles",
+        "tags": [
+          "tool-settings"
+        ]
+      }
+    },
+    "/api/v1/tool-settings/sandbox/credential": {
+      "delete": {
+        "description": "Delete the stored sandbox key, so sandboxes are leased with the environment's key again.\n\nClearing a key that was never stored is not an error. Operator-gated.",
+        "operationId": "tool-settings-clear_sandbox_credential",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxCredentialPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Clear Sandbox Credential",
+        "tags": [
+          "tool-settings"
+        ]
+      },
+      "put": {
+        "description": "Store the key this deployment's hosted sandbox provider leases sandboxes with.\n\nWins over the provider's environment variable (``E2B_API_KEY``), on this\nworker at once and on every other within 30 seconds, so a rotated key needs\nno redeploy. Refused for the ``protocol`` provider, which takes no key of\nits own. Operator-gated.",
+        "operationId": "tool-settings-set_sandbox_credential",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxCredentialPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Sandbox Credential",
         "tags": [
           "tool-settings"
         ]
@@ -44026,7 +45061,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -44040,12 +45075,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -44059,7 +45094,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -44256,7 +45291,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -44270,12 +45305,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -44289,7 +45324,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -44514,7 +45549,7 @@
     },
     "/api/v1/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+        "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
         "operationId": "traces-trace_series",
         "parameters": [
           {
@@ -44524,7 +45559,11 @@
             "schema": {
               "default": "hour",
               "enum": [
+                "1m",
+                "5m",
+                "30m",
                 "hour",
+                "6h",
                 "day"
               ],
               "title": "Bucket",
@@ -44551,7 +45590,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -44565,12 +45604,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -44584,7 +45623,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -44828,7 +45867,7 @@
     },
     "/api/v1/usage": {
       "delete": {
-        "description": "Delete imported usage rows by explicit ids or by filter (standalone).\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /\n``status`` / date range / ``priced``). Only imported rows\n(``counts_toward_budget = false``) are ever removed: enforced gateway rows and\nthe spend ledger (``users.spend``) are untouched, so a delete can never desync a\nbudget. Master-key only.",
+        "description": "Delete imported usage rows by explicit ids or by filter.\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /\n``status`` / date range / ``priced``). Only imported rows\n(``counts_toward_budget = false``) are ever removed: enforced gateway rows and\nthe spend ledger (``users.spend``) are untouched, so a delete can never desync a\nbudget. Master-key only.",
         "operationId": "usage-delete_usage_rows",
         "requestBody": {
           "content": {
@@ -45657,7 +46696,7 @@
     },
     "/api/v1/usage/external-events": {
       "post": {
-        "description": "Ingest a batch of externally-observed usage events (standalone).\n\nAuthenticated with either an API key or the master key. Usage binds to the\nauthenticated principal: an API key attributes to its own user (and stamps its\nid on the rows); the master key may name any user via ``user_id``. Records\nsubscription-backed usage (e.g. Claude Code) as usage-log rows tagged with their\n``source``, priced at the effective API rate for each event's timestamp.\nImported usage is real cost, but never counts toward budgets or mutates\n``users.spend`` (it is retrospective, so it cannot be reserved). Idempotent by\n``(source, source_event_id)``. The payload is content-free; any\nprompt/completion/tool field is rejected (422), not stored.",
+        "description": "Ingest a batch of externally-observed usage events.\n\nAuthenticated with either an API key or the master key. Usage binds to the\nauthenticated principal: an API key attributes to its own user (and stamps its\nid on the rows); the master key may name any user via ``user_id``. Records\nsubscription-backed usage (e.g. Claude Code) as usage-log rows tagged with their\n``source``, priced at the effective API rate for each event's timestamp.\nImported usage is real cost, but never counts toward budgets or mutates\n``users.spend`` (it is retrospective, so it cannot be reserved). Idempotent by\n``(source, source_event_id)``. The payload is content-free; any\nprompt/completion/tool field is rejected (422), not stored.",
         "operationId": "usage-ingest_external_usage",
         "requestBody": {
           "content": {
@@ -45737,7 +46776,7 @@
     },
     "/api/v1/usage/requests/{request_id}": {
       "get": {
-        "description": "Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).\n\nThis is how a caller recovers the cost of a request whose response never\ncarried one: a stream that failed or was disconnected mid-response, or a\nrequest that errored. An API key sees only the requests it made; the master\nkey sees any. Returns 404 until the request has settled (its rows are written\nby a background writer, so a lookup made the instant a stream closes can\nprecede them), and for an id that is unknown or belongs to another key, with\nno way to tell those apart. A stream that ended before the provider reported\nusage, and ran no gateway tools, writes no row, so its id stays 404.",
+        "description": "Look up a request's settled cost by the ``Otari-Request-ID`` it was sent.\n\nThis is how a caller recovers the cost of a request whose response never\ncarried one: a stream that failed or was disconnected mid-response, or a\nrequest that errored. An API key sees only the requests it made; the master\nkey sees any. Returns 404 until the request has settled (its rows are written\nby a background writer, so a lookup made the instant a stream closes can\nprecede them), and for an id that is unknown or belongs to another key, with\nno way to tell those apart. A stream that ended before the provider reported\nusage, and ran no gateway tools, writes no row, so its id stays 404.",
         "operationId": "usage-get_request_settlement",
         "parameters": [
           {
@@ -46177,7 +47216,7 @@
     },
     "/api/v1/usage/set-price": {
       "post": {
-        "description": "Set the cost of imported usage rows from manual per-1M rates (standalone).\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed\nfrom each row's own token counts at the supplied ``input`` / ``output`` /\n``cache_read`` / ``cache_write`` per-1M rates (manual rates, not a recompute from\nconfigured pricing). Only imported rows (``counts_toward_budget = false``) are\ntouched, so ``users.spend`` is never affected. Master-key only.",
+        "description": "Set the cost of imported usage rows from manual per-1M rates.\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed\nfrom each row's own token counts at the supplied ``input`` / ``output`` /\n``cache_read`` / ``cache_write`` per-1M rates (manual rates, not a recompute from\nconfigured pricing). Only imported rows (``counts_toward_budget = false``) are\ntouched, so ``users.spend`` is never affected. Master-key only.",
         "operationId": "usage-set_usage_price_rows",
         "requestBody": {
           "content": {
@@ -47059,158 +48098,6 @@
         "summary": "Get User Usage",
         "tags": [
           "users"
-        ]
-      }
-    },
-    "/api/v1/web-search/search": {
-      "get": {
-        "description": "Run one search through this deployment's configured search provider.\n\nThe declared query params are the ``provider_options`` keys the providers\nunderstand. Everything else the caller sends, ``format`` and ``engines``\nincluded, is ignored rather than forwarded: the bag is opaque to the gateway\nthat filled it, so passing it upstream unread would let a workspace set\nprovider request fields this deployment never chose.",
-        "operationId": "web-search-web_search",
-        "parameters": [
-          {
-            "description": "The search query.",
-            "in": "query",
-            "name": "q",
-            "required": true,
-            "schema": {
-              "description": "The search query.",
-              "minLength": 1,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "max_results",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 20,
-                  "minimum": 1,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Max Results"
-            }
-          },
-          {
-            "in": "query",
-            "name": "search_depth",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "pattern": "^(basic|advanced)$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Search Depth"
-            }
-          },
-          {
-            "in": "query",
-            "name": "topic",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "pattern": "^(general|news|finance)$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Topic"
-            }
-          },
-          {
-            "in": "query",
-            "name": "time_range",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "pattern": "^(day|week|month|year|d|w|m|y)$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Time Range"
-            }
-          },
-          {
-            "in": "query",
-            "name": "include_answer",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Include Answer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-gateway-token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Gateway-Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebSearchBackendResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "GatewayTokenAuth": []
-          }
-        ],
-        "summary": "Web Search",
-        "tags": [
-          "web-search"
         ]
       }
     },
@@ -48702,7 +49589,7 @@
         ]
       },
       "post": {
-        "description": "Add an existing organization member to a workspace.",
+        "description": "Add an existing organization member to a workspace.\n\nThe 404 for a workspace deleted during the add describes PostgreSQL. SQLite does not name the\nforeign key it enforced, so it surfaces that race as a 500.",
         "operationId": "workspaces-add_workspace_member",
         "parameters": [
           {
@@ -48754,6 +49641,26 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRefusal"
+                }
+              }
+            },
+            "description": "The workspace does not exist, or was deleted during the add."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRefusal"
+                }
+              }
+            },
+            "description": "The user is already a member of the workspace."
           },
           "422": {
             "content": {
@@ -49331,7 +50238,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/web-search-keys": {
       "get": {
-        "description": "The organization's web search keys as this workspace sees them, and which one it searches with.\n\nAny member of the workspace may read it. ``is_effective`` is decided across every key, not only this page.",
+        "description": "The organization's keys as this workspace sees them, and which of each kind it uses.\n\nAny member of the workspace may read it. ``is_effective`` is decided across every key, not only this page,\nand ``search_provider`` and ``fetch_provider`` say what the workspace's searches and fetches run on.",
         "operationId": "web-search-keys-list_workspace_web_search_keys",
         "parameters": [
           {
@@ -49470,7 +50377,7 @@
         ]
       },
       "patch": {
-        "description": "Pin a web search key as this workspace's own, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins. Answers with the list's first page.",
+        "description": "Pin a key as this workspace's own for its kind, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins. Answers with the list's first page.",
         "operationId": "web-search-keys-set_workspace_web_search_key_override",
         "parameters": [
           {

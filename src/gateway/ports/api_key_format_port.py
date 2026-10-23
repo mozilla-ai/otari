@@ -2,7 +2,7 @@
 
 The seam between key handling and whichever build decides the shape of its
 credentials. The core adapter mints the open-source format and treats every
-presented key as local, so a standalone gateway behaves as it always has. A
+presented key as local. A
 hosted overlay binds a richer format behind the same interface: a product
 prefix, a format version, a region tag and a checksum, minted and parsed
 without editing any file in this tree (otari-ai#1665).
@@ -48,8 +48,8 @@ class Malformed:
     """The key claims this adapter's format and fails it.
 
     A bad checksum, an unknown region, or a credential of another kind in the
-    product's format (a gateway token presented as an API key). Answered as
-    ``401`` before any lookup, since no API key row can match it.
+    product's format. Answered as ``401`` before any lookup, since no API key
+    row can match it.
     """
 
 
@@ -59,8 +59,7 @@ KeyRoute = Local | Misdirected | Malformed
 class ApiKeyFormatPort(Protocol):
     """The format of the API keys this build mints and recognizes.
 
-    API keys only: the credential an end user presents. The gateway's own token
-    to the platform is a different credential with its own checker.
+    API keys only: the credential an end user presents.
     """
 
     def mint(self) -> str:
@@ -85,9 +84,7 @@ class ApiKeyFormatPort(Protocol):
 
         ``presented`` is always a credential offered as an API key (``Otari-Key``,
         ``Authorization: Bearer`` or ``x-api-key``); this port sees no other
-        header and no other kind of credential. A gateway token is parsed by
-        whatever checks gateway tokens, never here, so one that arrives in the
-        product's format is ``Malformed`` rather than a kind to route.
+        header and no other kind of credential.
 
         ``Local`` for a key checked here, including every key whose format this
         adapter does not recognize. ``Misdirected`` for a key that names another

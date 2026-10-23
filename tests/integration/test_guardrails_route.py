@@ -97,7 +97,8 @@ def test_block_mode_returns_403_and_skips_provider(
         resp = client.post(path, json={**body, "guardrails": [{"profile": "prompt-injection"}]}, headers=api_key_header)
 
     assert resp.status_code == 403, resp.text
-    detail = resp.json()["detail"]
+    # The Messages route answers in Anthropic's envelope, the refusal's fields beside its message.
+    detail = resp.json()["error"] if route == "messages" else resp.json()["detail"]
     assert detail["code"] == "guardrail_violation"
     assert detail["guardrails"][0]["profile"] == "prompt-injection"
     provider.assert_not_awaited()

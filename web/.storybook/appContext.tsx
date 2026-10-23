@@ -16,13 +16,12 @@ import { bootstrap } from "@/tests/fixtures"
  *
  * `.storybook/` may import `@/shared/hooks` and `@/tests` freely: it sits outside
  * `src/`, so none of biome.jsonc's layer overrides apply to it. This is the same
- * exemption `src/tests/providers.tsx` documents for itself -- a harness exists to
+ * exemption `src/tests/providers.tsx` documents for itself: a harness exists to
  * mount what the app mounts.
  *
- * The default bootstrap is the fixture's, so it describes a standalone deployment
- * with every standalone surface hosted. A story overrides it through
- * `parameters.deployment`, which is how the hybrid and claimed-key cases are
- * reached:
+ * The default bootstrap is the fixture's, so it describes a deployment that
+ * publishes every surface. A story overrides it through `parameters.deployment`,
+ * which is how the claimed-key case is reached:
  *
  *   parameters: { deployment: { sign_in_methods: ["password"] } }
  */

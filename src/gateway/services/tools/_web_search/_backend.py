@@ -55,6 +55,7 @@ from gateway.services.tools._web_names import (
     WEB_SEARCH_TOOL_NAME,
     web_search_tool_definition,
 )
+from gateway.services.tools._web_provider_client import web_provider_client_for
 from gateway.services.tools._web_tool_failure import (
     CALL_LIMIT_TAG,
     INTERNAL_ERROR_TAG,
@@ -248,7 +249,7 @@ class WebSearchBackend:
                 api_key=resolved.api_key,
                 api_base=resolved.api_base,
                 timeout=resolved.timeout,
-                client=self._web_provider_client,
+                client=web_provider_client_for(self._web_provider_client, tenant_endpoint=resolved.tenant_endpoint),
             ) as engine:
                 # The count is always passed, so a native count option cannot raise it.
                 result = await engine.search(query, max_results=self._max_results, **resolved.options)

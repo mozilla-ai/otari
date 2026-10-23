@@ -48,6 +48,22 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
             if key.end_user_budget_ids and budget_id in key.end_user_budget_ids:
                 key.end_user_budget_ids = [listed for listed in key.end_user_budget_ids if listed != budget_id]
 
+    async def access_lists(self) -> list[tuple[str | None, list[str] | None, list[str] | None]]:
+        """Each active key's user and its ``allowed_models`` and ``allowed_tools``, for the startup check."""
+        result = await self.db.execute(
+            select(APIKey.user_id, APIKey.allowed_models, APIKey.allowed_tools).where(APIKey.is_active.is_(True))
+        )
+        return [(user_id, models, tools) for user_id, models, tools in result.all()]
+
+    async def keys_reading_tools_off_models(self, user_id: str) -> list[APIKey]:
+        """A user's keys with a model list of their own and no ``allowed_tools``.
+
+        Filtered here rather than in SQL: an explicit ``None`` in a JSON column is
+        stored as JSON ``null``, which ``IS NULL`` does not match.
+        """
+        result = await self.db.execute(select(APIKey).where(APIKey.user_id == user_id))
+        return [key for key in result.scalars() if key.allowed_models is not None and key.allowed_tools is None]
+
     async def get_by_config_name(self, config_name: str) -> APIKey | None:
         """Return the key config.yml declares under this name, or None."""
         result = await self.db.execute(select(APIKey).where(APIKey.config_name == config_name))

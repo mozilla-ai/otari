@@ -320,7 +320,7 @@ describe("managedModelReason", () => {
   })
 
   // The operator is the party that pays the upstream bill, which is what keeps a
-  // standalone deployment pricing its own models exactly as before.
+  // single-tenant deployment pricing its own models exactly as before.
   it("exempts the deployment operator", () => {
     expect(
       managedModelReason({

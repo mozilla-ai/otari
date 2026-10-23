@@ -92,6 +92,40 @@ own response, and both together print the result with `raw` kept. `--describe PR
 provider's metadata and each native option with its type, allowed values, default and
 description, then exits without searching.
 
+## DeepSeek
+
+`deepseek` calls DeepSeek's [Search API](https://api-docs.deepseek.com/api/search),
+`POST /v1/tools/search`, a search engine of DeepSeek's own, apart from its models, with the key in
+a bearer header, read from `DEEPSEEK_API_KEY` when not passed. DeepSeek publishes no SDK for it, so
+the adapter sends the query, and `count` when `max_results` is passed, and nothing else unless you
+pass a native option.
+
+| `SearchHit` | From DeepSeek |
+|---|---|
+| `url`, `title` | `url`, `title` |
+| `snippet` | `snippet`, DeepSeek's short text; its longer `summary`, written for a model, stays in `raw` |
+| `text` | `content`, which DeepSeek returns only with `need_content=True`; empty counts as none |
+| `published` | `date`, RFC 3339 in UTC, or `null` when DeepSeek does not know it |
+
+DeepSeek reports no cost. `max_results` becomes `count`, at most 50; without it DeepSeek returns
+its default of 10. DeepSeek has no recency parameter, so `time_range` becomes its `after:` query
+operator, the day the range starts on as `YYYY-MM-DD`, appended to the query. DeepSeek counts that
+day in from midnight China Standard Time (UTC+8), so the range covers at least its span. The
+operator counts toward DeepSeek's 128-character limit on the query, so a query within 17 characters of that limit is
+refused with a 400 when a `time_range` is passed. The other native options are `ori_question`,
+`localization` (an IP address) and `need_content`; an option set to `None` is not sent.
+
+A failed call raises `ProviderError` with DeepSeek's HTTP status, tagged with the `error.type` of
+its OpenAI-shaped body: `authentication_error` for a refused key, `invalid_request_error` for a bad
+request. Its `error.code` is `invalid_request_error` for every failure, so it is the tag only when
+there is no type. The message is never read, since for a refused key it quotes the key's last four
+characters. A successful search carries no error of its own.
+
+Every field read from a successful answer is checked: an answer without `results`, or an item
+without `url`, `title`, `snippet`, `content` or `date`, all of which DeepSeek documents on every
+result, or with any of them of the wrong type or a `date` that does not parse, raises
+`ProviderError` with the tag `unexpected_response`. Fields the adapter does not read are ignored.
+
 ## Exa
 
 `exa` calls Exa's [`POST /search`](https://exa.ai/docs/reference/search), with the key in the

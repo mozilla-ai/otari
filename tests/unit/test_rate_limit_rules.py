@@ -12,7 +12,6 @@ from starlette.types import Message, Receive, Scope, Send
 
 from gateway.adapters.rate_limit_store_adapter import InMemoryRateLimitStore
 from gateway.core.config import GatewayConfig, RateLimitRule
-from gateway.main import _validate_rate_limit_store
 from gateway.rate_limit import (
     RATE_LIMIT_HITS,
     BudgetMinuteLimits,
@@ -60,13 +59,6 @@ def test_rule_names_are_unique() -> None:
                 RateLimitRule(name="twice", per="user", rpm=1),
             ]
         )
-
-
-def test_hybrid_mode_refuses_to_start_with_rules() -> None:
-    config = GatewayConfig(mode="hybrid", rate_limits=[RateLimitRule(name="keys", per="key", rpm=1)])
-
-    with pytest.raises(ValueError, match="hybrid mode"):
-        _validate_rate_limit_store(config)
 
 
 @pytest.mark.asyncio

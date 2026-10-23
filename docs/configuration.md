@@ -13,7 +13,7 @@ Pass a file explicitly:
 otari serve --config config.yml
 ```
 
-A small standalone configuration looks like this:
+A small configuration looks like this:
 
 ```yaml
 database_url: "postgresql://otari:otari@postgres:5432/otari"
@@ -86,8 +86,8 @@ the corresponding startup value after the database is available.
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
 | `pricing_refresh` | What a scheduled models.dev price check does with an update: `manual`, `review`, or `auto`. |
-| `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting, unavailable in hybrid mode. See [Product feedback](#product-feedback). |
-| `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting, standalone and hosted only. See [Health checks](health-checks.md). |
+| `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting. See [Product feedback](#product-feedback). |
+| `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -97,18 +97,17 @@ the corresponding startup value after the database is available.
 | `budgets` | Budgets declared by id and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `api_keys` | API keys, service keys among them, declared with a secret you choose and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY`, or the gateway refuses to start. See [Workload identity](workload-identity.md). |
+| `federation_member_rules` | Let an organization's owners and admins give their own API keys federation rules naming any public https issuer, matched only in the token exchange that names them. Defaults to `false`. Setting it requires `OTARI_SECRET_KEY`. See [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key). |
 | `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
 | `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
-| `provider_user_identifier_enabled` | Send each provider call an opaque, per-end-user identifier, so a provider's policy block lands on one user rather than the whole account. Defaults to `true`. See [End-user identifiers](#end-user-identifiers). |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
-| `streaming_first_chunk_hold_ms` | How long a standalone gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
+| `streaming_first_chunk_hold_ms` | How long the gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `provider_request_timeout_seconds` | How long a non-streaming provider call may take, in seconds. Defaults to 600. Connecting stays capped at 5 seconds for providers whose SDK separates the two (Anthropic, OpenAI and OpenAI-compatible, Groq, Cerebras, Together); Bedrock, Gemini, Vertex AI, Mistral and Cohere apply the value as a whole. Without it, Anthropic's SDK refuses a non-streaming request with a large `max_tokens`. Providers with no per-request timeout, and a provider whose `client_args` sets its own `timeout`, keep their client's timeout. |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
-| `mode` | `standalone`, `hosted`, or `hybrid`. See [Modes](modes.md). |
 
 For every field, its current default, validation, and description live on
 `GatewayConfig` in `src/gateway/core/config.py`, or in the per-domain module
@@ -220,8 +219,7 @@ a dashboard session), and `per: user` does not limit one billed to no user. A re
 that does not is refused with a 429 naming the rule and the limit it hit, counted by none of them,
 and holds no budget. Rules count in `rate_limit_store`, so with Redis they hold
 across replicas. They apply to chat completions, messages, responses and search, after
-`rate_limit_rpm`. A hybrid gateway does not enforce them yet, so it refuses to
-start with `rate_limits` set.
+`rate_limit_rpm`.
 
 `per: model` limits each model in `models`, written as `instance:model` (the
 provider instance it is called through, then the model). One count is kept per
@@ -259,9 +257,7 @@ rule keeps the requests it already counted. Choose "Each model" to add a
 `per: model` rule and pick its models. `per: budget`, `budgets` and `mode` are
 set through the API. The rules in config.yml are listed there read-only, and a stored rule cannot take the name of one. A stored rule
 whose name config.yml later declares is skipped with a warning at startup and
-left out of the list; `DELETE /api/v1/rate-limits/{name}` still removes it. A
-hosted control plane serves no inference, so its dashboard does not offer the
-rules.
+left out of the list; `DELETE /api/v1/rate-limits/{name}` still removes it.
 
 ### Trace context propagation
 
@@ -286,9 +282,7 @@ allow-list.
 A deployment can declare its budgets and API keys in config.yml instead of
 creating them through the management API. Each start creates the ones missing
 from the database and writes back the ones whose entry changed, so a service that calls Otari needs only this file and one secret
-that both sides read from the environment. Standalone and hosted mode only: a
-hybrid gateway holds no budgets or keys of its own, so it refuses to start with
-either section set.
+that both sides read from the environment.
 
 ```yaml
 budgets:
@@ -549,9 +543,7 @@ for every non-Anthropic model.
 The setting covers `/v1/messages` traffic only, and only where the instance's
 provider has a Responses API; an instance whose provider has none keeps the
 default and logs a warning once. Any other value fails at startup. It is read
-from the `providers:` block of the gateway's own config, so it applies in
-standalone mode; a hybrid gateway's instances come from the platform and keep
-the default.
+from the `providers:` block of the gateway's own config.
 
 ### Bedrock read timeout
 
@@ -614,8 +606,8 @@ used to override the configured one.
 ### Hosted providers in config.yml
 
 A hosted provider is a credential the deployment serves requests on when
-nothing else credentials them (see [Modes](modes.md#hosted-providers-and-byo-credentials)).
-Besides the Hosted providers page, a standalone or hosted deployment can declare
+nothing else credentials them (see [Hosted providers](hosted-providers.md#hosted-providers-and-byo-credentials)).
+Besides the Hosted providers page, a deployment can declare
 them in a `hosted_providers:` block, keyed by name, with the fields the
 `/api/v1/hosted-providers` body takes:
 
@@ -698,8 +690,7 @@ in no catalog; they come back if the entry does, and the next catalog sweep on
 the Hosted providers page (`POST /api/v1/hosted-providers/refresh`) deletes
 them and their prices, naming the provider in `orphaned_rosters`. Where no
 hosted provider offers a model at all, the sweep deletes those models and leaves
-every price in place. A hybrid
-gateway ignores the block.
+every price in place.
 
 ### Provider copies
 
@@ -714,7 +705,7 @@ by default, and the pepper is unset, shorter than 32 characters, or equal to the
 master key or an `OTARI_SECRET_KEY` key. Generate one with
 `otari gen-provider-account-pepper` or `openssl rand -base64 32`, and keep it in
 your secret store. Rotating it costs nothing but a fresh copy of each file the
-next time a request uses it. Hybrid mode makes no copies and needs no pepper.
+next time a request uses it.
 
 ### End-user identifiers
 
@@ -723,20 +714,33 @@ provider that enforces its usage policy per end user needs an identifier for
 each one, or a block meant for one person lands on the account, and every user
 and workspace on the deployment loses that provider.
 
-So while `provider_user_identifier_enabled` is on, which it is by default, Otari
-sends each provider call a digest of the workspace and the user tag the caller
-sent Otari (`user` on chat completions and Responses, `metadata.user_id` on
-Messages), or of the workspace and the resolved user when the caller sent no
-tag. The table below names the field each provider receives it in. The
-provider never sees the tag, which may be personal data, or an Otari id. The
-same user in the same workspace always gets the same identifier, which is what
-a provider scopes enforcement by. The dashboard's Playground ignores a `user`
-sent in its request body, so the identifier its calls carry is always the
-signed-in member's.
+So Otari sends each provider call a digest of the workspace and the resolved
+user, and of the user tag the caller sent Otari when there is one. On chat
+completions and Responses the tag is `safety_identifier`, or `user` when the
+request has none; on Messages it is `metadata.user_id`. A tag equal to the
+resolved user counts as none. The table below names the field each provider
+receives it in. The provider never sees the tag, which may be personal data, or
+an Otari id. The same tag from the same user in the same workspace always gets
+the same identifier, which is what a provider scopes enforcement by. Because the
+resolved user is always in the digest, a tag only tells apart the end users
+behind one user: tagging a request with another user's id never gives it that
+user's identifier. The dashboard's Playground ignores a `user` or
+`safety_identifier` sent in its request body, so the identifier its calls carry
+is always the signed-in member's.
+
+`user` has a second job: on a service key it names the billed end user, and on
+any other key it must match the key's user unless `reject_user_mismatch` is
+off. `safety_identifier` names nobody billed and nothing checks it, so one
+request can bill one user and tag another. Send it when one key serves several
+end users that `user` does not tell apart: a request with neither tag gets the
+key holder's identifier, so a block meant for one lands on all of them. The
+caller chooses the tag, so a caller that sends a new one on each request gets a
+new identifier each time and no block lands on anyone. Otari cannot detect
+that; the answer is to block that customer.
 
 | Provider | Field |
 | --- | --- |
-| OpenAI, Azure OpenAI | `user` on chat completions, `safety_identifier` on Responses |
+| OpenAI, Azure OpenAI | `safety_identifier` |
 | Cerebras, DeepSeek, Fireworks, Groq, OpenRouter, xAI | `user` on chat completions (DeepSeek's `user_id`) |
 | Anthropic, including Azure and Vertex AI | `metadata.user_id` |
 | Bedrock | `requestMetadata.otari_user`, except `metadata.user_id` on Messages to a Claude model that sets no `output_format` |
@@ -750,19 +754,49 @@ invocation logs, which is where the prompt ids in an AWS abuse report are traced
 back to a user. Every other provider gets nothing: some have no such field
 (Vertex AI, whose labels are for billing only, and Mistral), some run your own
 models, and for the rest an unknown field can fail the call. A Responses or
-Messages request served as a chat completion gets that provider's chat field.
+Messages request served as a chat completion gets that provider's chat field. The
+call that describes an image for a text-only model (`vision_describe_model`)
+carries the request's identifier too, in the field the vision model's provider
+reads.
+
+Nothing turns the identifier off. OpenAI's partner program for gateways requires
+one on every request, and a provider that cannot take one already gets nothing.
 
 Set `OTARI_PROVIDER_USER_IDENTIFIER_KEY` to a random value of at least 32
 characters (`openssl rand -base64 32`) to key the digest. Without it the digest
 is unkeyed, so the same workspace id and user give the same identifier on any
 deployment, and Otari logs a warning at startup. Otari refuses to start when the
 key equals the master key or an `OTARI_SECRET_KEY` key. Rotating it gives every
-user a new identifier.
+user a new identifier: a block a provider placed on an old identifier stops
+landing, and the provider's history for that user starts again. Rotate it only
+when the key has leaked.
 
-In hybrid mode the workspace and user come from otari.ai's resolve response,
-and Otari refuses a request with a `502` when it names no workspace, or no user
-for a caller that sent no tag, rather than send it unscoped. See
-[End-user identifier](hybrid-mode-protocol.md#end-user-identifier).
+#### Tracing an identifier back
+
+A provider that reports abuse names the identifier, and it is a one-way digest.
+Each usage row stores the identifier its request's provider calls carry, in the
+indexed `usage_logs.safety_identifier` column, so the database answers who it
+was:
+
+```sql
+SELECT workspace_id, user_id, api_key_id,
+       MIN(timestamp) AS first_seen, MAX(timestamp) AS last_seen,
+       COUNT(DISTINCT request_group_id) AS requests
+FROM usage_logs
+WHERE safety_identifier = '<identifier>'
+GROUP BY workspace_id, user_id, api_key_id;
+```
+
+The rows keep an identifier after a key rotation, so an old one still traces.
+For a Gemini label, which is cut to 63 characters, match the prefix:
+`WHERE safety_identifier LIKE '<label>%'`.
+
+The rows hold the user behind the key, not the tag the caller sent. When the
+identifier came from a tag, the customer that owns the workspace maps it to their
+own end user. A row has no identifier where its request had none: usage imported
+from outside, the pass-through endpoints (embeddings, images, audio,
+moderations, batches), a request refused before Otari resolved its user, and
+every row written before Otari stored it.
 
 ## Pricing
 
@@ -867,8 +901,7 @@ instances and any hosted models the deployment serves to every organization,
 priced at the deployment's rates, and never a hosted provider restricted to one
 organization, an organization's
 override, key-scoped allow-list, or usage. A caller who sends a credential is
-served as that caller, valid or not. The setting is off by default, off in
-hybrid mode, and can be changed at runtime.
+served as that caller, valid or not. The setting is off by default and can be changed at runtime.
 
 Anonymous reads are throttled per client address by
 `public_catalog_rate_limit_per_minute`, sixty a minute by default and its own
@@ -884,11 +917,8 @@ address, and one scraper exhausts the budget for everyone, unless
 is per worker, so a deployment running N workers serves up to N times the
 configured number.
 
-In hosted mode a visitor sees the same thing a visitor sees anywhere else: the
-process-wide `providers:` instances, which in that mode are the deployment's
-own rather than any tenant's, and the deployment-wide roster of the hosted
-models it pays for (what `ModelProviderPort.get_hosted_models` answers with no
-organization), priced at the deployment's rates. No
+The hosted models a visitor sees are the deployment-wide roster (what
+`ModelProviderPort.get_hosted_models` answers with no organization). No
 organization's providers, overrides, or usage are public, whatever the flag is
 set to.
 
@@ -1001,17 +1031,23 @@ model needs its own pricing row, for example `cohere:rerank-v3.5` at
 A model served over chat completions, the Responses API, or Messages can be
 priced the same way, for an upstream that bills per call and reports little or
 no token usage, such as an answer endpoint served through an OpenAI-compatible
-provider instance named `exa`. Give its pricing `unit: requests`:
+provider instance named `exa`. Give its pricing a `price_per_request` in USD:
 
 ```yaml
 pricing:
   exa:exa:
-    input_price_per_million: 5000   # $0.005 per request
-    output_price_per_million: 0
-    unit: requests
+    price_per_request: 0.005
 ```
 
-Such a model is charged `input_price_per_million / 1,000,000` for each
+`price_per_request` is the readable form of `unit: requests`: Otari stores it as
+`unit: requests` with `input_price_per_million` a million times the price
+(`5000` here), and `GET /api/v1/pricing` reports both. `POST /api/v1/pricing`
+takes it too. It replaces the token prices rather than adding to them, so it
+is refused beside an `input_price_per_million` that differs, an
+`output_price_per_million`, a cache price, `pricing_tiers` or another `unit`.
+Writing the rate in full as `unit: requests` still works.
+
+Such a model is charged its price per request for each
 successful call, streamed or not, whatever tokens it reports. The token counts
 are still recorded on the usage row, and still count toward a token budget, but
 they are not priced. A failed call, including a stream that errors or that the
@@ -1120,7 +1156,8 @@ file or environment, then to the built-in default.
 
 - `web_search_default_tool`: the search instance the in-loop tool uses when no
   organization key applies, and the one an unnamed direct call uses. It must be one
-  whose provider the in-loop tool can search with; `none` turns in-loop search off.
+  whose provider the in-loop tool can search with; `none` turns off the deployment's
+  own in-loop search, while a workspace's organization search key still serves it.
   When unset, the in-loop tool uses the search backend the legacy settings
   describe (`web_search_provider` with its key, else `web_search_url`), else the
   only search instance, when there is exactly one and the in-loop tool can search
@@ -1167,8 +1204,7 @@ it has no `api_key`. `timeout` sets the seconds to wait for an answer (default 3
 
 These entries are separate from `providers` because none of these upstreams serves
 chat: they never appear in `/api/v1/models` or provider health. Price a decision
-model like any other, as `<provider>:<model>` in `pricing`. Decisions are
-standalone-mode only.
+model like any other, as `<provider>:<model>` in `pricing`.
 
 ### Agent model recommendations
 
@@ -1185,7 +1221,7 @@ agent_recommender_candidates:
   opus: Hard reasoning, ambiguous goals, large or security-sensitive changes.
 ```
 
-These are a standalone deployment's settings. On otari.ai a managed
+These are a deployment's own settings. On otari.ai a managed
 recommender answers behind the same route, so neither applies there.
 `agent_recommender_model` is a `decision_providers` selector, resolved per
 request, so a deployment that never asks need not configure the provider.
@@ -1286,8 +1322,7 @@ code_execution_workspace_default: false  # OTARI_CODE_EXECUTION_WORKSPACE_DEFAUL
 Each decides only for a workspace with no stored policy: `false` refuses the
 tool there as a stored disabled policy would, and a workspace owner or admin
 turns it on from the Tools pages or the workspace policy API. A stored policy
-always wins. Unset, the tools are on, except on a hosted deployment, where they
-are off. See [Built-in tools](tools.md#per-workspace-web-access-policy) for what
+always wins. Both default to `true`. See [Built-in tools](tools.md#per-workspace-web-access-policy) for what
 each policy covers.
 
 ## Documentation links
@@ -1311,8 +1346,8 @@ privacy_url: "https://example.com/privacy"
 Each is independent. Unset, the Terms of service row is absent and the Data &
 Privacy row stays disabled. A deployment whose dashboard sits beside a site that
 owns the documents points at that site. `GET /api/v1/bootstrap` publishes both
-addresses unauthenticated, so a credential in either is refused at startup, the
-way `data_plane_url` refuses one. The same check covers `docs_url` and
+addresses unauthenticated, so a credential in either is refused at startup. The
+same check covers `docs_url` and
 `site_url`.
 
 ## The public site
@@ -1356,27 +1391,6 @@ origin holding none of the sign-in state it started with, and the sign-in fails
 with the authorization code unspent. Passkeys need their own settings there; see
 [Access control](access-control.md#passkeys).
 
-## The data-plane address
-
-A hosted control plane does not serve inference. Set `data_plane_url` or
-`OTARI_DATA_PLANE_URL` to the gateway origin used by client snippets:
-
-```yaml
-data_plane_url: "https://gateway.example.com"
-```
-
-Supply the origin or path prefix without a trailing slash or `/api/v1`. Credentials,
-query strings, and fragments are refused because `GET /api/v1/bootstrap` publishes
-this value without authentication.
-
-## otari.ai variables
-
-Hybrid mode requires `OTARI_AI_TOKEN`. Optional platform settings control the
-platform API URL, management URL, health-probe path, resolution timeout,
-usage-report timeout and retries, and first-chunk fallback timeout. See
-[Modes](modes.md) and the normative
-[hybrid-mode protocol](hybrid-mode-protocol.md).
-
 ## Extending Otari with a bootstrap module
 
 `bootstrap` or `OTARI_BOOTSTRAP` names a trusted `module:callable` loaded
@@ -1406,8 +1420,7 @@ logging or tracing you configure.
 
 Feedback is on by default. To turn it off, set `feedback_enabled: false` in
 YAML or `OTARI_FEEDBACK_ENABLED=false`, then restart. Off, the endpoint is not
-mounted and the Feedback entry is hidden. Standalone and hosted deployments
-offer it; hybrid gateways never do. This setting is visible in Settings but
+mounted and the Feedback entry is hidden. This setting is visible in Settings but
 cannot be changed there at runtime.
 
 Each signed-in person (and the master key) can send five messages every ten
