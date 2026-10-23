@@ -33,7 +33,10 @@ interface Sent {
   body: unknown
 }
 
-function mockApi(shares: TraceContentShare[] = []): Sent[] {
+function mockApi(
+  shares: TraceContentShare[] = [],
+  more: TraceContentShare[] = [],
+): Sent[] {
   const sent: Sent[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const method = (init?.method ?? "GET").toUpperCase()
@@ -42,7 +45,13 @@ function mockApi(shares: TraceContentShare[] = []): Sent[] {
       method,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
-    const body = method === "GET" ? { items: shares } : SHARE
+    const older = String(input).includes("skip=20")
+    const body =
+      method === "GET"
+        ? older
+          ? { items: more, has_more: false }
+          : { items: shares, has_more: more.length > 0 }
+        : SHARE
     return new Response(JSON.stringify(body), {
       status: method === "POST" ? 201 : 200,
       headers: { "Content-Type": "application/json" },
@@ -216,5 +225,31 @@ describe("SessionContent", () => {
     expect(
       screen.queryByRole("button", { name: "Stop sharing" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("pages to older shares, so a running one past the first page can still be ended", async () => {
+    const sent = mockApi(
+      [SHARE],
+      [{ ...SHARE, id: "older", note: "older one" }],
+    )
+    renderWith(
+      <SessionContent
+        detail={traceDetail({
+          summary: traceSummary({ user_id: "alice" }),
+          content_access: "owner",
+          spans: [{ ...tool, content: { command: "pytest -x" } }],
+        })}
+      />,
+    )
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Show older shares" }),
+    )
+
+    expect(await screen.findByText("“older one”")).toBeInTheDocument()
+    expect(sent.some((request) => request.url.includes("skip=20"))).toBe(true)
+    expect(
+      screen.getAllByRole("button", { name: "Stop sharing" }),
+    ).toHaveLength(2)
   })
 })

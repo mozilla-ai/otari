@@ -69,7 +69,7 @@ export function SessionContent({ detail }: { detail: TraceDetail }) {
         Shared with you by the person whose session this is, until{" "}
         {formatDate(share.expires_at)}.
         {share.note ? ` Their note: “${share.note}”.` : ""} They can see that
-        you read it.
+        you read it, and when.
       </InfoBanner>
     )
   }
@@ -77,7 +77,8 @@ export function SessionContent({ detail }: { detail: TraceDetail }) {
     return (
       <InfoBanner>
         What this session was about is private to the person whose session it
-        is. They can share it with you from this page.
+        is. They can share it with the organization's admins, or with the team
+        that runs this deployment, from this page.
       </InfoBanner>
     )
   }
@@ -103,7 +104,7 @@ function OwnerSharing({
   const shares = useTraceShares(traceId, workspaceId, true)
   const endShare = useEndTraceShare()
   const [isSharing, setIsSharing] = useState(false)
-  const items = shares.data?.items ?? []
+  const items = (shares.data?.pages ?? []).flatMap((page) => page.items)
 
   // A session that never kept content and was never shared has nothing to say.
   if (!canShare && items.length === 0 && !shares.error) return null
@@ -111,14 +112,25 @@ function OwnerSharing({
   return (
     <div className="flex flex-col gap-3">
       <InfoBanner>
-        Only you can read what this session was about: its prompts, commands and
-        file paths. Share it when you want someone to look into it.
+        Otari shows what this session was about, its prompts, commands and file
+        paths, only to you. Share it when you want someone to look into it.
       </InfoBanner>
       <ErrorBanner error={shares.error ?? endShare.error} />
       {canShare ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="primary" onPress={() => setIsSharing(true)}>
             Share this session
+          </Button>
+        </div>
+      ) : null}
+      {shares.hasNextPage ? (
+        <div>
+          <Button
+            variant="ghost"
+            onPress={() => void shares.fetchNextPage()}
+            isDisabled={shares.isFetchingNextPage}
+          >
+            Show older shares
           </Button>
         </div>
       ) : null}
@@ -237,7 +249,7 @@ function ShareDialog({
         if (!open) onClose()
       }}
       title="Share this session"
-      description="Session content is encrypted and only you can read it. Whoever you share it with can read its prompts, commands and file paths until the share ends or you stop it. Each time they open it, you can see it here."
+      description="Otari shows this session's content only to you. Whoever you share it with can read its prompts, commands and file paths until the share ends, you stop it, or you leave this workspace. Their reads are recorded, at most once an hour each, and listed here."
       submitLabel="Share"
       onSubmit={submit}
       isPending={share.isPending}
