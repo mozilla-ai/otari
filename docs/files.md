@@ -317,15 +317,15 @@ sent through the image path.
 Gemini refuses a request past 20 MB, attachments included. Once a request's
 attachments to a Gemini model would pass `files_gemini_inline_max_bytes` (16 MiB
 by default, counted as sent, base64-encoded, which leaves room for the rest of
-the request), Otari uploads each further one to Gemini's Files API with the
-serving instance's own key and sends a reference to it instead of the bytes. An
+the request), Otari uploads each further one to Gemini's Files API with the key
+the request is served with, a hosted provider's included, and sends a reference
+to it instead of the bytes. An
 upload is remembered for 47 hours, one less than Gemini keeps the file, so an
 agent resending the same conversation does not upload it again. Where Gemini
 refuses the upload, the request is answered with a 400 before it reaches the
 provider. A request that may fall back to a provider other than Gemini is sent
 as it is, since a Gemini file reference means nothing to the fallback, and so is
-one to Vertex AI, which has no Files API in any-llm. In hybrid mode attachments
-are not normalized, so Gemini's own size error is what comes back.
+one to Vertex AI, which has no Files API in any-llm.
 
 ### Capability resolution
 
