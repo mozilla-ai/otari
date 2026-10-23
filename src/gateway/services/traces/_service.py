@@ -23,7 +23,7 @@ from gateway.exceptions.traces_exceptions import (
 from gateway.models.traces import Trace, TraceContentRead, TraceContentShare, TraceGuardrailDefinition, TraceSpan
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
 from gateway.services.traces._collector import CALL_ID_DIGEST, call_id_digest
-from gateway.services.traces._content import SpanContent
+from gateway.services.traces._content import SealItem, SpanContent
 from gateway.services.traces._reading import MAX_SPANS_PER_READ, trace_view
 from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
@@ -49,9 +49,6 @@ from gateway.types.traces import (
     WriteResult,
 )
 from otari_agent.domain.definitions import GateDefinition, definition_digest, gates_from_body
-
-# A stored span's identity: its workspace, its trace and its own id.
-SpanKey = tuple[uuid.UUID, str, str]
 
 # How often one reader's reads through a share are recorded, and how many of a
 # share's newest reads its listing carries.
@@ -99,7 +96,9 @@ class TraceService:
         async with self._uow:
             # First, so a workspace turning content off or deleting it waits for this
             # write to commit, or this write sees the generation it moved on to.
-            generations = await self._barriers.lock({workspace_id for workspace_id, _, _ in sealed})
+            generations = await self._barriers.lock(
+                {trace.workspace_id for trace, held in zip(traces, sealed, strict=True) if held}
+            )
             new_traces: dict[TraceKey, dict[str, Any]] = {}
             for trace in traces:
                 new_traces.setdefault(_key(trace), _new_trace(trace, written_at))
@@ -111,7 +110,7 @@ class TraceService:
             rejected = 0
             kept: list[tuple[TraceWrite, list[SpanRecord]]] = []
             rows: dict[tuple[uuid.UUID, str, str], dict[str, Any]] = {}
-            for trace in traces:
+            for trace, held in zip(traces, sealed, strict=True):
                 spans = _unique_spans(trace.spans)
                 holder = holders.get(_key(trace))
                 if holder is None or holder[0] != trace.user_id:
@@ -121,7 +120,8 @@ class TraceService:
                 for span in spans:
                     rows.setdefault(
                         (trace.workspace_id, trace.trace_id, span.span_id),
-                        _span_values(trace, span, sealed if _current(trace, generations) else {}),
+                        # The write whose row this is supplies its content, never another write of the batch.
+                        _span_values(trace, span, held if _current(trace, generations) else {}),
                     )
             inserted = await self._spans.insert_new(list(rows.values()))
 
@@ -159,18 +159,31 @@ class TraceService:
             await self._barriers.advance(workspace_id)
             return await self._spans.clear_content(workspace_id)
 
-    async def _seal(self, traces: Sequence[TraceWrite]) -> dict[SpanKey, str]:
-        """Each span's content sealed for its own row, keyed as the row is: a span id alone names no row."""
-        sealed: dict[SpanKey, str] = {}
+    async def _seal(self, traces: Sequence[TraceWrite]) -> list[dict[str, str]]:
+        """Each write's spans' content, sealed for that write's own rows, by span id.
+
+        Per write rather than per row key, so a write that is rejected or stale cannot
+        supply the content of a row another write of the batch stores. A write that
+        carries no content generation keeps no content, so none is sealed for it.
+        """
+        items = [
+            SealItem(span.content, trace.workspace_id, trace.trace_id, span.span_id)
+            for trace in traces
+            if trace.content_generation is not None
+            for span in trace.spans
+            if span.content
+        ]
+        values = iter(await self._content.seal_many(items))
+        sealed: list[dict[str, str]] = []
         for trace in traces:
-            for span in trace.spans:
-                key = (trace.workspace_id, trace.trace_id, span.span_id)
-                if span.content and key not in sealed:
-                    value = await self._content.seal(
-                        span.content, workspace_id=trace.workspace_id, trace_id=trace.trace_id, span_id=span.span_id
-                    )
-                    if value is not None:
-                        sealed[key] = value
+            held: dict[str, str] = {}
+            if trace.content_generation is not None:
+                for span in trace.spans:
+                    if span.content:
+                        value = next(values)
+                        if value is not None:
+                            held.setdefault(span.span_id, value)
+            sealed.append(held)
         return sealed
 
     async def search(
@@ -520,7 +533,7 @@ def _growth(key: TraceKey, spans: list[SpanRecord], written_at: datetime) -> Tra
     )
 
 
-def _span_values(trace: TraceWrite, span: SpanRecord, sealed: dict[SpanKey, str]) -> dict[str, Any]:
+def _span_values(trace: TraceWrite, span: SpanRecord, sealed: dict[str, str]) -> dict[str, Any]:
     return {
         "workspace_id": trace.workspace_id,
         "trace_id": trace.trace_id,
@@ -552,7 +565,7 @@ def _span_values(trace: TraceWrite, span: SpanRecord, sealed: dict[SpanKey, str]
         "otel_trace_id": span.otel_trace_id,
         "otel_span_id": span.otel_span_id,
         "attributes": dict(span.attributes) or None,
-        "content_sealed": sealed.get((trace.workspace_id, trace.trace_id, span.span_id)),
+        "content_sealed": sealed.get(span.span_id),
     }
 
 

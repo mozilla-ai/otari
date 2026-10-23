@@ -28,7 +28,7 @@ import json
 import os
 import uuid
 from collections import OrderedDict
-from collections.abc import Awaitable, Mapping
+from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass
 from time import monotonic
 
@@ -67,6 +67,16 @@ UNOPENED = Counter(
 )
 
 
+@dataclass(frozen=True)
+class SealItem:
+    """One span's content, and the row it is sealed for."""
+
+    content: Mapping[str, str]
+    workspace_id: uuid.UUID
+    trace_id: str
+    span_id: str
+
+
 @dataclass
 class _WriteKey:
     key: DataKey
@@ -78,8 +88,10 @@ class SpanContent:
     """Seals and opens span content under the data keys ``keys`` makes and opens.
 
     One per process, so its caches serve every request and the trace writer.
-    Each call to the key source is held to ``_KEY_SOURCE_BUDGET_S``, so a slow
-    source costs a batch its content and never the batch. Expired keys are
+    A batch fetches the keys it lacks all at once and waits for them at most
+    ``_KEY_SOURCE_BUDGET_S`` in all, so a slow source costs a batch its content
+    and never the batch, however many workspaces it spans. Writing and reading
+    pause apart: a read that fails does not stop capture, nor a write reads. Expired keys are
     dropped on every call and by a timer of their own, so an idle process holds
     none past its age; dropping a reference cannot make Python overwrite the
     bytes, which stay in memory until reused.
@@ -89,7 +101,8 @@ class SpanContent:
         self._keys = keys
         self._write_keys: OrderedDict[str, _WriteKey] = OrderedDict()
         self._open_keys: OrderedDict[tuple[str, bytes, str], tuple[bytes, float]] = OrderedDict()
-        self._paused_until = 0.0
+        self._write_paused_until = 0.0
+        self._read_paused_until = 0.0
         self._sweep: asyncio.TimerHandle | None = None
 
     @classmethod
@@ -109,23 +122,85 @@ class SpanContent:
         self, content: Mapping[str, str], *, workspace_id: uuid.UUID, trace_id: str, span_id: str
     ) -> str | None:
         """The span's content sealed for its row; None when there is none, or it could not be sealed."""
-        if not content or self._keys is None or self._keys.wrapper is None:
-            return None
+        [sealed] = await self.seal_many([SealItem(content, workspace_id, trace_id, span_id)])
+        return sealed
+
+    async def seal_many(self, items: Sequence[SealItem]) -> list[str | None]:
+        """Each item's content sealed for its row, in order; None where there is none or it could not be sealed.
+
+        The keys the batch lacks are fetched together, under one deadline for the
+        batch. An item whose workspace's key is not in hand by then is not sealed.
+        """
+        keys = self._keys
+        if keys is None or keys.wrapper is None:
+            return [None] * len(items)
         self._prune()
-        if self._paused():
-            UNSEALED.labels(reason="paused").inc()
-            return None
-        try:
-            key = await self._write_key(self._keys, workspace_id)
-        except ContentKeyError as exc:
-            self._failed(exc, "sealed")
-            UNSEALED.labels(reason=exc.reason).inc()
-            return None
-        nonce = os.urandom(_NONCE_BYTES)
-        ciphertext = AESGCM(key.plaintext).encrypt(
-            nonce, json.dumps(dict(content)).encode(), _associated_data(workspace_id, trace_id, span_id)
-        )
-        return ".".join((_FORMAT, key.wrapper, _b64(key.wrapped), _b64(nonce + ciphertext)))
+        wanted = list(dict.fromkeys(item.workspace_id for item in items if item.content))
+        held, reason = await self._write_keys_for(keys, wanted) if wanted else ({}, "paused")
+        sealed: list[str | None] = []
+        for item in items:
+            key = held.get(item.workspace_id) if item.content else None
+            if key is None:
+                if item.content:
+                    UNSEALED.labels(reason=reason).inc()
+                sealed.append(None)
+                continue
+            nonce = os.urandom(_NONCE_BYTES)
+            ciphertext = AESGCM(key.plaintext).encrypt(
+                nonce,
+                json.dumps(dict(item.content)).encode(),
+                _associated_data(item.workspace_id, item.trace_id, item.span_id),
+            )
+            sealed.append(".".join((_FORMAT, key.wrapper, _b64(key.wrapped), _b64(nonce + ciphertext))))
+        return sealed
+
+    async def _write_keys_for(
+        self, keys: ContentKeyPort, workspaces: Sequence[uuid.UUID]
+    ) -> tuple[dict[uuid.UUID, DataKey], str]:
+        """A write key for each workspace that has one cached or gets one in time, and why the others went without."""
+        held: dict[uuid.UUID, DataKey] = {}
+        missing: list[uuid.UUID] = []
+        for workspace_id in workspaces:
+            cached = self._write_keys.get(str(workspace_id))
+            if cached is not None and cached.uses < _WRITE_KEY_MAX_USES:
+                self._write_keys.move_to_end(str(workspace_id))
+                cached.uses += 1
+                held[workspace_id] = cached.key
+            else:
+                missing.append(workspace_id)
+        if not missing:
+            return held, "unavailable"
+        if self._write_paused():
+            return held, "paused"
+        tasks = {
+            asyncio.ensure_future(keys.new_data_key(_context(workspace_id))): workspace_id for workspace_id in missing
+        }
+        done, pending = await asyncio.wait(tasks, timeout=_KEY_SOURCE_BUDGET_S)
+        for task in pending:
+            task.cancel()
+        failure: ContentKeyError | None = None
+        if pending:
+            failure = ContentKeyError("unavailable", "the content key source did not answer in time")
+        for task in done:
+            exc = task.exception()
+            if exc is None:
+                workspace_id = tasks[task]
+                held[workspace_id] = self._cache_write_key(workspace_id, task.result())
+            elif isinstance(exc, ContentKeyError):
+                failure = failure or exc
+            else:
+                raise exc
+        if failure is not None:
+            self._failed(failure, "sealed")
+            return held, failure.reason
+        return held, "unavailable"
+
+    def _cache_write_key(self, workspace_id: uuid.UUID, key: DataKey) -> DataKey:
+        self._write_keys[str(workspace_id)] = _WriteKey(key, made_at=monotonic(), uses=1)
+        while len(self._write_keys) > _KEY_CACHE_SIZE:
+            self._write_keys.popitem(last=False)
+        self._schedule_sweep()
+        return key
 
     async def open(self, sealed: str | None, *, workspace_id: uuid.UUID, trace_id: str, span_id: str) -> dict[str, str]:
         """The content sealed for this row; empty when none was, or it cannot be opened."""
@@ -162,20 +237,6 @@ class SpanContent:
             return {}
         return _allowed(content)
 
-    async def _write_key(self, keys: ContentKeyPort, workspace_id: uuid.UUID) -> DataKey:
-        workspace = str(workspace_id)
-        held = self._write_keys.get(workspace)
-        if held is None or held.uses >= _WRITE_KEY_MAX_USES:
-            made = await _within_budget(keys.new_data_key(_context(workspace_id)))
-            held = _WriteKey(made, made_at=monotonic())
-            self._write_keys[workspace] = held
-            while len(self._write_keys) > _KEY_CACHE_SIZE:
-                self._write_keys.popitem(last=False)
-            self._schedule_sweep()
-        self._write_keys.move_to_end(workspace)
-        held.uses += 1
-        return held.key
-
     async def _open_key(self, wrapper: str, wrapped: bytes, workspace_id: uuid.UUID) -> bytes | None:
         """The opened key; None when it is not cached and the source is paused."""
         if self._keys is None:
@@ -185,7 +246,7 @@ class SpanContent:
         if cached is not None:
             self._open_keys.move_to_end(cache_key)
             return cached[0]
-        if self._paused():
+        if self._read_paused():
             return None
         data_key = await _within_budget(self._keys.open_data_key(wrapper, wrapped, _context(workspace_id)))
         self._open_keys[cache_key] = (data_key, monotonic())
@@ -217,14 +278,22 @@ class SpanContent:
         if self._write_keys or self._open_keys:
             self._schedule_sweep()
 
-    def _paused(self) -> bool:
-        return monotonic() < self._paused_until
+    def _write_paused(self) -> bool:
+        return monotonic() < self._write_paused_until
+
+    def _read_paused(self) -> bool:
+        return monotonic() < self._read_paused_until
 
     def _failed(self, exc: ContentKeyError, action: str) -> None:
         if exc.reason == "rejected":
             return
         # A key source that is down or refusing would fail every span the same way.
-        self._paused_until = monotonic() + _PAUSE_AFTER_FAILURE_S
+        # Writing and reading pause apart: one bad read must not stop capture.
+        until = monotonic() + _PAUSE_AFTER_FAILURE_S
+        if action == "sealed":
+            self._write_paused_until = until
+        else:
+            self._read_paused_until = until
         logger.warning(
             "Trace content could not be %s (%s: %s); the key source is not asked again for %.0fs",
             action,
