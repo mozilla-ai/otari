@@ -14,12 +14,12 @@ name: Otari Lock Refresh
 # rather than fail. CI and the Docker image both install with --frozen, so the lockfile is
 # what ships.
 #
-# The refresh runs the resolution-sensitive checks itself before opening anything,
-# because a PR authored by GITHUB_TOKEN does not trigger `pull_request` workflows
-# (GitHub blocks that to avoid recursive runs). Set a LOCK_REFRESH_TOKEN secret (a
-# PAT or GitHub App token with contents:write and pull-requests:write on this
-# repo) to have the PR's own checks run automatically; without it, the PR body
-# tells the reviewer how to trigger them.
+# Two jobs. `refresh` re-resolves and runs the resolution-sensitive checks with
+# no write access, since it installs and executes a freshly upgraded dependency
+# set. `open-pr` takes the tested uv.lock as an artifact and opens the PR as
+# otari-bot, whose key lives in the `release` environment, so that key is never
+# present while new third-party code runs. A PR the App opens starts its own
+# checks, which one opened with GITHUB_TOKEN would not.
 #
 # A run whose checks fail opens no PR, which is the intended outcome (a broken
 # resolution should not land) but also a silent one: the signal is a red run in
@@ -53,17 +53,12 @@ jobs:
     # suite here sees the secrets it does. The environment carries no protection
     # rules, so it adds no approval gate to a scheduled run.
     environment: integration-tests
-    permissions:
-      contents: write
-      pull-requests: write
+    outputs:
+      changed: ${{ steps.relock.outputs.changed }}
 
     steps:
-      # persist-credentials: false matters more here than in the sibling
-      # workflows that set it. This job holds contents: write and then installs
-      # and executes a freshly upgraded dependency set, so a persisted
-      # write-capable token would sit in .git/config while brand-new third-party
-      # code runs against it. create-pull-request pushes with its own `token`
-      # input, so nothing needs the persisted credential.
+      # No persisted credential: this job installs and executes a freshly
+      # upgraded dependency set.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -134,12 +129,47 @@ jobs:
         # a new resolution dragged onto an OSS code path fails here.
         run: uv run --frozen --no-dev python scripts/oss_edition_smoke.py
 
-      - name: Open the refresh PR
+      - name: Keep the tested lockfile for the PR job
         if: steps.relock.outputs.changed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: refreshed-lock
+          path: uv.lock
+          retention-days: 1
+
+  open-pr:
+    needs: refresh
+    if: needs.refresh.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    # Holds otari-bot's key, deployable from main only.
+    environment: release
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Take the tested lockfile
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: refreshed-lock
+
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Open the refresh PR
         id: refresh_pr
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
-          token: ${{ secrets.LOCK_REFRESH_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           branch: chore/uv-lock-refresh
           delete-branch: true
           commit-message: |
@@ -157,10 +187,6 @@ jobs:
             integration suites, and the OSS-edition smoke gate against this
             resolution before opening the PR. See the run summary for the
             package-level diff.
-
-            If the PR's own checks did not start, it was authored by
-            `GITHUB_TOKEN`, which cannot trigger `pull_request` workflows. Push an
-            empty commit to the branch, or close and reopen the PR, to run them.
 
             ## Description
 
