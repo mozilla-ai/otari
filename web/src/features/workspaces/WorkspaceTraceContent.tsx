@@ -6,6 +6,7 @@ import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Toggle } from "@/design-system/forms/Toggle"
+import { exceptionalAccess } from "@/features/traces/exceptionalAccess"
 import {
   useDeleteWorkspaceTraceContent,
   useSetWorkspaceTraceContent,
@@ -35,6 +36,7 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
   const [pending, setPending] = useState<Pending>()
   const [deleteStored, setDeleteStored] = useState(false)
   const enabled = workspace.trace_content_enabled ?? false
+  const exceptions = exceptionalAccess(deployment.trace_platform_break_glass)
   const retention = `A session is deleted, with what it was about, ${deployment.trace_retention_days} days after its last activity, and ${deployment.trace_session_max_age_days} days after it started at the latest.`
 
   const close = () => {
@@ -66,7 +68,7 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
           <p className="text-body">{LABEL}</p>
           <p className="mt-1 max-w-md text-caption">
             {available
-              ? `Stores the prompt that starts each turn, the commands and file paths your agents' tools use, and what guardrail checks looked at. Never tool output or model responses. It is encrypted, and Otari shows it only to the person whose session it is, unless they share a session for review. Other members of this workspace, including its admins, see that a session ran and what it cost, but not what it was about. It is kept only for sessions of the workspace's current members, and nobody reads it once its owner leaves. Your agents also have to be set to send it. ${retention}`
+              ? `Stores the prompt that starts each turn, the commands and file paths your agents' tools use, and what guardrail checks looked at. Never tool output or model responses. It is encrypted, and Otari shows it only to the person whose session it is, unless they share a session for review. ${exceptions} Other members of this workspace, including its admins, see that a session ran and what it cost, but not what it was about. It is collected only for the workspace's current members; what is already stored stays until it is deleted, after its owner leaves too. Your agents also have to be set to send it. ${retention}`
               : `This deployment does not keep session content, so a workspace cannot turn it on. Sessions still record their tools, costs and outcomes. ${retention}`}
           </p>
         </div>
@@ -105,7 +107,8 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
               From the next export on, this workspace keeps the prompts,
               commands and file paths its members' agents send. Otari shows each
               person only their own sessions' content. Nobody else sees it, you
-              included, unless they share a session with you. {retention}
+              included, unless they share a session with you. {exceptions}{" "}
+              {retention}
             </p>
           ) : pending === "off" ? (
             <div className="flex flex-col gap-3">
