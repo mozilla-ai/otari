@@ -152,7 +152,7 @@ from gateway.services.traces import SpanContent, TraceMembershipListener, TraceS
 from gateway.services.usage_admin_service import usage_in
 from gateway.services.usage_and_telemetry import UsageService
 from gateway.services.workspace_scope import default_workspace_id
-from gateway.types.traces import ContentReader, SessionOwners, TraceScope
+from gateway.types.traces import ContentReader, SessionOwners, ShareAudience, TraceScope
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -1930,7 +1930,7 @@ async def get_organization_trace_scope(visible: VisibleWorkspacesDep, identity: 
         reader=ContentReader(
             user_id=identity.id,
             email=identity.email or str(identity.id),
-            audience="organization_admins" if visible.whole_organization else None,
+            audiences=frozenset({"organization_admins"}) if visible.whole_organization else frozenset(),
         ),
     )
 
@@ -2163,15 +2163,27 @@ def _caller_usage_scope(workspaces: CallerWorkspaceQuery) -> ColumnElement[bool]
 CallerUsageScope = Annotated[ColumnElement[bool], Depends(_caller_usage_scope)]
 
 
-def get_deployment_trace_scope(workspace_ids: CallerWorkspaces, identity: CurrentIdentity) -> TraceScope:
+async def get_deployment_trace_scope(
+    workspace_ids: CallerWorkspaces,
+    organization_id: CallerOrganization,
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TraceScope:
     """The scope of the deployment-operator trace routes: every workspace in the caller's organization.
 
-    The operator reads a session's content only where its user shared it with the operator, or it is their own.
+    The operator reads a session's content where it is their own, where its user shared it with the
+    operator, and, as an owner or admin of that organization too, where its user shared it with them.
     """
+    audiences: set[ShareAudience] = {"deployment_operator"}
+    membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
+        organization_id, identity.id
+    )
+    if membership is not None and membership.role in MANAGEMENT_ROLES:
+        audiences.add("organization_admins")
     return TraceScope.workspaces(
         workspace_ids,
         reader=ContentReader(
-            user_id=identity.id, email=identity.email or str(identity.id), audience="deployment_operator"
+            user_id=identity.id, email=identity.email or str(identity.id), audiences=frozenset(audiences)
         ),
     )
 

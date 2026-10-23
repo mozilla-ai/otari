@@ -676,13 +676,14 @@ def test_a_share_lets_its_audience_read_until_its_owner_ends_it_and_records_each
     shared = _detail(client, world["admin"])
     assert _tool_call(shared)["content"] == {"command": "pytest -x"}
     assert (shared["content_access"], shared["content_share"]["note"]) == ("share", "flaky test")
-    # A share with the organization's admins is not one with the deployment's operator.
-    assert _tool_call(_operator_get(client, world, "/traces/s-one").json())["content_private"] is True
+    # This operator also owns the organization, so a share with its owners and admins reaches them there too.
+    assert _tool_call(_operator_get(client, world, "/traces/s-one").json())["content"] == {"command": "pytest -x"}
 
     listed = _as(client, world["member"], "GET", path)
     assert listed.status_code == status.HTTP_200_OK, listed.text
     [entry] = listed.json()["items"]
-    assert [read["reader_email"] for read in entry["reads"]] == ["a@a.test"]
+    # Each reader through the share is recorded: the operator, who owns the organization, then the admin.
+    assert sorted(read["reader_email"] for read in entry["reads"]) == ["a@a.test", "op@a.test"]
     assert _as(client, world["admin"], "GET", path).status_code == status.HTTP_403_FORBIDDEN
 
     ended = _as(client, world["member"], "DELETE", f"{path}/{share['id']}")
@@ -1126,3 +1127,28 @@ def test_a_share_made_after_its_owner_was_removed_mid_request_is_refused(
     assert refused.status_code == status.HTTP_403_FORBIDDEN, refused.text
     with db_session_factory() as session:
         assert session.scalars(select(TraceContentShare)).all() == []
+
+
+def test_an_operator_who_owns_the_organization_reads_a_share_with_its_owners_on_the_operator_routes(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The dashboard reads through the operator's routes for an operator, who may be an owner as well."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    assert _tool_call(_operator_get(client, world, "/traces/s-one").json())["content_private"] is True
+
+    created = _as(
+        client,
+        world["member"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "organization_admins"},
+    )
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+
+    detail = _operator_get(client, world, "/traces/s-one").json()
+    assert (_tool_call(detail)["content"], detail["content_access"]) == ({"command": "pytest -x"}, "share")

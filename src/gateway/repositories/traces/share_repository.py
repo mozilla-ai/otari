@@ -1,7 +1,7 @@
 """Data access for ``trace_content_shares`` and ``trace_content_reads``. Flushes, never commits."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Never
 
@@ -60,15 +60,15 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
         return result.scalars().all()
 
     async def active(
-        self, workspace_id: uuid.UUID, trace_id: str, audience: str, now: datetime
+        self, workspace_id: uuid.UUID, trace_id: str, audiences: Collection[str], now: datetime
     ) -> TraceContentShare | None:
-        """The newest share of the session to ``audience`` that has neither expired nor been revoked."""
+        """The newest share of the session to any of ``audiences`` that has neither expired nor been revoked."""
         result = await self.db.execute(
             select(TraceContentShare)
             .where(
                 TraceContentShare.workspace_id == workspace_id,
                 TraceContentShare.trace_id == trace_id,
-                TraceContentShare.audience == audience,
+                TraceContentShare.audience.in_(list(audiences)),
                 TraceContentShare.revoked_at.is_(None),
                 TraceContentShare.expires_at > now,
             )

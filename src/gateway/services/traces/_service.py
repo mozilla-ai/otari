@@ -295,8 +295,8 @@ class TraceService:
                     break_glass.reader_user_id,
                 )
                 access = "break_glass"
-            elif access == "none" and sealed and scope.reader is not None and scope.reader.audience is not None:
-                share = await self._shares.active(row.workspace_id, row.trace_id, scope.reader.audience, now)
+            elif access == "none" and sealed and scope.reader is not None and scope.reader.audiences:
+                share = await self._shares.active(row.workspace_id, row.trace_id, scope.reader.audiences, now)
                 # A share lasts only while its owner belongs: one who left can no longer manage it,
                 # so nobody reads through it, and it is ended for good rather than revived on a return.
                 if share is not None and not await self._owners.is_member(row.workspace_id, row.user_id):

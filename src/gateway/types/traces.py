@@ -360,8 +360,12 @@ class ContentReader:
 
     user_id: uuid.UUID
     email: str
-    audience: ShareAudience | None = None
-    """The shares this reader may read through: none for a member who manages nothing."""
+    audiences: frozenset[ShareAudience] = frozenset()
+    """The shares this reader may read through: none for a member who manages nothing.
+
+    More than one where a reader is both, such as an operator who also owns or
+    administers the organization.
+    """
 
 
 class SessionOwners(Protocol):
