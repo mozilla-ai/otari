@@ -58,6 +58,7 @@ export const HEALTH_CHECKS = "health-checks"
 // A run is started by a worker that polls every 15 seconds, so the page polls
 // at the same pace while it is open.
 export const HEALTH_CHECKS_POLL_MS = 15_000
+export const UPDATE_CHECK = "update-check"
 export const BUILD = "build"
 export const KEYS = "keys"
 // One key's federation rules. Its own root rather than a child of KEYS: a key

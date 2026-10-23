@@ -21178,6 +21178,200 @@
         "title": "UpdateBudgetRequest",
         "type": "object"
       },
+      "UpdateCheckAdvisory": {
+        "description": "A published security advisory for otari that covers the version this deployment ran when it checked.",
+        "properties": {
+          "fixed_in": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixed In"
+          },
+          "id": {
+            "maxLength": 64,
+            "title": "Id",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "summary": {
+            "maxLength": 500,
+            "title": "Summary",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 500,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "summary",
+          "severity",
+          "url"
+        ],
+        "title": "UpdateCheckAdvisory",
+        "type": "object"
+      },
+      "UpdateCheckAnswer": {
+        "additionalProperties": false,
+        "description": "An operator's answer to whether this deployment checks for new releases.",
+        "example": {
+          "enabled": true
+        },
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "UpdateCheckAnswer",
+        "type": "object"
+      },
+      "UpdateCheckStatus": {
+        "description": "Whether this deployment checks for new releases, who decided, what it sends, and what it last heard.",
+        "properties": {
+          "advisories": {
+            "description": "Security advisories that affect the version running now, as of the last check.",
+            "items": {
+              "$ref": "#/components/schemas/UpdateCheckAdvisory"
+            },
+            "title": "Advisories",
+            "type": "array"
+          },
+          "answered_by": {
+            "anyOf": [
+              {
+                "enum": [
+                  "config",
+                  "operator"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who decided: config.yml or the environment (the dashboard cannot change it), an operator in the dashboard, or nobody yet.",
+            "title": "Answered By"
+          },
+          "checkable": {
+            "description": "Whether this build carries a release version. A development build is never checked.",
+            "title": "Checkable",
+            "type": "boolean"
+          },
+          "current_version": {
+            "title": "Current Version",
+            "type": "string"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether checks are sent. Null until an operator answers.",
+            "title": "Enabled"
+          },
+          "endpoint": {
+            "description": "Where checks are sent.",
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "install_id": {
+            "description": "The random id sent with each check.",
+            "title": "Install Id",
+            "type": "string"
+          },
+          "last_checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Checked At"
+          },
+          "latest_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Version"
+          },
+          "next_check_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Check At"
+          },
+          "release_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Url"
+          },
+          "update_available": {
+            "title": "Update Available",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "answered_by",
+          "current_version",
+          "checkable",
+          "install_id",
+          "endpoint",
+          "last_checked_at",
+          "next_check_at",
+          "latest_version",
+          "release_url",
+          "update_available",
+          "advisories"
+        ],
+        "title": "UpdateCheckStatus",
+        "type": "object"
+      },
       "UpdateKeyRequest": {
         "description": "Request model for updating a key.",
         "properties": {
@@ -45474,6 +45668,84 @@
         "summary": "Get Trace",
         "tags": [
           "traces"
+        ]
+      }
+    },
+    "/api/v1/update-check": {
+      "get": {
+        "description": "Whether checks are on and who decided, what a check sends, and what the last one heard.",
+        "operationId": "update-check-get_update_check",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateCheckStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Update Check",
+        "tags": [
+          "update-check"
+        ]
+      },
+      "put": {
+        "description": "Turn the checks on or off. A yes is checked within a minute.\n\nRefused with 409 when the deployment's configuration answers instead.",
+        "operationId": "update-check-answer_update_check",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCheckAnswer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateCheckStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Answer Update Check",
+        "tags": [
+          "update-check"
         ]
       }
     },
