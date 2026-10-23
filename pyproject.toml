@@ -206,8 +206,8 @@ loadtest = [
 # refuses the whole lock. Raise the bound when onnxruntime publishes cp315
 # wheels; `requires-python` itself stays open.
 environments = [
-    "sys_platform == 'linux' and python_full_version < '3.15'",
-    "sys_platform == 'darwin' and python_full_version < '3.15'",
+    "sys_platform == 'linux' and python_version < '3.15'",
+    "sys_platform == 'darwin' and python_version < '3.15'",
 ]
 # authlib is imported nowhere here: apron-auth owns the OAuth mechanics and
 # pulls it in. It stays floored rather than listed as a direct dependency,
