@@ -38,7 +38,7 @@ from gateway.models.users import User as BillingUser
 from gateway.repositories.traces.break_glass_repository import BreakGlassRepository
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import generate_secret_key
-from gateway.services.traces import SpanContent
+from gateway.services.traces import SpanContent, TraceService
 
 from .test_otlp import _agent_span, _exempt_key, _otlp_traces
 
@@ -1090,3 +1090,39 @@ def test_removing_a_member_from_the_organization_ends_their_shares_so_a_return_r
         returned.status = "active"
         session.commit()
     assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
+
+
+def test_a_share_made_after_its_owner_was_removed_mid_request_is_refused(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scope was resolved while they were a member; the removal lands before the share is written."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    real_owned = TraceService._owned
+
+    async def owned_then_removed(self: TraceService, *args: Any, **kwargs: Any) -> Any:
+        row = await real_owned(self, *args, **kwargs)
+        with db_session_factory() as session:
+            member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+            for membership in session.scalars(select(WorkspaceMember).where(col(WorkspaceMember.user_id) == member.id)):
+                session.delete(membership)
+            session.commit()
+        return row
+
+    monkeypatch.setattr(TraceService, "_owned", owned_then_removed)
+
+    refused = _as(
+        client,
+        world["member"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "organization_admins"},
+    )
+
+    assert refused.status_code == status.HTTP_403_FORBIDDEN, refused.text
+    with db_session_factory() as session:
+        assert session.scalars(select(TraceContentShare)).all() == []
