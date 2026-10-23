@@ -2982,7 +2982,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"cleanup\": false,\n  \"digest\": \"string\"\n}"
+              "raw": "{\n  \"cleanup\": false\n}"
             },
             "description": "Apply the reviewed prices, then refresh every provider's models, then the cleanup if asked.\n\nThe price step comes first, so the model step prices new models at the\nprices it applied, and a model held for want of a price is served once it\nhas one. Without a ``digest`` no price changes. A ``digest`` that no longer\nnames the pending prices answers 409 and changes nothing. ``cleanup``\nremoves the prices of models no provider serves, with their history.",
             "header": [
