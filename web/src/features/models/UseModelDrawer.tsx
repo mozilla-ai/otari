@@ -96,7 +96,9 @@ export function UseModelDrawer({
                   <p className="text-sm text-muted">
                     Send{" "}
                     <CopyableValue value={sendAs} label="model selector">
-                      <code className="text-mono-caption">{sendAs}</code>
+                      <code className="text-mono-caption wrap-anywhere">
+                        {sendAs}
+                      </code>
                     </CopyableValue>{" "}
                     as <code className="text-mono-caption">model</code>.
                   </p>
