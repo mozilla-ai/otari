@@ -5,7 +5,6 @@
 ## Start here
 
 * [Quickstart](quickstart.md)
-* [Modes](modes.md)
 
 ## For operators
 
@@ -15,6 +14,7 @@
 * [Access control](access-control.md)
 * [Workload identity](workload-identity.md)
 * [Models](models.md)
+* [Hosted providers](hosted-providers.md)
 * [Provider endpoints](provider-endpoints.md)
 * [Routing policies](routing.md)
 * [Health checks](health-checks.md)
@@ -80,7 +80,6 @@
   * [Traces](api-endpoints/traces.md)
   * [Usage](api-endpoints/usage.md)
   * [Users](api-endpoints/users.md)
-  * [Web search](api-endpoints/web-search.md)
   * [Web search keys](api-endpoints/web-search-keys.md)
   * [Workspace activation](api-endpoints/workspace-activation.md)
   * [Workspace code execution policy](api-endpoints/workspace-code-execution-policy.md)
@@ -106,5 +105,4 @@
 
 ## For platform builders
 
-* [Hybrid-mode protocol](hybrid-mode-protocol.md)
 * [Code-execution protocol](code-execution-protocol.md)

@@ -13,9 +13,7 @@ authenticates as that key. Everything the key carries still applies: its
 active flag and expiry, its user being blocked, its model allow-list, its
 budgets and ceilings, and whether it is a service key.
 
-Workload identity is available in standalone and hosted modes. A hybrid
-gateway verifies no keys of its own and refuses the setting at startup. It also
-needs `OTARI_SECRET_KEY`, which signs the access tokens of the
+Workload identity needs `OTARI_SECRET_KEY`, which signs the access tokens of the
 [token exchange](#claude-code-and-the-anthropic-sdks): with `federation_issuers`
 set and no `OTARI_SECRET_KEY`, the gateway refuses to start.
 
@@ -129,8 +127,9 @@ token matching both authenticates as neither.
 key's rules and `DELETE /api/v1/keys/{key_id}/federation-rules/{rule_id}`
 removes one, effective with the next request. Deleting the key deletes its
 rules. These routes need the deployment operator's standing, like the rest of
-`/api/v1/keys`, so on a hosted gateway the operator manages rules on a
-tenant's behalf; a tenant's own admins cannot yet.
+`/api/v1/keys`. On a deployment that turns on `federation_member_rules`, a
+member can give their own keys rules instead; see
+[Rules on a member's own key](#rules-on-a-members-own-key).
 
 Once the rule is in place, the key's secret is not needed by the backend.
 Keep it out of the backend's environment entirely.
@@ -182,9 +181,7 @@ def otari() -> OpenAI:
     return OpenAI(base_url=f"{AUDIENCE}/api/v1", api_key=credentials.token)
 
 
-reply = otari().chat.completions.create(
-    model="openai:gpt-4o", messages=[{"role": "user", "content": "Hello"}]
-)
+reply = otari().chat.completions.create(model="openai:gpt-4o", messages=[{"role": "user", "content": "Hello"}])
 ```
 
 ## Claude Code and the Anthropic SDKs
@@ -236,8 +233,9 @@ default, between 60 and 3600), and never past the identity token it was
 exchanged for; the SDKs refresh it before then. It authenticates exactly as the
 rule's key, the same way an identity token presented directly does, and it is
 checked again on every request: deleting the rule, deactivating the key, the
-key expiring, or removing the rule's issuer from `federation_issuers` cuts it
-off at once. It is never the master key.
+key expiring, removing an operator's rule's issuer from `federation_issuers`,
+or turning `federation_member_rules` off for a member's rule cuts it off at
+once. It is never the master key.
 
 The access token is stateless. Otari signs it with HMAC-SHA256 under a key
 HKDF derives from `OTARI_SECRET_KEY`, and stores nothing, so every replica that
@@ -255,8 +253,8 @@ which the SDKs report with a hint to check the federation rule. A refusal
 writes nothing to the database.
 
 The endpoint takes no credential, since the identity token is one, and is
-mounted only when `federation_issuers` lists an issuer: otherwise it answers
-404.
+mounted only when `federation_issuers` lists an issuer or
+`federation_member_rules` is on: otherwise it answers 404.
 
 ### Keeping the token file fresh
 
@@ -305,6 +303,69 @@ threading.Thread(target=refresh_forever, daemon=True).start()
 On GKE, a projected service account token volume can write the file instead,
 with its own refresh.
 
+## Rules on a member's own key
+
+On a deployment shared by several organizations, one list of trusted issuers
+does not fit every tenant, and the operator should not have to write every
+tenant's rules. With `federation_member_rules: true` (or
+`OTARI_FEDERATION_MEMBER_RULES=true`), an organization's owners and admins give
+their own keys rules, naming the issuer on the rule itself, and the deployment
+operator can give one to any key in their active organization. A plain member
+cannot add a rule, but can list and delete the rules on their own keys.
+
+In the dashboard, open **API keys**, choose **Workload identity…** from the
+key's actions menu, and add a rule with the issuer, the audience your workload
+asks its platform for, and the service account's email or subject. The dialog
+then shows the environment that points Claude Code or an Anthropic SDK at that
+rule, with the rule id and the organization id filled in; set
+`ANTHROPIC_IDENTITY_TOKEN_FILE` to wherever your refresher writes the token
+(see [Keeping the token file fresh](#keeping-the-token-file-fresh)).
+
+The same is available over the API, authenticated by the member's dashboard
+session:
+
+```bash
+curl -X POST "https://otari.example.com/api/v1/organizations/me/keys/$KEY_ID/federation-rules" \
+  --cookie "otari_dashboard_session=$SESSION" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "issuer": "https://accounts.google.com",
+        "audience": "https://api.anthropic.com",
+        "email": "hackbot@my-project.iam.gserviceaccount.com"
+      }'
+```
+
+`GET` on the same path lists the key's rules and `DELETE .../{rule_id}`
+removes one. The key must be the caller's own, as on the rest of
+`/api/v1/organizations/me/keys`, and anyone else's answers 404, except for the
+deployment operator. Adding a rule as a plain member answers 403.
+
+A member's rule differs from the operator's in three ways, and each is what
+keeps one tenant's rule from reaching another tenant's workload:
+
+- **It names any https issuer.** The issuer need not be on
+  `federation_issuers`. Its discovery document and signing keys are always
+  fetched from a public host, whatever `federation_allow_private_hosts` says,
+  because a member chose the URL.
+- **It matches only in the token exchange that names it.** A workload presents
+  the rule's id to `POST /api/v1/oauth/token`, as Claude Code and the Anthropic
+  SDKs do, and only that rule is checked. A bare identity token is looked up
+  among the operator's rules alone, so a member's rule for another tenant's
+  service account never claims that tenant's tokens.
+- **It conflicts only with itself.** The same rule twice on one key answers
+  409. A rule on another key for the same identity does not, since each is
+  named in its own exchange, and a 409 would tell a member that someone else's
+  key trusts that identity.
+
+A member's rule lets a workload act as that member's key and nothing more,
+which is no more than the member could do by handing the workload the key's
+secret. Turning `federation_member_rules` off stops every member's rule from
+exchanging, and ends the access tokens already exchanged for one, at once; a
+member can still list and delete their rules.
+
+The response's `member_managed` field tells a member's rule from the
+operator's.
+
 ## Other issuers
 
 Any OpenID Connect issuer that publishes a discovery document and signs with
@@ -316,5 +377,5 @@ issuer, for instance, puts `system:serviceaccount:<namespace>:<name>` in `sub`.
 ## Related documentation
 
 - [Access control](access-control.md): API keys, service keys and budgets.
-- [Configuration](configuration.md): where `federation_issuers` is set.
+- [Configuration](configuration.md): where `federation_issuers` and `federation_member_rules` are set.
 - [Use with Claude Code](use-with-claude-code.md): routing Claude Code through Otari.

@@ -1,7 +1,7 @@
 # Quickstart
 
-This guide runs a persistent standalone Otari with Docker Compose. For an
-ephemeral, no-clone example, use the [README quickstart](https://github.com/mozilla-ai/otari/blob/v0.31.1/README.md#quickstart).
+This guide runs a persistent Otari with Docker Compose. For an
+ephemeral, no-clone example, use the [README quickstart](https://github.com/mozilla-ai/otari/blob/v0.32.0/README.md#quickstart).
 
 ## Prerequisites
 
