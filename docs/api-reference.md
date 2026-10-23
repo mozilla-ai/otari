@@ -298,7 +298,9 @@ Otari answers with that text, streamed or not, without calling the provider. The
 request is still authenticated, rate limited, held against its budgets, priced
 at the model's rate and settled, with usage estimated at four characters a
 token, so budgets and the usage log move as they would in production. The model
-still has to resolve and be priced, as for any request.
+still has to resolve and be priced, as for any request. Nothing else calls a
+model either: a routing policy with a router serves its default target, and
+attachments are not described or extracted.
 
 Only an API key with `allow_mock_response` (`POST` or `PATCH /api/v1/keys`, or
 config.yml) may send it. On any other key, the master key or a dashboard

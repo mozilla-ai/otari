@@ -1,5 +1,6 @@
 """The digest a start compares to tell whether a config.yml entry changed."""
 
+import hashlib
 import secrets
 from typing import Any
 
@@ -44,3 +45,12 @@ def test_a_key_digest_changes_with_its_settings_and_its_secret() -> None:
 def test_a_key_digest_is_not_a_digest_of_the_secret_alone() -> None:
     assert SECRET not in _key().declaration_digest()
     assert declaration_digest({"secret": SECRET}) != _key().declaration_digest()
+
+
+def test_a_key_that_leaves_a_later_field_unset_keeps_the_digest_it_had_before_the_field() -> None:
+    key = _key()
+    before = key.model_dump(mode="json", exclude={"secret", "allow_mock_response"})
+    before["secret_sha256"] = hashlib.sha256(SECRET.encode()).hexdigest()
+
+    assert key.declaration_digest() == declaration_digest(before)
+    assert _key(allow_mock_response=True).declaration_digest() != declaration_digest(before)

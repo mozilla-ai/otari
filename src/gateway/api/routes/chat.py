@@ -68,6 +68,7 @@ from gateway.services.inference import (
     chat_user_fields,
     is_chat_stream_cost_carrier,
     mock_completion,
+    mock_output_tokens,
     mock_stream,
     provider_failure,
     require_choices,
@@ -611,6 +612,11 @@ async def run_chat_completion(
         return len(str(request.messages)), stats.vision_usage()
 
     output_cap = _effective_output_cap(request.max_tokens, request.max_completion_tokens)
+    mocked = request.mock_response is not None
+    # A mock settles for its own text whatever the cap says, so it is held for that.
+    estimate_output_tokens = (
+        mock_output_tokens(request.mock_response, request.n) if request.mock_response is not None else output_cap
+    )
 
     try:
         ctx = await resolve_request_context(
@@ -625,15 +631,18 @@ async def run_chat_completion(
             user_id_from_request=request.user,
             safety_identifier=request.safety_identifier,
             estimate_prompt_chars=len(str(request.messages)),
-            estimate_max_output_tokens=output_cap,
+            estimate_max_output_tokens=estimate_output_tokens,
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
             session_principal=session_principal,
-            mock_response_requested=request.mock_response is not None,
-            routing_signal=lambda: routing_signal_from_messages(
-                request.messages, raw_request, has_tools=bool(request.tools)
-            ),
-            normalize_messages=_normalize,
+            mock_response_requested=mocked,
+            # Both can call a model before dispatch (a router's embeddings, a vision
+            # description of an attachment), which a mock must never do. Without a
+            # signal a policy serves its default target.
+            routing_signal=None
+            if mocked
+            else lambda: routing_signal_from_messages(request.messages, raw_request, has_tools=bool(request.tools)),
+            normalize_messages=None if mocked else _normalize,
             tools=request.tools,
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,

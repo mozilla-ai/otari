@@ -27,6 +27,12 @@ _CONFIG_NAME = re.compile(BUDGET_ID_PATTERN)
 # How to make a secret that passes, quoted in every refusal.
 SECRET_RECIPE = "python -c \"import secrets; print('tk-' + secrets.token_urlsafe(48))\""
 
+# Fields added after declared keys started storing a digest. Each enters the
+# digest only when set away from its default, so a declaration that does not use
+# it keeps the digest it had: a changed digest rewrites the key on the next start,
+# which would reactivate one an operator disabled.
+_DIGESTED_WHEN_SET = ("allow_mock_response",)
+
 
 def _mask(value: Any) -> Any:
     """Hide a value that may be a secret from the errors pydantic builds, which quote their input."""
@@ -121,6 +127,9 @@ class ApiKeyConfig(BaseModel):
         says no more about it than the key's hash already does.
         """
         entry = self.model_dump(mode="json", exclude={"secret"})
+        for name in _DIGESTED_WHEN_SET:
+            if entry[name] == type(self).model_fields[name].default:
+                del entry[name]
         entry["secret_sha256"] = hashlib.sha256(self.secret.get_secret_value().encode()).hexdigest()
         return declaration_digest(entry)
 
