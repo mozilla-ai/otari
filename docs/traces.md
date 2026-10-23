@@ -451,6 +451,14 @@ opened: the gateway opens a workspace's content with a cached key for five
 minutes without asking KMS again, so CloudTrail shows when content was opened
 for a workspace, and the share read records show who read which session.
 
+Before relying on a key, check it from a development account with
+`uv run python scripts/check_trace_content_kms.py --profile <profile> --region <region> --account <account id>`.
+It creates throwaway keys, runs otari's own sealing code against them (KMS
+refusing another session or workspace, rotation, an alias moved to a new key, the
+batch deadline across many sessions, break-glass calling KMS afresh), and
+schedules them for deletion. It makes real AWS calls, so it never runs in CI, and
+it refuses to run when the profile resolves to any other account.
+
 To rotate:
 
 - **KMS automatic rotation** needs nothing: KMS keeps the earlier key material
