@@ -7,7 +7,7 @@ import {
   traceSummary,
 } from "@/tests/traceFixtures"
 
-import { toTrace } from "./fromApi"
+import { PRIVATE_CONTENT, toTrace } from "./fromApi"
 import { summarizeTrace } from "./types"
 
 describe("toTrace", () => {
@@ -422,6 +422,22 @@ describe("toTrace", () => {
       "gate.evidence": "pytest -x",
       "gate.detail": "ok",
     })
+  })
+
+  it("says a span's content is private where the reader may not open it", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({ span_id: "tool-1", kind: "tool", content_private: true }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("tool-1")?.input).toBe(PRIVATE_CONTENT)
+    expect(byId.get("req-1")?.input).toBeUndefined()
   })
 
   it("gives every gate of a check what the check read, sent on one of them", () => {
