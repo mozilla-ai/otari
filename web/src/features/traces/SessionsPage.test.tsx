@@ -1160,6 +1160,20 @@ describe("SessionsPage", () => {
     expect(params.get("end")).toBe(end)
   })
 
+  it("reads a window with only a start as running to now", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+    const start = "2026-10-01T00:00:00.000Z"
+
+    renderPage(<SessionsPage />, `/sessions?start_date=${start}`)
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    const [params] = listReads(calls)
+    expect(params.get("start")).toBe(start)
+    expect(Date.parse(params.get("end") ?? "")).toBeGreaterThan(
+      Date.parse(start),
+    )
+  })
+
   it("sends the filters the Overview tabs share with the list, count and chart", async () => {
     const { calls } = mockApi({ traces: [traceSummary()] })
 

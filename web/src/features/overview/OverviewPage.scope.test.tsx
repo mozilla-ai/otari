@@ -206,6 +206,18 @@ describe("Overview scope", () => {
     expect(screen.queryByText(/error rate 50/)).toBeNull()
   })
 
+  it("judges a member's attention strip on their own usage under Everyone", async () => {
+    mockGateway({ deployment_operator: false, role: "member" }, true, {
+      mine: 0,
+      everyone: 20,
+    })
+    renderOverview("/overview?scope=everyone")
+
+    await screen.findByText("Everyone in Production")
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
+    expect(screen.queryByText(/error rate 50/)).toBeNull()
+  })
+
   it("links a member's own failures with their scope", async () => {
     mockGateway({ deployment_operator: false, role: "member" }, true, {
       mine: 20,
