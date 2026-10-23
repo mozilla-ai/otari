@@ -6,6 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type {
+  TraceBreakGlassReadList,
   TraceContentShare,
   TraceContentShareCreate,
   TraceContentShareList,
@@ -251,5 +252,40 @@ export function useEndTraceShare() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [TRACES, "shares"] })
     },
+  })
+}
+
+// Opening a session's content without its owner's share, as an owner of the
+// organization. The opening is recorded with its reason before anything opens.
+export function useBreakGlass() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      traceId,
+      workspaceId,
+      reason,
+    }: {
+      traceId: string
+      workspaceId: string
+      reason: string
+    }) =>
+      apiFetch<TraceDetail>(
+        `${SHARE_BASE}/${encodeURIComponent(traceId)}/break-glass?${new URLSearchParams({ workspace_id: workspaceId }).toString()}`,
+        { method: "POST", body: JSON.stringify({ reason }) },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [TRACES, "break-glass"] })
+    },
+  })
+}
+
+// The organization's owners' break-glass openings, newest first. Owners only.
+export function useBreakGlassLog(enabled: boolean) {
+  return useQuery({
+    queryKey: [TRACES, "break-glass"],
+    queryFn: () =>
+      apiFetch<TraceBreakGlassReadList>(`${SHARE_BASE}/audit/break-glass`),
+    enabled,
+    staleTime: 30_000,
   })
 }

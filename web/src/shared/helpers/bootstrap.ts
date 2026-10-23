@@ -64,6 +64,7 @@ export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {
     open_signup: wire.open_signup ?? false,
     // Off: a gateway old enough to omit this kept no workspace's content.
     trace_content_available: wire.trace_content_available ?? false,
+    trace_platform_break_glass: wire.trace_platform_break_glass ?? false,
     // The setting defaults, for a gateway old enough to omit them.
     trace_retention_days: wire.trace_retention_days ?? 30,
     trace_session_max_age_days: wire.trace_session_max_age_days ?? 90,

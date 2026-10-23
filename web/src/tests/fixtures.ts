@@ -205,6 +205,7 @@ export function bootstrap(
     federation_member_rules: false,
     // Off, the setting default: the session content tests turn it on.
     trace_content_available: false,
+    trace_platform_break_glass: false,
     trace_retention_days: 30,
     trace_session_max_age_days: 90,
     // Off by default, matching the config default; the public-catalog tests
