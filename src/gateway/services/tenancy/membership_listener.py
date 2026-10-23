@@ -26,5 +26,8 @@ class MembershipListener(Protocol):
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         """A workspace and these memberships are about to be deleted."""
 
+    async def member_left_organization(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
+        """A person's organization membership ended; these are the organization's workspaces."""
+
 
 __all__ = ["MembershipListener"]

@@ -2158,7 +2158,20 @@ class OrganizationService:
                 await self.invitations.update_status(invitation, {"status": "cancelled"})
         if updated.status == "suspended":
             await self._move_off_ended_membership(updated)
+            await self._tell_listener_member_left(updated)
         return updated
+
+    async def _tell_listener_member_left(self, membership: OrganizationMember) -> None:
+        """Let the other domains react to a membership ending, in the transaction that ends it.
+
+        Skipped where this service was built without a listener or a Unit of Work,
+        which the read-only builds are; ending a membership is not one of their uses.
+        """
+        if self._membership_listener is None or self._uow is None:
+            return
+        async with self._uow:
+            workspace_ids = await self.workspace_rows.get_ids_by_organization(membership.organization_id)
+            await self._membership_listener.member_left_organization(membership.user_id, workspace_ids)
 
     async def _move_off_ended_membership(self, membership: OrganizationMember) -> None:
         """Stage the identity's active organization onto its oldest live membership, if it named the one that ended.
