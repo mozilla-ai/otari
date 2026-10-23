@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Self
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.repositories.traces.barrier_repository import ContentBarrierRepository
+from gateway.repositories.traces.barrier_repository import ContentBarrierRepository, UserBarrierRepository
 from gateway.repositories.traces.definition_repository import GuardrailDefinitionRepository
 from gateway.repositories.traces.share_repository import ContentShareRepository
 from gateway.repositories.traces.span_repository import SpanRepository
@@ -18,6 +18,7 @@ class TracesRepositories:
     definitions: GuardrailDefinitionRepository
     shares: ContentShareRepository
     barriers: ContentBarrierRepository
+    erasures: UserBarrierRepository
 
     @classmethod
     def on(cls, uow: UnitOfWork) -> Self:
@@ -28,4 +29,5 @@ class TracesRepositories:
             definitions=GuardrailDefinitionRepository(uow),
             shares=ContentShareRepository(uow),
             barriers=ContentBarrierRepository(uow),
+            erasures=UserBarrierRepository(uow),
         )

@@ -244,3 +244,17 @@ class TraceContentBarrier(Base):
         Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
     )
     generation: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+
+
+class TraceUserBarrier(Base):
+    """When a user's traces were last erased, so no replica stores spans of theirs taken in before it.
+
+    Erasure sets ``erased_at`` and deletes in one transaction, and a write locks
+    the row of each user it stores for, so a batch another replica still held
+    from before the erasure is dropped rather than stored after it.
+    """
+
+    __tablename__ = "trace_user_barriers"
+
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
+    erased_at: Mapped[datetime | None] = mapped_column(UtcDateTime())

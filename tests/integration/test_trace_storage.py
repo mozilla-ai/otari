@@ -451,7 +451,9 @@ async def test_a_batch_costs_the_same_statements_however_many_traces_it_holds(
     finally:
         event.remove(Engine, "before_cursor_execute", count)
 
-    assert len(statements) == 4, statements
+    # Lock the users' erasure rows (create, then lock), create the traces, read
+    # their owners, insert the spans, grow the totals. Still fixed, however many.
+    assert len(statements) == 6, statements
 
 
 async def test_two_writers_sharing_traces_in_opposite_order_do_not_deadlock(
@@ -803,3 +805,25 @@ async def test_a_rejected_write_cannot_supply_another_writes_content(
         await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.span_id) == "tool-1"))
     ).scalar_one()
     assert sealed is None
+
+
+async def test_a_batch_another_replica_held_from_before_an_erasure_is_never_stored(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    # Replica B took this in, and has not flushed it yet.
+    held = _write(workspace, "s-alice", _span("tool-1", kind="tool", content={"prompt": "x"}))
+    await store.write((_write(workspace, "s-alice", _span("step-0")),))
+
+    # Replica A erases the user.
+    await store.purge_user("alice")
+    # Replica B flushes.
+    result = await store.write((held,))
+
+    assert result.accepted == 0
+    async_db.expire_all()
+    assert (await async_db.execute(select(TraceSpan.span_id))).scalars().all() == []
+    # Someone else's spans are stored as ever.
+    bob = await store.write((_write(workspace, "s-bob", _span("step-0"), user_id="bob"),))
+    assert bob.accepted == 1

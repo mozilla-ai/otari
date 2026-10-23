@@ -50,6 +50,9 @@ from gateway.types.traces import (
 )
 from otari_agent.domain.definitions import GateDefinition, definition_digest, gates_from_body
 
+# How long after a user's erasure spans taken in for them are still refused.
+ERASURE_MARGIN = timedelta(minutes=10)
+
 # How often one reader's reads through a share are recorded, and how many of a
 # share's newest reads its listing carries.
 READ_RECORDED_EVERY = timedelta(hours=1)
@@ -81,20 +84,25 @@ class TraceService:
         self._definitions = repositories.definitions
         self._shares = repositories.shares
         self._barriers = repositories.barriers
+        self._erasures = repositories.erasures
 
     async def write(self, traces: Sequence[TraceWrite]) -> WriteResult:
         """Store these traces' spans, creating each trace on its first span.
 
-        A fixed number of statements however many traces the batch holds: create
-        the traces not stored yet, read their owners, insert the spans, grow the
-        totals. Each runs in key order, so two writers sharing traces lock them in
+        A fixed number of statements however many traces the batch holds: lock its
+        users' erasure rows (and, where it keeps content, its workspaces'
+        generations), create the traces not stored yet, read their owners, insert
+        the spans, grow the totals. Each runs in key order, so two writers sharing traces lock them in
         the same order.
         """
         written_at = datetime.now(UTC)
         # Sealed before the block, so a key source's round trip holds no connection.
         sealed = await self._seal(traces)
         async with self._uow:
-            # First, so a workspace turning content off or deleting it waits for this
+            # First, so a user's erasure on any replica waits for this write to commit
+            # and then deletes it, or this write sees the erasure and stores nothing of theirs.
+            erased = await self._erasures.lock({trace.user_id for trace in traces if trace.user_id is not None})
+            # Then, so a workspace turning content off or deleting it waits for this
             # write to commit, or this write sees the generation it moved on to.
             generations = await self._barriers.lock(
                 {trace.workspace_id for trace, held in zip(traces, sealed, strict=True) if held}
@@ -113,7 +121,7 @@ class TraceService:
             for trace, held in zip(traces, sealed, strict=True):
                 spans = _unique_spans(trace.spans)
                 holder = holders.get(_key(trace))
-                if holder is None or holder[0] != trace.user_id:
+                if _erased_since(trace, erased) or holder is None or holder[0] != trace.user_id:
                     rejected += len(spans)
                     continue
                 kept.append((trace, spans))
@@ -444,8 +452,12 @@ class TraceService:
             return _summary(rows[0])
 
     async def purge_user(self, user_id: str) -> int:
-        """Delete every trace a user owns, in every workspace, for erasure."""
+        """Delete every trace a user owns, in every workspace, for erasure.
+
+        What any replica took in for them before now, and still holds, is never stored.
+        """
         async with self._uow:
+            await self._erasures.erase(user_id, datetime.now(UTC))
             return await self._traces.delete_for_user(user_id)
 
     async def expire(self, *, idle_before: datetime, started_before: datetime) -> int:
@@ -608,6 +620,16 @@ def _span_record(row: TraceSpan) -> SpanRecord:
         otel_span_id=row.otel_span_id,
         attributes=row.attributes or {},
     )
+
+
+def _erased_since(trace: TraceWrite, erased: dict[str, datetime | None]) -> bool:
+    """Whether the write's user was erased after, or too near, the moment it was taken in.
+
+    ``ERASURE_MARGIN`` absorbs the difference between two replicas' clocks, at the
+    cost of refusing a recreated user's first spans for that long.
+    """
+    at = erased.get(trace.user_id) if trace.user_id is not None else None
+    return at is not None and trace.captured_at < at + ERASURE_MARGIN
 
 
 def _current(trace: TraceWrite, generations: dict[uuid.UUID, int]) -> bool:
