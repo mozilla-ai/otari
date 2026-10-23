@@ -295,8 +295,13 @@ export function SessionsPage() {
   // it opened is held here for the session it opened, never polled over.
   const isOwner = useOrganizationContext().data?.role === "owner"
   const [opened, setOpened] = useState<TraceDetail>()
+  const peekWorkspace = url.get("peek_workspace")
   const openedHere =
-    opened && opened.summary.trace_id === peekId ? opened : undefined
+    opened &&
+    opened.summary.trace_id === peekId &&
+    (!peekWorkspace || opened.summary.workspace_id === peekWorkspace)
+      ? opened
+      : undefined
   const shown = openedHere ?? detail.data
 
   const points = seriesQuery.data?.points
