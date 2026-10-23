@@ -46,7 +46,7 @@ def _attr(key: str, value: Any) -> dict[str, Any]:
     return {"key": key, "value": {"stringValue": str(value)}}
 
 
-def _api_request_record(source_event_id: str = "req_otlp_1", **over: Any) -> dict[str, Any]:
+def _api_request_record(source_event_id: str = "req_011CgBfeQi6uhNCE3aH5jmr3", **over: Any) -> dict[str, Any]:
     attrs = {
         "event.name": "api_request",
         "event.timestamp": "2026-07-22T12:00:00.000Z",
@@ -108,7 +108,7 @@ def test_otlp_api_request_is_ingested_and_priced(
     resp = client.post(_PATH, json=_otlp(_api_request_record()), headers=headers)
     assert resp.status_code == 200, resp.text
 
-    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "req_otlp_1").one()
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "req_011CgBfeQi6uhNCE3aH5jmr3").one()
     assert row.source == "claude_code"
     assert row.user_id == "alice"
     assert row.api_key_id is not None
@@ -584,7 +584,7 @@ def test_otlp_a_judge_gates_model_calls_are_booked_to_the_agents_session(
         9,
         6684,
     )
-    other = db_session.query(UsageLog).filter(UsageLog.source_event_id == side_id).one()
+    other = db_session.query(UsageLog).filter(UsageLog.source_event_id == f"{span_id}:{side_id}").one()
     assert (other.source, other.source_label, other.model, other.prompt_tokens) == (
         "otari-hook",
         "77192d4d-b969-44eb-bb05-e7ca84f6dfab",
@@ -833,6 +833,99 @@ def test_otlp_claude_code_spans_record_the_tool_a_hook_refused(
     assert tool.tool_call_id is not None and tool.tool_call_id.startswith("tc-")
     assert (tool.outcome, tool.error_class) == ("blocked", None)
     assert tool.attributes["otari.tool.decision_source"] == "hook"
+
+
+def test_otlp_claude_code_request_cost_reaches_its_session_once(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ledger prices a Claude Code request from its log event and hands the cost to the request's session."""
+    headers = _exempt_key(client, master_key_header)
+    _seed_pricing(client, master_key_header)
+    writer = _install_writer(client, monkeypatch)
+    session_id = "2c92f0a0-773f-41f2-8703-1ab0a6a2065b"
+    llm_request = _agent_span(
+        base64.b64encode(bytes.fromhex("7d8efff798038103d269b633813fc60c")).decode(),
+        base64.b64encode(bytes.fromhex("00000000000000a1")).decode(),
+        name="claude_code.llm_request",
+        attributes=[
+            _attr("session.id", session_id),
+            _attr("span.type", "llm_request"),
+            _attr("model", "claude-opus-4-8"),
+            _attr("request_id", "req_011CgBfeQi6uhNCE3aH5jmr3"),
+        ],
+    )
+    body = {
+        "resourceSpans": [
+            {"scopeSpans": [{"scope": {"name": "com.anthropic.claude_code.tracing"}, "spans": [llm_request]}]}
+        ]
+    }
+
+    assert client.post("/otlp/v1/traces", json=body, headers=headers).status_code == 200
+    for _ in range(2):  # a retried export
+        assert client.post(_PATH, json=_otlp(_api_request_record()), headers=headers).status_code == 200
+
+    spans_write, *cost_writes = writer.writes
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "req_011CgBfeQi6uhNCE3aH5jmr3").one()
+    [request] = [span for span in spans_write.spans if span.kind == "llm"]
+    usage = [span for write in cost_writes for span in write.spans]
+    assert {write.trace_id for write in cost_writes} == {spans_write.trace_id}
+    assert request.request_id == "req_011CgBfeQi6uhNCE3aH5jmr3"
+    assert [(span.request_id, span.cost_snapshot, span.operation) for span in usage] == [
+        ("req_011CgBfeQi6uhNCE3aH5jmr3", row.cost, "usage")
+    ] * 2
+    # One span id however often the event is sent, so the writer counts it once.
+    assert usage[0].span_id == usage[1].span_id
+    # The rates it was priced at, which a tool call's estimate is read with.
+    assert dict(usage[0].attributes) == {
+        "otari.llm.rate.input": "15",
+        "otari.llm.rate.output": "75",
+        "otari.llm.rate.cache_read": "1.5",
+        "otari.llm.rate.cache_write": "18.75",
+    }
+
+
+def test_otlp_a_judge_gates_cost_reaches_its_gate_on_the_session(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A judge's tokens on its gate span are priced by the ledger, and the cost lands on the gate by its span id."""
+    headers = _exempt_key(client, master_key_header)
+    _seed_pricing(client, master_key_header)
+    writer = _install_writer(client, monkeypatch)
+    span_id = "00000000000000b2"
+    gate = {
+        "traceId": base64.b64encode(bytes.fromhex("8d8efff798038103d269b633813fc60c")).decode(),
+        "spanId": base64.b64encode(bytes.fromhex(span_id)).decode(),
+        "name": "otari.gate",
+        "startTimeUnixNano": "1784000000000000000",
+        "endTimeUnixNano": "1784000040000000000",
+        "attributes": [
+            _attr(key, value)
+            for key, value in {
+                "session.id": "2c92f0a0-773f-41f2-8703-1ab0a6a2065b",
+                "otari.harness": "claude-code",
+                "otari.gate.id": "writing-style",
+                "otari.gate.type": "judge",
+                "otari.gate.outcome": "pass",
+                "otari.gate.moment": "stop",
+                "gen_ai.provider.name": "anthropic",
+                "gen_ai.request.model": "claude-opus-4-8",
+                "gen_ai.usage.input_tokens": 1000,
+                "gen_ai.usage.output_tokens": 100,
+            }.items()
+        ],
+    }
+    body = {"resourceSpans": [{"scopeSpans": [{"scope": {"name": "otari.hook"}, "spans": [gate]}]}]}
+
+    assert client.post("/otlp/v1/traces", json=body, headers=headers).status_code == 200
+
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == span_id).one()
+    spans_write, cost_write = writer.writes
+    [judge] = spans_write.spans
+    [usage] = cost_write.spans
+    assert cost_write.trace_id == spans_write.trace_id
+    assert (judge.kind, judge.request_id) == ("guardrail", span_id)
+    assert (usage.request_id, usage.cost_snapshot) == (span_id, row.cost)
+    assert row.cost is not None and row.cost > 0
 
 
 # --- Claude Platform -------------------------------------------------------------

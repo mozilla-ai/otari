@@ -52,13 +52,18 @@ _GEMINI_LABEL_KEY = "safety_identifier"
 _GEMINI_LABEL_VALUE_MAX = 63
 
 
-def upstream_user_identifier(workspace_id: str, subject: str, key: str | None) -> str:
-    """The identifier for ``subject`` (a user tag or user id) within ``workspace_id``.
+def upstream_user_identifier(workspace_id: str, user_id: str | None, key: str | None, *, tag: str | None = None) -> str:
+    """The identifier for ``user_id`` within ``workspace_id``, or for a ``tag`` of that user's own.
 
-    Keyed with ``key`` when one is set, so the same user is not linkable across
-    deployments; an unkeyed digest otherwise.
+    A tag only subdivides its caller's identifier: the user is always digested, so
+    no tag gives one user another's identifier, and a digest with a tag never
+    equals one without. Keyed with ``key`` when one is set, so the same user is
+    not linkable across deployments; an unkeyed digest otherwise.
     """
-    payload = json.dumps([_DIGEST_VERSION, workspace_id, subject], ensure_ascii=False, separators=(",", ":")).encode()
+    parts: list[str | None] = [_DIGEST_VERSION, workspace_id, user_id]
+    if tag is not None:
+        parts.append(tag)
+    payload = json.dumps(parts, ensure_ascii=False, separators=(",", ":")).encode()
     if key is None:
         return hashlib.sha256(payload).hexdigest()
     # codeql[py/weak-sensitive-data-hashing]
@@ -79,16 +84,17 @@ def end_user_identifier(
 ) -> str:
     """The identifier a request's provider calls carry.
 
-    The caller's own user tag wins over the resolved user, except on a dashboard
-    ``session``: it names no end user, so its tag would let a member pick another's
-    identifier. A request with nothing to derive it from raises
+    The caller's own user tag tells apart the end users behind the resolved user,
+    except on a dashboard ``session``, which names no end user; a tag equal to the
+    resolved user is no tag. A request with nothing to derive it from raises
     :class:`UnidentifiedEndUserError` rather than going upstream unscoped, where a
     block would land on the whole account.
     """
-    subject = user_id if session else tag or user_id
-    if not workspace_id or not subject:
+    if session or tag == user_id:
+        tag = None
+    if not workspace_id or not (tag or user_id):
         raise UnidentifiedEndUserError
-    return upstream_user_identifier(workspace_id, subject, key)
+    return upstream_user_identifier(workspace_id, user_id, key, tag=tag or None)
 
 
 def bind_upstream_user(request_fields: dict[str, Any], identifier: str | None) -> dict[str, Any]:

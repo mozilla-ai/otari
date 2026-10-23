@@ -7523,13 +7523,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -7601,13 +7601,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -7686,7 +7686,7 @@
         {
           "name": "Trace Series",
           "request": {
-            "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+            "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7715,13 +7715,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -11085,13 +11085,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -11161,13 +11161,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -11244,7 +11244,7 @@
         {
           "name": "Trace Series",
           "request": {
-            "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+            "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
             "header": [],
             "method": "GET",
             "url": {
@@ -11271,13 +11271,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""

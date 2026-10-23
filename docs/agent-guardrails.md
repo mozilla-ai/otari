@@ -451,10 +451,16 @@ sends it with that same key; one the server cannot take yet, a rejected key
 included, waits there for the next check, for up to a day. The API key is read
 from the environment when it is sent and never written to the outbox.
 
+With `OTARI_HOOK_REPORT_CONTENT=1`, a check on a tool call also sends what it
+read, the command or the paths, and each gate its own detail. A server keeps them
+only where it keeps content; see [Keeping what a span was about](traces.md#keeping-what-a-span-was-about).
+
 Without `OTARI_URL`, a harness's own OpenTelemetry trace export
 (`OTEL_TRACES_EXPORTER=otlp` with `OTEL_EXPORTER_OTLP_ENDPOINT` and its headers)
 is used instead. Claude Code does not pass `OTEL_*` variables to its hooks, so
-it needs `OTARI_URL`. `OTARI_HOOK_REPORT=off` turns reporting off.
+it needs `OTARI_URL`, set in the `env` block of its settings as
+[Send Claude Code sessions to Otari](use-with-claude-code.md#send-claude-code-sessions-to-otari)
+shows. `OTARI_HOOK_REPORT=off` turns reporting off.
 
 ## Generating gates from AGENTS.md or CLAUDE.md
 

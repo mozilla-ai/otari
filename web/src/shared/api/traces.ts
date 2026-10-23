@@ -15,6 +15,7 @@ import type {
 import { apiFetch, retryUnlessNotFound } from "@/shared/api/client"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import { TRACES, workspaceMeta } from "@/shared/api/queryKeys"
+import type { ChartBucket } from "@/shared/helpers/timeRange"
 
 // What narrows the session list. An empty string is "no filter", the same
 // reading the URL state gives a cleared key. `workspaceId` is the shell's
@@ -104,7 +105,7 @@ export function useTraceCount(filters: TraceFilters) {
   })
 }
 
-export function useTraceSeries(filters: TraceFilters, bucket: "hour" | "day") {
+export function useTraceSeries(filters: TraceFilters, bucket: ChartBucket) {
   const scope = useTraceScope()
   return useQuery({
     queryKey: [TRACES, "series", scope.base, filters, bucket],

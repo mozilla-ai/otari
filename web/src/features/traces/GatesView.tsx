@@ -1,6 +1,8 @@
 import type { TraceGateSummary } from "@/client"
 import { Chip, type ChipTone } from "@/design-system/indicators/Chip"
 
+import { GATE_KIND, says } from "./gateWords"
+
 const GATE_COUNTS: {
   key: "blocked" | "refused" | "undecided" | "flagged" | "passed"
   label: string
@@ -103,7 +105,7 @@ export function GatesView({
                   {gate.gate_id}
                 </span>
                 {gate.gate_type ? (
-                  <Chip tone="neutral">{gate.gate_type}</Chip>
+                  <Chip tone="neutral">{says(GATE_KIND, gate.gate_type)}</Chip>
                 ) : null}
               </li>
             ))}

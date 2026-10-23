@@ -8,6 +8,7 @@ from gateway.services.traces._reading import (
     _attach_gates,
     _fill_client_tool_starts,
     _gate_summaries,
+    _price_requests,
     _settle_tools,
     _turns,
 )
@@ -244,3 +245,45 @@ def test_a_gate_hangs_under_the_call_it_checked_when_a_client_reuses_call_ids() 
     }
 
     assert (attached["gate-1"], attached["gate-2"]) == ("tool-1", "tool-2")
+
+
+def test_a_judge_gates_cost_is_read_on_the_gate_and_not_counted_as_a_turns_request() -> None:
+    usage = _span("usage-1", "llm", operation="usage", request_id="00000000000000b2", cost_snapshot=Decimal("0.02"))
+    spans = _price_requests(
+        [
+            _span("turn", "step", opens_turn=True),
+            _span("gate-1", "guardrail", "turn", request_id="00000000000000b2"),
+            usage,
+        ]
+    )
+
+    assert [(span.span_id, span.cost_snapshot) for span in spans] == [("turn", None), ("gate-1", Decimal("0.02"))]
+    [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+    assert turn.cost == Decimal(0)
+
+
+def test_a_judges_further_model_is_added_to_its_gates_cost() -> None:
+    main = _span("usage-1", "llm", operation="usage", request_id="00000000000000b2", cost_snapshot=Decimal("0.02"))
+    side = replace(
+        main, span_id="usage-2", request_id="00000000000000b2:00000000000000c3", cost_snapshot=Decimal("0.005")
+    )
+    spans = _price_requests([_span("gate-1", "guardrail", request_id="00000000000000b2"), main, side])
+
+    assert [(span.span_id, span.cost_snapshot) for span in spans] == [("gate-1", Decimal("0.025"))]
+
+
+def test_a_requests_cost_the_ledger_priced_later_is_read_on_the_request_and_counted_in_its_turn() -> None:
+    usage = _span("usage-1", "llm", operation="usage", request_id="req_1", cost_snapshot=Decimal("0.25"))
+    spans = _price_requests(
+        [
+            _span("turn", "step", opens_turn=True),
+            _span("llm-1", "llm", "turn", request_id="req_1", input_tokens=10, output_tokens=2),
+            usage,
+            # A cost whose request was never exported is the session's, not a span to read.
+            replace(usage, span_id="usage-2", request_id="req_lost"),
+        ]
+    )
+
+    assert [(span.span_id, span.cost_snapshot) for span in spans] == [("turn", None), ("llm-1", Decimal("0.25"))]
+    [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+    assert turn.cost == Decimal("0.25")

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gateway.models.money import as_float
 from gateway.types.trace_views import TraceView, TurnView
-from gateway.types.traces import SpanRecord, TraceBucket, TracePage, TraceSummary
+from gateway.types.traces import SpanRecord, TraceBucket, TraceBucketGrain, TracePage, TraceSummary
 from otari_agent.domain.definitions import DIGEST_LENGTH, MAX_DEFINITION_GATES, MAX_GATE_MESSAGE_LENGTH, MAX_GATE_RUNS
 from otari_agent.domain.policy import MAX_GATE_ID_LENGTH
 from otari_agent.domain.types import GateType, RunsAt
@@ -51,20 +51,20 @@ class TraceCountPublic(BaseModel):
 
 class TraceBucketPublic(BaseModel):
     bucket: str = Field(description="Bucket start, ISO 8601 UTC.")
-    succeeded: int = Field(description="Sessions that started in the bucket and did not fail.")
+    succeeded: int = Field(description="Sessions active in the bucket that did not fail.")
     failed: int = Field(
-        description="Sessions that started in the bucket and hold an unrecovered error other than a tool's. "
+        description="Sessions active in the bucket that hold an unrecovered error other than a tool's. "
         "A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session."
     )
 
 
 class TraceSeriesPublic(BaseModel):
-    bucket: Literal["hour", "day"]
+    bucket: TraceBucketGrain
     points: list[TraceBucketPublic]
 
 
 class SpanPublic(BaseModel):
-    """One span of a session. Content is never part of a span."""
+    """One span of a session. Its content is empty unless the deployment keeps content."""
 
     span_id: str
     parent_span_id: str | None
@@ -101,6 +101,12 @@ class SpanPublic(BaseModel):
         "Null on a span the gateway recorded itself."
     )
     attributes: dict[str, str | int | float | bool]
+    content: dict[str, str] = Field(
+        description=(
+            "What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the "
+            "deployment keeps content and the agent sent it. Empty otherwise."
+        )
+    )
 
 
 class TurnPublic(BaseModel):
@@ -136,6 +142,25 @@ class GateSummaryPublic(BaseModel):
     gate_type: str | None = Field(description="From the guardrail's definition, when it was sent.")
     enforcement: Literal["required", "advisory"] | None
     message: str | None = Field(description="What the gate says when it fails, from the guardrail's definition.")
+    runs: list[str] = Field(description="The moments the gate runs at (pre_tool_use.edit_target, stop.session, ...).")
+    origin: Literal["repo", "user"] | None = Field(
+        description="Whether the gate is the repository's (.otari/) or the user's own (~/.otari/)."
+    )
+
+
+class ToolCostPublic(BaseModel):
+    """An estimate of what one tool call cost, from the model requests either side of it."""
+
+    span_id: str
+    total: float
+    calling: float = Field(description="Its share of the output of the request that called it.")
+    writing: float = Field(description="Writing its result into the context, on the next request.")
+    rereading: float = Field(description="Reading its result again in later requests, until the context was compacted.")
+    result_tokens: int = Field(description="About how many tokens its result added to the context.")
+    later_requests: int = Field(description="The later requests that read its result again.")
+    calls_sharing_request: int = Field(description="Tool calls the request that called it made, sharing its output.")
+    calls_sharing_result: int = Field(description="Tool calls whose results arrived together, sharing that growth.")
+    subagent: float | None = Field(description="What a subagent the call ran cost, exactly.")
 
 
 class TraceDetailPublic(BaseModel):
@@ -146,6 +171,9 @@ class TraceDetailPublic(BaseModel):
     truncated: bool = Field(description="True when the session holds more spans than one read returns.")
     gates: list[GateSummaryPublic] = Field(
         description="Each agent guardrail gate a coding agent's hook reported, the ones that did something first.",
+    )
+    tool_costs: list[ToolCostPublic] = Field(
+        description="An estimate for each tool call between two priced model requests, in the order they were made.",
     )
 
 
@@ -173,7 +201,7 @@ def list_public(page: TracePage) -> TraceListPublic:
     return TraceListPublic(items=[summary_public(item) for item in page.items], has_more=page.has_more)
 
 
-def series_public(bucket: Literal["hour", "day"], points: tuple[TraceBucket, ...]) -> TraceSeriesPublic:
+def series_public(bucket: TraceBucketGrain, points: tuple[TraceBucket, ...]) -> TraceSeriesPublic:
     return TraceSeriesPublic(
         bucket=bucket,
         points=[TraceBucketPublic(bucket=p.bucket, succeeded=p.succeeded, failed=p.failed) for p in points],
@@ -211,6 +239,7 @@ def _span_public(span: SpanRecord, approximate: frozenset[str]) -> SpanPublic:
         otel_trace_id=span.otel_trace_id,
         otel_span_id=span.otel_span_id,
         attributes=dict(span.attributes),
+        content=dict(span.content),
     )
 
 
@@ -251,8 +280,25 @@ def detail_public(view: TraceView) -> TraceDetailPublic:
                 gate_type=gate.gate_type,
                 enforcement=gate.enforcement,  # type: ignore[arg-type]
                 message=gate.message,
+                runs=list(gate.runs),
+                origin=gate.origin,  # type: ignore[arg-type]
             )
             for gate in view.gates
+        ],
+        tool_costs=[
+            ToolCostPublic(
+                span_id=cost.span_id,
+                total=float(cost.total),
+                calling=float(cost.calling),
+                writing=float(cost.writing),
+                rereading=float(cost.rereading),
+                result_tokens=cost.result_tokens,
+                later_requests=cost.later_requests,
+                calls_sharing_request=cost.calls_sharing_request,
+                calls_sharing_result=cost.calls_sharing_result,
+                subagent=float(cost.subagent) if cost.subagent is not None else None,
+            )
+            for cost in view.tool_costs
         ],
     )
 

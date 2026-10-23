@@ -2623,8 +2623,9 @@ async def resolve_request_context(
     is not gated or refundable).
 
     ``safety_identifier`` is the caller's tag for the end user, which wins over
-    ``user_id_from_request`` as the subject of the provider's end-user
-    identifier. Unlike ``user``, it names nobody billed, so nothing checks it.
+    ``user_id_from_request`` as the tag in the provider's end-user identifier.
+    Unlike ``user``, it names nobody billed, so nothing checks it: a tag only
+    subdivides the resolved user's identifier.
 
     ``mock_response_requested`` refuses the request with 403 unless it came on an
     API key that allows ``mock_response`` (``allow_mock_response``), before any

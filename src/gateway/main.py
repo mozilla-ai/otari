@@ -127,7 +127,7 @@ from gateway.services.search_tool_store_service import (
     reset_search_tool_cache,
     run_search_tool_refresher,
 )
-from gateway.services.secret_box import shares_secret_key, validate_secret_key
+from gateway.services.secret_box import secret_box_configured, shares_secret_key, validate_secret_key
 from gateway.services.selector_index_service import run_selector_index_refresher
 from gateway.services.tenancy.org_provider_key_service import (
     load_org_provider_keys_at_startup,
@@ -1100,6 +1100,8 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()
+    if config.trace_content_enabled and not secret_box_configured():
+        logger.warning("OTARI_TRACE_CONTENT_ENABLED is on but OTARI_SECRET_KEY is not set, so no trace content is kept")
     set_config(config)
     # The search and fetch libraries leave their log filters to the host, so a
     # provider URL carrying a query or a key never reaches httpx's own logging.

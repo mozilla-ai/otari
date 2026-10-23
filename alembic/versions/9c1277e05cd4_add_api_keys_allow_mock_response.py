@@ -5,7 +5,7 @@ answers itself without calling the provider, for load tests. False on every
 existing key.
 
 Revision ID: 9c1277e05cd4
-Revises: c3e5a7b9d1f2
+Revises: c8e0f2a4b6d3
 Create Date: 2026-10-23 00:00:00.000000
 
 """
@@ -17,7 +17,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "9c1277e05cd4"
-down_revision: str | Sequence[str] | None = "c3e5a7b9d1f2"
+down_revision: str | Sequence[str] | None = "c8e0f2a4b6d3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

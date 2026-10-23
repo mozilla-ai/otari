@@ -2,16 +2,17 @@
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from decimal import Decimal
+from typing import Any, cast
 
 import pytest
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, ArrayValue, KeyValue
 
 from gateway.api.routes.otlp import _attributes
 from gateway.core.config import GatewayConfig
-from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, project_otlp_spans
+from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, TraceWriter, project_otlp_spans
 from gateway.services.traces._collector import call_id_digest
-from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT
+from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT, PricedRequest, record_priced_requests
 from gateway.services.traces._reading import _gate_summaries
 from gateway.types.traces import TraceWrite, is_identifier
 
@@ -135,6 +136,8 @@ def test_a_claude_code_interaction_is_a_turn_with_its_model_calls_and_tools() ->
             output_tokens="300",
             cache_read_tokens="18157",
             cache_creation_tokens="2000",
+            stop_reason="tool_use",
+            ttft_ms="917",
             success="True",
         ),
         _claude("t1", "tool", parent="i1", tool_name="Read", tool_use_id=_TOOL_USE_ID),
@@ -158,6 +161,7 @@ def test_a_claude_code_interaction_is_a_turn_with_its_model_calls_and_tools() ->
         18_157,
         2_000,
     )
+    assert dict(llm.attributes) == {"gen_ai.response.finish_reasons": "tool_use", "otari.llm.ttft_ms": 917}
     assert (tool.kind, tool.tool_name, tool.tool_type, tool.tool_call_id, tool.outcome) == (
         "tool",
         "Read",
@@ -650,3 +654,114 @@ def test_one_export_can_never_fill_the_trace_queue() -> None:
 def test_the_session_cap_binds_below_the_span_cap() -> None:
     """A cap on sessions at or above the span cap could never take effect."""
     assert MAX_TRACES_PER_EXPORT < MAX_SPANS_PER_EXPORT
+
+
+def test_content_is_kept_only_where_the_deployment_keeps_it() -> None:
+    spans = (
+        _claude("i1", "interaction", user_prompt="Fix the flaky test"),
+        _claude("t1", "tool", parent="i1", tool_name="Bash", tool_use_id=_TOOL_USE_ID, full_command="pytest -x"),
+        _claude("t2", "tool", parent="i1", tool_name="Edit", file_path="src/app.py"),
+        _gate("g1", "fail", **{"otari.gate.evidence": "CHANGELOG.md", "otari.gate.detail": "(CHANGELOG.md)"}),
+    )
+
+    [kept] = project_otlp_spans(
+        list(spans),
+        workspace_id=_WORKSPACE,
+        user_id="alice",
+        api_key_id="k",
+        retention=_RETENTION,
+        now=_NOW,
+        keep_content=True,
+    ).writes
+    [dropped] = _project(*spans)
+
+    by_id = {span.otel_span_id: dict(span.content) for span in kept.spans}
+    assert by_id == {
+        "i1": {"prompt": "Fix the flaky test"},
+        "t1": {"command": "pytest -x"},
+        "t2": {"file_path": "src/app.py"},
+        "g1": {"gate.evidence": "CHANGELOG.md", "gate.detail": "(CHANGELOG.md)"},
+    }
+    assert all(not span.content for span in dropped.spans)
+
+
+def test_a_prompt_claude_code_redacted_is_not_content() -> None:
+    [write] = project_otlp_spans(
+        [_claude("i1", "interaction", user_prompt="<REDACTED>")],
+        workspace_id=_WORKSPACE,
+        user_id="alice",
+        api_key_id="k",
+        retention=_RETENTION,
+        now=_NOW,
+        keep_content=True,
+    ).writes
+
+    assert not write.spans[0].content
+
+
+def test_a_claude_code_model_request_keeps_its_request_id_though_it_looks_like_a_credential() -> None:
+    [write] = _project(_claude("l1", "llm_request", request_id="req_011CgBfeQi6uhNCE3aH5jmr3"))
+
+    assert write.spans[0].request_id == "req_011CgBfeQi6uhNCE3aH5jmr3"
+
+
+class _Writer:
+    def __init__(self) -> None:
+        self.writes: list[TraceWrite] = []
+
+    def submit(self, write: TraceWrite) -> None:
+        self.writes.append(write)
+
+
+@pytest.mark.parametrize(("budget_exempt", "written"), [(True, 1), (False, 0)])
+def test_a_priced_request_reaches_its_session_only_for_a_key_that_may_import(budget_exempt: bool, written: int) -> None:
+    writer = _Writer()
+
+    record_priced_requests(
+        cast(TraceWriter, writer),
+        [PricedRequest("req_1", "session-1", datetime.now(UTC), Decimal("0.01"), "claude_code")],
+        budget_exempt=budget_exempt,
+        workspace_id=_WORKSPACE,
+        user_id=None,
+        api_key_id=None,
+        retention=timedelta(days=30),
+    )
+
+    assert len(writer.writes) == written
+
+
+@pytest.mark.parametrize(("source", "written"), [("claude_code", 1), ("otari-hook", 1), ("codex", 0), ("otel", 0)])
+def test_a_priced_request_reaches_a_session_only_from_a_source_the_trace_store_has(source: str, written: int) -> None:
+    writer = _Writer()
+
+    record_priced_requests(
+        cast(TraceWriter, writer),
+        [PricedRequest("req_1", "session-1", datetime.now(UTC), Decimal("0.01"), source)],
+        budget_exempt=True,
+        workspace_id=_WORKSPACE,
+        user_id=None,
+        api_key_id=None,
+        retention=timedelta(days=30),
+    )
+
+    assert len(writer.writes) == written
+
+
+def test_a_priced_request_whose_id_a_span_cannot_carry_is_skipped_and_the_rest_recorded() -> None:
+    writer = _Writer()
+
+    record_priced_requests(
+        cast(TraceWriter, writer),
+        [
+            PricedRequest("batch/req_1", "session-1", datetime.now(UTC), Decimal("0.01"), "claude_code"),
+            PricedRequest("req_2", "session-2", datetime.now(UTC), Decimal("0.02"), "claude_code"),
+        ],
+        budget_exempt=True,
+        workspace_id=_WORKSPACE,
+        user_id=None,
+        api_key_id=None,
+        retention=timedelta(days=30),
+    )
+
+    [write] = writer.writes
+    assert [span.request_id for span in write.spans] == ["req_2"]

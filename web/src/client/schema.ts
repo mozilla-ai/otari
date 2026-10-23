@@ -4057,11 +4057,14 @@ export interface paths {
         };
         /**
          * Trace Series
-         * @description Count sessions per bucket of their start, split by whether they failed.
+         * @description Count the sessions active in each bucket, split by whether they failed.
          *
-         *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
-         *     goes back to the model, an MCP tool's included, so a session whose only errors are tools'
-         *     counts as succeeded.
+         *     A session is active from its start to its last activity, so a long one counts in every bucket it ran
+         *     through. Here ``start`` and ``end`` bound the buckets: a session that began before
+         *     ``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are
+         *     aligned to their size in UTC and only the populated ones are returned. A session failed when it holds an
+         *     unrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so
+         *     a session whose only errors are tools' counts as succeeded.
          */
         get: operations["organization-traces-trace_series"];
         put?: never;
@@ -6093,11 +6096,14 @@ export interface paths {
         };
         /**
          * Trace Series
-         * @description Count sessions per bucket of their start, split by whether they failed.
+         * @description Count the sessions active in each bucket, split by whether they failed.
          *
-         *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
-         *     goes back to the model, an MCP tool's included, so a session whose only errors are tools'
-         *     counts as succeeded.
+         *     A session is active from its start to its last activity, so a long one counts in every bucket it ran
+         *     through. Here ``start`` and ``end`` bound the buckets: a session that began before
+         *     ``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are
+         *     aligned to their size in UTC and only the populated ones are returned. A session failed when it holds an
+         *     unrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so
+         *     a session whose only errors are tools' counts as succeeded.
          */
         get: operations["traces-trace_series"];
         put?: never;
@@ -10796,6 +10802,11 @@ export interface components {
              * @description What the gate says when it fails, from the guardrail's definition.
              */
             message: string | null;
+            /**
+             * Origin
+             * @description Whether the gate is the repository's (.otari/) or the user's own (~/.otari/).
+             */
+            origin: ("repo" | "user") | null;
             /** Passed */
             passed: number;
             /**
@@ -10803,6 +10814,11 @@ export interface components {
              * @description Checks where the gate could not decide and held the agent anyway.
              */
             refused: number;
+            /**
+             * Runs
+             * @description The moments the gate runs at (pre_tool_use.edit_target, stop.session, ...).
+             */
+            runs: string[];
             /**
              * Span Id
              * @description The check to open first: the earliest that did anything but pass. Null for a gate that never ran.
@@ -16643,7 +16659,7 @@ export interface components {
         };
         /**
          * SpanPublic
-         * @description One span of a session. Content is never part of a span.
+         * @description One span of a session. Its content is empty unless the deployment keeps content.
          */
         SpanPublic: {
             /**
@@ -16665,6 +16681,13 @@ export interface components {
              * @description Input tokens written to the prompt cache.
              */
             cache_write_tokens: number | null;
+            /**
+             * Content
+             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the deployment keeps content and the agent sent it. Empty otherwise.
+             */
+            content: {
+                [key: string]: string;
+            };
             /** Cost */
             cost: number | null;
             /** Duration Ms */
@@ -16949,6 +16972,56 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * ToolCostPublic
+         * @description An estimate of what one tool call cost, from the model requests either side of it.
+         */
+        ToolCostPublic: {
+            /**
+             * Calling
+             * @description Its share of the output of the request that called it.
+             */
+            calling: number;
+            /**
+             * Calls Sharing Request
+             * @description Tool calls the request that called it made, sharing its output.
+             */
+            calls_sharing_request: number;
+            /**
+             * Calls Sharing Result
+             * @description Tool calls whose results arrived together, sharing that growth.
+             */
+            calls_sharing_result: number;
+            /**
+             * Later Requests
+             * @description The later requests that read its result again.
+             */
+            later_requests: number;
+            /**
+             * Rereading
+             * @description Reading its result again in later requests, until the context was compacted.
+             */
+            rereading: number;
+            /**
+             * Result Tokens
+             * @description About how many tokens its result added to the context.
+             */
+            result_tokens: number;
+            /** Span Id */
+            span_id: string;
+            /**
+             * Subagent
+             * @description What a subagent the call ran cost, exactly.
+             */
+            subagent: number | null;
+            /** Total */
+            total: number;
+            /**
+             * Writing
+             * @description Writing its result into the context, on the next request.
+             */
+            writing: number;
+        };
+        /**
          * ToolMeter
          * @description One gateway-run tool's call counts on a request.
          *
@@ -17025,12 +17098,12 @@ export interface components {
             bucket: string;
             /**
              * Failed
-             * @description Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.
+             * @description Sessions active in the bucket that hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.
              */
             failed: number;
             /**
              * Succeeded
-             * @description Sessions that started in the bucket and did not fail.
+             * @description Sessions active in the bucket that did not fail.
              */
             succeeded: number;
         };
@@ -17055,6 +17128,11 @@ export interface components {
             state: "active" | "idle";
             summary: components["schemas"]["TraceSummaryPublic"];
             /**
+             * Tool Costs
+             * @description An estimate for each tool call between two priced model requests, in the order they were made.
+             */
+            tool_costs: components["schemas"]["ToolCostPublic"][];
+            /**
              * Truncated
              * @description True when the session holds more spans than one read returns.
              */
@@ -17075,7 +17153,7 @@ export interface components {
              * Bucket
              * @enum {string}
              */
-            bucket: "hour" | "day";
+            bucket: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
             /** Points */
             points: components["schemas"]["TraceBucketPublic"][];
         };
@@ -25555,9 +25633,9 @@ export interface operations {
                 order?: "asc" | "desc";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -25603,9 +25681,9 @@ export interface operations {
             query?: {
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -25680,12 +25758,12 @@ export interface operations {
     "organization-traces-trace_series": {
         parameters: {
             query?: {
-                bucket?: "hour" | "day";
+                bucket?: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -28765,9 +28843,9 @@ export interface operations {
                 order?: "asc" | "desc";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -28813,9 +28891,9 @@ export interface operations {
             query?: {
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -28890,12 +28968,12 @@ export interface operations {
     "traces-trace_series": {
         parameters: {
             query?: {
-                bucket?: "hour" | "day";
+                bucket?: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;

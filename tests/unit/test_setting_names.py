@@ -160,6 +160,7 @@ _SETTING_NAMES = frozenset(
         "terms_url",
         "tools_header",
         "trace_capture_enabled",
+        "trace_content_enabled",
         "trace_flush_interval_s",
         "trace_flush_max_spans",
         "trace_max_spans_per_request",
