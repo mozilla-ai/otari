@@ -190,7 +190,8 @@ def test_a_key_that_is_not_a_service_key_still_cannot_name_a_user(
     response = client.post(f"{API_ROOT}/keys", json={"user_id": "plain"}, headers=master_key_header)
     headers = {API_KEY_HEADER: f"Bearer {response.json()['key']}"}
 
-    assert _chat(client, headers, "alice").status_code == 403
+    # The name is ignored: the request bills the key's own user and mints no end user.
+    assert _chat(client, headers, "alice").status_code == 200
     assert _end_user(db_session, "plain", "alice") is None
 
 

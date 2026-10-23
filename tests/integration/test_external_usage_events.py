@@ -199,11 +199,11 @@ def test_api_key_ingests_for_own_user(
 def test_api_key_cannot_attribute_to_another_user(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
-    """A key naming a different user is rejected (default strict binding)."""
+    """A strict key naming a different user is rejected."""
     _seed_user(client, master_key_header, "dev-a")
     _seed_user(client, master_key_header, "dev-b")
     _seed_pricing(client, master_key_header)
-    headers = _make_key(client, master_key_header, "dev-a")
+    headers = _make_key(client, master_key_header, "dev-a", reject_user_mismatch=True)
 
     resp = _post(client, headers, [_event("cross")], user_id="dev-b")
     assert resp.status_code == 200

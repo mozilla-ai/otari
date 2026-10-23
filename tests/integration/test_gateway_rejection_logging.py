@@ -146,7 +146,7 @@ def test_user_key_mismatch_rejection_is_recorded_against_the_keys_user(
     """
     _make_user(client, master_key_header, "owner")
     _make_user(client, master_key_header, "someone-else")
-    key = _make_key(client, master_key_header, "owned", user_id="owner")
+    key = _make_key(client, master_key_header, "owned", user_id="owner", reject_user_mismatch=True)
 
     assert _chat(client, key, model="openai:gpt-4o", user="someone-else") == 403
 
@@ -162,7 +162,7 @@ def test_user_key_mismatch_rejection_row_carries_the_request_tags(
     """The mismatch is refused before the request context exists, and its row is still tagged."""
     _make_user(client, master_key_header, "owner")
     _make_user(client, master_key_header, "someone-else")
-    key = _make_key(client, master_key_header, "owned", user_id="owner")
+    key = _make_key(client, master_key_header, "owned", user_id="owner", reject_user_mismatch=True)
 
     assert _chat(client, key, model="openai:gpt-4o", user="someone-else", metadata={"purpose": "chat"}) == 403
 
@@ -338,7 +338,7 @@ def test_passthrough_user_key_mismatch_is_recorded(client: TestClient, master_ke
     """The pass-through scaffold records a user/key mismatch like the pipeline does."""
     _make_user(client, master_key_header, "embed-owner")
     _make_user(client, master_key_header, "embed-stranger")
-    key = _make_key(client, master_key_header, "embed-owned", user_id="embed-owner")
+    key = _make_key(client, master_key_header, "embed-owned", user_id="embed-owner", reject_user_mismatch=True)
 
     resp = client.post(
         f"{API_ROOT}/embeddings",
@@ -395,7 +395,7 @@ def test_mismatch_rows_are_bounded_by_the_rate_limit(
     client = rate_limited_client
     _make_user(client, master_key_header, "rl-owner")
     _make_user(client, master_key_header, "rl-stranger")
-    key = _make_key(client, master_key_header, "rl-owned", user_id="rl-owner")
+    key = _make_key(client, master_key_header, "rl-owned", user_id="rl-owner", reject_user_mismatch=True)
 
     attempts = _RPM * 2
     statuses = [_chat(client, key, model="openai:gpt-4o", user="rl-stranger") for _ in range(attempts)]
@@ -418,7 +418,7 @@ def test_passthrough_mismatch_rows_are_bounded_by_the_rate_limit(
     client = rate_limited_client
     _make_user(client, master_key_header, "rl-embed-owner")
     _make_user(client, master_key_header, "rl-embed-stranger")
-    key = _make_key(client, master_key_header, "rl-embed-owned", user_id="rl-embed-owner")
+    key = _make_key(client, master_key_header, "rl-embed-owned", user_id="rl-embed-owner", reject_user_mismatch=True)
 
     attempts = _RPM * 2
     statuses = [

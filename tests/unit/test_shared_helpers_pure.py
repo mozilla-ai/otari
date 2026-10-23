@@ -52,7 +52,7 @@ def test_resolve_user_id_master_key_without_user() -> None:
 
 
 def test_resolve_user_id_rejects_mismatched_request_user() -> None:
-    """A non-master key naming a *different* user is rejected (IDOR fix)."""
+    """With reject_mismatch=True, a non-master key naming a *different* user is rejected."""
     api_key = _make_key("key-user")
     with pytest.raises(HTTPException) as exc_info:
         resolve_user_id(
@@ -63,13 +63,14 @@ def test_resolve_user_id_rejects_mismatched_request_user() -> None:
             no_api_key_error=_make_error("no api key"),
             no_user_error=_make_error("no user"),
             forbidden_user_error=_make_error("forbidden user", 403),
+            reject_mismatch=True,
         )
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "forbidden user"
 
 
 def test_resolve_user_id_lenient_mode_binds_mismatch_to_key_user() -> None:
-    """With reject_mismatch=False, a foreign user is ignored and bound to the key's user."""
+    """By default, a foreign user is ignored and bound to the key's user."""
     api_key = _make_key("key-user")
     user_id = resolve_user_id(
         user_id_from_request="someone-else",
@@ -79,7 +80,6 @@ def test_resolve_user_id_lenient_mode_binds_mismatch_to_key_user() -> None:
         no_api_key_error=_make_error("no api key"),
         no_user_error=_make_error("no user"),
         forbidden_user_error=_make_error("forbidden user", 403),
-        reject_mismatch=False,
     )
     # Bound to the key's own user — never the foreign one — so no cross-user billing.
     assert user_id == "key-user"

@@ -17,7 +17,7 @@ from openai.types.batch import Batch
 from openai.types.batch_request_counts import BatchRequestCounts
 
 from gateway.api.routes._pipeline import PROVIDER_CREDENTIALS_DETAIL
-from gateway.core.config import API_KEY_HEADER, API_ROOT
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_CREDENTIAL_REJECTED
 
 from .test_rate_limiting import _make_rate_limit_client
@@ -649,8 +649,11 @@ def test_create_batch_api_key_cannot_bill_other_user(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A non-master key naming a user other than its own is rejected."""
+    """With reject_user_mismatch=True, a non-master key naming a user other than its own is rejected."""
+    monkeypatch.setattr(test_config, "reject_user_mismatch", True)
     resp = client.post(
         f"{API_ROOT}/users",
         json={"user_id": "batch-victim-user"},
