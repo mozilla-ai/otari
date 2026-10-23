@@ -90,9 +90,9 @@ export function UseModelDrawer({
                   <Drawer.Heading className="text-heading">
                     Use {model.name}
                   </Drawer.Heading>
-                  {/* `CopyableValue` keeps the press off the header, which is
-                      the drawer's drag handle: a drag there captures the
-                      pointer, which ends a text selection. */}
+                  {/* `CopyableValue` keeps the press off the drawer's drag
+                      handle, which is everything outside its body: a drag
+                      captures the pointer, which ends a text selection. */}
                   <p className="text-sm text-muted">
                     Send{" "}
                     <CopyableValue value={sendAs} label="model selector">

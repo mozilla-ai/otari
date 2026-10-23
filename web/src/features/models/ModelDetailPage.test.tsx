@@ -378,9 +378,9 @@ describe("ModelDetailPage", () => {
     )
     expect(writeText).toHaveBeenCalledWith("z-ai/glm-5.3")
 
-    // The header is the drawer's drag handle. A drag across the selector has to
-    // stay a text selection rather than pull the drawer shut. jsdom has no
-    // pointer capture, which the drag takes as it starts.
+    // Everything outside the drawer's body is its drag handle. A drag across
+    // the selector has to stay a text selection rather than pull the drawer
+    // shut. jsdom has no pointer capture, which the drag takes as it starts.
     const setPointerCapture = vi.fn()
     Object.assign(drawer, { setPointerCapture, releasePointerCapture: vi.fn() })
     const selector = within(drawer).getByText("z-ai/glm-5.3")
@@ -389,6 +389,13 @@ describe("ModelDetailPage", () => {
     expect(setPointerCapture).not.toHaveBeenCalled()
     expect(drawer.style.transform).toBe("")
     fireEvent.pointerUp(selector, { clientX: 200, pointerId: 1 })
+
+    // The rest of the header still drags, so the drawer keeps its swipe to
+    // dismiss.
+    const heading = within(drawer).getByRole("heading", { name: /^Use / })
+    fireEvent.pointerDown(heading, { button: 0, clientX: 100, pointerId: 2 })
+    fireEvent.pointerMove(heading, { clientX: 140, pointerId: 2 })
+    expect(setPointerCapture).toHaveBeenCalledWith(2)
   })
 
   it("names each offering's model ID among the drawer's providers", async () => {
