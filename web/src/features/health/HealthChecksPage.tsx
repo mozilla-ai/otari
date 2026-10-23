@@ -9,10 +9,8 @@ import type {
 import { Button } from "@/design-system/actions/Button"
 import { ConfirmButton } from "@/design-system/actions/ConfirmButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
-import {
-  PAGE_SIZE_OPTIONS,
-  TablePagination,
-} from "@/design-system/data/TablePagination"
+import { TablePagination } from "@/design-system/data/TablePagination"
+import { useClientPagination } from "@/design-system/data/useClientPagination"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
@@ -432,28 +430,20 @@ export function HealthChecksPage() {
   const run = useRunHealthChecks()
   const disable = useDisableFailingModels()
   const [showAll, setShowAll] = useState(false)
-  const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0])
   const data = status.data
+  const results = data
+    ? data.results.filter((result) => showAll || result.status === "fail")
+    : []
+  const { pageRows, pagination } = useClientPagination(results, showAll)
 
   if (status.isPending && !data) {
     return <PageLoading label="Loading health checks…" />
   }
 
   const busy = Boolean(data?.running || data?.settings.run_requested)
-  const results = data
-    ? data.results.filter((result) => showAll || result.status === "fail")
-    : []
   const failing = data
     ? data.results.filter((result) => result.status === "fail").length
     : 0
-  // A run or a disable can shrink the list under the page the operator is on.
-  const lastPage = Math.max(0, Math.ceil(results.length / pageSize) - 1)
-  const shownPage = Math.min(page, lastPage)
-  const pageRows = results.slice(
-    shownPage * pageSize,
-    (shownPage + 1) * pageSize,
-  )
 
   return (
     <div className="flex flex-col gap-6">
@@ -513,13 +503,7 @@ export function HealthChecksPage() {
                       Disable all
                     </ConfirmButton>
                   ) : null}
-                  <Button
-                    size="sm"
-                    onPress={() => {
-                      setShowAll(!showAll)
-                      setPage(0)
-                    }}
-                  >
+                  <Button size="sm" onPress={() => setShowAll(!showAll)}>
                     {showAll ? "Failing only" : "Show all"}
                   </Button>
                 </span>
@@ -547,20 +531,9 @@ export function HealthChecksPage() {
                 getRowKey={(row) => row.selector}
                 mobileLayout="cards"
                 emptyContent="Every model answered."
+                scrollResetKey={pagination.page}
               />
-              {results.length > PAGE_SIZE_OPTIONS[0] ? (
-                <TablePagination
-                  page={shownPage}
-                  pageSize={pageSize}
-                  total={results.length}
-                  rowsOnPage={pageRows.length}
-                  onPageChange={setPage}
-                  onPageSizeChange={(size) => {
-                    setPageSize(size)
-                    setPage(0)
-                  }}
-                />
-              ) : null}
+              <TablePagination {...pagination} />
             </SettingsGroup>
           ) : null}
           <AlertsCard saved={data.settings.alert_emails} />
