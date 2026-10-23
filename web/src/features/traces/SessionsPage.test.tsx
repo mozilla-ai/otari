@@ -933,6 +933,23 @@ describe("SessionsPage", () => {
     )
   })
 
+  it("edits the search mid-text without the caret jumping to the end", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const search = await screen.findByRole("searchbox", {
+      name: "Search sessions",
+    })
+    await user.type(search, "deepseek")
+    await user.keyboard("{ArrowLeft>4/}XY")
+
+    expect(search).toHaveValue("deepXYseek")
+    await vi.waitFor(() =>
+      expect(listReads(calls).at(-1)?.get("q")).toBe("deepXYseek"),
+    )
+  })
+
   it("stops the search at the 128 characters the API accepts", async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ traces: [traceSummary()] })
