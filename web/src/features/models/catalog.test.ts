@@ -195,7 +195,32 @@ describe("the list's URL", () => {
       filters: { ...from.filters, capabilities: ["reasoning"] },
       page: 0,
     }
-    expect(catalogUrlChanges(from, to)).toEqual({ capability: ["reasoning"] })
+    expect(catalogUrlChanges(from, to, { q: "glm" })).toEqual({
+      capability: ["reasoning"],
+    })
+  })
+
+  it("adds and removes only this change's values in a repeated param", () => {
+    // The URL already holds a change the rendered list has not caught up with.
+    const seen = {
+      ...EMPTY_CATALOG_LIST,
+      filters: { ...EMPTY_FILTERS, inputModalities: ["pdf"] },
+    }
+    const latest = { input: ["pdf", "text"] }
+    const addImage = {
+      ...seen,
+      filters: { ...seen.filters, inputModalities: ["pdf", "image"] },
+    }
+    expect(catalogUrlChanges(seen, addImage, latest)).toEqual({
+      input: ["pdf", "text", "image"],
+    })
+    const dropPdf = {
+      ...seen,
+      filters: { ...seen.filters, inputModalities: [] },
+    }
+    expect(catalogUrlChanges(seen, dropPdf, latest)).toEqual({
+      input: ["text"],
+    })
   })
 })
 

@@ -579,6 +579,25 @@ describe("ModelCatalogPage", () => {
     })
   })
 
+  it("keeps two quick selections on the same filter", async () => {
+    const fetchMock = mockApi()
+    renderPage(<ModelCatalogPage />)
+    await screen.findByRole("list", { name: "Models" })
+
+    // One tick, so the second press is handled with the list as it was before
+    // the first, and builds its set of input modalities from that.
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Text" })[0])
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Image" })[0])
+
+    await waitFor(() => {
+      const last = new URL(
+        String(fetchMock.mock.calls.at(-1)?.[0]),
+        "http://localhost",
+      ).searchParams
+      expect(last.getAll("input_modality")).toEqual(["image", "text"])
+    })
+  })
+
   it("reads a hand-edited URL, falling back where the rail offers no such value", async () => {
     const fetchMock = mockApi()
     renderPage(

@@ -3,6 +3,7 @@ import {
   type HistoryState,
   Link,
   useNavigate,
+  useRouter,
   useSearch,
 } from "@tanstack/react-router"
 import type { ReactNode } from "react"
@@ -61,6 +62,7 @@ import {
   formatRate,
   formatReleaseDate,
 } from "@/shared/helpers/format"
+import type { DashboardSearch } from "@/shared/helpers/search"
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useDebounced } from "@/shared/hooks/useDebounced"
 
@@ -820,6 +822,7 @@ export function ModelCatalogView({
 /** The catalog on the router: a pressed card navigates to the model's page. */
 export function ModelCatalogPage() {
   const navigate = useNavigate()
+  const router = useRouter()
   // The list lives in the URL, so Back and a model page's link back return to
   // it as it was left.
   const url = useUrlState(CATALOG_URL_DEFAULTS)
@@ -828,7 +831,15 @@ export function ModelCatalogPage() {
   return (
     <ModelCatalogView
       list={list}
-      onListChange={(next) => url.patch(catalogUrlChanges(list, next))}
+      onListChange={(next) =>
+        url.patch(
+          catalogUrlChanges(
+            list,
+            next,
+            router.latestLocation.search as DashboardSearch,
+          ),
+        )
+      }
       openState={openState}
       onOpen={(id) => {
         void navigate({

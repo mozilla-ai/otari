@@ -7,6 +7,7 @@ import type {
 } from "@/client"
 import { PAGE_SIZE_OPTIONS } from "@/design-system/data/TablePagination"
 import { providerDisplayName } from "@/shared/helpers/providers"
+import type { DashboardSearch } from "@/shared/helpers/search"
 import type { UrlState } from "@/shared/helpers/urlState"
 
 // What the list can be narrowed by, and how a row is sorted. Pure, so the page
@@ -322,22 +323,37 @@ export function catalogListFromUrl(
 }
 
 /**
- * Only the URL params that differ between `from` and `to`. A change is built
- * from the list as last rendered, which can lag the URL by a render, so writing
- * every param would put back a value the URL has already moved on from.
+ * The URL params a change from `seen` to `next` sets, on top of `latest`, the
+ * URL as it stands. A change is built from the list as last rendered, which can
+ * lag the URL while the router commits, so only the params that changed are
+ * written, and a repeated one gains and loses just the values this change
+ * added or removed rather than being replaced by a stale set.
  */
 export function catalogUrlChanges(
-  from: CatalogListState,
-  to: CatalogListState,
+  seen: CatalogListState,
+  next: CatalogListState,
+  latest: DashboardSearch,
 ): Partial<Record<CatalogUrlKey, string | number | string[]>> {
-  const before = catalogListToUrl(from)
-  const after = catalogListToUrl(to)
-  return Object.fromEntries(
-    Object.entries(after).filter(
-      ([key, value]) =>
-        JSON.stringify(value) !== JSON.stringify(before[key as CatalogUrlKey]),
-    ),
-  )
+  const before = catalogListToUrl(seen)
+  const after = catalogListToUrl(next)
+  const changes: Partial<Record<CatalogUrlKey, string | number | string[]>> = {}
+  for (const key of Object.keys(after) as CatalogUrlKey[]) {
+    const was = before[key]
+    const now = after[key]
+    if (JSON.stringify(was) === JSON.stringify(now)) continue
+    if (!Array.isArray(was) || !Array.isArray(now)) {
+      changes[key] = now
+      continue
+    }
+    const current = [latest[key] ?? []].flat().filter(Boolean)
+    changes[key] = [
+      ...current.filter((value) => now.includes(value) || !was.includes(value)),
+      ...now.filter(
+        (value) => !was.includes(value) && !current.includes(value),
+      ),
+    ]
+  }
+  return changes
 }
 
 /** The URL params that set `list`, for `UrlState.patch`. */
