@@ -20,6 +20,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.adapters.content_key_adapter import build_content_key_port
 from gateway.core.config import GatewayConfig
 from gateway.core.database import dispose_db, init_db
 from gateway.core.unit_of_work import create_unit_of_work
@@ -29,7 +30,7 @@ from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
 from gateway.repositories.traces import TracesRepositories
 from gateway.services.secret_box import generate_secret_key
-from gateway.services.traces import TraceService
+from gateway.services.traces import SpanContent, TraceService
 from gateway.services.traces import _service as trace_service_module
 from gateway.services.traces._collector import call_id_digest
 from gateway.types.traces import SpanRecord, TraceFilter, TraceScope, TraceWrite
@@ -44,7 +45,7 @@ async def store(test_config: GatewayConfig, clean_database: None) -> AsyncIterat
     init_db(test_config)
     try:
         async with create_unit_of_work() as uow:
-            yield TraceService(uow, TracesRepositories.on(uow))
+            yield TraceService(uow, TracesRepositories.on(uow), SpanContent(build_content_key_port(test_config)))
     finally:
         await dispose_db()
 
@@ -455,7 +456,7 @@ async def test_two_writers_sharing_traces_in_opposite_order_do_not_deadlock(
 
     async def write(order: list[str], tag: str) -> None:
         async with create_unit_of_work() as uow:
-            await TraceService(uow, TracesRepositories.on(uow)).write(
+            await TraceService(uow, TracesRepositories.on(uow), SpanContent(build_content_key_port(test_config))).write(
                 tuple(_write(workspace, trace_id, _span(f"{tag}-{trace_id}")) for trace_id in order)
             )
 

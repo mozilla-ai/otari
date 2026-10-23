@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version == '3.14.*' and sys_platform == 'linux'",
@@ -1376,6 +1376,9 @@ e2b = [
 fsspec = [
     { name = "fsspec" },
 ]
+kms = [
+    { name = "boto3" },
+]
 metrics = [
     { name = "prometheus-client" },
 ]
@@ -1428,6 +1431,7 @@ requires-dist = [
     { name = "apron-auth", specifier = ">=0.18.0,<0.19.0" },
     { name = "asyncpg", specifier = ">=0.32.0" },
     { name = "bcrypt", specifier = ">=5.0.0" },
+    { name = "boto3", marker = "extra == 'kms'", specifier = ">=1.42.0" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.43.115" },
     { name = "click", specifier = ">=8.1.0" },
     { name = "cryptography", specifier = ">=50.0.0" },
@@ -1460,13 +1464,13 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
     { name = "webauthn", specifier = ">=2.5.0" },
 ]
-provides-extras = ["ocr", "s3", "fsspec", "e2b", "redis", "metrics"]
+provides-extras = ["ocr", "s3", "kms", "fsspec", "e2b", "redis", "metrics"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "boto3-stubs", extras = ["s3"] },
     { name = "jsonschema", specifier = ">=4.26.0" },
-    { name = "moto", extras = ["s3"], specifier = ">=5.2.4" },
+    { name = "moto", extras = ["s3", "kms"], specifier = ">=5.2.4" },
     { name = "mypy" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "pre-commit", specifier = ">=4.7.0" },

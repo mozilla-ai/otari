@@ -36,7 +36,7 @@ from gateway.schemas.traces import (
     series_public,
     summary_public,
 )
-from gateway.services.traces import run_trace_retention
+from gateway.services.traces import SpanContent, run_trace_retention
 from gateway.types.traces import TraceBucketGrain, TraceFilter, TraceScope, TraceSort, TraceSortKey
 
 MAX_PAGE_SIZE = 100
@@ -174,8 +174,9 @@ organization_router = build_trace_router(
 
 
 async def _retention(config: GatewayConfig) -> None:
+    # Retention deletes by age and never reads content.
     await run_trace_retention(
-        build_trace_service,
+        lambda uow: build_trace_service(uow, SpanContent.disabled()),
         retention_days=config.trace_retention_days,
         max_age_days=config.trace_session_max_age_days,
         interval=_RETENTION_INTERVAL_S,
