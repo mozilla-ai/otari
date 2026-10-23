@@ -1,6 +1,6 @@
 import { Button, Spinner } from "@heroui/react"
 import { useNavigate } from "@tanstack/react-router"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { FiShare } from "react-icons/fi"
 import type {
   SummaryDimension,
@@ -17,6 +17,7 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
@@ -37,6 +38,10 @@ import {
 import { FilterMultiComboBox } from "@/design-system/navigation/FilterMultiComboBox"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
+import {
+  type ObserveScope,
+  useObserveScope,
+} from "@/features/observe/useObserveScope"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { ShareDialog } from "@/features/usage/ShareDialog"
 import { billedTokenTotal, cacheSums } from "@/features/usage/usageTotals"
@@ -63,11 +68,13 @@ import {
   findPreset,
   formatWindowLabel,
   isoAgo,
+  localMidnightIso,
   type RangePreset,
   rangeFromBuckets,
   USAGE_DEFAULT_KEY,
   USAGE_PRESETS,
 } from "@/shared/helpers/timeRange"
+import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // ---------- formatting ----------
@@ -111,6 +118,21 @@ const DEFAULT_PRESET = findPreset(
   USAGE_PRESETS,
   USAGE_DEFAULT_KEY,
 ) as RangePreset
+
+// The view state, kept in the URL so a window and its filters are linkable and
+// shared with the other Overview tabs (`model`, `user_id` and `api_key_id` are
+// the names the request log and the sessions list read too).
+const URL_DEFAULTS = {
+  range: USAGE_DEFAULT_KEY,
+  start_date: "",
+  end_date: "",
+  model: "",
+  user_id: "",
+  api_key_id: "",
+  metric: "cost",
+  group_by: "",
+  workspace: "",
+} as const
 
 const TABLE_TOP_N = 15
 
@@ -505,6 +527,51 @@ interface BreakdownDimensionDef {
 
 // ---------- page ----------
 
+/** Inside the Overview the page waits for its scope, so it never fetches the wrong one. */
+export function UsagePage({
+  scope = "caller",
+  embedded = false,
+}: {
+  scope?: UsageScope
+  // Inside the Overview layout, which owns the heading: only the window caption
+  // and Refresh render, as a row.
+  embedded?: boolean
+} = {}) {
+  return embedded ? (
+    <EmbeddedUsagePage scope={scope} />
+  ) : (
+    <StandaloneUsagePage scope={scope} />
+  )
+}
+
+/** The part of the Overview scope the page reads. */
+interface UsageObserve {
+  userIds: string[]
+  scope: ObserveScope
+  scopeSearch: { scope?: ObserveScope }
+}
+
+function EmbeddedUsagePage({ scope }: { scope: UsageScope }) {
+  const observe = useObserveScope()
+  return observe.isResolved ? (
+    <UsagePageContent scope={scope} embedded observe={observe} />
+  ) : (
+    <PageLoading />
+  )
+}
+
+// Outside the Overview nothing decides a scope: the URL's own `user_id` is the
+// filter, so the role and owner reads behind `useObserveScope` are not made.
+function StandaloneUsagePage({ scope }: { scope: UsageScope }) {
+  const { getAll } = useUrlState(URL_DEFAULTS)
+  const userIds = useMemo(() => getAll("user_id"), [getAll])
+  const observe = useMemo<UsageObserve>(
+    () => ({ userIds, scope: "everyone", scopeSearch: {} }),
+    [userIds],
+  )
+  return <UsagePageContent scope={scope} embedded={false} observe={observe} />
+}
+
 // One page, two scopes. `"caller"` is the workspace rail's Usage destination:
 // whatever the caller may read, narrowed to the sidebar's selected workspace.
 // `"organization"` is the organization rail's (otari-ai#1963): the same
@@ -512,7 +579,15 @@ interface BreakdownDimensionDef {
 // so an admin can finally ask about the organization as a whole; an explicit
 // workspace filter replaces the sidebar switcher, because the server lets an
 // admin narrow to any workspace in the organization, member of it or not.
-export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
+function UsagePageContent({
+  scope,
+  embedded,
+  observe,
+}: {
+  scope: UsageScope
+  embedded: boolean
+  observe: UsageObserve
+}) {
   const orgWide = scope === "organization"
   const navigate = useNavigate()
 
@@ -530,30 +605,61 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
   // the filter row above it currently selects, so there is no scope state here.
   const [shareOpen, setShareOpen] = useState(false)
 
-  const [preset, setPreset] = useState<RangePreset>(DEFAULT_PRESET)
-  // Anchored start of the rolling preset window, snapshotted so a re-render does
-  // not recompute "now" and churn the query key. Re-anchored on preset change
-  // and on refresh. Usage presets are all bounded, so this is always set.
-  const [startDate, setStartDate] = useState<string>(() =>
-    isoAgo(DEFAULT_PRESET.seconds ?? 0),
-  )
-  // Custom range: an explicit UTC-bucket window selected by dragging across the
-  // analytics chart. When active it overrides the preset window. The selection
-  // always yields both bounds, so there is no half-filled window.
-  const [customMode, setCustomMode] = useState(false)
-  const [customStart, setCustomStart] = useState<string | undefined>()
-  const [customEnd, setCustomEnd] = useState<string | undefined>()
+  const url = useUrlState(URL_DEFAULTS)
+  const patch = url.patch
+  const range = url.get("range")
+  const startParam = url.get("start_date")
+  const endParam = url.get("end_date")
+  // An explicit window (dragged across the chart, or carried from another view)
+  // wins over the preset, and either bound alone is enough to make one.
+  const customMode = startParam !== "" || endParam !== ""
+  const preset = findPreset(USAGE_PRESETS, range) ?? DEFAULT_PRESET
   // Entity filters are sets, not single choices: the question this page answers is
   // usually a comparison ("these two models", "this team's three keys"). The
   // endpoints take each one repeatably and match any of its values.
-  const [modelFilters, setModelFilters] = useState<string[]>([])
-  const [userFilters, setUserFilters] = useState<string[]>([])
-  const [apiKeyFilters, setApiKeyFilters] = useState<string[]>([])
-  const [metric, setMetric] = useState<ChartMetric>("cost")
-  const [groupBy, setGroupBy] = useState<"" | UsageGroupBy>("")
+  const modelFilters = url.getAll("model")
+  // Inside the Overview the scope decides this; elsewhere it is the URL's own.
+  const { userIds: userFilters, scope: observeScope, scopeSearch } = observe
+  const apiKeyFilters = url.getAll("api_key_id")
+  const metricParam = url.get("metric")
+  const metric: ChartMetric =
+    METRIC_TABS.find((tab) => tab.key === metricParam)?.key ?? "cost"
+  const groupParam = url.get("group_by")
+  const groupBy: "" | UsageGroupBy =
+    GROUP_OPTIONS.find((option) => option.value === groupParam)?.value ?? ""
+  const workspaceFilter = url.get("workspace") || undefined
 
-  const winStart = customMode ? customStart : startDate
-  const winEnd = customMode ? customEnd : undefined
+  // Anchored start of the rolling preset window, snapshotted so a re-render does
+  // not recompute "now" and churn the query key. Re-anchored on preset change,
+  // on refresh and when an explicit window is cleared; the effects skip their
+  // first run so a mount does not move the start the initializer just took.
+  // Usage presets are all bounded, so this is always set.
+  const [startDate, setStartDate] = useState<string>(() =>
+    isoAgo(preset.seconds ?? 0),
+  )
+  const prevPresetKey = useRef(preset.key)
+  useEffect(() => {
+    if (prevPresetKey.current === preset.key) return
+    prevPresetKey.current = preset.key
+    setStartDate(isoAgo(preset.seconds ?? 0))
+  }, [preset.key, preset.seconds])
+  const wasCustom = useRef(customMode)
+  useEffect(() => {
+    const cleared = wasCustom.current && !customMode
+    wasCustom.current = customMode
+    if (cleared) setStartDate(isoAgo(preset.seconds ?? 0))
+  }, [customMode, preset.seconds])
+
+  // An unrecognized `range` (Activity's `all`, or a hand-edited value) shows the
+  // default window, so the URL is corrected to say so. Bounds win over a preset,
+  // so a window carried in them leaves the range alone.
+  useEffect(() => {
+    if (customMode || findPreset(USAGE_PRESETS, range)) return
+    patch({ range: USAGE_DEFAULT_KEY })
+  }, [customMode, range, patch])
+
+  const winStart = customMode ? startParam || undefined : startDate
+  const winEnd = customMode ? endParam || undefined : undefined
   // Bucket by the window's length, not by whether it is custom, so a short
   // custom range still buckets hourly instead of collapsing to a single point.
   const bucket: UsageBucket = customMode
@@ -565,7 +671,6 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
   const { selected: workspace } = useSelectedWorkspace()
   // The organization page's own workspace narrowing, in place of the sidebar's
   // switcher (which offers only the caller's memberships).
-  const [workspaceFilter, setWorkspaceFilter] = useState<string | undefined>()
   const workspaces = useWorkspaces(orgWide)
   const filters: UsageFilters = useMemo(
     () => ({
@@ -648,9 +753,11 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
     previousFilters !== null ? previous.data?.totals : undefined
   const costDelta = totals ? deltaFraction(totals.cost, prevTotals?.cost) : null
 
-  // Model typeahead options: the in-window models. Sourced from a summary that
-  // omits the model filter, so the list stays complete when a model is selected,
-  // and derived directly from query data rather than mirrored into state.
+  // Model typeahead options: the in-window models. Inside the Overview the filter
+  // bar owns the pickers, so neither suggestion query runs. Sourced from a
+  // summary that omits the model filter, so the list stays complete when a
+  // model is selected, and derived directly from query data rather than
+  // mirrored into state.
   const modelSuggestFilters: UsageFilters = useMemo(
     () => ({ ...filters, model: undefined }),
     [filters],
@@ -659,7 +766,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
     modelSuggestFilters,
     bucket,
     MODEL_BREAKDOWN,
-    true,
+    !embedded,
     scope,
   )
   const realGroups = (rows: UsageGroupRow[] | undefined) =>
@@ -676,7 +783,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
     entitySuggestFilters,
     bucket,
     ENTITY_BREAKDOWNS,
-    true,
+    !embedded,
     scope,
   )
   // Name first, id in parentheses: the id is what the row submits, and two
@@ -719,7 +826,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
   const timeFiltered = customMode || preset.key !== USAGE_DEFAULT_KEY
   const anyFilter =
     modelFilters.length > 0 ||
-    userFilters.length > 0 ||
+    (observeScope === "everyone" && userFilters.length > 0) ||
     apiKeyFilters.length > 0 ||
     workspaceFilter !== undefined ||
     timeFiltered
@@ -757,11 +864,13 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
     options: { value: string; label: string }[],
     value: string,
   ) => options.find((option) => option.value === value)?.label ?? value
+  const setModelFilters = (next: string[]) => patch({ model: next })
+  const setUserFilters = (next: string[]) => patch({ user_id: next })
+  const setApiKeyFilters = (next: string[]) => patch({ api_key_id: next })
+  const setWorkspaceFilter = (next: string | undefined) =>
+    patch({ workspace: next ?? "" })
   const clearEntityFilters = () => {
-    setModelFilters([])
-    setUserFilters([])
-    setApiKeyFilters([])
-    setWorkspaceFilter(undefined)
+    patch({ model: [], user_id: [], api_key_id: [], workspace: "" })
   }
   const valueChips = (
     dimension: string,
@@ -830,17 +939,13 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
   const effectiveEnd = data?.end_date ?? winEnd
 
   const pickPreset = (next: RangePreset) => {
-    setCustomMode(false)
-    setPreset(next)
-    setStartDate(isoAgo(next.seconds ?? 0))
-    setCustomStart(undefined)
-    setCustomEnd(undefined)
+    // The effect re-anchors on a key change; re-picking the live preset has none.
+    if (next.key === preset.key) setStartDate(isoAgo(next.seconds ?? 0))
+    patch({ range: next.key, start_date: "", end_date: "" })
   }
 
   const pickCustom = (startIso: string, endIso: string) => {
-    setCustomMode(true)
-    setCustomStart(startIso)
-    setCustomEnd(endIso)
+    patch({ start_date: startIso, end_date: endIso })
   }
 
   // Refetch every window-scoped query, not just the headline summary: in custom
@@ -852,8 +957,10 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
       setStartDate(isoAgo(preset.seconds ?? 0))
     }
     void summary.refetch()
-    void modelSuggest.refetch()
-    void entitySuggest.refetch()
+    if (!embedded) {
+      void modelSuggest.refetch()
+      void entitySuggest.refetch()
+    }
     if (previousFilters !== null) {
       void previous.refetch()
     }
@@ -862,28 +969,35 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
     }
   }
 
-  // Drill from a breakdown row into the Activity log, pre-filtering on the picked
-  // dimension plus the current time window. The bounds are absolute instants, so
-  // Activity reads the same window without any local/UTC reinterpretation. A
-  // multi-value filter travels whole, as repeated params: Activity reads the same
-  // sets, so the log opens on exactly the traffic the chart was showing.
+  // Drill from a breakdown row into the Requests view, pre-filtering on the picked
+  // dimension plus the current time window and the page's own entity filters (the
+  // drilled dimension replaces its own key). The bounds are absolute instants, so
+  // the log reads the same window without any local/UTC reinterpretation. A
+  // multi-value filter travels whole, as repeated params. A push, so Back returns
+  // to the chart.
   const drillTo = (params: Record<string, string | string[] | undefined>) => {
     const search: DashboardSearch = {
+      ...(embedded ? scopeSearch : {}),
       ...(winStart ? { start_date: winStart } : {}),
       ...(winEnd ? { end_date: winEnd } : {}),
       ...Object.fromEntries(
-        Object.entries(params).flatMap(
-          ([key, value]): [string, string | string[]][] => {
-            const values = (
-              typeof value === "string" ? [value] : (value ?? [])
-            ).filter(Boolean)
-            if (values.length === 0) return []
-            return [[key, values.length === 1 ? values[0] : values]]
-          },
-        ),
+        Object.entries({
+          model: modelFilters,
+          user_id: userFilters,
+          api_key_id: apiKeyFilters,
+          ...params,
+        }).flatMap(([key, value]): [string, string | string[]][] => {
+          // Mine travels as the scope, not as the caller's own id.
+          if (key === "user_id" && observeScope === "mine") return []
+          const values = (
+            typeof value === "string" ? [value] : (value ?? [])
+          ).filter(Boolean)
+          if (values.length === 0) return []
+          return [[key, values.length === 1 ? values[0] : values]]
+        }),
       ),
     }
-    navigate({ to: "/activity", search })
+    navigate({ to: "/requests", search })
   }
 
   const errorRate =
@@ -1175,30 +1289,57 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
     visibleSecondary.find((dimension) => dimension.key === secondaryDim) ??
     visibleSecondary[0]
 
+  const introAction = (
+    <div className="flex items-center gap-3">
+      <span className="text-overline">
+        {formatWindowLabel(effectiveStart, effectiveEnd)} · UTC
+      </span>
+      <RefreshButton
+        onRefresh={refresh}
+        isFetching={summary.isFetching}
+        updatedAt={summary.dataUpdatedAt}
+      />
+    </div>
+  )
+
+  // Today is the caller's local day so far, as an explicit window rather than a
+  // rolling preset: its start is a wall-clock instant, not "now minus N".
+  const midnight = localMidnightIso()
+  const presetTabs = (
+    <TabRow>
+      <Tab
+        isActive={startParam === midnight && endParam === ""}
+        onPress={() => pickCustom(midnight, "")}
+      >
+        Today
+      </Tab>
+      {USAGE_PRESETS.map((periodPreset) => (
+        <Tab
+          key={periodPreset.key}
+          isActive={!customMode && preset.key === periodPreset.key}
+          onPress={() => pickPreset(periodPreset)}
+        >
+          {periodPreset.label}
+        </Tab>
+      ))}
+    </TabRow>
+  )
+
   return (
     <div className="flex flex-col">
-      <PageIntro
-        title={orgWide ? "Organization usage" : "Usage & analytics"}
-        action={
-          <div className="flex items-center gap-3">
-            <span className="text-overline">
-              {formatWindowLabel(effectiveStart, effectiveEnd)} · UTC
-            </span>
-            <RefreshButton
-              onRefresh={refresh}
-              isFetching={summary.isFetching}
-              updatedAt={summary.dataUpdatedAt}
-            />
-          </div>
-        }
-      >
-        {/* The drill-in clause is in the workspace arm only: organization
+      {embedded ? null : (
+        <PageIntro
+          title={orgWide ? "Organization usage" : "Usage & analytics"}
+          action={introAction}
+        >
+          {/* The drill-in clause is in the workspace arm only: organization
             scope passes `onDrill={undefined}` to all three breakdowns, so
             promising a clickable row is exactly wrong for this caller. */}
-        {orgWide
-          ? "Spend, tokens, cache use, and request volume over time across every workspace in this organization. Group the chart by model, user, key, or source."
-          : "Spend, tokens, cache use, and request volume over time. Group the chart by model, user, key, or source, and click a breakdown row to drill into the request log."}
-      </PageIntro>
+          {orgWide
+            ? "Spend, tokens, cache use, and request volume over time across every workspace in this organization. Group the chart by model, user, key, or source."
+            : "Spend, tokens, cache use, and request volume over time. Group the chart by model, user, key, or source, and click a breakdown row to drill into the request log."}
+        </PageIntro>
+      )}
 
       <ErrorBanner
         error={
@@ -1209,63 +1350,59 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
 
       {/* Window + filter row: presets anchor the rolling window (dragging on the
           chart below selects an explicit sub-window), the Add filter toggle and
-          its chips share the same line, and the caption + refresh sit at the
-          right edge. */}
-      <FilterChips
-        chips={filterChips}
-        onClearAll={clearEntityFilters}
-        start={
-          <TabRow>
-            {USAGE_PRESETS.map((periodPreset) => (
-              <Tab
-                key={periodPreset.key}
-                isActive={!customMode && preset.key === periodPreset.key}
-                onPress={() => pickPreset(periodPreset)}
-              >
-                {periodPreset.label}
-              </Tab>
-            ))}
-          </TabRow>
-        }
-      >
-        {orgWide ? (
-          <FilterSelect
-            label="Workspace"
-            value={workspaceFilter ?? ""}
-            onChange={(value) => setWorkspaceFilter(value || undefined)}
-            options={[
-              { value: "", label: "All workspaces" },
-              ...workspaceOptions,
-            ]}
+          its chips share the same line. Inside the Overview the filter bar owns the
+          entity pickers, so only the presets remain. */}
+      {embedded ? (
+        // One row: the window's presets, then what it resolved to and Refresh.
+        <div className="otari-toolbar flex flex-wrap items-center gap-3 pb-3">
+          {presetTabs}
+          <div className="ml-auto">{introAction}</div>
+        </div>
+      ) : (
+        <FilterChips
+          chips={filterChips}
+          onClearAll={clearEntityFilters}
+          start={presetTabs}
+        >
+          {orgWide ? (
+            <FilterSelect
+              label="Workspace"
+              value={workspaceFilter ?? ""}
+              onChange={(value) => setWorkspaceFilter(value || undefined)}
+              options={[
+                { value: "", label: "All workspaces" },
+                ...workspaceOptions,
+              ]}
+            />
+          ) : null}
+          {/* allowsCustom because the options are the in-window top spenders (a
+              breakdown capped at 100): an entity below that rank, or with no traffic
+              in the window, is not offered, so Enter has to commit a pasted id. */}
+          <FilterMultiComboBox
+            label="User"
+            values={userFilters}
+            onChange={setUserFilters}
+            options={userOptions}
+            allowsCustom
+            placeholder="All users"
           />
-        ) : null}
-        {/* allowsCustom because the options are the in-window top spenders (a
-            breakdown capped at 100): an entity below that rank, or with no traffic
-            in the window, is not offered, so Enter has to commit a pasted id. */}
-        <FilterMultiComboBox
-          label="User"
-          values={userFilters}
-          onChange={setUserFilters}
-          options={userOptions}
-          allowsCustom
-          placeholder="All users"
-        />
-        <FilterMultiComboBox
-          label="Model"
-          values={modelFilters}
-          onChange={setModelFilters}
-          options={modelOptionList}
-          placeholder="All models"
-        />
-        <FilterMultiComboBox
-          label="API key"
-          values={apiKeyFilters}
-          onChange={setApiKeyFilters}
-          options={keyOptions}
-          allowsCustom
-          placeholder="All keys"
-        />
-      </FilterChips>
+          <FilterMultiComboBox
+            label="Model"
+            values={modelFilters}
+            onChange={setModelFilters}
+            options={modelOptionList}
+            placeholder="All models"
+          />
+          <FilterMultiComboBox
+            label="API key"
+            values={apiKeyFilters}
+            onChange={setApiKeyFilters}
+            options={keyOptions}
+            allowsCustom
+            placeholder="All keys"
+          />
+        </FilterChips>
+      )}
 
       {isEmptyEver ? (
         <EmptyState
@@ -1409,7 +1546,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                   <Tab
                     key={tab.key}
                     isActive={metric === tab.key}
-                    onPress={() => setMetric(tab.key)}
+                    onPress={() => patch({ metric: tab.key })}
                   >
                     {tab.label}
                   </Tab>
@@ -1433,7 +1570,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                 <FilterSelect
                   ariaLabel="Group by"
                   value={groupBy}
-                  onChange={(value) => setGroupBy(value as "" | UsageGroupBy)}
+                  onChange={(value) => patch({ group_by: value })}
                   options={GROUP_OPTIONS.filter(
                     (option) => option.value !== "source" || showSource,
                   ).map((option) => ({

@@ -43,6 +43,18 @@ describe("FilterChips", () => {
     expect(region.className).not.toContain("hidden")
   })
 
+  it("names the toggle as asked, for a page that carries two", () => {
+    render(
+      <FilterChips chips={[]} toggleLabel="More filters">
+        <span>Tool picker</span>
+      </FilterChips>,
+    )
+    expect(
+      screen.getByRole("button", { name: "More filters" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Add filter" })).toBeNull()
+  })
+
   it("offers 'Clear all' only when filters are active", async () => {
     const user = userEvent.setup()
     const clearAll = vi.fn()

@@ -71,9 +71,6 @@ describe("nav registry", () => {
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
       "Playground",
       "Overview",
-      "Activity",
-      "Sessions",
-      "Usage",
       "Models",
       "Routing",
       "Tools",
@@ -313,19 +310,15 @@ describe("nav registry", () => {
     expect(overview?.capability).toBeUndefined()
   })
 
-  it("names the surface each observability page reads", () => {
-    // Activity and Usage are two views over /v1/usage, so they gate together on
-    // the surface rather than each on a name of its own; Sessions reads traces.
-    const observability = NAV_SECTIONS.find(
-      (section) => section.id === "observe",
-    )
-    // The whole section now: the index moved out to its own group above, so
-    // there is nothing ungated left in here to skip past.
-    expect(observability?.items.map((item) => item.surface)).toEqual([
-      "usage",
-      "traces",
-      "usage",
-    ])
+  it("files the Overview's tabs under the index rather than a section", () => {
+    // Usage, Requests and Sessions are views of the landing page, each gated
+    // on its own surface inside it, so they add no row.
+    const overview = NAV_ITEMS.find((item) => item.label === "Overview")
+    expect(overview?.views).toEqual(["/requests", "/sessions"])
+    // The section stays declared, empty, for the rows an overlay files under it.
+    expect(
+      NAV_SECTIONS.find((section) => section.id === "observe")?.items,
+    ).toEqual([])
   })
 
   it("gates no base entry on a capability", () => {
@@ -565,6 +558,13 @@ describe("isPathVisible", () => {
     expect(isPathVisible("/routing/new", without("routing"))).toBe(false)
   })
 
+  it("answers a tab of the Overview with the Overview", () => {
+    expect(navItemForPath("/requests")?.label).toBe("Overview")
+    expect(navItemForPath("/sessions")?.label).toBe("Overview")
+    // Ungated, like the page it is a view of: each tab gates itself.
+    expect(isPathVisible("/sessions", without("traces"))).toBe(true)
+  })
+
   it("leaves a path the registry does not declare ungated", () => {
     // The account page and the 404 splat: the registry governs what it declares and
     // nothing else, so withholding every surface must not gate them.
@@ -750,7 +750,8 @@ describe("composeNavItems", () => {
 
 describe("pageLabelForPath", () => {
   it("names a rail page and a chrome page from one place", () => {
-    expect(pageLabelForPath("/usage")).toBe("Usage")
+    expect(pageLabelForPath("/keys")).toBe("API keys")
+    expect(pageLabelForPath("/sessions")).toBe("Overview")
     expect(pageLabelForPath("/invitations")).toBe("Invitations")
     expect(pageLabelForPath("/account")).toBe("Account")
     expect(pageLabelForPath("/nowhere")).toBeUndefined()

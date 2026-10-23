@@ -107,6 +107,7 @@ export function useUsageLogs(
   filters: UsageFilters,
   page: number,
   pageSize: number,
+  enabled = true,
 ) {
   const scope = useUsageScope()
   return useQuery({
@@ -118,7 +119,7 @@ export function useUsageLogs(
       params.set("limit", String(pageSize))
       return apiFetch<UsageEntry[]>(`${scope.base}?${params.toString()}`)
     },
-    enabled: scope.isReady,
+    enabled: enabled && scope.isReady,
     placeholderData: keepPreviousData,
     // The log is a snapshot an operator reads, not a feed. On a busy gateway rows
     // arrive faster than anyone can inspect them, so a page that refetched on its

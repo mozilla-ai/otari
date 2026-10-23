@@ -179,8 +179,10 @@ export async function expectOk(
 
 // ---------- filters ----------
 
-// The filter pickers live behind the "Add filter" toggle (see FilterChips), so a
-// select or combobox cannot be driven until the region is revealed. Idempotent:
+// The shared filter pickers (status, model, user, key) are the Overview's filter bar,
+// above the view, and live behind its "Add filter" toggle (see FilterChips), so a
+// select or combobox cannot be driven until the region is revealed. The request
+// log's own pickers sit behind "More filters". Idempotent:
 // the toggle reads "Done" once open, so a second call is a no-op rather than a
 // close.
 export async function openFilterPickers(page: Page): Promise<void> {
