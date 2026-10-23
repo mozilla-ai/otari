@@ -302,6 +302,13 @@ class TraceWrite:
     spans: tuple[SpanRecord, ...]
     harness: str | None = None
     name: str | None = None
+    content_generation: int | None = None
+    """The workspace's content generation when its spans' content was captured.
+
+    Content is stored only while the workspace is still on that generation, so
+    content queued before the workspace turned content off, or deleted it, is
+    dropped however late it is written. None keeps no content.
+    """
 
     def __post_init__(self) -> None:
         _check_id("trace_id", self.trace_id)

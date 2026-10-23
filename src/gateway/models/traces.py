@@ -227,3 +227,20 @@ class TraceContentRead(Base):
     read_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
     )
+
+
+class TraceContentBarrier(Base):
+    """Which generation of a workspace's content capture is current.
+
+    Turning content off and deleting it both move the generation on, and a
+    write stores content only when it was captured on the current one. The
+    write and the move lock this row, so neither can land in the middle of the
+    other on any replica.
+    """
+
+    __tablename__ = "trace_content_barriers"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    generation: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")

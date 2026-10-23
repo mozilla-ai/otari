@@ -26,7 +26,7 @@ from sqlmodel import col
 from gateway.adapters.content_key_adapter import SECRET_KEY_WRAPPER, ContentKeyring, SecretKeyContentKeys
 from gateway.core.config import API_ROOT
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
-from gateway.models.traces import Trace, TraceContentShare, TraceGuardrailDefinition, TraceSpan
+from gateway.models.traces import Trace, TraceContentBarrier, TraceContentShare, TraceGuardrailDefinition, TraceSpan
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import generate_secret_key
@@ -736,6 +736,15 @@ def test_a_workspace_keeps_no_content_until_its_managers_turn_it_on(
     )
     assert renamed.status_code == status.HTTP_200_OK, renamed.text
     assert renamed.json()["trace_content_enabled"] is True
+
+    # Turning it off also ends the content generation, so nothing already queued is stored.
+    turned_off = _as(
+        client, world["admin"], "PATCH", f"/workspaces/{workspace_id}", json={"trace_content_enabled": False}
+    )
+    assert turned_off.status_code == status.HTTP_200_OK, turned_off.text
+    with db_session_factory() as session:
+        barrier = session.get(TraceContentBarrier, workspace_id)
+        assert barrier is not None and barrier.generation == 1
 
 
 def test_a_workspaces_managers_delete_its_stored_content_and_keep_its_sessions(

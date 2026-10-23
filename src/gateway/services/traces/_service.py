@@ -74,6 +74,7 @@ class TraceService:
         self._spans = repositories.spans
         self._definitions = repositories.definitions
         self._shares = repositories.shares
+        self._barriers = repositories.barriers
 
     async def write(self, traces: Sequence[TraceWrite]) -> WriteResult:
         """Store these traces' spans, creating each trace on its first span.
@@ -87,6 +88,9 @@ class TraceService:
         # Sealed before the block, so a key source's round trip holds no connection.
         sealed = await self._seal(traces)
         async with self._uow:
+            # First, so a workspace turning content off or deleting it waits for this
+            # write to commit, or this write sees the generation it moved on to.
+            generations = await self._barriers.lock({workspace_id for workspace_id, _, _ in sealed})
             new_traces: dict[TraceKey, dict[str, Any]] = {}
             for trace in traces:
                 new_traces.setdefault(_key(trace), _new_trace(trace, written_at))
@@ -107,7 +111,8 @@ class TraceService:
                 kept.append((trace, spans))
                 for span in spans:
                     rows.setdefault(
-                        (trace.workspace_id, trace.trace_id, span.span_id), _span_values(trace, span, sealed)
+                        (trace.workspace_id, trace.trace_id, span.span_id),
+                        _span_values(trace, span, sealed if _current(trace, generations) else {}),
                     )
             inserted = await self._spans.insert_new(list(rows.values()))
 
@@ -126,9 +131,23 @@ class TraceService:
             await self._traces.add_totals([_growth(key, spans, written_at) for key, spans in grown.items()])
         return WriteResult(accepted=accepted, duplicate=duplicate, rejected=rejected)
 
-    async def forget_content(self, workspace_id: uuid.UUID) -> int:
-        """Delete what every span in the workspace was about, keeping the spans; returns how many held content."""
+    async def content_generation(self, workspace_id: uuid.UUID) -> int:
+        """The workspace's content generation, to capture content on. Read before whether content is on at all."""
         async with self._uow:
+            return await self._barriers.generation(workspace_id)
+
+    async def stop_content(self, workspace_id: uuid.UUID) -> None:
+        """Keep none of the content already captured in the workspace that is not stored yet, on any replica."""
+        async with self._uow:
+            await self._barriers.advance(workspace_id)
+
+    async def forget_content(self, workspace_id: uuid.UUID) -> int:
+        """Delete what every span in the workspace was about, keeping the spans; returns how many held content.
+
+        Content captured before the deletion and not stored yet is never stored.
+        """
+        async with self._uow:
+            await self._barriers.advance(workspace_id)
             return await self._spans.clear_content(workspace_id)
 
     async def _seal(self, traces: Sequence[TraceWrite]) -> dict[SpanKey, str]:
@@ -523,6 +542,11 @@ def _span_record(row: TraceSpan) -> SpanRecord:
         otel_span_id=row.otel_span_id,
         attributes=row.attributes or {},
     )
+
+
+def _current(trace: TraceWrite, generations: dict[uuid.UUID, int]) -> bool:
+    """Whether the write's content was captured on its workspace's current generation."""
+    return trace.content_generation is not None and generations.get(trace.workspace_id) == trace.content_generation
 
 
 def _owner(scope: TraceScope) -> ContentReader:
