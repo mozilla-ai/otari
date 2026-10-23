@@ -53,6 +53,7 @@ import { PostSignInGate } from "@/app/overlayPostSignInGate"
 import { PendingPage } from "@/app/PendingPage"
 import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
+import { elementTiming } from "@/design-system/helpers/elementTiming"
 import { Chip } from "@/design-system/indicators/Chip"
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
 import { PricingWarning } from "@/features/models/PricingWarning"
@@ -66,6 +67,7 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useDocumentTitle } from "@/shared/hooks/useDocumentTitle"
 import { useEntitlements } from "@/shared/hooks/useEntitlements"
+import { BOOT_MARKS, useMarkAfterPaint } from "@/shared/telemetry/bootTiming"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
@@ -258,7 +260,18 @@ function NavRowLink({
         <Icon className={NAV_ICON_CLASS} aria-hidden="true" />
       ) : null}
       {isCollapsed ? null : (
-        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <span
+          className="min-w-0 flex-1 truncate"
+          // The rail's first paint, for a lab run reading Element Timing; the
+          // `shell:painted` mark is the same moment for everything else. On
+          // Overview's label rather than the rail itself, because the browser
+          // reports text against the element holding it, and the rail holds
+          // none of its own (measured: an `<aside>` carrying the attribute
+          // reports nothing). Overview's row is the one every rail opens with.
+          {...elementTiming(to === "/" ? "shell" : undefined)}
+        >
+          {label}
+        </span>
       )}
       {badge && !isCollapsed ? <Chip tone="accent">{badge}</Chip> : null}
     </Link>
@@ -488,6 +501,7 @@ export function AppShell() {
 }
 
 function AppShellChrome() {
+  useMarkAfterPaint(BOOT_MARKS.SHELL)
   const { feedback_enabled } = useDeployment()
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const feedbackTriggerRef = useRef<HTMLButtonElement>(null)

@@ -73,4 +73,19 @@ export const TELEMETRY_EVENTS = {
    * existing name rather than inventing a second one.
    */
   CHECKOUT_CANCELLED: "Checkout Cancelled",
+
+  /**
+   * How long this load took to reach its shell and, on Overview, its first
+   * figure. Recorded once per load by `app/BootTimingReport.tsx`, from the
+   * marks in `shared/telemetry/bootTiming.ts`, once "Spend today" holds a
+   * figure, the page is hidden, or 30 seconds have passed, whichever is first.
+   *
+   * Every property is bounded: durations in milliseconds from navigation start
+   * (rounded to 10, capped at 60,000), and otherwise enums and booleans. The
+   * names are `t_shell_ms`, `t_kpi_ms`, `t_bootstrap_ms`, `t_context_ms`,
+   * `landing_route`, `nav_type`, `signed_in`, `kept_bootstrap`, `kept_context`,
+   * `remounted`, `role_bucket`, `device`, `effective_type` and
+   * `hidden_during_boot`.
+   */
+  DASHBOARD_BOOT_TIMED: "Dashboard Boot Timed",
 } as const

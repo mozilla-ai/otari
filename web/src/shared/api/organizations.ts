@@ -54,6 +54,7 @@ import {
   ORGANIZATIONS,
   WORKSPACES,
 } from "@/shared/api/queryKeys"
+import { BOOT_MARKS, markOnce } from "@/shared/telemetry/bootTiming"
 
 /** The context key as React Query addresses it, for a filter that excludes it. */
 const ORGANIZATION_CONTEXT_HASH = hashKey(ORGANIZATION_CONTEXT)
@@ -84,9 +85,14 @@ export function useOrganizationContext(
     queryKey: ORGANIZATION_CONTEXT,
     queryFn: async (): Promise<OrganizationContext | null> => {
       try {
-        return await apiFetch<OrganizationContext>("/organizations/me")
+        const context = await apiFetch<OrganizationContext>("/organizations/me")
+        markOnce(BOOT_MARKS.CONTEXT)
+        return context
       } catch (error) {
-        if (isNoOrganizationError(error)) return null
+        if (isNoOrganizationError(error)) {
+          markOnce(BOOT_MARKS.CONTEXT)
+          return null
+        }
         throw error
       }
     },
@@ -123,6 +129,20 @@ function asContextResult(
     isSuccess: false,
     status: "error",
   } as UseQueryResult<OrganizationContext>
+}
+
+/**
+ * A reader of whatever context this tab already holds, for a caller that must
+ * not start a read: `BootTimingReport` sits above the auth gate, where asking
+ * would 401 into the sign-out handler. `null` is the cached 404.
+ */
+export function useCachedOrganizationContext(): () =>
+  | OrganizationContext
+  | null
+  | undefined {
+  const queryClient = useQueryClient()
+  return () =>
+    queryClient.getQueryData<OrganizationContext | null>(ORGANIZATION_CONTEXT)
 }
 
 /**

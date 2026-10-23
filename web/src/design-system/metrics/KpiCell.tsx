@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { elementTiming } from "@/design-system/helpers/elementTiming"
 import { type Severity, SeverityMark } from "./SeverityMark"
 
 export function KpiCell({
@@ -8,6 +9,7 @@ export function KpiCell({
   subline,
   delta,
   graphic,
+  valueTiming,
 }: {
   label: string
   value: string
@@ -21,6 +23,13 @@ export function KpiCell({
   subline?: string
   delta?: ReactNode
   graphic?: ReactNode
+  /**
+   * An Element Timing identifier for the value, so a measurement can read when
+   * this number was first painted. Pass it only while the value is a real
+   * figure: the browser reports the first paint of the element, and a
+   * placeholder painted first would be reported in its place.
+   */
+  valueTiming?: string
 }) {
   return (
     // `grid-rows-subgrid` over `row-span-4` is what keeps the five values on one
@@ -47,7 +56,15 @@ export function KpiCell({
       {/* 400, deliberately, where the rest of the page's emphasis is 550: at
           30px the size is already the hierarchy, and a heavier numeral here
           would out-weigh the page title above it. */}
-      <span className="text-mono-figure font-normal text-foreground">
+      {/* Keyed on the identifier so the figure is a fresh element, and a fresh
+          text node, rather than the placeholder's node with its text replaced:
+          Element Timing reports a text node once, so one already painted as the
+          placeholder would never report the figure. */}
+      <span
+        key={valueTiming ?? "untimed"}
+        className="text-mono-figure font-normal text-foreground"
+        {...elementTiming(valueTiming)}
+      >
         {value}
       </span>
       {/* One line, always present, so no cell is shorter than its neighbors.
