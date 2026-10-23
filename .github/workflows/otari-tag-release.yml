@@ -22,10 +22,21 @@ name: Otari Release (tag + publish)
 # edit with the release key, and its refs/pull/N/merge ref could never satisfy
 # the release environment's main-only policy. pull_request_target runs main's
 # copy on main. Nothing here checks out or runs the pull request's code.
+#
+# A pull_request_target re-run reuses the workflow file of the original run, so
+# a fix to this file cannot reach a release that already failed on it. Dispatch
+# the workflow from main with the merged release PR's number instead: the run
+# reads that PR and holds it to the same checks as a merge.
 on:
   pull_request_target:
     types: [closed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Number of the merged release PR
+        required: true
+        type: number
 
 # git-cliff uses GITHUB_TOKEN to read PR metadata, and the Homebrew build to
 # attach its assets to the draft. The tag, the draft and the publish use the
@@ -39,16 +50,46 @@ jobs:
     name: Tag and draft the Release
     environment: release
     if: >-
+      github.event_name == 'workflow_dispatch' || (
       github.event.pull_request.merged == true &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      contains(github.event.pull_request.labels.*.name, 'release')
+      contains(github.event.pull_request.labels.*.name, 'release'))
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.ver.outputs.version }}
+      sha: ${{ steps.pr.outputs.sha }}
     steps:
+      - name: Read the release PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ inputs.pr }}
+          EVENT_BRANCH: ${{ github.event.pull_request.head.ref }}
+          EVENT_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          EVENT_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then
+            echo "branch=$EVENT_BRANCH" >> "$GITHUB_OUTPUT"
+            echo "sha=$EVENT_SHA" >> "$GITHUB_OUTPUT"
+            printf '%s' "$EVENT_BODY" > "$RUNNER_TEMP/pr-body"
+            exit 0
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" > "$RUNNER_TEMP/pr.json"
+          jq -e --arg repo "$GITHUB_REPOSITORY" \
+            '.merged and .base.ref == "main" and .head.repo.full_name == $repo and any(.labels[]; .name == "release")' \
+            "$RUNNER_TEMP/pr.json" > /dev/null || {
+            echo "::error::PR #$PR is not a merged release PR from this repository"
+            exit 1
+          }
+          echo "branch=$(jq -r .head.ref "$RUNNER_TEMP/pr.json")" >> "$GITHUB_OUTPUT"
+          echo "sha=$(jq -r .merge_commit_sha "$RUNNER_TEMP/pr.json")" >> "$GITHUB_OUTPUT"
+          jq -j '.body // ""' "$RUNNER_TEMP/pr.json" > "$RUNNER_TEMP/pr-body"
+
+      # The merge commit, not main: git-cliff renders what is unreleased at the
+      # checkout, so a run after main moved on would take in later commits.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          ref: ${{ steps.pr.outputs.sha }}
           fetch-depth: 0
           # Nothing here pushes over git: the tag is created through the API
           # below. So this needs no write credential, and leaves none behind
@@ -62,9 +103,9 @@ jobs:
       - name: Resolve release version
         id: ver
         env:
-          BRANCH: ${{ github.event.pull_request.head.ref }}
-          BODY: ${{ github.event.pull_request.body }}
+          BRANCH: ${{ steps.pr.outputs.branch }}
         run: |
+          BODY="$(cat "$RUNNER_TEMP/pr-body")"
           # Branch is release/vX.Y.Z.
           VERSION="${BRANCH#release/v}"
           # Cross-check against the marker embedded in the PR body, so an edited
@@ -111,9 +152,11 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TAG: v${{ steps.ver.outputs.version }}
-          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          SHA: ${{ steps.pr.outputs.sha }}
         run: |
-          tagged="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null || true)"
+          # On a 404, gh api prints the error body to stdout, so only its exit
+          # status says whether the tag exists.
+          tagged="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null)" || tagged=""
           if [ -z "$tagged" ]; then
             gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$SHA" > /dev/null
           elif [ "$tagged" != "$SHA" ]; then
@@ -192,7 +235,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           VERSION: ${{ needs.tag-and-release.outputs.version }}
-          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          SHA: ${{ needs.tag-and-release.outputs.sha }}
         run: |
           jq -nc --arg tag "v$VERSION" --arg sha "$SHA" \
             '{event_type:"otari-release-published",client_payload:{tag:$tag,sha:$sha}}' \

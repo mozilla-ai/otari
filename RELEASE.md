@@ -37,7 +37,10 @@ The release runs in two halves so the changelog is reviewable before the tag:
    publishes it. Releases are immutable once published, so a Release's assets
    and tag cannot change afterwards, which is why the assets are attached
    while it is a draft. If a run fails before publishing, re-run it: it reuses
-   the tag and the draft.
+   the tag and the draft. A re-run keeps the workflow file of the failed run,
+   so when the failure was in the workflow itself, fix it on `main` and then
+   dispatch Otari Release (tag + publish) from `main` with the release PR's
+   number: `gh workflow run otari-tag-release.yml --ref main -f pr=<number>`.
 
 The same workflow then sends an `otari-release-published` repository dispatch
 to `mozilla-ai/otari-ai`. The event carries the tag and the merge commit SHA.
