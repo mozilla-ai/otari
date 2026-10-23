@@ -13,6 +13,7 @@ from gateway.types.traces import (
     SHARE_MAX_DAYS,
     SHARE_NOTE_MAX_LENGTH,
     ContentAccess,
+    ContentRead,
     ContentShare,
     ShareAudience,
     SpanRecord,
@@ -203,12 +204,23 @@ class ContentSharePublic(BaseModel):
     revoked_at: datetime | None
     active: bool = Field(description="Whether it still lets its audience read.")
     reads: list[ContentReadPublic] = Field(
-        default_factory=list, description="Each read made through it, newest first. Only its owner sees them."
+        default_factory=list,
+        description=(
+            "Its newest reads, newest first; GET .../shares/{share_id}/reads pages through all of them. A reader's "
+            "reads are recorded at most once an hour. Only its owner sees them."
+        ),
     )
+    read_count: int = Field(default=0, description="How many reads it has had in all.")
 
 
 class ContentShareListPublic(BaseModel):
     items: list[ContentSharePublic]
+    has_more: bool = Field(default=False, description="More shares follow this page.")
+
+
+class ContentReadListPublic(BaseModel):
+    items: list[ContentReadPublic]
+    has_more: bool = Field(description="More reads follow this page.")
 
 
 class ContentShareCreate(BaseModel):
@@ -337,11 +349,13 @@ def share_public(share: ContentShare, *, now: datetime | None = None) -> Content
         expires_at=share.expires_at,
         revoked_at=share.revoked_at,
         active=share.active(now or datetime.now(UTC)),
-        reads=[
-            ContentReadPublic(reader_user_id=read.reader_user_id, reader_email=read.reader_email, read_at=read.read_at)
-            for read in share.reads
-        ],
+        reads=[read_public(read) for read in share.reads],
+        read_count=share.read_count,
     )
+
+
+def read_public(read: ContentRead) -> ContentReadPublic:
+    return ContentReadPublic(reader_user_id=read.reader_user_id, reader_email=read.reader_email, read_at=read.read_at)
 
 
 def detail_public(view: TraceView) -> TraceDetailPublic:

@@ -184,6 +184,7 @@ GET /api/v1/organizations/me/traces/{trace_id}      # not yet wrapped
 GET /api/v1/organizations/me/traces/{trace_id}/shares                 # dashboard-only
 POST /api/v1/organizations/me/traces/{trace_id}/shares                # dashboard-only
 DELETE /api/v1/organizations/me/traces/{trace_id}/shares/{share_id}   # dashboard-only
+GET /api/v1/organizations/me/traces/{trace_id}/shares/{share_id}/reads  # dashboard-only
 # Other control-plane extensions of already-covered resources
 GET /api/v1/usage/count                             # not yet wrapped
 GET /api/v1/usage/requests/{request_id}            # not yet wrapped

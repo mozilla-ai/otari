@@ -4419,6 +4419,28 @@
         "title": "ConfigSearchToolSchema",
         "type": "object"
       },
+      "ContentReadListPublic": {
+        "properties": {
+          "has_more": {
+            "description": "More reads follow this page.",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ContentReadPublic"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "title": "ContentReadListPublic",
+        "type": "object"
+      },
       "ContentReadPublic": {
         "description": "One read of a session's content through a share.",
         "properties": {
@@ -4494,6 +4516,12 @@
       },
       "ContentShareListPublic": {
         "properties": {
+          "has_more": {
+            "default": false,
+            "description": "More shares follow this page.",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/ContentSharePublic"
@@ -4552,8 +4580,14 @@
             "description": "Why it was shared, in its owner's words.",
             "title": "Note"
           },
+          "read_count": {
+            "default": 0,
+            "description": "How many reads it has had in all.",
+            "title": "Read Count",
+            "type": "integer"
+          },
           "reads": {
-            "description": "Each read made through it, newest first. Only its owner sees them.",
+            "description": "Its newest reads, newest first; GET .../shares/{share_id}/reads pages through all of them. A reader's reads are recorded at most once an hour. Only its owner sees them.",
             "items": {
               "$ref": "#/components/schemas/ContentReadPublic"
             },
@@ -39055,7 +39089,7 @@
     },
     "/api/v1/organizations/me/traces/{trace_id}/shares": {
       "get": {
-        "description": "Every share one of your sessions has had, newest first, with each read made through it.",
+        "description": "The shares one of your sessions has had, ended ones included, newest first, each with its newest reads.",
         "operationId": "organization-traces-list_trace_content_shares",
         "parameters": [
           {
@@ -39084,6 +39118,29 @@
               ],
               "description": "The workspace the trace is in, as its list entry names it.",
               "title": "Workspace Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],
@@ -39269,6 +39326,109 @@
           }
         ],
         "summary": "End Trace Content Share",
+        "tags": [
+          "organization-traces"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/traces/{trace_id}/shares/{share_id}/reads": {
+      "get": {
+        "description": "Every read through one share of your session, newest first, a page at a time.",
+        "operationId": "organization-traces-list_trace_content_share_reads",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "share_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Share Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The workspace the trace is in, as its list entry names it.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The workspace the trace is in, as its list entry names it.",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentReadListPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Trace Content Share Reads",
         "tags": [
           "organization-traces"
         ]

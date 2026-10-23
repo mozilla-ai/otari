@@ -26,6 +26,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
 from gateway.schemas.traces import (
+    ContentReadListPublic,
     ContentShareCreate,
     ContentShareListPublic,
     ContentSharePublic,
@@ -36,6 +37,7 @@ from gateway.schemas.traces import (
     TraceSummaryPublic,
     detail_public,
     list_public,
+    read_public,
     series_public,
     share_public,
     summary_public,
@@ -44,6 +46,7 @@ from gateway.services.traces import SpanContent, run_trace_retention
 from gateway.types.traces import TraceBucketGrain, TraceFilter, TraceScope, TraceSort, TraceSortKey
 
 MAX_PAGE_SIZE = 100
+MAX_SHARE_PAGE = 50
 # Traces expire on the scale of days, so an hourly pass is soon enough.
 _RETENTION_INTERVAL_S = 3600.0
 _MAX_FILTER_VALUES = 50
@@ -205,11 +208,33 @@ async def share_trace_content(
 
 @organization_router.get("/{trace_id}/shares", response_model=ContentShareListPublic)
 async def list_trace_content_shares(
-    traces: TraceServiceDep, scope: OrganizationScopeDep, trace_id: str, workspace_id: WorkspaceQuery = None
+    traces: TraceServiceDep,
+    scope: OrganizationScopeDep,
+    trace_id: str,
+    workspace_id: WorkspaceQuery = None,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=MAX_SHARE_PAGE)] = 20,
 ) -> ContentShareListPublic:
-    """Every share one of your sessions has had, newest first, with each read made through it."""
-    shares = await traces.content_shares(scope, trace_id, workspace_id=workspace_id)
-    return ContentShareListPublic(items=[share_public(share) for share in shares])
+    """The shares one of your sessions has had, ended ones included, newest first, each with its newest reads."""
+    shares, has_more = await traces.content_shares(scope, trace_id, limit=limit, offset=skip, workspace_id=workspace_id)
+    return ContentShareListPublic(items=[share_public(share) for share in shares], has_more=has_more)
+
+
+@organization_router.get("/{trace_id}/shares/{share_id}/reads", response_model=ContentReadListPublic)
+async def list_trace_content_share_reads(
+    traces: TraceServiceDep,
+    scope: OrganizationScopeDep,
+    trace_id: str,
+    share_id: uuid.UUID,
+    workspace_id: WorkspaceQuery = None,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 50,
+) -> ContentReadListPublic:
+    """Every read through one share of your session, newest first, a page at a time."""
+    reads, has_more = await traces.content_share_reads(
+        scope, trace_id, share_id, limit=limit, offset=skip, workspace_id=workspace_id
+    )
+    return ContentReadListPublic(items=[read_public(read) for read in reads], has_more=has_more)
 
 
 @organization_router.delete("/{trace_id}/shares/{share_id}", status_code=status.HTTP_204_NO_CONTENT)
