@@ -477,6 +477,9 @@ async def _dispatch_search(
                 request_id,
                 describe_port_error(exc),
             )
+            # Ends the transaction the port may have left failed, rolling it back
+            # when it cannot commit, so the refund below has a usable session.
+            await release_session(db)
             await refund_reservation(db, reservation)
             await log_rejection(
                 FUNDS_CHECK_UNAVAILABLE_DETAIL,
@@ -525,8 +528,23 @@ async def _dispatch_search(
         api_key_id=api_key_id,
     )
     # The policy read on this same session, so this frees the request's one
-    # connection before the provider call; settlement checks one back out.
-    await release_session(db)
+    # connection before the provider call; settlement checks one back out. The
+    # commit also lands any credit the funding gate granted, so a search whose
+    # admission did not commit is not served on it.
+    if not await release_session(db) and funding is not None:
+        logger.error(
+            "Could not commit a deployment-paid search admission: organization=%s request_id=%s",
+            organization_id,
+            request_id,
+        )
+        await refund_reservation(db, reservation)
+        await log_rejection(
+            FUNDS_CHECK_UNAVAILABLE_DETAIL,
+            row_model=tool.name,
+            row_provider=tool.provider,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=FUNDS_CHECK_UNAVAILABLE_DETAIL)
 
     try:
         result = await run_direct_search(search, web_provider_client)

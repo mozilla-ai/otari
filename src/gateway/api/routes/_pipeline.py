@@ -4018,6 +4018,18 @@ async def _admit_tool_funding(
             ctx, adapter, tool_key, FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE
         )
         raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API) from exc
+    # The commit also lands any credit admission granted, so a request whose
+    # admission did not commit is not served on it, as at the model's gate.
+    if funding is not None and not await release_session(ctx.db):
+        logger.error(
+            "Could not commit a deployment-paid tool admission: organization=%s request_id=%s",
+            ctx.organization_id,
+            ctx.request_id,
+        )
+        await _refuse_tool_funding(
+            ctx, adapter, tool_key, FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+        raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API)
     ctx.tool_funding = funding
 
 

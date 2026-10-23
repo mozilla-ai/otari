@@ -712,3 +712,36 @@ def test_a_direct_search_on_the_deployments_account_is_refused_without_funds(
     assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
     assert probe.LEDGER == []
     assert _user(client)["reserved"] == pytest.approx(0.0)
+
+
+def test_a_tool_admission_that_does_not_commit_is_not_served(billed: tuple[TestClient, ModuleType]) -> None:
+    client, probe = billed
+    _price(client, "anthropic:claude-opus-4")
+    _price(client, "otari:web_search")
+    key = _key(client)
+
+    with patch("gateway.api.routes._pipeline.release_session", new=AsyncMock(return_value=False)):
+        response, provider = _chat_with_search(client, key, "anthropic:claude-opus-4")
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE, response.text
+    provider.assert_not_called()
+    assert probe.LEDGER == []
+    assert _user(client)["reserved"] == pytest.approx(0.0)
+
+
+def test_a_direct_search_whose_admission_does_not_commit_is_not_served(
+    billed_search: tuple[TestClient, ModuleType],
+) -> None:
+    client, probe = billed_search
+    key = _key(client)
+
+    with (
+        patch("gateway.api.routes.search.release_session", new=AsyncMock(return_value=False)),
+        patch("gateway.api.routes.search.run_direct_search", new=AsyncMock()) as searched,
+    ):
+        response = _search(client, key)
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE, response.text
+    searched.assert_not_called()
+    assert probe.LEDGER == []
+    assert _user(client)["reserved"] == pytest.approx(0.0)
