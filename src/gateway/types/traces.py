@@ -25,7 +25,7 @@ import re
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import MappingProxyType
 from typing import Literal, Protocol
@@ -312,6 +312,8 @@ class TraceWrite:
     spans: tuple[SpanRecord, ...]
     harness: str | None = None
     name: str | None = None
+    captured_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    """When the gateway took these spans in, which an erasure of their user since then outranks."""
     content_generation: int | None = None
     """The workspace's content generation when its spans' content was captured.
 
