@@ -283,6 +283,13 @@ gateway accepted before and had not stored yet, on every replica: it is never
 stored. `GET /api/v1/bootstrap` reports
 `trace_content_available`, whether the deployment allows content at all.
 
+Content is kept only for a session a current member of the workspace owns: the
+API key that exports it belongs to an active owner or admin of the organization,
+or an active member of the workspace. A key with no user, or minted for a
+billing user no dashboard identity stands behind (as `POST /api/v1/keys` mints
+for any `user_id`), keeps no content, because nobody could ever read it. Mint
+tracing keys for real members.
+
 Content is kept only when the agent sends it too:
 
 - Claude Code sends the prompt that opened a turn with `OTEL_LOG_USER_PROMPTS=1`,
@@ -300,36 +307,74 @@ you keep traces.
 
 ### Who reads content
 
-A session's content is private to the user it belongs to. Nobody else reads it,
-not the workspace's other members, not its admins, not the organization's owners
-and admins, and not the deployment's operator. They all still see the session:
-that it ran, its tools, models, costs, outcomes and guardrail verdicts. A span
-whose content they may not open says so (`content_private: true`) and shows none.
+A session's content is private to the user it belongs to. Nobody else reads it
+in the normal course, not the workspace's other members, not its admins, not the
+organization's owners and admins, and not the deployment's operator. They all
+still see the session: that it ran, its tools, models, costs, outcomes and
+guardrail verdicts. A span whose content they may not open says so
+(`content_private: true`) and shows none.
 
 | Reader | Reads a session's content |
 | --- | --- |
-| The session's own user | Always. |
-| An organization owner or admin | When the user shared it with the organization's admins, and for sessions no user owns (a service key's). |
+| The session's own user | While they are a member of the workspace. |
+| An organization owner or admin | When the user shared it with the organization's admins. |
 | The deployment's operator | When the user shared it with the operator. |
+| An organization owner, by break-glass | Any of the organization's sessions, recorded with a reason. |
+| The deployment's operator, by break-glass | Any session, where `trace_platform_break_glass_enabled` is on, recorded with a reason and a reference. |
 | Anyone else | Never. |
 
-A user shares one session at a time, from the session's page or with
+**Sharing.** A user shares one session at a time, from the session's page or with
 `POST /api/v1/organizations/me/traces/{trace_id}/shares`, naming the audience
 (`organization_admins` or `deployment_operator`), an optional note saying why,
 and how many days it lasts (30 by default, 90 at most). The share ends when it
-expires or when the user ends it (`DELETE .../shares/{share_id}`). Reads through
-a share are recorded, at most once an hour per reader so a page left open is
-one read, and the user sees who read it and when: `GET .../shares` lists every
-share, ended and expired ones included, with its newest reads and how many it
-has had, and `GET .../shares/{share_id}/reads` pages through all of them. A trace's detail says how the read reached its content in
-`content_access`: `owner`, `share` or `none`.
+expires, when the user ends it (`DELETE .../shares/{share_id}`), or when the user
+leaves the workspace; a share that ended stays ended if they return. Reads
+through a share are recorded, at most once an hour per reader so a page left open
+is one read, and the user sees who read it and when: `GET .../shares` lists every
+share, running ones first and ended ones after, with its newest reads and how
+many it has had, and `GET .../shares/{share_id}/reads` pages through all of them.
+
+A share with the deployment's operator is read on the operator's trace routes,
+which cover the operator's own organization. On a deployment where the operator
+supports other organizations, as on otari.ai, reaching a share in another
+organization needs the operator to act in that organization.
+
+**A member who leaves.** Their shares end, and nobody reads their sessions'
+content in the normal course. It stays sealed until retention deletes it, and
+only break-glass opens it.
+
+**Break-glass.** For an investigation a session's owner cannot be asked to share
+for, such as an HR or legal matter, an owner of the organization (not an admin)
+can open any of its sessions' content with
+`POST /api/v1/organizations/me/traces/{trace_id}/break-glass`, giving a reason of
+at least ten characters. Where `trace_platform_break_glass_enabled` is on, off by
+default, the deployment's operator can open any organization's session with
+`POST /api/v1/traces/{trace_id}/break-glass?workspace_id=...`, giving a reason and
+a reference such as a legal request's number. Each opening:
+
+- is recorded, with who, which session, when, the reason and the reference, in
+  the same transaction that reads the session and before any content opens, so
+  nothing opens without its record;
+- is listed for the organization's owners at
+  `GET /api/v1/organizations/me/traces/audit/break-glass` (their own openings) and
+  for the operator at `GET /api/v1/traces/audit/break-glass` (every opening);
+- is logged as an event naming ids only, and, with AWS KMS, is a `Decrypt` in
+  CloudTrail naming the session;
+- is not told to the session's owner.
+
+Records are kept for `trace_break_glass_retention_days` (365 by default), apart
+from the session they opened, and go with the organization.
+
+A trace's detail says how the read reached its content in `content_access`:
+`owner`, `share`, `break_glass` or `none`.
 
 This is an access rule the gateway enforces, not end-to-end encryption: whoever
 runs the gateway holds the key that opens content, so a self-hosted deployment's
 operator could read it by changing the code or the database. What the rule and
 the encryption give is that nobody reads content through Otari without its
-owner's say, and that the database alone, or a backup of it, shows none. With
-AWS KMS, every data key the gateway fetches is also in CloudTrail.
+owner's say or a recorded break-glass, and that the database alone, or a backup
+of it, shows none. With AWS KMS, every data key the gateway fetches is also in
+CloudTrail.
 
 ### How content is sealed
 
@@ -339,11 +384,14 @@ or made by AWS KMS. The ciphertext is bound to its workspace, its session and
 its span, so a value copied onto another span, another session or another
 workspace reads back empty.
 
-A data key serves one workspace for up to five minutes, so the key source is
-asked once every few minutes per workspace and replica rather than once per
-span. A busy Claude Code session, around 14,000 spans an hour, costs KMS about
-12 `GenerateDataKey` calls an hour, and reading that hour back about 12
-`Decrypt` calls, then none while they are cached.
+Each session has data keys of its own, so a key that leaked would open one
+session. A data key serves its session for up to five minutes, so the key source
+is asked once every few minutes per active session and replica rather than once
+per span. A busy Claude Code session, around 14,000 spans an hour, costs KMS about
+12 `GenerateDataKey` calls an hour, and reading that hour back about 12 `Decrypt`
+calls, then none while they are cached. A batch fetches the keys it lacks
+together, so a batch spanning many sessions waits for them at most 1.5 seconds
+in all.
 
 A cached data key is dropped five minutes after it was fetched, whether or not
 the gateway is busy, and every cached key is dropped when the gateway stops.
@@ -374,8 +422,10 @@ usual chain (an ECS task role, an instance profile, environment variables).
 | `trace_content_kms_endpoint_url` | A KMS endpoint other than the region's, such as a VPC endpoint. |
 
 The gateway calls `kms:GenerateDataKey`, `kms:Decrypt` and `kms:DescribeKey`,
-always with the encryption context `otari:purpose=trace-content` and
-`otari:workspace=<workspace id>`, so a policy can allow only that purpose:
+always with the encryption context `otari:purpose=trace-content`,
+`otari:workspace=<workspace id>` and `otari:session=<trace id>`, so a policy can
+allow only that purpose, and require every call to name a workspace and a
+session:
 
 ```json
 {
@@ -384,13 +434,15 @@ always with the encryption context `otari:purpose=trace-content` and
   "Resource": "<key arn>",
   "Condition": {
     "StringEquals": {"kms:EncryptionContext:otari:purpose": "trace-content"},
-    "ForAllValues:StringEquals": {"kms:EncryptionContextKeys": ["otari:purpose", "otari:workspace"]}
+    "ForAllValues:StringEquals": {"kms:EncryptionContextKeys": ["otari:purpose", "otari:workspace", "otari:session"]},
+    "Null": {"kms:EncryptionContext:otari:workspace": "false", "kms:EncryptionContext:otari:session": "false"}
   }
 }
 ```
 
-plus `kms:DescribeKey` on the key, which the gateway calls once to learn which
-keys it may open. Every `GenerateDataKey` and `Decrypt` lands in CloudTrail with
+plus `kms:DescribeKey` on the key and on each previous key listed, which the
+gateway calls every few minutes to learn which keys it may open, so an alias
+pointed at a new key is followed without a restart. Every `GenerateDataKey` and `Decrypt` lands in CloudTrail with
 the workspace it was for. Those record each data key fetched, not each span
 opened: the gateway opens a workspace's content with a cached key for five
 minutes without asking KMS again, so CloudTrail shows when content was opened
@@ -441,6 +493,13 @@ Deleting a user erases their traces, as it erases their telemetry.
 | `trace_capture_enabled` | `true` | Record traces and serve the read API. Requires restart. |
 | `trace_retention_days` | `30` | Delete a trace once it has had no activity for this long. |
 | `trace_session_max_age_days` | `90` | Delete a session's trace this long after it started, even while it is active, so a reused session id starts a new trace. |
+| `trace_platform_break_glass_enabled` | `false` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. |
+| `trace_break_glass_retention_days` | `365` | Delete the record of a break-glass opening this long after it. |
+
+Retention runs whether or not traces are captured, so a deployment that stops
+capturing still deletes what it captured on this schedule. Erasing a user deletes
+their traces on every replica: spans another replica took in for them before the
+erasure, and still holds, are never stored.
 
 Traces are written off the request path, within fixed limits: a trace never
 slows or fails a request, and when the writer cannot keep up it drops whole
