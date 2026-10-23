@@ -31,8 +31,9 @@ class _Repository:
     async def get_committed(self, _provider: str) -> Any:
         row = type(self).row
         type(self).read_started.set()
-        if type(self).release_read is not None:
-            await type(self).release_read.wait()
+        release = type(self).release_read
+        if release is not None:
+            await release.wait()
         return row
 
     async def put(self, provider: str, *, encrypted_api_key: str, last4: str) -> None:
