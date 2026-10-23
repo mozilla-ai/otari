@@ -220,7 +220,10 @@ member sees the same page scoped to their own keys, always billed to themselves
 and never budget-exempt. An operator, or an organization owner or admin, can also
 cap a key's own spend: the key's create and edit forms take an existing budget
 or a custom amount and reset, and a Budget column shows each key's spend this
-period against its limit.
+period against its limit. Where the deployment turns on
+`federation_member_rules`, a key's actions menu offers Workload identity… to the
+operator, and to an organization owner or admin on their own keys; see [Rules on
+a member's own key](workload-identity.md#rules-on-a-members-own-key).
 
 Overview splits the same way. Everyone lands on their own spend, traffic and
 recent requests. An organization owner or admin also gets a budget-health
