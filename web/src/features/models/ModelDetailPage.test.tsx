@@ -365,13 +365,8 @@ describe("ModelDetailPage", () => {
     mockApi()
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
     const user = userEvent.setup()
-    // Install after userEvent.setup(), which otherwise replaces navigator.clipboard
-    // with its own stub.
-    const writeText = vi.fn().mockResolvedValue(undefined)
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText },
-    })
+    // A spy on userEvent's own clipboard stub, so `restoreAllMocks` undoes it.
+    const writeText = vi.spyOn(navigator.clipboard, "writeText")
 
     await user.click(
       await screen.findByRole("button", { name: "Use this model" }),
