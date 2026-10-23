@@ -382,6 +382,7 @@ from gateway.streaming import (
 )
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
+from gateway.types.provider_account import ResolvedCredential
 from gateway.types.session_principal import SessionPrincipal
 from gateway.types.tool_charges import describe_rate_key
 
@@ -3044,6 +3045,24 @@ async def resolve_request_context(
         code_execution_policy_loaded = True
 
     if normalize_messages is not None:
+
+        async def _hosted_credential() -> ResolvedCredential | None:
+            # The rung ``_serve_from_hosted_credential`` adds at dispatch, which a routed chain does not take.
+            if gate_instance is None or (plan is not None and len(plan.attempts) > 1):
+                return None
+            hosted = await hosted_credential_for(
+                model_provider,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                provider=gate_instance,
+                model=gate_model,
+            )
+            if hosted is None or hosted.api_key is None:
+                return None
+            return ResolvedCredential(
+                api_key=hosted.api_key, api_base=hosted.api_base, client_args=dict(hosted.client_args or {})
+            )
+
         try:
             # The caller's own workspace, not the resolved one: the key's for
             # a keyed request, the session's for a Playground one, and None
@@ -3064,6 +3083,7 @@ async def resolve_request_context(
                         tuple(attempt.provider for attempt in plan.attempts) if plan is not None else (gate_impl,)
                     ),
                     upstream_user=upstream_user,
+                    hosted_credential=_hosted_credential,
                 )
             )
             # Bill the vision describe side-call before the reservation

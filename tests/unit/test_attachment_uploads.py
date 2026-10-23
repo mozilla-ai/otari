@@ -237,3 +237,46 @@ def test_a_request_that_may_fall_back_beyond_gemini_is_sent_as_it_is() -> None:
 
 def test_responses_gets_no_limit() -> None:
     assert _limit(LLMProvider.GEMINI, fmt="responses") is None
+
+
+class _Files:
+    def __init__(self) -> None:
+        self.credentials: list[ResolvedCredential] = []
+
+    async def attachment_uri(self, data: bytes, *, credential: ResolvedCredential, **_: Any) -> str:
+        self.credentials.append(credential)
+        return _URI
+
+
+def _hosted_limit(files: _Files, hosted: ResolvedCredential | None) -> Any:
+    async def _hosted() -> ResolvedCredential | None:
+        return hosted
+
+    return inline_limit_for(
+        GatewayConfig(files_gemini_inline_max_bytes=100),
+        LLMProvider.GEMINI,
+        "openai",
+        files=cast(FileService, files),
+        candidates=(LLMProvider.GEMINI,),
+        instance=None,
+        workspace_id=None,
+        hosted_credential=_hosted,
+    )
+
+
+@pytest.mark.asyncio
+async def test_with_no_stored_key_the_upload_uses_the_hosted_provider() -> None:
+    files = _Files()
+    hosted = ResolvedCredential(api_key="hosted-key")
+
+    assert await _hosted_limit(files, hosted).upload(b"%PDF", "application/pdf", "report.pdf") == _URI
+    assert files.credentials == [hosted]
+
+
+@pytest.mark.asyncio
+async def test_with_no_key_anywhere_the_upload_is_refused() -> None:
+    files = _Files()
+
+    with pytest.raises(LookupError):
+        await _hosted_limit(files, None).upload(b"%PDF", "application/pdf", "report.pdf")
+    assert files.credentials == []

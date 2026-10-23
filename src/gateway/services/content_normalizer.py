@@ -44,6 +44,7 @@ from gateway.services.files import FileScope, FileService, StagedFile, sandbox_p
 from gateway.services.model_capabilities import Capabilities
 from gateway.services.provider_kwargs import effective_credential, get_provider_kwargs
 from gateway.services.vision import describe_image
+from gateway.types.provider_account import ResolvedCredential
 
 WireFormat = Literal["openai", "anthropic", "responses"]
 
@@ -155,6 +156,7 @@ def inline_limit_for(
     candidates: Sequence[LLMProvider | None],
     instance: str | None,
     workspace_id: uuid.UUID | None,
+    hosted_credential: Callable[[], Awaitable[ResolvedCredential | None]] | None = None,
 ) -> InlineLimit | None:
     """The inline attachment limit for ``provider``, with an upload where Otari can move a file there.
 
@@ -169,10 +171,18 @@ def inline_limit_for(
 
         async def upload(data: bytes, mime: str, filename: str) -> str:
             kwargs = get_provider_kwargs(config, provider, instance, workspace_id=workspace_id)
+            try:
+                credential = effective_credential(provider, kwargs)
+            except LookupError:
+                # No stored key: dispatch falls back to the deployment's hosted provider, so the upload does too.
+                hosted = await hosted_credential() if hosted_credential is not None else None
+                if hosted is None:
+                    raise
+                credential = hosted
             return await attachments.attachment_uri(
                 data,
                 provider=provider,
-                credential=effective_credential(provider, kwargs),
+                credential=credential,
                 workspace_id=workspace_id,
                 mime_type=mime,
                 filename=filename,

@@ -970,6 +970,7 @@ async def create_message(
             workspace_id=target.file_workspace_id,
             candidates=target.candidate_providers,
             credential_workspace_id=target.credential_workspace_id,
+            hosted_credential=target.hosted_credential,
             upstream_user=target.upstream_user,
             sandbox_requested=sandbox_requested(
                 request.tools,

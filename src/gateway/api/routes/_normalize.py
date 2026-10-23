@@ -17,7 +17,7 @@ provider carrying a file ID of the caller's choosing.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from any_llm import AnyLLM, LLMProvider
@@ -58,6 +58,7 @@ from gateway.services.tools import (
     parse_code_execution_header,
     resolve_code_executor_preference,
 )
+from gateway.types.provider_account import ResolvedCredential
 
 
 def _executor_preference(
@@ -197,6 +198,7 @@ async def normalize_request_messages(
     provider_container: bool = False,
     candidates: Sequence[LLMProvider | None] = (),
     credential_workspace_id: uuid.UUID | None = None,
+    hosted_credential: Callable[[], Awaitable[ResolvedCredential | None]] | None = None,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Normalize ``messages`` for the resolved ``provider/model``.
 
@@ -241,6 +243,7 @@ async def normalize_request_messages(
             candidates=candidates or (provider,),
             instance=instance,
             workspace_id=credential_workspace_id,
+            hosted_credential=hosted_credential,
         )
         normalized, stats = await normalize_messages(
             messages,
