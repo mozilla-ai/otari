@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import TraceContentRead, TraceContentShare
@@ -88,6 +88,18 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
         if share.revoked_at is None:
             share.revoked_at = now
             await self.db.flush()
+
+    async def revoke_by(self, workspace_id: uuid.UUID, user_id: uuid.UUID, now: datetime) -> None:
+        """Stage the end of every share this user made of a session in the workspace that is still running."""
+        await self.db.execute(
+            update(TraceContentShare)
+            .where(
+                TraceContentShare.workspace_id == workspace_id,
+                TraceContentShare.shared_by_user_id == user_id,
+                TraceContentShare.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+        )
 
     async def record_read(
         self, share_id: uuid.UUID, reader_user_id: uuid.UUID, reader_email: str, *, unless_since: datetime
