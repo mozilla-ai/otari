@@ -33,6 +33,7 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass
 from time import monotonic
+from typing import Any
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -146,7 +147,11 @@ class SpanContent:
         held, reason = await self._write_keys_for(keys, wanted) if wanted else ({}, "paused")
         sealed: list[str | None] = []
         for item in items:
-            key = held.get((item.workspace_id, item.trace_id)) if item.content else None
+            session = (item.workspace_id, item.trace_id)
+            key = held.get(session) if item.content else None
+            if key is not None and (cached := self._write_keys.get(session)) is not None:
+                # Counted per seal, so a key is replaced after its seals, not its batches.
+                cached.uses += 1
             if key is None:
                 if item.content:
                     UNSEALED.labels(reason=reason).inc()
@@ -171,7 +176,6 @@ class SpanContent:
             cached = self._write_keys.get(session)
             if cached is not None and cached.uses < _WRITE_KEY_MAX_USES:
                 self._write_keys.move_to_end(session)
-                cached.uses += 1
                 held[session] = cached.key
             else:
                 missing.append(session)
@@ -182,6 +186,8 @@ class SpanContent:
         tasks = {asyncio.ensure_future(keys.new_data_key(_context(*session))): session for session in missing}
         done, pending = await asyncio.wait(tasks, timeout=_KEY_SOURCE_BUDGET_S)
         for task in pending:
+            # A call already in a thread runs on; collect what it ends with, so nothing is left unretrieved.
+            task.add_done_callback(_collect)
             task.cancel()
         failure: ContentKeyError | None = None
         if pending:
@@ -194,21 +200,38 @@ class SpanContent:
             elif isinstance(exc, ContentKeyError):
                 failure = failure or exc
             else:
-                raise exc
+                # Anything else costs the batch its content, never the batch.
+                failure = failure or ContentKeyError(
+                    "unavailable", f"the content key source failed ({type(exc).__name__})"
+                )
         if failure is not None:
             self._failed(failure, "sealed")
             return held, failure.reason
         return held, "unavailable"
 
     def _cache_write_key(self, session: Session, key: DataKey) -> DataKey:
-        self._write_keys[session] = _WriteKey(key, made_at=monotonic(), uses=1)
+        self._write_keys[session] = _WriteKey(key, made_at=monotonic())
         while len(self._write_keys) > _KEY_CACHE_SIZE:
             self._write_keys.popitem(last=False)
         self._schedule_sweep()
         return key
 
-    async def open(self, sealed: str | None, *, workspace_id: uuid.UUID, trace_id: str, span_id: str) -> dict[str, str]:
-        """The content sealed for this row; empty when none was, or it cannot be opened."""
+    async def open(
+        self,
+        sealed: str | None,
+        *,
+        workspace_id: uuid.UUID,
+        trace_id: str,
+        span_id: str,
+        keys_opened: dict[tuple[str, bytes, Session], bytes] | None = None,
+    ) -> dict[str, str]:
+        """The content sealed for this row; empty when none was, or it cannot be opened.
+
+        ``keys_opened``, where given, stands in for the shared cache: the keys this
+        one reading opened, so each is asked of the key source afresh, once, and is
+        kept by nobody after. Break-glass reads this way, so every opening is a call
+        the key source records.
+        """
         if not sealed:
             return {}
         if not sealed.startswith(_FORMAT + "."):
@@ -223,7 +246,7 @@ class SpanContent:
             return {}
         self._prune()
         try:
-            data_key = await self._open_key(wrapper, wrapped, (workspace_id, trace_id))
+            data_key = await self._open_key(wrapper, wrapped, (workspace_id, trace_id), keys_opened)
         except ContentKeyError as exc:
             self._failed(exc, "opened")
             UNOPENED.labels(reason=exc.reason).inc()
@@ -242,11 +265,26 @@ class SpanContent:
             return {}
         return _allowed(content)
 
-    async def _open_key(self, wrapper: str, wrapped: bytes, session: Session) -> bytes | None:
+    async def _open_key(
+        self,
+        wrapper: str,
+        wrapped: bytes,
+        session: Session,
+        keys_opened: dict[tuple[str, bytes, Session], bytes] | None = None,
+    ) -> bytes | None:
         """The opened key; None when it is not cached and the source is paused."""
         if self._keys is None:
             raise ContentKeyError("unavailable", "no content key is configured")
         cache_key = (wrapper, wrapped, session)
+        if keys_opened is not None:
+            if cache_key in keys_opened:
+                return keys_opened[cache_key]
+            if self._read_paused():
+                return None
+            keys_opened[cache_key] = await _within_budget(
+                self._keys.open_data_key(wrapper, wrapped, _context(*session))
+            )
+            return keys_opened[cache_key]
         cached = self._open_keys.get(cache_key)
         if cached is not None:
             self._open_keys.move_to_end(cache_key)
@@ -306,6 +344,11 @@ class SpanContent:
             exc,
             _PAUSE_AFTER_FAILURE_S,
         )
+
+
+def _collect(task: "asyncio.Future[Any]") -> None:
+    if not task.cancelled():
+        task.exception()
 
 
 async def _within_budget[T](call: Awaitable[T]) -> T:

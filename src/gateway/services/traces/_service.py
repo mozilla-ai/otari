@@ -63,6 +63,8 @@ from otari_agent.domain.definitions import GateDefinition, definition_digest, ga
 
 # How long after a user's erasure spans taken in for them are still refused.
 ERASURE_MARGIN = timedelta(minutes=10)
+# How long past that an erased user's row is kept: far longer than any batch is held.
+ERASURE_KEPT_FOR = timedelta(hours=1)
 
 # How often one reader's reads through a share are recorded, and how many of a
 # share's newest reads its listing carries.
@@ -295,7 +297,9 @@ class TraceService:
                     await self._shares.record_read(
                         share.id, scope.reader.user_id, scope.reader.email, unless_since=now - READ_RECORDED_EVERY
                     )
-        # Opened after the block, so a key source's round trip holds no connection.
+        # Opened after the block, so a key source's round trip holds no connection. Break-glass
+        # opens its keys afresh, bypassing the shared cache, so the key source records each opening.
+        keys_opened: dict[Any, bytes] | None = {} if access == "break_glass" else None
         for position, span in enumerate(spans[:span_limit]):
             if not span.content_sealed:
                 continue
@@ -303,7 +307,11 @@ class TraceService:
                 records[position] = dataclasses.replace(records[position], content_private=True)
                 continue
             content = await self._content.open(
-                span.content_sealed, workspace_id=span.workspace_id, trace_id=span.trace_id, span_id=span.span_id
+                span.content_sealed,
+                workspace_id=span.workspace_id,
+                trace_id=span.trace_id,
+                span_id=span.span_id,
+                keys_opened=keys_opened,
             )
             records[position] = dataclasses.replace(records[position], content=content)
         return TraceDetail(
@@ -345,6 +353,11 @@ class TraceService:
         """Delete the records of break-glass openings made before ``before``."""
         async with self._uow:
             return await self._break_glass.delete_before(before)
+
+    async def expire_erasures(self, *, now: datetime) -> int:
+        """Forget users erased longer ago than any spans of theirs could still be waiting to be written."""
+        async with self._uow:
+            return await self._erasures.forget_erased_before(now - ERASURE_MARGIN - ERASURE_KEPT_FOR)
 
     async def share_content(
         self,
@@ -536,6 +549,7 @@ class TraceService:
         """
         async with self._uow:
             await self._erasures.erase(user_id, datetime.now(UTC))
+            await self._break_glass.forget_session_user(user_id)
             return await self._traces.delete_for_user(user_id)
 
     async def expire(self, *, idle_before: datetime, started_before: datetime) -> int:

@@ -17,6 +17,8 @@ import binascii
 import json
 import re
 import secrets
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from time import monotonic
 from typing import TYPE_CHECKING, Any
 
@@ -36,6 +38,9 @@ if TYPE_CHECKING:
 DATA_KEY_BYTES = 32
 # How long the key ARNs a deployment's ids resolve to are trusted before they are resolved again.
 _ALLOWED_KEYS_TTL_S = 300.0
+_PARTIAL_KEYS_TTL_S = 15.0
+# KMS calls in flight at once, and the client's connections for them.
+_KMS_CONCURRENCY = 32
 
 SECRET_KEY_WRAPPER = "sk"
 KMS_WRAPPER = "kms"
@@ -119,14 +124,16 @@ class AwsKmsContentKeys(DataKeySource):
                 connect_timeout=1,
                 read_timeout=1,
                 retries={"max_attempts": 2, "mode": "standard"},
-                max_pool_connections=32,
+                max_pool_connections=_KMS_CONCURRENCY,
             )
             client = boto3.client("kms", region_name=region, endpoint_url=endpoint_url, config=config)
         self._client = client
+        self._executor = ThreadPoolExecutor(max_workers=_KMS_CONCURRENCY, thread_name_prefix="otari-kms")
         self._key_id = key_id
         self._key_ids = (key_id, *previous_key_ids)
         self._allowed_arns: frozenset[str] | None = None
         self._allowed_at = 0.0
+        self._allowed_complete = True
 
     async def new_data_key(self, context: dict[str, str]) -> DataKey:
         response = await self._call(
@@ -142,6 +149,9 @@ class AwsKmsContentKeys(DataKeySource):
         allowed = await self._allowed()
         response = await self._call("Decrypt", self._client.decrypt, CiphertextBlob=wrapped, EncryptionContext=context)
         if response.get("KeyId") not in allowed:
+            if not self._allowed_complete:
+                # It may be under the key that could not be described: an outage, not a tampered row.
+                raise ContentKeyError("unavailable", "the KMS key this data key was made under could not be described")
             raise ContentKeyError("rejected", "the data key was made under a KMS key this deployment does not list")
         plaintext: bytes = response["Plaintext"]
         return plaintext
@@ -154,7 +164,8 @@ class AwsKmsContentKeys(DataKeySource):
         followed without a restart.
         """
         now = monotonic()
-        if self._allowed_arns is not None and now - self._allowed_at < _ALLOWED_KEYS_TTL_S:
+        ttl = _ALLOWED_KEYS_TTL_S if self._allowed_complete else _PARTIAL_KEYS_TTL_S
+        if self._allowed_arns is not None and now - self._allowed_at < ttl:
             return self._allowed_arns
         arns: set[str] = set()
         failure: ContentKeyError | None = None
@@ -169,15 +180,17 @@ class AwsKmsContentKeys(DataKeySource):
             raise failure or ContentKeyError("unavailable", "no configured KMS key could be described")
         if failure is not None:
             logger.warning("A configured trace content KMS key could not be described and is skipped (%s)", failure)
-        self._allowed_arns, self._allowed_at = frozenset(arns), now
+        # A partial set is trusted only briefly, so one throttled DescribeKey does not shut out a key for minutes.
+        self._allowed_arns, self._allowed_at, self._allowed_complete = frozenset(arns), now, failure is None
         return self._allowed_arns
 
-    @staticmethod
-    async def _call(operation: str, method: Any, **kwargs: Any) -> Any:
+    async def _call(self, operation: str, method: Any, **kwargs: Any) -> Any:
         from botocore.exceptions import BotoCoreError, ClientError
 
         try:
-            return await asyncio.to_thread(method, **kwargs)
+            # A pool of its own, as wide as the client's connections, so a batch fetching many
+            # sessions' keys is not queued behind the process's small default executor.
+            return await asyncio.get_running_loop().run_in_executor(self._executor, partial(method, **kwargs))
         except ClientError as exc:
             code = str(exc.response.get("Error", {}).get("Code", "unknown"))
             reason: ContentKeyFailure = (

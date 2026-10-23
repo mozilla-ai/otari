@@ -952,6 +952,7 @@ def test_an_owner_opens_a_private_session_by_break_glass_and_it_is_recorded_firs
     assert _as(client, world["admin"], "POST", path, json={"reason": _REASON}).status_code == 403
     assert _as(client, world["member"], "POST", path, json={"reason": _REASON}).status_code == 403
     assert _as(client, world["operator"], "POST", path, json={"reason": "why"}).status_code == 422
+    assert _as(client, world["operator"], "POST", path, json={"reason": " " * 20}).status_code == 422
 
     opened = _as(client, world["operator"], "POST", path, json={"reason": _REASON})
     assert opened.status_code == status.HTTP_200_OK, opened.text
