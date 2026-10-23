@@ -50,6 +50,9 @@ from gateway.types.traces import (
 )
 from otari_agent.domain.definitions import GateDefinition, definition_digest, gates_from_body
 
+# A stored span's identity: its workspace, its trace and its own id.
+SpanKey = tuple[uuid.UUID, str, str]
+
 # The most buckets one series read returns, each joined against every session it
 # overlaps. A dashboard preset asks for at most 60; its "All", by the day, keeps
 # the newest two years.
@@ -138,14 +141,15 @@ class TraceService:
         async with self._uow:
             return await self._spans.clear_content(workspace_id)
 
-    async def _seal(self, traces: Sequence[TraceWrite]) -> dict[tuple[uuid.UUID, str], str]:
-        sealed: dict[tuple[uuid.UUID, str], str] = {}
+    async def _seal(self, traces: Sequence[TraceWrite]) -> dict[SpanKey, str]:
+        """Each span's content sealed for its own row, keyed as the row is: a span id alone names no row."""
+        sealed: dict[SpanKey, str] = {}
         for trace in traces:
             for span in trace.spans:
-                key = (trace.workspace_id, span.span_id)
+                key = (trace.workspace_id, trace.trace_id, span.span_id)
                 if span.content and key not in sealed:
                     value = await self._content.seal(
-                        span.content, workspace_id=trace.workspace_id, span_id=span.span_id
+                        span.content, workspace_id=trace.workspace_id, trace_id=trace.trace_id, span_id=span.span_id
                     )
                     if value is not None:
                         sealed[key] = value
@@ -209,7 +213,7 @@ class TraceService:
                 records[position] = dataclasses.replace(records[position], content_private=True)
                 continue
             content = await self._content.open(
-                span.content_sealed, workspace_id=span.workspace_id, span_id=span.span_id
+                span.content_sealed, workspace_id=span.workspace_id, trace_id=span.trace_id, span_id=span.span_id
             )
             records[position] = dataclasses.replace(records[position], content=content)
         return TraceDetail(
@@ -462,7 +466,7 @@ def _growth(key: TraceKey, spans: list[SpanRecord], written_at: datetime) -> Tra
     )
 
 
-def _span_values(trace: TraceWrite, span: SpanRecord, sealed: dict[tuple[uuid.UUID, str], str]) -> dict[str, Any]:
+def _span_values(trace: TraceWrite, span: SpanRecord, sealed: dict[SpanKey, str]) -> dict[str, Any]:
     return {
         "workspace_id": trace.workspace_id,
         "trace_id": trace.trace_id,
@@ -494,7 +498,7 @@ def _span_values(trace: TraceWrite, span: SpanRecord, sealed: dict[tuple[uuid.UU
         "otel_trace_id": span.otel_trace_id,
         "otel_span_id": span.otel_span_id,
         "attributes": dict(span.attributes) or None,
-        "content_sealed": sealed.get((trace.workspace_id, span.span_id)),
+        "content_sealed": sealed.get((trace.workspace_id, trace.trace_id, span.span_id)),
     }
 
 

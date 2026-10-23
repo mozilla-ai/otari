@@ -692,3 +692,28 @@ async def test_concurrent_new_guardrail_versions_never_pass_the_workspace_cap(
         )
     ).all()
     assert len(digests) == 2
+
+
+async def test_two_users_spans_sharing_an_id_in_one_batch_keep_their_own_content(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exported span ids come from the client's OTel ids, so two users' spans can share one."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    await store.write(
+        (
+            _write(workspace, "alice-session", _span("tool-1", kind="tool", content={"prompt": "alice's secret"})),
+            _write(workspace, "bob-session", _span("tool-1", kind="tool"), user_id="bob"),
+            _write(
+                workspace, "bob-other", _span("tool-1", kind="tool", content={"prompt": "bob's own"}), user_id="bob"
+            ),
+        )
+    )
+
+    sealed = dict((await async_db.execute(select(TraceSpan.trace_id, TraceSpan.content_sealed))).tuples().all())
+    assert sealed["bob-session"] is None
+    alice = await store.get(TraceScope.deployment(), "alice-session", span_limit=10)
+    bob = await store.get(TraceScope.deployment(), "bob-other", span_limit=10)
+    assert alice is not None and bob is not None
+    assert dict(alice.spans[0].content) == {"prompt": "alice's secret"}
+    assert dict(bob.spans[0].content) == {"prompt": "bob's own"}
