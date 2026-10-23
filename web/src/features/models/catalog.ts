@@ -215,6 +215,9 @@ export const SORT_OPTIONS: {
   },
 ]
 
+/** The API's limit on the search term, which a hand-edited URL can exceed. */
+export const SEARCH_MAX_LENGTH = 200
+
 const SORT_COLUMNS: readonly CatalogSortColumn[] = [
   "name",
   "released",
@@ -318,6 +321,25 @@ export function catalogListFromUrl(
   }
 }
 
+/**
+ * Only the URL params that differ between `from` and `to`. A change is built
+ * from the list as last rendered, which can lag the URL by a render, so writing
+ * every param would put back a value the URL has already moved on from.
+ */
+export function catalogUrlChanges(
+  from: CatalogListState,
+  to: CatalogListState,
+): Partial<Record<CatalogUrlKey, string | number | string[]>> {
+  const before = catalogListToUrl(from)
+  const after = catalogListToUrl(to)
+  return Object.fromEntries(
+    Object.entries(after).filter(
+      ([key, value]) =>
+        JSON.stringify(value) !== JSON.stringify(before[key as CatalogUrlKey]),
+    ),
+  )
+}
+
 /** The URL params that set `list`, for `UrlState.patch`. */
 export function catalogListToUrl(
   list: CatalogListState,
@@ -398,7 +420,7 @@ export function catalogRequest(
   return {
     skip: page * pageSize,
     limit: pageSize,
-    search: filters.query.trim() || undefined,
+    search: filters.query.trim().slice(0, SEARCH_MAX_LENGTH) || undefined,
     provider: [...filters.providers].sort(),
     vendor: [...filters.vendors].sort(),
     input_modality: [...filters.inputModalities].sort(),

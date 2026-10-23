@@ -32,8 +32,8 @@ import {
   type CatalogSortColumn,
   CONTEXT_OPTIONS,
   catalogListFromUrl,
-  catalogListToUrl,
   catalogRequest,
+  catalogUrlChanges,
   EMPTY_FILTERS,
   MODALITIES,
   MODALITY_LABELS,
@@ -42,6 +42,7 @@ import {
   PRICING_OPTIONS,
   providerOptions,
   RELEASE_OPTIONS,
+  SEARCH_MAX_LENGTH,
   SORT_OPTIONS,
   SOURCE_OPTIONS,
   vendorOptions,
@@ -91,7 +92,7 @@ function SearchInput({
   return (
     <input
       type="search"
-      maxLength={200}
+      maxLength={SEARCH_MAX_LENGTH}
       value={draft ?? value}
       onFocus={() => setDraft(value)}
       onBlur={() => setDraft(null)}
@@ -822,11 +823,12 @@ export function ModelCatalogPage() {
   // The list lives in the URL, so Back and a model page's link back return to
   // it as it was left.
   const url = useUrlState(CATALOG_URL_DEFAULTS)
+  const list = catalogListFromUrl(url)
   const openState = { catalogSearch: useSearch({ strict: false }) }
   return (
     <ModelCatalogView
-      list={catalogListFromUrl(url)}
-      onListChange={(next) => url.patch(catalogListToUrl(next))}
+      list={list}
+      onListChange={(next) => url.patch(catalogUrlChanges(list, next))}
       openState={openState}
       onOpen={(id) => {
         void navigate({
