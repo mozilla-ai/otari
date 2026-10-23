@@ -1,20 +1,20 @@
 name: Otari Release (tag + publish)
 
 # Step 2 of the release flow. Fires when a `release`-labeled PR opened by
-# otari-release.yml is merged. Tags the squash commit `vX.Y.Z` and publishes a
-# GitHub Release whose body is the git-cliff render for that version. Publishing
-# the Release fires otari-docker.yml (`release: published`), which builds and
-# pushes the image with OTARI_VERSION baked to the tag.
+# otari-release.yml is merged. Tags the squash commit `vX.Y.Z` and opens a draft
+# GitHub Release whose body is the git-cliff render for that version, attaches
+# the Homebrew assets (otari-homebrew-build.yml), then publishes it. A published
+# Release is immutable, so everything it carries is attached while it is a draft.
+# Publishing fires the `release: published` workflows (RELEASE.md lists them).
 #
 # Runs as the otari-bot GitHub App (RELEASE_APP_CLIENT_ID +
-# RELEASE_APP_PRIVATE_KEY) so that `gh release create` triggers
-# otari-docker.yml; a Release created with the default GITHUB_TOKEN would not
-# start downstream workflows. See RELEASE.md.
+# RELEASE_APP_PRIVATE_KEY): only otari-bot may create a `v*` tag, and a Release
+# published with the default GITHUB_TOKEN would not start downstream workflows.
 #
-# The App token is minted in the last step rather than the first, so that it
-# does not exist while the job is running git-cliff.
+# The App token is minted after git-cliff has run, so it does not exist while
+# git-cliff does.
 #
-# A second job announces the published Release to mozilla-ai/otari-ai with a
+# The last job announces the published Release to mozilla-ai/otari-ai with a
 # repository dispatch.
 
 # pull_request_target, not pull_request: a pull_request run takes this file
@@ -27,15 +27,16 @@ on:
     types: [closed]
     branches: [main]
 
-# Only git-cliff uses GITHUB_TOKEN, and only to read PR metadata. The tag and
-# the Release are created with the App token, minted in the last step.
+# git-cliff uses GITHUB_TOKEN to read PR metadata, and the Homebrew build to
+# attach its assets to the draft. The tag, the draft and the publish use the
+# App token.
 permissions:
   contents: read
   pull-requests: read
 
 jobs:
   tag-and-release:
-    name: Tag and publish
+    name: Tag and draft the Release
     environment: release
     if: >-
       github.event.pull_request.merged == true &&
@@ -49,7 +50,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          # Nothing here pushes over git: the tag is created by the Release
+          # Nothing here pushes over git: the tag is created through the API
           # below. So this needs no write credential, and leaves none behind
           # for the git-cliff step to find.
           persist-credentials: false
@@ -101,24 +102,67 @@ jobs:
           # repository variable.
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          # This job creates a tag and a Release and touches nothing else.
+          # This job creates a tag and a draft Release and touches nothing else.
           permission-contents: write
 
-      - name: Create tag and publish GitHub Release
+      # Re-runnable: a tag already at the merge commit and a Release still in
+      # draft are what a failed earlier attempt leaves, and are reused.
+      - name: Create the tag and a draft Release
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          VERSION: ${{ steps.ver.outputs.version }}
+          TAG: v${{ steps.ver.outputs.version }}
           SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
-          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
-            echo "::error::Tag v$VERSION already exists"
+          tagged="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null || true)"
+          if [ -z "$tagged" ]; then
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$SHA" > /dev/null
+          elif [ "$tagged" != "$SHA" ]; then
+            echo "::error::Tag $TAG already exists at $tagged, not at the merge commit $SHA"
             exit 1
           fi
-          # Creates the tag at the merge commit and publishes in one step.
-          gh release create "v$VERSION" \
-            --target "$SHA" \
-            --title "v$VERSION" \
-            --notes-file /tmp/notes.md
+          # Listed rather than looked up by tag: the by-tag endpoint skips drafts.
+          draft="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$TAG\") | .draft")"
+          case "$draft" in
+            "") gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-file /tmp/notes.md ;;
+            true) gh release edit "$TAG" --notes-file /tmp/notes.md ;;
+            *)
+              echo "::error::Release $TAG is already published"
+              exit 1
+              ;;
+          esac
+
+  homebrew-assets:
+    name: Attach the Homebrew assets
+    needs: tag-and-release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/otari-homebrew-build.yml
+    with:
+      tag: v${{ needs.tag-and-release.outputs.version }}
+
+  publish:
+    name: Publish the Release
+    needs: [tag-and-release, homebrew-assets]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions: {}
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      # Published by otari-bot rather than GITHUB_TOKEN, so `release: published`
+      # starts the downstream workflows. --latest keeps what creating and
+      # publishing in one step did.
+      - name: Publish the draft Release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TAG: v${{ needs.tag-and-release.outputs.version }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
 
   # NOTE: This job runs after the Release is published, so a failed dispatch
   # leaves the Release in place. The event reports the tag and the Release.
@@ -126,7 +170,7 @@ jobs:
   # after this event.
   notify-otari-ai:
     name: Announce the release to otari-ai
-    needs: tag-and-release
+    needs: [tag-and-release, publish]
     runs-on: ubuntu-latest
     environment: platform-dispatch
     permissions: {}

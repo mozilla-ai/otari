@@ -31,8 +31,13 @@ The release runs in two halves so the changelog is reviewable before the tag:
    [Breaking changes](#breaking-changes).
 2. **Merge it.** Review the changelog diff and squash-merge the PR.
    **Otari Release (tag + publish)** (`otari-tag-release.yml`) then tags the
-   squash commit `v0.4.0` and publishes the GitHub Release with the git-cliff
-   notes. Creating the Release is what creates the tag.
+   squash commit `v0.4.0`, opens a draft GitHub Release with the git-cliff
+   notes, attaches the Homebrew assets (`otari-homebrew-build.yml`: the
+   `otari-agent` sdist, its pinned requirements and `Formula/otari.rb`), and
+   publishes it. Releases are immutable once published, so a Release's assets
+   and tag cannot change afterwards, which is why the assets are attached
+   while it is a draft. If a run fails before publishing, re-run it: it reuses
+   the tag and the draft.
 
 The same workflow then sends an `otari-release-published` repository dispatch
 to `mozilla-ai/otari-ai`. The event carries the tag and the merge commit SHA.
@@ -52,13 +57,13 @@ Five workflows react to the published Release:
 - **`otari-sdk-codegen.yml`** regenerates each SDK's typed core, stamps the
   release version into the core, and opens a regeneration PR on each SDK repo.
 - **`otari-homebrew.yml`** ships the agent-side CLI (`cli/`, distribution
-  `otari-agent`) to `mozilla-ai/homebrew-tap`. It builds its sdist, whose
-  version setuptools-scm takes from the tag being released, renders
-  `Formula/otari.rb` from
-  `packaging/homebrew/otari.rb.tmpl` and the lock (`scripts/homebrew_formula.py`),
-  uploads the sdist, the pinned requirements and the formula to the Release,
-  installs and `brew test`s the formula on a macOS runner, then commits it to
-  the tap, so `brew install mozilla-ai/tap/otari` follows every release.
+  `otari-agent`) to `mozilla-ai/homebrew-tap`. The formula it ships was
+  attached to the Release before publishing: `otari-homebrew-build.yml` builds
+  the sdist, whose version setuptools-scm takes from the tag being released,
+  and renders `Formula/otari.rb` from `packaging/homebrew/otari.rb.tmpl` and
+  the lock (`scripts/homebrew_formula.py`). This workflow installs and
+  `brew test`s that formula on a macOS runner, then commits it to the tap, so
+  `brew install mozilla-ai/tap/otari` follows every release.
 - **`otari-release-labels.yml`** labels every PR merged since the previous
   release with the release tag (for example `v0.4.0`), creating the label, so
   each PR shows the release it shipped in. A final release counts from the
