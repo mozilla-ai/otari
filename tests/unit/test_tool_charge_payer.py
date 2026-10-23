@@ -85,3 +85,20 @@ def test_a_reported_cost_on_the_deployments_account_is_charged_as_reported() -> 
     charges = charge_tool_calls(tally.label_calls(), {})
 
     assert charges.deployment_paid_total == Decimal("0.009")
+
+
+def test_each_charge_line_says_whose_account_ran_its_calls() -> None:
+    """One label served on both accounts settles as two lines, so the row shows what the organization was charged."""
+    tally = ToolUsageTally()
+    tally.record_result("web_search", _HITS, deployment_paid=True)
+    tally.record_result("web_search", _HITS, deployment_paid=False)
+    calls = tally.label_calls()
+    rates = {lookup: _SEARCH_RATE for entry in calls if (lookup := tool_rate_lookup(entry)) is not None}
+
+    charges = charge_tool_calls(calls, rates)
+
+    assert [(line["label"], line["deployment_paid"], line["cost"]) for line in charges.lines] == [
+        ("otari:web_search", False, 0.01),
+        ("otari:web_search", True, 0.01),
+    ]
+    assert charges.unit_rates == {"web_search": Decimal("0.01")}

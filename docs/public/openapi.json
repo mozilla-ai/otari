@@ -20520,7 +20520,7 @@
       },
       "ToolChargeLine": {
         "additionalProperties": true,
-        "description": "A gateway-run tool's charge line, one per tool and label.\n\nA subclass with ``label`` required, rather than a defaulted field on\n:class:`UnitChargeLine`, so the per-request, rerank and image lines, and a\nstored tool line without a label, serialize back without a\n``\"label\": null`` they never had.",
+        "description": "A gateway-run tool's charge line, one per tool, label and payer.\n\nA subclass with ``label`` required, rather than a defaulted field on\n:class:`UnitChargeLine`, so the per-request, rerank and image lines, and a\nstored tool line without a label, serialize back without a\n``\"label\": null`` they never had.\n\nA line written since tools are charged by whose account ran them also\ncarries ``deployment_paid``: true where the deployment's account ran the\ncalls, which charges the organization's funds where the deployment bills\nthem, and false where the organization's own key did. It is kept as an extra\nkey rather than declared, so an older line serializes back without it.",
         "properties": {
           "cost": {
             "description": "USD charged for this line.",

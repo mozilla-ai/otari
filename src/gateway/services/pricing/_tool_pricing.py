@@ -123,15 +123,17 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
     except that a tool line carries ``unit_rate`` (USD per call, the label's
     cost over its calls) where a token line carries ``rate_per_million``. That
     key is what tells a reader, and the UI, which unit convention applies. A
-    tool line also names its ``label``. A label with no reported cost and no
+    tool line also names its ``label``, and ``deployment_paid``: whether the
+    deployment's account ran its calls, and so whether the organization's funds
+    were charged for them. A label with no reported cost and no
     pricing row still gets a line, at a zero rate, so the work stays on the row
     and in the audit trail even when the operator has not priced it.
     """
-    # Keyed by tool and label, so two records of one label with different rate
-    # keys still settle as one line.
-    by_label: dict[tuple[str, str], tuple[int, Decimal]] = {}
+    # Keyed by tool, label and whose account ran the calls, so two records of one
+    # label with different rate keys still settle as one line, and a line says
+    # whether the organization's funds were charged for it.
+    by_label: dict[tuple[str, str, bool], tuple[int, Decimal]] = {}
     unpriced: dict[tuple[str, str, RateKey], UnpricedToolLabel] = {}
-    deployment_paid = Decimal(0)
     for entry in calls:
         if entry.calls <= 0:
             continue
@@ -143,10 +145,9 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
             + entry.unreported_calls * (rate.unit_rate if rate is not None else Decimal(0))
             + entry.enrichment_cost
         )
-        if _deployment_paid(entry):
-            deployment_paid += cost
-        units, label_cost = by_label.get((entry.tool, label), (0, Decimal(0)))
-        by_label[(entry.tool, label)] = (units + entry.calls, label_cost + cost)
+        line = (entry.tool, label, _deployment_paid(entry))
+        units, label_cost = by_label.get(line, (0, Decimal(0)))
+        by_label[line] = (units + entry.calls, label_cost + cost)
         if lookup is not None and lookup.rate_keys and rate is None:
             first = lookup.rate_keys[0]
             previous = unpriced.get((entry.tool, label, first))
@@ -163,13 +164,15 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
             "units": units,
             "unit_rate": float(cost / units),
             "cost": float(cost),
+            "deployment_paid": paid,
         }
-        for (tool, label), (units, cost) in sorted(by_label.items())
+        for (tool, label, paid), (units, cost) in sorted(by_label.items())
     ]
     by_tool: dict[str, tuple[int, Decimal]] = {}
-    for (tool, _label), (units, cost) in by_label.items():
+    for (tool, _label, _paid), (units, cost) in by_label.items():
         tool_units, tool_cost = by_tool.get(tool, (0, Decimal(0)))
         by_tool[tool] = (tool_units + units, tool_cost + cost)
     total = quantize_cost(sum((cost for _units, cost in by_tool.values()), Decimal(0)))
     unit_rates = {tool: cost / units for tool, (units, cost) in by_tool.items()}
+    deployment_paid = sum((cost for (_tool, _label, paid), (_units, cost) in by_label.items() if paid), Decimal(0))
     return ToolCharges(total, lines, unit_rates, list(unpriced.values()), quantize_cost(deployment_paid))
