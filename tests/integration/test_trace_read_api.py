@@ -26,7 +26,14 @@ from sqlmodel import col
 from gateway.adapters.content_key_adapter import SECRET_KEY_WRAPPER, ContentKeyring, SecretKeyContentKeys
 from gateway.core.config import API_ROOT
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
-from gateway.models.traces import Trace, TraceContentBarrier, TraceContentShare, TraceGuardrailDefinition, TraceSpan
+from gateway.models.traces import (
+    Trace,
+    TraceContentBarrier,
+    TraceContentRead,
+    TraceContentShare,
+    TraceGuardrailDefinition,
+    TraceSpan,
+)
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import generate_secret_key
@@ -786,3 +793,41 @@ def test_the_bootstrap_says_whether_the_deployment_keeps_content(
 
     monkeypatch.setattr(config, "trace_content_enabled", True)
     assert client.get(f"{API_ROOT}/bootstrap").json()["trace_content_available"] is True
+
+
+def test_a_share_records_a_polling_reader_once_and_pages_a_long_history(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    path = "/organizations/me/traces/s-one/shares"
+    share = _as(client, world["member"], "POST", path, json={"audience": "organization_admins"}).json()
+
+    # A page polling the session reads it again and again; that is one read.
+    for _ in range(3):
+        _detail(client, world["admin"])
+    [entry] = _as(client, world["member"], "GET", path).json()["items"]
+    assert (entry["read_count"], len(entry["reads"])) == (1, 1)
+
+    with db_session_factory() as session:
+        session.add_all(
+            TraceContentRead(
+                share_id=uuid.UUID(share["id"]),
+                reader_email=f"r{n}@a.test",
+                read_at=datetime.now(UTC) - timedelta(days=1, minutes=n),
+            )
+            for n in range(30)
+        )
+        session.commit()
+
+    [entry] = _as(client, world["member"], "GET", path).json()["items"]
+    assert (entry["read_count"], len(entry["reads"])) == (31, 10)
+    first = _as(client, world["member"], "GET", f"{path}/{share['id']}/reads", params={"limit": 20}).json()
+    rest = _as(client, world["member"], "GET", f"{path}/{share['id']}/reads", params={"limit": 20, "skip": 20}).json()
+    assert (len(first["items"]), first["has_more"]) == (20, True)
+    assert (len(rest["items"]), rest["has_more"]) == (11, False)
+    assert _as(client, world["admin"], "GET", f"{path}/{share['id']}/reads").status_code == status.HTTP_403_FORBIDDEN
