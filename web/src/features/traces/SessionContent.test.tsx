@@ -252,4 +252,58 @@ describe("SessionContent", () => {
       screen.getAllByRole("button", { name: "Stop sharing" }),
     ).toHaveLength(2)
   })
+
+  it("lets an owner open a private session by break-glass, with a reason", async () => {
+    const sent = mockApi()
+    const opened = vi.fn()
+    const detail = traceDetail({ spans: [{ ...tool, content_private: true }] })
+    renderWith(<SessionContent detail={detail} onBreakGlass={opened} />)
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Open by break-glass" }),
+    )
+    const submit = screen.getByRole("button", { name: "Open and record" })
+    expect(submit).toBeDisabled()
+    await userEvent.type(
+      screen.getByRole("textbox", { name: /Reason/ }),
+      "HR matter 17, approved by legal",
+    )
+    await userEvent.click(submit)
+
+    const post = sent.find((request) => request.method === "POST")
+    expect(post?.url).toBe(
+      `${API_ROOT}/organizations/me/traces/${detail.summary.trace_id}/break-glass?workspace_id=${detail.summary.workspace_id}`,
+    )
+    expect(post?.body).toEqual({ reason: "HR matter 17, approved by legal" })
+    await vi.waitFor(() => expect(opened).toHaveBeenCalled())
+  })
+
+  it("offers no break-glass to someone who is not an owner", () => {
+    mockApi()
+    renderWith(
+      <SessionContent
+        detail={traceDetail({ spans: [{ ...tool, content_private: true }] })}
+      />,
+    )
+
+    expect(
+      screen.queryByRole("button", { name: "Open by break-glass" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("says a break-glass opening is recorded and seen by every owner", () => {
+    mockApi()
+    renderWith(
+      <SessionContent
+        detail={traceDetail({
+          content_access: "break_glass",
+          spans: [{ ...tool, content: { command: "pytest -x" } }],
+        })}
+      />,
+    )
+
+    expect(
+      screen.getByText(/every owner of the organization can see it/),
+    ).toBeInTheDocument()
+  })
 })

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 
-import type { TraceSortKey, TraceSummary } from "@/client"
+import type { TraceDetail, TraceSortKey, TraceSummary } from "@/client"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import {
@@ -16,6 +16,7 @@ import { Chip } from "@/design-system/indicators/Chip"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { ActivityTimeline } from "@/features/activity/ActivityTimeline"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   DEFAULT_TRACE_SORT,
   type TraceFilters,
@@ -37,7 +38,7 @@ import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDebounced } from "@/shared/hooks/useDebounced"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-
+import { BreakGlassLog } from "./BreakGlassLog"
 import { formatDuration, formatTraceTimestamp } from "./format"
 import { toTrace } from "./fromApi"
 import { SessionContent } from "./SessionContent"
@@ -290,6 +291,13 @@ export function SessionsPage() {
   const seriesQuery = useTraceSeries(seriesFilters, bucket)
   const peekId = url.get("peek")
   const detail = useTrace(peekId, url.get("peek_workspace"))
+  // An owner of the organization may open a private session by break-glass. What
+  // it opened is held here for the session it opened, never polled over.
+  const isOwner = useOrganizationContext().data?.role === "owner"
+  const [opened, setOpened] = useState<TraceDetail>()
+  const openedHere =
+    opened && opened.summary.trace_id === peekId ? opened : undefined
+  const shown = openedHere ?? detail.data
 
   const points = seriesQuery.data?.points
   const chartStart =
@@ -324,10 +332,10 @@ export function SessionsPage() {
   const rows = traces.data?.items ?? []
   const openIndex = rows.findIndex((session) => session.trace_id === peekId)
   // The row on screen, or the read's own summary for a link off this page.
-  const openSummary = rows[openIndex] ?? detail.data?.summary
+  const openSummary = rows[openIndex] ?? shown?.summary
   const open = useMemo(
-    () => (openSummary ? toTrace(openSummary, detail.data) : null),
-    [openSummary, detail.data],
+    () => (openSummary ? toTrace(openSummary, shown) : null),
+    [openSummary, shown],
   )
   // A trace is keyed by its workspace and its id, so the URL keeps both.
   const openPeek = (id: string) =>
@@ -439,6 +447,7 @@ export function SessionsPage() {
               }
             />
           </TableScrollFrame>
+          {isOwner ? <BreakGlassLog /> : null}
           <TablePagination
             page={page}
             pageSize={pageSize}
@@ -463,7 +472,14 @@ export function SessionsPage() {
           onClose={() => url.patch({ peek: "", peek_workspace: "", span: "" })}
           onPrevious={previous ? () => openPeek(previous) : undefined}
           onNext={next ? () => openPeek(next) : undefined}
-          notice={detail.data ? <SessionContent detail={detail.data} /> : null}
+          notice={
+            shown ? (
+              <SessionContent
+                detail={shown}
+                onBreakGlass={isOwner ? setOpened : undefined}
+              />
+            ) : null
+          }
         />
       ) : null}
     </div>

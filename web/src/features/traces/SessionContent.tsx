@@ -13,6 +13,7 @@ import { RadioGroup } from "@/design-system/forms/RadioGroup"
 import { Select } from "@/design-system/forms/Select"
 import { TextArea } from "@/design-system/forms/TextArea"
 import {
+  useBreakGlass,
   useEndTraceShare,
   useShareTrace,
   useTraceShares,
@@ -42,6 +43,9 @@ const DAY_OPTIONS = [
   { value: "90", label: "90 days" },
 ] as const
 
+// The server refuses a shorter reason; the dialog does not offer to send one.
+const BREAK_GLASS_REASON_MIN = 10
+
 function isAudience(value: string): value is TraceShareAudience {
   return value in AUDIENCE_LABELS
 }
@@ -51,10 +55,19 @@ function isAudience(value: string): value is TraceShareAudience {
  *
  * Its own user is told it is private to them and can share it; someone reading
  * through a share is told whose say that is and that the read was recorded;
- * anyone else is told the content exists and is not theirs to read. A session
- * no user owns (a service key's) has no one to share it, so it offers nothing.
+ * anyone else is told the content exists and is not theirs to read. An owner
+ * of the organization is offered break-glass for it, recorded with a reason
+ * that every owner can see. A session no user owns has no one to share it, so
+ * it offers nothing.
  */
-export function SessionContent({ detail }: { detail: TraceDetail }) {
+export function SessionContent({
+  detail,
+  onBreakGlass,
+}: {
+  detail: TraceDetail
+  /** Takes the session as break-glass opened it; offered to an organization owner only. */
+  onBreakGlass?: (opened: TraceDetail) => void
+}) {
   const access = detail.content_access
   const holdsPrivate = detail.spans.some((span) => span.content_private)
   const holdsContent = detail.spans.some(
@@ -62,6 +75,15 @@ export function SessionContent({ detail }: { detail: TraceDetail }) {
   )
   const owned = access === "owner" && detail.summary.user_id !== null
 
+  if (access === "break_glass") {
+    return (
+      <InfoBanner tone="warning">
+        Opened by break-glass, without its owner's share. The opening is
+        recorded with your reason, and every owner of the organization can see
+        it.
+      </InfoBanner>
+    )
+  }
   if (access === "share" && detail.content_share) {
     const share = detail.content_share
     return (
@@ -75,11 +97,16 @@ export function SessionContent({ detail }: { detail: TraceDetail }) {
   }
   if (holdsPrivate) {
     return (
-      <InfoBanner>
-        What this session was about is private to the person whose session it
-        is. They can share it with the organization's admins, or with the team
-        that runs this deployment, from this page.
-      </InfoBanner>
+      <div className="flex flex-col gap-3">
+        <InfoBanner>
+          What this session was about is private to the person whose session it
+          is. They can share it with the organization's admins, or with the team
+          that runs this deployment, from this page.
+        </InfoBanner>
+        {onBreakGlass ? (
+          <BreakGlassAction detail={detail} onOpened={onBreakGlass} />
+        ) : null}
+      </div>
     )
   }
   // On ownership alone, not on the content having opened: during a key-source
@@ -89,6 +116,71 @@ export function SessionContent({ detail }: { detail: TraceDetail }) {
     return <OwnerSharing detail={detail} canShare={holdsContent} />
   }
   return null
+}
+
+function BreakGlassAction({
+  detail,
+  onOpened,
+}: {
+  detail: TraceDetail
+  onOpened: (opened: TraceDetail) => void
+}) {
+  const breakGlass = useBreakGlass()
+  const [isOpen, setIsOpen] = useState(false)
+  const [reason, setReason] = useState("")
+  const trimmed = reason.trim()
+
+  const submit = () => {
+    if (breakGlass.isPending || trimmed.length < BREAK_GLASS_REASON_MIN) return
+    breakGlass.mutate(
+      {
+        traceId: detail.summary.trace_id,
+        workspaceId: detail.summary.workspace_id,
+        reason: trimmed,
+      },
+      {
+        onSuccess: (opened) => {
+          setIsOpen(false)
+          setReason("")
+          onOpened(opened)
+        },
+      },
+    )
+  }
+
+  return (
+    <>
+      <div>
+        <Button variant="ghost" onPress={() => setIsOpen(true)}>
+          Open by break-glass
+        </Button>
+      </div>
+      {isOpen ? (
+        <FormDialog
+          isOpen
+          onOpenChange={(open) => {
+            if (!open) setIsOpen(false)
+          }}
+          title="Open this session by break-glass"
+          description="For an investigation its owner cannot be asked to share for, such as an HR or legal matter. The opening is recorded with your reason and shown to every owner of this organization. The session's owner is not told."
+          submitLabel="Open and record"
+          onSubmit={submit}
+          isPending={breakGlass.isPending}
+          isSubmitDisabled={trimmed.length < BREAK_GLASS_REASON_MIN}
+          error={breakGlass.error}
+        >
+          <TextArea
+            label="Reason"
+            value={reason}
+            onChange={setReason}
+            rows={3}
+            isRequired
+            description="At least ten characters. Name the matter, and who approved it."
+          />
+        </FormDialog>
+      ) : null}
+    </>
+  )
 }
 
 function OwnerSharing({
