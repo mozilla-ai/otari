@@ -1930,7 +1930,7 @@ main {
    17px at md where a primary puts it at 12 and 16. The padding gives the pixel
    back. Both sizes, because the rule is about the border rather than about
    which sizes happen to be in use today. Icon-only is excluded: it has no
-   label to inset and HeroUI zeroes its padding to keep it square.
+   label to inset and HeroUI drops its padding to keep it square.
 
    The rail is excluded too: its band controls set their own lane (`px-6`),
    which this unlayered rule would outrank. `:where` keeps the specificity
