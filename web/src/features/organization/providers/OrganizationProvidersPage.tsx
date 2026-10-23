@@ -18,7 +18,10 @@ import type {
 import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
-import { PAGE_SIZE_OPTIONS } from "@/design-system/data/TablePagination"
+import {
+  PAGE_SIZE_OPTIONS,
+  snapPageSize,
+} from "@/design-system/data/TablePagination"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
@@ -341,9 +344,7 @@ export function OrganizationProvidersPage() {
   // hand-edited or stale `models_size` must not reach the API as a limit it
   // never offers, or leave the rows-per-page select showing a value it does not.
   const modelsPage = Math.max(0, url.getNumber("models_page"))
-  const modelsSize =
-    PAGE_SIZE_OPTIONS.find((size) => size === url.getNumber("models_size")) ??
-    PAGE_SIZE_OPTIONS[0]
+  const modelsSize = snapPageSize(url.getNumber("models_size"))
   const ratingModelKey = url.get("override")
   // Narrowed to the model being edited, and read only while one is. Every
   // period of that model is what the editor needs, and the first page of the

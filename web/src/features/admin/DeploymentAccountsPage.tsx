@@ -12,6 +12,7 @@ import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import {
   PAGE_SIZE_OPTIONS,
+  snapPageSize,
   TablePagination,
 } from "@/design-system/data/TablePagination"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
@@ -89,9 +90,7 @@ export function DeploymentAccountsPage() {
   // Clamped, because the URL is editable and the route refuses a negative
   // `skip` or a `limit` of zero.
   const page = Math.max(0, url.getNumber("page"))
-  const pageSize =
-    PAGE_SIZE_OPTIONS.find((size) => size === url.getNumber("size")) ??
-    PAGE_SIZE_OPTIONS[0]
+  const pageSize = snapPageSize(url.getNumber("size"))
   const search = useDebounced(url.get("q").trim().slice(0, MAX_SEARCH_LENGTH))
   const accounts = useDeploymentUsers({ page, pageSize, search }, isGranted)
   const update = useUpdateDeploymentUser()

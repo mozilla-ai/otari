@@ -1,5 +1,5 @@
 import { Button, Spinner } from "@heroui/react"
-import { useId, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import { INPUT_CLASS } from "@/design-system/forms/inputClass"
 import { formatNumber } from "@/design-system/helpers/format"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
@@ -15,6 +15,18 @@ import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 // Bulk actions over more rows than a page go through "select all N matching
 // this filter" instead of a bigger page.
 export const PAGE_SIZE_OPTIONS = [15, 30, 45, 60]
+
+/**
+ * The offered size nearest a requested one, for a size read from a URL: an old
+ * bookmark (`size=50`, `size=500`) lands on the closest page that exists rather
+ * than the smallest, and a hand-edited `size=0` or `size=-5` never reaches the
+ * API as a limit it refuses.
+ */
+export function snapPageSize(requested: number): number {
+  return PAGE_SIZE_OPTIONS.reduce((best, option) =>
+    Math.abs(option - requested) < Math.abs(best - requested) ? option : best,
+  )
+}
 
 export interface TablePaginationProps {
   /** 0-based current page. */
@@ -63,6 +75,16 @@ export function TablePagination({
   const pageCount =
     total != null ? Math.max(1, Math.ceil(total / pageSize)) : null
   const isFirst = page === 0
+
+  // A page past the end answers empty, and only "first page" got out of it:
+  // an old or hand-edited link, a larger size snapped from a URL, or the last
+  // rows of the last page removed. Once the total says where the end is, go
+  // to the last page that holds rows.
+  useEffect(() => {
+    if (pageCount != null && !isFetching && page > pageCount - 1) {
+      onPageChange(pageCount - 1)
+    }
+  }, [page, pageCount, isFetching, onPageChange])
   const isLast = pageCount != null ? page >= pageCount - 1 : !hasNextFallback
 
   const rangeStart = rowsOnPage > 0 ? page * pageSize + 1 : 0

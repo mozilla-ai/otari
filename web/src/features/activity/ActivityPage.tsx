@@ -9,7 +9,7 @@ import type {
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import {
-  PAGE_SIZE_OPTIONS,
+  snapPageSize,
   TablePagination,
 } from "@/design-system/data/TablePagination"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -152,11 +152,7 @@ export function ActivityPage() {
   // or size=-5 must not reach the API as an invalid limit (or leave the
   // rows-per-page select showing a value it does not offer).
   const rawPageSize = url.getNumber("size")
-  const pageSize = PAGE_SIZE_OPTIONS.reduce((best, option) =>
-    Math.abs(option - rawPageSize) < Math.abs(best - rawPageSize)
-      ? option
-      : best,
-  )
+  const pageSize = snapPageSize(rawPageSize)
 
   // Snapshot the window so a rolling preset does not recompute "now" every render
   // (which would churn the query key). Re-anchored when the range selection changes,

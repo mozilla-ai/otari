@@ -1058,7 +1058,8 @@ describe("OrganizationProvidersPage", () => {
     await screen.findByRole("grid", { name: "Models on Production" })
 
     const read = requests.find((request) => request.url.includes("/models?"))
-    expect(read?.url).toContain("skip=30")
-    expect(read?.url).toContain("limit=15")
+    // 999 snaps to the nearest offered size, 60, so page 2 starts at 120.
+    expect(read?.url).toContain("skip=120")
+    expect(read?.url).toContain("limit=60")
   })
 })

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import { pickOption } from "@/tests/select"
 
-import { TablePagination } from "./TablePagination"
+import { snapPageSize, TablePagination } from "./TablePagination"
 
 function setup(overrides: Partial<Parameters<typeof TablePagination>[0]> = {}) {
   const onPageChange = vi.fn()
@@ -110,5 +110,35 @@ describe("TablePagination", () => {
     setup({ total: null, hasNextFallback: false, rowsOnPage: 40, page: 2 })
     expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Previous page" })).toBeEnabled()
+  })
+
+  it("moves a page past the end to the last page that holds rows", () => {
+    // 20 rows at 15 a page is two pages; page 6 is an old link's leftover.
+    const { onPageChange } = setup({
+      page: 5,
+      pageSize: 15,
+      total: 20,
+      rowsOnPage: 0,
+    })
+    expect(onPageChange).toHaveBeenCalledWith(1)
+  })
+
+  it("leaves the page alone while the total is still loading", () => {
+    const { onPageChange } = setup({
+      page: 5,
+      pageSize: 15,
+      total: 20,
+      rowsOnPage: 0,
+      isFetching: true,
+    })
+    expect(onPageChange).not.toHaveBeenCalled()
+  })
+
+  it("snaps a requested size to the nearest one offered", () => {
+    expect(snapPageSize(50)).toBe(45)
+    expect(snapPageSize(25)).toBe(30)
+    expect(snapPageSize(500)).toBe(60)
+    expect(snapPageSize(-5)).toBe(15)
+    expect(snapPageSize(Number.NaN)).toBe(15)
   })
 })
