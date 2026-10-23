@@ -82,7 +82,11 @@ export type PendingAttachment = {
  * lives.
  */
 export function usePlayground() {
-  const { selected, isLoading: isLoadingWorkspace } = useSelectedWorkspace()
+  const {
+    selected,
+    isLoading: isLoadingWorkspace,
+    isConfirmed: isWorkspaceConfirmed,
+  } = useSelectedWorkspace()
   const workspaceId = selected?.workspace_id
 
   // The grouped catalog, not the flat `/models` listing; playgroundModels.ts
@@ -244,8 +248,10 @@ export function usePlayground() {
   }, [defaultModel, workspaceId, models])
 
   useEffect(() => {
-    if (panelA.model && workspaceId) rememberModel(workspaceId, panelA.model)
-  }, [panelA.model, workspaceId])
+    if (panelA.model && workspaceId && isWorkspaceConfirmed) {
+      rememberModel(workspaceId, panelA.model)
+    }
+  }, [panelA.model, workspaceId, isWorkspaceConfirmed])
 
   const isBusy = isAnyPanelBusy(panelA, panelB)
   const isUploading = attachments.some(

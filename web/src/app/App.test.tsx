@@ -94,6 +94,22 @@ describe("App", () => {
     expect(takeRememberedModel()).toBeNull()
   })
 
+  it("offers the sign-in the current bootstrap names once it replaces a kept one", () => {
+    // State the sign-in screen seeded from the kept answer (which credential
+    // it asks for) must not outlive it.
+    const { rerender } = renderApp(bootstrap())
+    expect(screen.getByLabelText("Master key")).toBeInTheDocument()
+
+    rerender(
+      <Provider>
+        <App bootstrap={bootstrap({ sign_in_methods: ["password"] })} />
+      </Provider>,
+    )
+
+    expect(screen.getByLabelText("Email")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Master key")).not.toBeInTheDocument()
+  })
+
   it("asks a local-operator deployment to sign in", () => {
     // No stored session marker, so the shell is not reachable yet.
     renderApp(bootstrap())
@@ -437,6 +453,25 @@ describe("a bootstrap from an older gateway", () => {
 
     expect(container).not.toBeEmptyDOMElement()
     expect(screen.getByRole("alert")).toBeInTheDocument()
+  })
+
+  it("recovers from a kept bootstrap that threw once the current one replaces it", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const { rerender } = renderApp({
+      ...bootstrap(),
+      oauth_providers: 3 as unknown as string[],
+    })
+    expect(screen.getByRole("alert")).toBeInTheDocument()
+
+    rerender(
+      <Provider>
+        <App bootstrap={bootstrap()} />
+      </Provider>,
+    )
+
+    expect(
+      screen.getByRole("heading", { name: "Sign in to Otari" }),
+    ).toBeInTheDocument()
   })
 
   it("still renders a public auth page, which reads it on the no-mail path", () => {

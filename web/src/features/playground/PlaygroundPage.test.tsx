@@ -37,6 +37,20 @@ import {
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
+const keptAnswers = vi.hoisted(() => ({ organizationContext: false }))
+
+vi.mock("@/shared/api/overlayRequestPolicy", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/shared/api/overlayRequestPolicy")>()
+  return {
+    ...actual,
+    requestPolicy: () => ({
+      ...actual.requestPolicy(),
+      keptAnswers: { bootstrap: false, ...keptAnswers },
+    }),
+  }
+})
+
 /** Mirrors `RATING_ACKNOWLEDGEMENT_MS` in `hooks/usePlayground.ts`. */
 const RATING_ACKNOWLEDGEMENT_MS = 3000
 
@@ -375,6 +389,7 @@ function renderPage() {
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  keptAnswers.organizationContext = false
 })
 
 afterEach(() => {
@@ -954,6 +969,43 @@ describe("comparing two models", () => {
 })
 
 describe("state that must not outlive what produced it", () => {
+  it("remembers no model for a workspace the kept organization context names until the current one confirms it", async () => {
+    keptAnswers.organizationContext = true
+    localStorage.setItem("otari.dashboard.hasSession", "1")
+    localStorage.setItem(
+      "otari.dashboard.organizationContext",
+      JSON.stringify({ origin: "", keptAt: Date.now(), value: context() }),
+    )
+    const { fetchSpy } = mockApi()
+    let answer: (value: OrganizationContext) => void = () => {}
+    const passThrough = fetchSpy.getMockImplementation()
+    fetchSpy.mockImplementation((path, init) =>
+      path === "/organizations/me"
+        ? (new Promise<OrganizationContext>((resolve) => {
+            answer = resolve
+          }) as never)
+        : (passThrough?.(path, init) as never),
+    )
+    renderPage()
+    await screen.findByText("Try a prompt.")
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent(
+      "gpt-4o",
+    )
+    // Long enough for the picker's own seeding to have settled.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(
+      localStorage.getItem(`otari.playground.model.${WORKSPACE_ID}`),
+    ).toBeNull()
+
+    act(() => answer(context()))
+
+    await waitFor(() =>
+      expect(
+        localStorage.getItem(`otari.playground.model.${WORKSPACE_ID}`),
+      ).toBe("gpt-4o"),
+    )
+  })
+
   it("does not start a second reply when Enter is pressed mid-stream", async () => {
     // The send control becomes Stop while a reply is in flight, so the button
     // path is safe and Enter is the one that is not. Two streams into one panel

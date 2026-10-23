@@ -19,6 +19,7 @@ import {
   publicCatalogPath,
   takeRememberedModel,
 } from "@/features/models/publicCatalog"
+import { useKeepOrganizationContext } from "@/shared/api/organizations"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import { normalizeBootstrap } from "@/shared/helpers/bootstrap"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
@@ -84,9 +85,11 @@ export default function App({
 
   // Outside the provider rather than inside it, because the provider's own
   // correction memo reads `sign_in_methods` and is therefore one of the things
-  // that can throw on a bootstrap this dashboard did not expect.
+  // that can throw on a bootstrap this dashboard did not expect. Keyed on the
+  // bootstrap, so the current one replacing a kept one (`app/boot.ts`) starts
+  // over: neither state seeded from the old answer nor an error it threw lasts.
   return (
-    <ErrorBoundary resetKey={hash}>
+    <ErrorBoundary key={JSON.stringify(bootstrap)} resetKey={hash}>
       <DeploymentProvider value={normalizeBootstrap(bootstrap)}>
         <DeploymentRoot hash={hash} />
       </DeploymentProvider>
@@ -186,6 +189,7 @@ function DeploymentRoot({ hash }: { hash: string }) {
  * Done before the router mounts, so the home page never flashes first.
  */
 function SignedInRoot() {
+  useKeepOrganizationContext()
   useState(() => {
     const modelId = takeRememberedModel()
     const path = window.location.hash.replace(/^#/, "")
