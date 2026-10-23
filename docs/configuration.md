@@ -847,6 +847,13 @@ provider_supported_countries:
 client_country_header: CF-IPCountry
 ```
 
+OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
+[openai-supported-countries.json](public/openai-supported-countries.json), a
+JSON list the dashboard's Load from JSON file button reads for a hosted
+provider. OpenAI changes the page, so check the file against it before relying
+on it. The page allows Ukraine "with certain exceptions", which a country code
+cannot express, so `UA` allows all of it.
+
 A provider type with no entry serves every country, and an empty list closes
 the provider to all of them. Quote Norway's code, `"NO"`: YAML reads a bare
 `NO` as false, which is refused as no country code. As an environment variable,
