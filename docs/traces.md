@@ -278,7 +278,9 @@ admin) turns on **Keep what agent sessions were about** in the workspace's
 settings, or sends `PATCH /api/v1/workspaces/{id}` with
 `{"trace_content_enabled": true}`. Turning it off keeps nothing new from the
 next export on; `DELETE /api/v1/workspaces/{id}/trace-content` also deletes what
-is already stored, and the sessions stay. `GET /api/v1/bootstrap` reports
+is already stored, and the sessions stay. Either one also covers content the
+gateway accepted before and had not stored yet, on every replica: it is never
+stored. `GET /api/v1/bootstrap` reports
 `trace_content_available`, whether the deployment allows content at all.
 
 Content is kept only when the agent sends it too:
@@ -315,9 +317,11 @@ A user shares one session at a time, from the session's page or with
 `POST /api/v1/organizations/me/traces/{trace_id}/shares`, naming the audience
 (`organization_admins` or `deployment_operator`), an optional note saying why,
 and how many days it lasts (30 by default, 90 at most). The share ends when it
-expires or when the user ends it (`DELETE .../shares/{share_id}`). Every read
-through a share is recorded, and the user sees who read it and when
-(`GET .../shares`). A trace's detail says how the read reached its content in
+expires or when the user ends it (`DELETE .../shares/{share_id}`). Reads through
+a share are recorded, at most once an hour per reader so a page left open is
+one read, and the user sees who read it and when: `GET .../shares` lists every
+share, ended and expired ones included, with its newest reads and how many it
+has had, and `GET .../shares/{share_id}/reads` pages through all of them. A trace's detail says how the read reached its content in
 `content_access`: `owner`, `share` or `none`.
 
 This is an access rule the gateway enforces, not end-to-end encryption: whoever
@@ -325,14 +329,15 @@ runs the gateway holds the key that opens content, so a self-hosted deployment's
 operator could read it by changing the code or the database. What the rule and
 the encryption give is that nobody reads content through Otari without its
 owner's say, and that the database alone, or a backup of it, shows none. With
-AWS KMS, every opening of a data key is also in CloudTrail.
+AWS KMS, every data key the gateway fetches is also in CloudTrail.
 
 ### How content is sealed
 
 Each span's content is encrypted with AES-256-GCM under a data key, and the
 data key is stored beside it in wrapped form: wrapped with `OTARI_SECRET_KEY`,
-or made by AWS KMS. The ciphertext is bound to its workspace and its span, so a
-value copied onto another span, or into another workspace, reads back empty.
+or made by AWS KMS. The ciphertext is bound to its workspace, its session and
+its span, so a value copied onto another span, another session or another
+workspace reads back empty.
 
 A data key serves one workspace for up to five minutes, so the key source is
 asked once every few minutes per workspace and replica rather than once per
@@ -340,9 +345,15 @@ span. A busy Claude Code session, around 14,000 spans an hour, costs KMS about
 12 `GenerateDataKey` calls an hour, and reading that hour back about 12
 `Decrypt` calls, then none while they are cached.
 
-When the key source cannot be reached or refuses the gateway, spans are still
-stored, without their content, and the gateway does not ask it again for 30
-seconds. Content that cannot be opened reads back empty. Both are counted, on
+A cached data key is dropped five minutes after it was fetched, whether or not
+the gateway is busy, and every cached key is dropped when the gateway stops.
+Dropping a key removes the gateway's reference to it; Python does not overwrite
+the memory it occupied, which stays as it was until it is reused.
+
+When the key source cannot be reached, refuses the gateway, or takes more than
+1.5 seconds to answer, spans are still stored, without their content, and the
+gateway does not ask it again for 30 seconds; reads in those 30 seconds do not
+extend them. Content that cannot be opened reads back empty. Both are counted, on
 `gateway_trace_content_unsealed` and `gateway_trace_content_unopened`, by reason.
 
 Content stored by earlier versions, sealed with `OTARI_SECRET_KEY` alone, still
@@ -379,8 +390,11 @@ always with the encryption context `otari:purpose=trace-content` and
 ```
 
 plus `kms:DescribeKey` on the key, which the gateway calls once to learn which
-keys it may open. Every `Decrypt` lands in CloudTrail with the workspace it was
-for.
+keys it may open. Every `GenerateDataKey` and `Decrypt` lands in CloudTrail with
+the workspace it was for. Those record each data key fetched, not each span
+opened: the gateway opens a workspace's content with a cached key for five
+minutes without asking KMS again, so CloudTrail shows when content was opened
+for a workspace, and the share read records show who read which session.
 
 To rotate:
 
