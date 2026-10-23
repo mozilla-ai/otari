@@ -1,6 +1,7 @@
 """Inference request settings."""
 
 import re
+from collections.abc import Iterable
 from typing import Annotated, Self
 
 from any_llm import LLMProvider
@@ -11,7 +12,23 @@ from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 
 # An RFC 9110 field name (a token).
 _HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
-_COUNTRY_CODE = re.compile(r"[A-Z]{2}")
+
+
+def country_codes(values: Iterable[object]) -> list[str]:
+    """``values`` as upper-case ISO 3166-1 alpha-2 codes, in order and without repeats.
+
+    Raises:
+        ValueError: a value is no country code.
+    """
+    codes: list[str] = []
+    for value in values:
+        code = str(value).strip().upper()
+        if code not in COUNTRY_CODES:
+            msg = f"{value!r} is not an ISO 3166-1 alpha-2 country code"
+            raise ValueError(msg)
+        if code not in codes:
+            codes.append(code)
+    return codes
 
 
 class InferenceSettings(BaseModel):
@@ -149,18 +166,11 @@ class InferenceSettings(BaseModel):
             if not isinstance(raw_codes, list):
                 msg = f"provider_supported_countries.{provider_type} must be a list of country codes"
                 raise ValueError(msg)
-            codes: list[str] = []
-            for raw_code in raw_codes:
-                code = str(raw_code).strip().upper()
-                if code not in COUNTRY_CODES:
-                    msg = (
-                        f"provider_supported_countries.{provider_type}: {raw_code!r} is not an ISO 3166-1 "
-                        "alpha-2 country code"
-                    )
-                    raise ValueError(msg)
-                if code not in codes:
-                    codes.append(code)
-            normalized[provider_type] = codes
+            try:
+                normalized[provider_type] = country_codes(raw_codes)
+            except ValueError as exc:
+                msg = f"provider_supported_countries.{provider_type}: {exc}"
+                raise ValueError(msg) from None
         return normalized
 
     @model_validator(mode="after")
