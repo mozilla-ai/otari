@@ -156,7 +156,7 @@ describe("memberLabel", () => {
         organizationMember({ full_name: null, email: "ada@example.com" }),
       ),
     ).toBe("ada@example.com")
-    // The standalone operator has neither, and an opaque UUID is worse than a
+    // The local operator has neither, and an opaque UUID is worse than a
     // short prefix of it.
     expect(
       memberLabel(

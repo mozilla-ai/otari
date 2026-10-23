@@ -1,4 +1,4 @@
-"""Organization-scoped provider keys (standalone mode only).
+"""Organization-scoped provider keys.
 
 Thin composition over `gateway.services.tenancy.org_provider_key_service`.
 Two routers, because the surface has two scopes: an organization's own keys
@@ -53,10 +53,8 @@ org_router = APIRouter(
     dependencies=[Depends(verify_master_key)],
 )
 
-# Published by both topologies, because the page behind it is where an
-# organization's models are offered, priced and switched, and that is a tenant's
-# question whether or not the deployment has more than one tenant. ``providers``
-# stays standalone-only beside it, and the two are disjoint mechanisms (see
+# Where an organization's models are offered, priced and switched. ``providers``
+# is published beside it, and the two are disjoint mechanisms (see
 # ``models/provider_keys.py``), so neither stands in for the other. Not named
 # after its prefix, since ``organizations`` is already a surface.
 SURFACE = Surface("organization_providers")

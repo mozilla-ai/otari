@@ -25,7 +25,7 @@ offering the deployment serves (`openai/gpt-4o` while an `openai` instance
 serves `gpt-4o`); read as a catalog id otherwise. Where it is also the catalog
 id of a model the catalog also offers elsewhere (an OpenAI model served by
 Azure OpenAI too, say), the named offering serves first and the others are
-its fallback (see [Catalog spellings](#catalog-spellings)). Prefer the colon form in standalone
+its fallback (see [Catalog spellings](#catalog-spellings)). Prefer the colon form in
 configuration, pricing, aliases, and routing policies.
 
 ## Configuring a provider
@@ -93,9 +93,6 @@ aliases for the OpenAI implementation.
 The optional `models` list supplies discovery for a backend that has no
 model-listing endpoint. It does not restrict direct dispatch.
 
-Named instances are local configuration and do not apply in hybrid mode, where
-the control plane resolves each attempt.
-
 A workspace or a single user can also bring its own server, reached the same
 way (`my-vllm:qwen3`) but visible only to its owner. See
 [Provider endpoints](provider-endpoints.md).
@@ -124,7 +121,7 @@ does, is read to the last page.
 Discovery is cached and bounded; an unreachable provider does not block the
 catalog indefinitely.
 
-A [hosted provider](modes.md#hosted-providers-and-byo-credentials) lists its
+A [hosted provider](hosted-providers.md#hosted-providers-and-byo-credentials) lists its
 roster, the models switched on under it, rather than everything its upstream
 lists. The operator's `GET /api/v1/models/discoverable` and provider health
 dial it on its stored key beside the configured instances. A hosted provider
@@ -153,13 +150,20 @@ instance declared `openai-compatible` is looked up under OpenAI, so a model it
 serves under another name usually has no models.dev entry. With
 `models_dev_metadata: false`, the context window comes from the pricing snapshot alone.
 
+Each model also says what it accepts, in the fields OpenRouter's model listing
+uses, so a client built for that shape reads them unchanged. `name` is models.dev's
+display name. `supported_parameters` lists `tools` and `tool_choice` for a model
+that calls tools, `response_format` for one with structured output, and
+`reasoning` for a reasoning model; it names only the parameters models.dev records
+a flag for, not every parameter the model takes. `architecture` carries
+`input_modalities` and `output_modalities`, such as `["text", "image"]`. All three
+are `null` for a model models.dev does not describe, which means unknown rather
+than unsupported. An alias reports its target's capabilities but no `name`,
+because the target's name would say what the alias points at.
+
 Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's
 `models` list.
-
-Hosted mode keeps `GET /api/v1/models` for control-plane discovery. Hybrid mode
-does not serve the local catalog: it relays the control plane's list, limits
-included (see [Model listing](hybrid-mode-protocol.md#model-listing)).
 
 ### Who is shown which models
 
@@ -222,6 +226,23 @@ model_capabilities:
 File handling uses these values to decide whether to pass an attachment through
 or normalize it for a text-only model. See [Files](files.md).
 
+## Prompt caching
+
+Mark the prompt prefix to cache the way Anthropic does, with `cache_control`
+(`{"type": "ephemeral"}`, optionally `"ttl": "1h"`): on a system block or content
+block on `/api/v1/messages`, or on a message or content part on
+`/api/v1/chat/completions`. Anthropic models read it natively. For Gemini, any-llm
+turns the last breakpoint into a Gemini context cache holding everything up to
+it, reuses that cache while it lives (5 minutes, or 1 hour with `"ttl": "1h"`),
+and falls back to an uncached request when Gemini refuses a prefix below its
+minimum size. Gemini 2.5 and later models also cache repeated prefixes on their
+own, with nothing marked.
+
+Either way, the usage reports the tokens written to and read from the cache, and
+Otari bills them at the model's `cache_write_price_per_million` and
+`cache_read_price_per_million` when the pricing sets them, and at the input price
+otherwise. The time a Gemini cache is stored is not billed separately.
+
 ## Model aliases
 
 An alias gives callers a stable name for one real selector:
@@ -233,7 +254,7 @@ aliases:
 ```
 
 Callers send the alias in `model`. Completion responses keep the alias while
-pricing, budgets, and usage use the resolved target, which a standalone gateway
+pricing, budgets, and usage use the resolved target, which the gateway
 names in the `Otari-Provider` and `Otari-Model` response headers. Configure the
 target's price, not a price under the alias.
 
@@ -251,7 +272,7 @@ point to another alias.
 
 ### Runtime aliases
 
-Standalone operators can manage aliases from Routing or `/api/v1/aliases` without
+Operators can manage aliases from Routing or `/api/v1/aliases` without
 restarting. A stored alias belongs to a workspace and can optionally be narrowed
 to one user. Resolution prefers the most specific applicable alias.
 
@@ -356,7 +377,7 @@ another tenant's selector lands, and a model nobody offers to the caller
 resolves as the deployment's view says. A model's `selector` in the catalog is
 null where the caller has no such spelling for it.
 
-In standalone mode, a request that names a catalog id with more than one offering falls back across them. When the first offering fails before it sends a response, the next one in the same order serves the request, as a routing policy's `on_failure` list does. A catalog id spelled like the legacy `provider/model` of one of its own offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that offering first and the others after it in the usual order. The colon spelling of an offering (`openai:gpt-4o`) never falls back, so it is the way to pin one provider. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it. In hybrid mode, the control plane decides which offerings a request may try.
+A request that names a catalog id with more than one offering falls back across them. When the first offering fails before it sends a response, the next one in the same order serves the request, as a routing policy's `on_failure` list does. A catalog id spelled like the legacy `provider/model` of one of its own offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that offering first and the others after it in the usual order. The colon spelling of an offering (`openai:gpt-4o`) never falls back, so it is the way to pin one provider. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it.
 
 The Routing page's "Automatic fallback" section, read from
 `GET /api/v1/organizations/me/automatic-fallbacks`, lists every model your
@@ -390,8 +411,8 @@ list price is marked with the list price.
 
 With `public_catalog: true` (see [Configuration](configuration.md)), the same
 two routes and the same page are served to a visitor with no session, at the
-deployment's rates and for the models the deployment itself serves: the
-configured providers, and on a managed platform its hosted models. A visitor's
+deployment's rates and for the models the deployment itself serves, its
+hosted providers included. A visitor's
 "Use this model" opens account creation instead of the drawer (sign-in where
 signup is closed), and the dashboard reopens that model on their first sign-in.
 

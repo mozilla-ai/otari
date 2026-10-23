@@ -12,27 +12,26 @@ exceptions, since one client serves every tenant's searches and keys:
 - it sets no cap on total connections, keeping httpx's 20 idle keep-alive ones,
   so a burst of calls is not queued into pool timeouts by httpx's default of
   100.
-"""
 
-from http.cookiejar import Cookie, CookieJar
-from typing import Any
+A call to an ``api_base`` an organization's key names goes through
+:func:`web_provider_client_for` instead, which dials it as an endpoint a tenant
+owns: public addresses only, pinned to the one checked, no redirects.
+"""
 
 import httpx
 
-
-class _NoCookieJar(CookieJar):
-    """A jar that keeps no cookie, whatever a provider sets."""
-
-    def set_cookie(self, cookie: Cookie) -> None:
-        return None
-
-    def extract_cookies(self, response: Any, request: Any) -> None:
-        return None
+from gateway.services.providers import owned_endpoint_http_client
+from gateway.services.web_retrieval_network import NoCookieJar
 
 
 def build_web_provider_client() -> httpx.AsyncClient:
     """A new web provider client; its owner closes it. Timeouts are per request, set by each provider."""
     return httpx.AsyncClient(
-        cookies=_NoCookieJar(),
+        cookies=NoCookieJar(),
         limits=httpx.Limits(max_connections=None, max_keepalive_connections=20),
     )
+
+
+def web_provider_client_for(shared: httpx.AsyncClient | None, *, tenant_endpoint: bool) -> httpx.AsyncClient | None:
+    """The client a web provider call goes through: ``shared``, unless a tenant chose the endpoint it reaches."""
+    return owned_endpoint_http_client() if tenant_endpoint else shared

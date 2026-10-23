@@ -314,8 +314,8 @@ def test_a_header_outside_the_vocabulary_is_refused(
     response, _ = _post_messages(client, {**api_key_header, _HEADER: "anthropic"}, _messages_body(_ANTHROPIC, _DATED))
 
     assert response.status_code == 400
-    assert response.json()["detail"]["error"]["type"] == "invalid_request_error"
-    assert _HEADER in response.json()["detail"]["error"]["message"]
+    assert response.json()["error"]["type"] == "invalid_request_error"
+    assert _HEADER in response.json()["error"]["message"]
 
 
 def test_asking_for_otari_without_a_sandbox_is_refused(
@@ -326,7 +326,7 @@ def test_asking_for_otari_without_a_sandbox_is_refused(
     response, _ = _post_messages(client, {**api_key_header, _HEADER: "otari"}, _messages_body(_ANTHROPIC, _DATED))
 
     assert response.status_code == 400
-    assert "no sandbox is configured" in response.json()["detail"]["error"]["message"]
+    assert "no sandbox is configured" in response.json()["error"]["message"]
 
 
 # --- the deployment default ---------------------------------------------------------------
@@ -404,10 +404,7 @@ def test_a_header_that_disagrees_with_the_pin_is_refused(
     response, _ = _post_messages(client, {**api_key_header, _HEADER: "provider"}, _messages_body(_ANTHROPIC, _DATED))
 
     assert response.status_code == 403
-    assert (
-        "pins" in response.json()["detail"]["error"]["message"]
-        or "decides" in (response.json()["detail"]["error"]["message"])
-    )
+    assert "pins" in response.json()["error"]["message"] or "decides" in (response.json()["error"]["message"])
 
 
 def test_the_pin_does_not_refuse_a_header_over_the_explicit_otari_tool(
@@ -529,7 +526,7 @@ def test_the_explicit_type_beside_a_keyword_the_provider_keeps_is_still_two_sand
     )
 
     assert response.status_code == 400
-    assert "cannot be combined with a provider-native" in response.json()["detail"]["error"]["message"]
+    assert "cannot be combined with a provider-native" in response.json()["error"]["message"]
 
 
 # --- Responses ----------------------------------------------------------------------------------

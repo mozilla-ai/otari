@@ -5,7 +5,7 @@ import type { ReactNode } from "react"
  * is none.
  *
  * The composition seam for anything that has to sit in front of the whole app
- * once a session exists and before the dashboard behind it: a hosted signup
+ * once a session exists and before the dashboard behind it: otari.ai's signup
  * asking a few profile and use-case questions after the first sign-in of a new
  * account (otari-ai#1822) is the caller this exists for. A replacement owns the
  * questions, the answers, their storage and whatever it maps them onto; what it
@@ -69,7 +69,7 @@ import type { ReactNode } from "react"
  * is the one most likely to have nothing to name. A replacement that records
  * during its step identifies the actor itself.
  *
- * **This gateway stores nothing for it.** `models/tenancy.py` says the hosted
+ * **This gateway stores nothing for it.** `models/tenancy.py` says otari.ai's
  * CRM and onboarding columns "are simply not part of the reconciled schema", and
  * a replacement's query, its step and its record of the answer all live on the
  * side that has them. Nor is `GrowthSignalPort.record_onboarding_completed` the
@@ -77,8 +77,8 @@ import type { ReactNode } from "react"
  * so the port stays uncalled for the reason its docstring gives.
  *
  * **Not a change to the setup guide.** `SetupGuideCard`'s docstring argues why
- * this repository shows a panel where the platform shows a blocking sheet, and
- * that argument stands for a self-hosted operator. This seam leaves it alone: a
+ * this repository shows a panel where otari.ai shows a blocking sheet, and
+ * that argument stands for an operator running this build. This seam leaves it alone: a
  * sheet exists only in a build that has a signup to serve.
  *
  * **Reached by its `@/app/overlayPostSignInGate` specifier and never

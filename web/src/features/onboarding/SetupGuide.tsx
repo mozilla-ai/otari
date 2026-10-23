@@ -13,7 +13,6 @@ import {
 import { useModels } from "@/shared/api/models"
 import { resolveSnippetBaseUrl } from "@/shared/helpers/requestSnippets"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
 import { usePrefersReducedMotion } from "@/shared/hooks/usePrefersReducedMotion"
 
 /**
@@ -54,16 +53,12 @@ export function SetupGuide({
    */
   canServeRequests: boolean
 }) {
-  const surfaces = useSurfaces()
   const { selected } = useSelectedWorkspace()
   const workspaceId = selected?.workspace_id ?? null
   // Held back until the deployment can actually serve a request: with nothing to
   // route to this would be handing out a key for a call that cannot succeed, and
   // on the operator page the getting-started panel is the right guide instead.
-  const activation = useWorkspaceActivation(
-    workspaceId,
-    surfaces("workspaces") && canServeRequests,
-  )
+  const activation = useWorkspaceActivation(workspaceId, canServeRequests)
 
   if (!workspaceId || !activation.data) {
     return null
@@ -103,11 +98,7 @@ function SetupFlow({
   const createKey = useCreateActivationKey()
   const dismiss = useDismissActivation()
   const models = useModels()
-  // Where a request from this deployment belongs, which is not always the
-  // address that served this page: a hosted control plane serves the dashboard
-  // and not the API. Undefined when it has not said where its gateway is, and
-  // the examples are then withheld rather than aimed at this host (otari#823).
-  const baseUrl = resolveSnippetBaseUrl(useDeployment())
+  const baseUrl = resolveSnippetBaseUrl()
 
   // The issued key and a failed mint, held here rather than read off the
   // mutation. The effect below says why the observer cannot carry them.

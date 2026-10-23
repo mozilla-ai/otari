@@ -58,6 +58,7 @@ describe("a build that replaces the wallet-slot module", () => {
     expect([...(cluster?.children ?? [])].map((el) => el.textContent)).toEqual([
       "Playground",
       "Documentation",
+      "Community",
       "$12.34",
     ])
   })

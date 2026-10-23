@@ -162,7 +162,7 @@ def code_execution_tool_definition() -> dict[str, Any]:
     Module-level, and returning a fresh dict per call, so the ``/v1/tools``
     discovery endpoint can advertise the same schema the tool loop injects without
     constructing a backend. Mirrors
-    :func:`gateway.services.web_search_backend.web_search_tool_definition`.
+    :func:`gateway.services.web_retrieval_backend.web_search_tool_definition`.
     """
     return {
         "type": "function",
@@ -245,7 +245,6 @@ class SandboxBackend:
         purpose_hint: str | None = None,
         timeout_s: float = DEFAULT_EXEC_TIMEOUT_S,
         max_executions: int = 1,
-        auth_token: str | None = None,
         image: str | None = None,
         allowed_tools: frozenset[str] | None = None,
         tally: ToolUsageTally | None = None,
@@ -259,7 +258,7 @@ class SandboxBackend:
         self._port = port
         # The lease this request resumes, or None for a fresh sandbox, and the
         # registry that holds the session past this request. Both None where
-        # reuse is off or there is no database to remember a lease in.
+        # reuse is off.
         self._resume = container
         self._containers = containers
         self._on_lease = on_lease
@@ -271,7 +270,7 @@ class SandboxBackend:
         # None outside a request (tests, direct use), which announces none.
         self.files_base_url = files_base_url
         # The request's file bridge, or None when it has no uploads to seed and
-        # nowhere to keep what a run produces (hybrid mode, tests, direct use).
+        # nowhere to keep what a run produces (tests, direct use).
         self._files = files
         # Per-request accounting, owned by the route and passed in. None when the
         # backend runs outside a billed request (tests, direct use).
@@ -288,8 +287,6 @@ class SandboxBackend:
             timeout_s * max(max_executions, 1) * _CALLS_PER_ROUND_ALLOWANCE + _SESSION_TTL_SLACK_S,
             _MAX_SESSION_TTL_S,
         )
-        # Sent as `Authorization: Bearer` on every sandbox call when set.
-        self._auth_token = auth_token
         # The sandbox image this session asks for: the workspace's pinned image,
         # else the deployment's, else nothing. Sent as an additive field on
         # ``CreateSession`` (see ``docs/code-execution-protocol.md``), so a
@@ -329,7 +326,6 @@ class SandboxBackend:
                 image=self._image,
                 timeout_s=self._timeout_s,
                 session_ttl_s=self._session_ttl_s,
-                auth_token=self._auth_token,
                 resume=self._resume.provider_session_id if self._resume is not None else None,
                 keep_alive_s=keep_alive_s,
             )

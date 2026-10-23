@@ -26,10 +26,10 @@ import {
 import { formatCost, formatNumber } from "@/shared/helpers/format"
 import {
   ACTIVITY_DEFAULT_KEY,
-  ACTIVITY_PRESETS,
   bucketDurationMs,
   CUSTOM_KEY,
   findPreset,
+  SESSION_PRESETS,
 } from "@/shared/helpers/timeRange"
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
@@ -219,8 +219,8 @@ export function SessionsPage() {
       : undefined
 
   const extent =
-    findPreset(ACTIVITY_PRESETS, url.get("range")) ??
-    findPreset(ACTIVITY_PRESETS, ACTIVITY_DEFAULT_KEY)
+    findPreset(SESSION_PRESETS, url.get("range")) ??
+    findPreset(SESSION_PRESETS, ACTIVITY_DEFAULT_KEY)
   const bucket = extent?.bucket ?? "hour"
   const extentSeconds = extent?.seconds ?? null
   // Rounded down to the minute, so the query key holds still between renders.
@@ -357,7 +357,7 @@ export function SessionsPage() {
             <ErrorBanner error={detail.error} />
           ) : null}
           <ActivityTimeline
-            presets={ACTIVITY_PRESETS}
+            presets={SESSION_PRESETS}
             extentKey={
               custom ? CUSTOM_KEY : (extent?.key ?? ACTIVITY_DEFAULT_KEY)
             }
@@ -380,8 +380,8 @@ export function SessionsPage() {
             windowStart={iso(win.start)}
             windowEnd={iso(win.end)}
             loading={seriesQuery.isPending}
-            ariaLabel="Session volume over the selected window"
-            unitLabel="Sessions"
+            ariaLabel="Sessions active over the selected window"
+            unitLabel="Active sessions"
           />
           <div className="otari-toolbar flex flex-wrap items-center gap-2">
             <SearchField

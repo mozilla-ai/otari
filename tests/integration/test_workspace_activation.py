@@ -36,14 +36,10 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.repositories.users_repository import get_or_create_attribution_user
-from gateway.services import playground_dispatch
-from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
     WorkspaceActivationService,
 )
-from gateway.types.session_principal import SessionPrincipal
 
 pytestmark = pytest.mark.asyncio
 
@@ -450,21 +446,3 @@ async def test_the_setup_key_is_minted_in_the_bound_format(async_db: AsyncSessio
     assert issued.key.startswith("probe-")
     assert issued.key_prefix == issued.key[:13]
     assert issued.key_suffix == issued.key[-4:]
-
-
-async def test_the_playground_key_is_minted_in_the_bound_format(
-    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
-    owner, workspace = await _setup(async_db, slug="acme-probe-playground")
-    principal_user = await get_or_create_attribution_user(async_db, user_id=str(owner.id), alias="Owner")
-    principal = SessionPrincipal(user_id=principal_user.user_id, workspace_id=workspace.id, allowed_models=None)
-
-    plaintext = await playground_dispatch.resolve_dispatch_key(
-        async_db, principal=principal, key_format=_ProbeKeyFormat()
-    )
-
-    assert plaintext.startswith("probe-")
-    stored = (await async_db.execute(select(APIKey).where(APIKey.user_id == principal_user.user_id))).scalar_one()
-    assert stored.key_prefix == plaintext[:13]
-    assert stored.key_suffix == plaintext[-4:]

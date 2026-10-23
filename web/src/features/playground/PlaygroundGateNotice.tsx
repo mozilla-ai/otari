@@ -4,7 +4,6 @@ import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { PageError } from "@/design-system/feedback/PageError"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { useDeploymentOperator } from "@/shared/api/organizations"
-import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 import type { PlaygroundGate } from "./helpers/playgroundView"
 
@@ -27,10 +26,6 @@ export function PlaygroundGateNotice({
   error?: unknown
 }) {
   const { isOperator } = useDeploymentOperator()
-  const serves = useSurfaces()
-  // An operator of a deployment that publishes no Hosted providers page is
-  // pointed where everyone else is.
-  const toHosted = isOperator && serves("hosted_providers")
 
   if (gate === "loading") {
     return <PageLoading label="Loading the Playground" />
@@ -58,11 +53,13 @@ export function PlaygroundGateNotice({
         Start on the{" "}
         <Link
           to={
-            toHosted ? "/admin/hosted-providers" : "/organization/provider-keys"
+            isOperator
+              ? "/admin/hosted-providers"
+              : "/organization/provider-keys"
           }
           className="font-medium text-link hover:text-link-hover"
         >
-          {toHosted ? "Hosted providers" : "Providers"}
+          {isOperator ? "Hosted providers" : "Providers"}
         </Link>{" "}
         page.
       </p>

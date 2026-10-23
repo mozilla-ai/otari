@@ -6,6 +6,7 @@ response. The tests pin that boundary, ordering, and exhausted-plan status.
 """
 
 import asyncio
+import uuid
 from typing import Any, Literal, cast
 
 import httpx
@@ -19,13 +20,11 @@ from gateway.api.routes._attempts import (
     ALL_ATTEMPTS_TIMED_OUT_DETAIL,
     EMPTY_PLAN_DETAIL,
     CandidateCannotServe,
-    classify_local_attempt_error,
-    walk_attempts,
-)
-from gateway.api.routes._platform import (
     all_attempts_rejected_detail,
+    classify_local_attempt_error,
     no_attempt_served_detail,
     prompt_too_long_for_every_attempt_detail,
+    walk_attempts,
 )
 from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, CONTEXT_LENGTH_EXCEEDED, error_code_of
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
@@ -91,8 +90,7 @@ def test_call_kwargs_applies_the_attempts_selector_last() -> None:
 
 
 def test_caller_supplied_credentials_never_reach_the_merge() -> None:
-    """``call_kwargs`` lets request fields override credentials by key, matching
-    the hybrid helper. That is only safe because a caller cannot get an
+    """``call_kwargs`` lets request fields override credentials by key. That is only safe because a caller cannot get an
     ``api_key`` or ``api_base`` into those fields: the request schema derives
     from any-llm's ``CompletionParams``, which has neither, and pydantic drops
     unknown fields. This pins the assumption the merge order relies on.
@@ -464,18 +462,16 @@ def _request_context(plan: Any) -> Any:
 
     return RequestContext(
         config=GatewayConfig(),
-        db=None,
-        uow=None,
+        db=cast(Any, object()),
+        uow=cast(Any, object()),
         # No settlement happens in these tests; the merge reads only `ctx.plan`.
         log_writer=cast(Any, None),
-        hybrid_mode=False,
-        route=None,
-        user_token=None,
         api_key_id=None,
         user_id=None,
         rate_limit_info=None,
         reservation=None,
         started_at=time.monotonic(),
+        workspace_id=uuid.uuid4(),
         plan=plan,
     )
 

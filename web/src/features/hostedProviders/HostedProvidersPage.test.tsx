@@ -243,12 +243,12 @@ function mockApi(
   return requests
 }
 
-function renderPage(surfaces?: string[]) {
+function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return renderWithRouter(
-    <DeploymentProvider value={bootstrap(surfaces ? { surfaces } : {})}>
+    <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>
         <HostedProvidersPage />
       </QueryClientProvider>
@@ -321,16 +321,6 @@ describe("HostedProvidersPage", () => {
     expect(
       screen.queryByRole("button", { name: "Refresh and purge" }),
     ).toBeNull()
-  })
-
-  it("says the page is not served where the surface is not published, asking nothing", async () => {
-    const requests = mockApi()
-    await renderPage([])
-
-    expect(
-      await screen.findByText("Hosted providers is not available here"),
-    ).toBeInTheDocument()
-    expect(requests).toEqual([])
   })
 
   it("walks the first provider in when none is configured", async () => {

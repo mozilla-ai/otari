@@ -1,4 +1,4 @@
-"""The caller's organization's guardrails (standalone mode only).
+"""The caller's organization's guardrails.
 
 Thin composition over `gateway.services.tenancy.organization_guardrail_service`:
 resolve the caller's identity, call the service, return its typed result. The
@@ -7,7 +7,7 @@ their own statuses (see `gateway.exceptions.guardrails_exceptions`), so nothing
 here catches them.
 
 Scoped to ``/me`` for the reason `routes/organization_pricing.py` and
-`routes/organizations.py` are: a standalone deployment has exactly one
+`routes/organizations.py` are: a deployment with no overlay has exactly one
 organization and the caller's identity already points at it, so a request cannot
 name one. Multi-organization administration is the overlay's to contribute.
 
@@ -38,7 +38,7 @@ from gateway.services.tenancy.organization_guardrail_service import (
 )
 from gateway.services.tool_settings_service import GUARDRAILS_URL, effective_value
 
-# Master key on the router, as every standalone management router declares it.
+# Master key on the router, as every management router declares it.
 # The role gate is a separate question answered in the service: the credential
 # says a request is the operator's, the membership says whether that identity may
 # change what every workspace of the organization is checked against.
@@ -52,10 +52,7 @@ router = APIRouter(
 # because one dashboard page shows both: a definition is what a check is and a
 # mandate is where it runs, and an admin fills them in together.
 # ``org_provider_keys`` declares one surface over two routers for the same
-# reason. Published by both editions, unlike ``providers``, which withholds
-# itself from a hosted deployment because ``provider_credentials`` is keyed on
-# the instance name alone and one row would serve every tenant. These rows are
-# keyed on the organization, so a control plane is exactly where they belong.
+# reason.
 SURFACE = Surface("organization_guardrails")
 
 

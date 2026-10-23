@@ -227,30 +227,21 @@ const BASE_NAV_SECTIONS = [
  *
  * Reached from the sidebar footer and left by the "Back to" link at its top,
  * so the two contexts never render together. Gated on the caller managing the
- * organization, which in a standalone deployment is always true: there is one
- * session, the local operator, and it owns the organization the gateway
- * provisioned for itself. The gate is written anyway because it is the thing
- * that becomes load-bearing the moment per-user sign-in lands (otari-ai#1716).
+ * organization, which today is always true: there is one session, the local
+ * operator, and it owns the organization the gateway provisioned for itself.
+ * The gate is written anyway because it is the thing that becomes load-bearing the moment per-user sign-in lands (otari-ai#1716).
  *
- * Every row is gated on a surface both topologies publish (`STANDALONE_SURFACES` and `HOSTED_SURFACES` in
+ * Every row is gated on a surface the bootstrap publishes (`SURFACES` in
  * `src/gateway/api/routes/bootstrap.py`), and a group whose every row a
- * deployment gates off drops entirely, heading included. Gateway holds nothing
- * in this build and drops; it stays declared for an overlay's Gateways.
+ * deployment gates off drops entirely, heading included.
  *
- * The organization's guardrails are published by both because their rows are
- * keyed on the organization. They are in General, under Providers.
+ * The organization's guardrails are in General, under Providers.
  *
- * The organization's own provider credentials are published by both because
- * the page behind them is where an organization's models are offered, priced
- * and switched.
- *
- * The design draws two more, Billing and Gateways, and neither is declared here
- * at all, because neither is this build's to declare: Billing is
- * ARCHITECTURE.md's canonical overlay-only capability, and the attached-gateway
- * surface behind Gateways is hosted depth (otari-ai#1779), so an overlay owns
- * both rows together with the pages under them and contributes them through
- * `overlayNavItems.ts`. Declaring either here would be worse than redundant: a
- * base route file at a path the overlay also serves is not shadowed by the
+ * The design draws one more, Billing, and it is not declared here at all,
+ * because it is not this build's to declare: Billing is ARCHITECTURE.md's
+ * canonical overlay-only capability, so an overlay owns the row together with
+ * the page under it and contributes it through `overlayNavItems.ts`. Declaring
+ * it here would be worse than redundant: a base route file at a path the overlay also serves is not shadowed by the
  * overlay's, it collides with it. The generator refuses the pair ("Conflicting
  * configuration paths were found") instead of choosing between them, so the
  * composed tree is never written: the Vite plugin logs that error and keeps
@@ -275,8 +266,7 @@ const ORGANIZATION_NAV_SECTIONS = [
       // The organization as a whole, which the workspace rail's Usage page
       // cannot ask for: its scope is the sidebar's selected workspace, and the
       // switcher offers only the caller's own memberships (otari-ai#1963).
-      // Both topologies publish it, so on standalone it sits beside that page.
-      // No `operatorOnly`
+      // It sits beside that page. No `operatorOnly`
       // and no role gate here: the organization rail already opens only to a
       // caller who manages the organization, and the server scopes a member
       // who lands here by URL to their own workspaces, the same rows `/usage`
@@ -339,21 +329,11 @@ const ORGANIZATION_NAV_SECTIONS = [
     ],
   },
   {
-    id: "org-gateway",
-    label: "Gateway",
-    // Empty in this build, so the rail drops it, heading included. Declared
-    // anyway because it is an overlay seam: an overlay contributes Gateways into
-    // this section by its id (`overlayNavItems.ts`), and a section that is not
-    // declared has nothing for that row to join.
-    items: [],
-  },
-  {
     id: "org-general",
     label: "General",
     items: [
-      // Where an organization's models are offered, priced and switched, a
-      // tenant's question on either topology. The deployment's own keys are
-      // Hosted providers, on the deployment rail.
+      // Where an organization's models are offered, priced and switched. The
+      // deployment's own keys are Hosted providers, on the deployment rail.
       {
         to: "/organization/provider-keys",
         label: "Providers",
@@ -394,7 +374,7 @@ const ORGANIZATION_NAV_SECTIONS = [
  * separate it from, and a heading inside a context already named Deployment
  * would read as "Deployment, Deployment, Settings".
  *
- * Both rows keep the refusal they declare, which is the axis the server
+ * Every row keeps the refusal it declares, which is the axis the server
  * enforces and not a property of which rail draws them.
  */
 const DEPLOYMENT_SECTIONS = [
@@ -424,6 +404,23 @@ const DEPLOYMENT_SECTIONS = [
         surface: "hosted_providers",
         operatorOnly: "unlisted",
         icon: FiCpu,
+      },
+      // What the deployment charges per call of the tools it runs itself, as
+      // Hosted providers is for its models. Refused rather than unlisted:
+      // `/pricing` answers a non-operator 403.
+      {
+        to: "/admin/web-search",
+        label: "Web search pricing",
+        surface: "pricing",
+        operatorOnly: "refused",
+        icon: FiGlobe,
+      },
+      {
+        to: "/admin/code-execution",
+        label: "Code execution pricing",
+        surface: "pricing",
+        operatorOnly: "refused",
+        icon: FiCode,
       },
       {
         to: "/health-checks",
@@ -554,9 +551,9 @@ export const NAV_SECTIONS: readonly NavSection[] = composeNavSections(
  * and it belongs on this rail, so an overlay that could only contribute to the
  * workspace one would have to edit this file to register it, which is what
  * cardinal rule 6 rules out. Both rails need the row seam as well as the section
- * one, and this rail is why: Billing lands inside "Cost & billing" and Gateways
- * inside "Gateway", among rows the base declares, so appending a section could
- * only put a second heading of the same name below the first. This build appends
+ * one, and this rail is why: Billing lands inside "Cost & billing", among rows
+ * the base declares, so appending a section could only put a second heading of
+ * the same name below the first. This build appends
  * nothing.
  *
  * Label overrides and row contributions come from the same lists the workspace
@@ -579,7 +576,7 @@ export const ORG_NAV_SECTIONS: readonly NavSection[] = composeNavSections(
  * The composed deployment sidebar.
  *
  * Composed through the same three seams as the other two rails, because the
- * distinction this rail draws is one an overlay can land on: a hosted edition
+ * distinction this rail draws is one an overlay can land on: otari.ai
  * administers the process every tenant is served by, and those destinations
  * belong here rather than beside a tenant's own settings. Reached through the
  * row seam, since the rail declares one headingless section and a contributed

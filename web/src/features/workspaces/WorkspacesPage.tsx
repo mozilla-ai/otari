@@ -756,12 +756,10 @@ export function WorkspacesPage() {
       : [],
   )
   // And dropped again where no workspace has a key to depart from, which is
-  // every standalone deployment: organization-owned provider keys are a hosted
-  // surface (`organization_providers`), so the column would otherwise be a
-  // header over blank cells on the single-tenant product. Read from the answer
-  // rather than from the surface, because the routes behind those keys are
-  // mounted on standalone too and an upgraded deployment can hold rows the
-  // dashboard never offered a page for.
+  // the usual state of a deployment whose organization holds no provider keys
+  // of its own, so the column would otherwise be a header over blank cells.
+  // Read from the answer rather than from the surface, because the surface is
+  // published whether or not any key exists.
   const holdsProviderKeys = [...providerKeys.data.values()].some(
     (rows) => rows.length > 0,
   )

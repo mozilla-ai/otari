@@ -216,12 +216,19 @@ def test_the_token_never_outlives_the_identity_token(client: TestClient, federat
     assert exchanged.json()["expires_in"] <= 120
 
 
-def test_workspace_and_service_account_are_accepted_when_they_are_the_keys(
-    client: TestClient, federated: _Federated
+@pytest.mark.parametrize(
+    "scope",
+    [
+        {"workspace_id": "wrkspc_01AbCdEf", "service_account_id": "svac_01AbCdEf"},
+        {"workspace_id": "00000000-0000-0000-0000-000000000000", "service_account_id": "another-key"},
+    ],
+    ids=["anthropic-ids", "other-otari-ids"],
+)
+def test_workspace_and_service_account_are_ignored(
+    client: TestClient, federated: _Federated, scope: dict[str, str]
 ) -> None:
-    exchanged = _exchange(
-        client, federated.grant(workspace_id=federated.workspace_id, service_account_id=federated.key_id)
-    )
+    """A client still configured with Anthropic's ids needs only its rule and organization changed."""
+    exchanged = _exchange(client, federated.grant(**scope))
 
     assert exchanged.status_code == 200, exchanged.text
 
@@ -237,8 +244,6 @@ _INVALID_GRANT = {
     [
         {"organization_id": "00000000-0000-0000-0000-000000000000"},
         {"organization_id": "not-a-uuid"},
-        {"workspace_id": "00000000-0000-0000-0000-000000000000"},
-        {"service_account_id": "another-key"},
         {"federation_rule_id": "no-such-rule"},
         {"assertion_overrides": {"email": "someone@project.iam.gserviceaccount.com"}},
         {"assertion_overrides": {"email_verified": False}},
@@ -249,8 +254,6 @@ _INVALID_GRANT = {
     ids=[
         "other-organization",
         "malformed-organization",
-        "other-workspace",
-        "other-service-account",
         "unknown-rule",
         "other-email",
         "unverified-email",

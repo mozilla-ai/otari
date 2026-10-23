@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Self
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.repositories.traces.definition_repository import GuardrailDefinitionRepository
 from gateway.repositories.traces.span_repository import SpanRepository
 from gateway.repositories.traces.trace_repository import TraceRepository
 
@@ -12,8 +13,11 @@ class TracesRepositories:
 
     traces: TraceRepository
     spans: SpanRepository
+    definitions: GuardrailDefinitionRepository
 
     @classmethod
     def on(cls, uow: UnitOfWork) -> Self:
         """Build every repository on this Unit of Work."""
-        return cls(traces=TraceRepository(uow), spans=SpanRepository(uow))
+        return cls(
+            traces=TraceRepository(uow), spans=SpanRepository(uow), definitions=GuardrailDefinitionRepository(uow)
+        )

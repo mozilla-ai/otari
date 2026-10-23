@@ -9,15 +9,15 @@ artifacts are the source of truth for paths, parameters, and schemas.
 The default server address is `http://localhost:8000`. The API is mounted at
 `/api/v1`. OpenAI-compatible clients use `http://localhost:8000/api/v1` as their
 base URL; Anthropic-compatible clients use `http://localhost:8000/api`, because
-their SDK appends `/v1/messages` itself. OTLP ingest is a sibling at `/otlp`:
+their SDK appends `/v1/messages` itself. A request under the old `/v1` root
+(a base URL of `http://localhost:8000/v1`, for example) is not served: it gets a
+404 whose detail names the same path under `/api/v1`. OTLP ingest is a sibling at `/otlp`:
 point `OTEL_EXPORTER_OTLP_ENDPOINT` at `http://localhost:8000/otlp` and the
 exporter appends `/v1/traces`, `/v1/logs` and `/v1/metrics`.
 
 ## Authentication
 
-Otari accepts a credential in any of these forms, whatever the mode: a local API
-key or the master key in standalone and hosted mode, an otari.ai user token in
-hybrid mode:
+Otari accepts an API key or the master key in any of these forms:
 
 ```text
 Authorization: Bearer <token>
@@ -33,28 +33,6 @@ operations, a separately scoped endpoint serves it to the caller's own
 organization: `/api/v1/organizations/me/usage` for usage, and
 `/api/v1/organizations/me/keys` for a member's own API keys.
 
-In hybrid mode, the generation APIs and the `/api/v1/mcp` and `/api/v1/hooks`
-endpoints accept an otari.ai user token in the same header forms. Local API
-keys and management APIs are not used.
-
-## Availability by mode
-
-| Surface | Standalone | Hosted | Hybrid |
-| --- | --- | --- | --- |
-| Health and `/api/v1/bootstrap` | Yes | Yes | Yes |
-| Chat, Messages, and Responses | Yes | No | Yes |
-| Caller-orchestrated MCP | Yes | No | Yes |
-| Other inference APIs | Yes | No | No |
-| `/api/v1/models` | Yes | Yes | Yes |
-| Management APIs | Yes | Yes | No |
-
-In hybrid mode, `/api/v1/models` lists the models the platform reports for the
-caller's key, so it needs the platform's model-listing endpoint (see the
-[Hybrid mode protocol](hybrid-mode-protocol.md#model-listing)).
-
-Hosted mode is a control plane. Its inference paths return a descriptive `404`
-and, when configured, the data-plane URL to use instead. See [Modes](modes.md).
-
 ## Core inference APIs
 
 Otari implements three completion surfaces:
@@ -63,7 +41,7 @@ Otari implements three completion surfaces:
 - `POST /api/v1/messages` and `/api/v1/messages/count_tokens`, Anthropic Messages
 - `POST /api/v1/responses`, OpenAI Responses
 
-Standalone mode also serves embeddings, images, audio, files, batches,
+Otari also serves embeddings, images, audio, files, batches,
 moderations, rerank, search, and decisions. Provider support differs by endpoint, so use
 `GET /api/v1/models` and the OpenAPI document for the deployment you are calling.
 
@@ -113,17 +91,23 @@ no way to send them back.
 
 ### Request ID and inline cost
 
-Every Chat, Messages, and Responses response carries an `Otari-Request-ID`
-header, streaming or not. In hybrid mode it is the platform's id for the
-request; a standalone gateway mints its own. A standalone gateway also names the
+Chat, Messages, and Responses responses carry an `Otari-Request-ID` header,
+streaming or not, and so do the responses of the embeddings, rerank, images,
+audio, moderations, decisions and search endpoints. The exception is a request
+rejected before the gateway handles it: a failed authentication (`401`) or a
+body that does not validate (`422`) carries none. The gateway mints it, sends
+it on its own refusals as well, and records it on the request's usage rows, so
+[`GET /api/v1/usage/requests/{request_id}`](#cost-of-a-failed-or-interrupted-request)
+finds the request's cost by it. The gateway also names the
 provider instance and model that served the request, whether a fallback did, and
 how long it took, in `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`,
-`Otari-Fallback` and `Otari-Response-Duration-Ms`; see
+`Otari-Fallback` and `Otari-Response-Duration-Ms`, and splits that duration into
+its own time and the provider's in `Server-Timing`; see
 [What is billed and what the caller sees](routing.md#what-is-billed-and-what-the-caller-sees).
 
 A priced response also carries its cost on the usage object it already returns,
 as `usage.cost_usd` (a six-decimal USD string) and `usage.pricing_source`. The
-standalone [rerank](#rerank) and embeddings endpoints carry the same two fields
+[rerank](#rerank) and embeddings endpoints carry the same two fields
 on their `usage`. On a stream the fields ride the terminal usage event: for Chat
 Completions, the last chunk that reports usage and either has no choices (OpenAI's
 `stream_options.include_usage` chunk) or finishes a choice (providers such as Cohere
@@ -131,12 +115,11 @@ and Gemini report usage on the chunk carrying `finish_reason`); `message_delta` 
 Messages; and `response.completed` for Responses. The two fields always appear
 together, and an unpriced or unreported request carries neither.
 
-In standalone mode the amount is the one the gateway wrote to its own usage
+The amount is the one the gateway wrote to its own usage
 record, including any gateway-run tool charges, and `pricing_source` names the
 rate that priced the model: `organization` (an organization's override),
 `deployment` (a rate stored on this gateway), or `defaults` (the bundled or
-accepted models.dev snapshot). Hybrid mode attaches the platform's settlement instead;
-see [Hybrid mode protocol](hybrid-mode-protocol.md#inline-response-fields).
+accepted models.dev snapshot).
 
 Each request's cost is settled to the micro-dollar, half-up, so a request that
 costs less than half a micro-dollar, such as a few tokens of a cheap embedding
@@ -232,7 +215,7 @@ three surfaces:
 {"model": "openai:gpt-4o", "messages": [...], "metadata": {"purpose": "chat", "country": "DE"}}
 ```
 
-A standalone gateway records the tags on every usage row the request writes:
+The gateway records the tags on every usage row the request writes:
 served, failed, streamed or not, refused by the gateway (a disallowed model,
 missing pricing, an exhausted budget), and the separate row billing an image
 description made for a text-only model. LiteLLM's
@@ -281,8 +264,6 @@ key:
 GET /api/v1/usage/summary?group_by_tag=purpose&dimensions=none
 ```
 
-Tags are recorded in standalone mode only.
-
 ### The `user` field
 
 OpenAI's `user` field is a free-form end-user identifier, and OpenAI examples
@@ -309,8 +290,8 @@ To tag a request with a free-form end-user ID, put it in `metadata`
 A stream that fails mid-response ends in an error event, and one the client
 disconnects from ends with nothing, so neither delivers `usage.cost_usd`. The
 provider may still have charged for the tokens it reported before the stream
-ended (an Anthropic stream reports its input tokens in `message_start`), and a
-standalone gateway records and bills those tokens rather than treating the
+ended (an Anthropic stream reports its input tokens in `message_start`), and the
+gateway records and bills those tokens rather than treating the
 request as free.
 
 To recover that amount, look the request up by its `Otari-Request-ID`:
@@ -341,10 +322,6 @@ background, and for an id that is unknown or belongs to another key. A stream th
 client abandoned before the provider reported any usage, and that ran no gateway
 tools, has nothing to bill and writes no row, so its id stays 404.
 
-This lookup is standalone only. In hybrid mode the platform owns settlement, and
-a failed stream reports no usage to it; see
-[Hybrid mode protocol](hybrid-mode-protocol.md).
-
 ### Retrying safely
 
 A request the provider or the gateway refused (a 429, a 529, any other error) is
@@ -363,7 +340,7 @@ request to make that retry safe. The value is any unique string of 1 to 255
 printable ASCII characters; a UUID is the usual choice. A retry with the same key
 and the same body then gets the original response, with its original
 `Otari-Request-ID`, serving headers and `usage.cost_usd`, and an `Otari-Idempotent-Replayed: true`
-header (but no `Otari-Response-Duration-Ms`, which described the original), without calling the provider or billing again. While the original is
+header (but no `Otari-Response-Duration-Ms` or `Server-Timing`, which described the original), without calling the provider or billing again. While the original is
 still running, a retry is answered 409 with `Retry-After`, and if the original
 fails the next retry runs in its place.
 
@@ -391,8 +368,7 @@ fails the next retry runs in its place.
 - Only a successful response is kept. On a retry the request is still
   authenticated and checked against the key's model access, and a user who has
   since been blocked is refused rather than given the stored response.
-- Streaming requests ignore the header, and so does hybrid mode, which has no
-  local database to keep the response in.
+- Streaming requests ignore the header.
 
 A retry runs again, and is billed again, whenever the original's response was
 not stored or can no longer be read. The cases above are the ones a deployment
@@ -446,8 +422,13 @@ for it works against Otari with its base URL changed. `include_raw` and
 the only configured tool. A call that names no tool runs on the workspace's
 [organization search key](tools.md#organization-search-keys) when it has a usable
 one; a named call runs on that tool with its own key. Either way the tool decides
-the key allow-list entry (`<provider>:<tool>`), the `rate_limits` rules, the
-timeout and the usage row's model and provider.
+the access check, the `rate_limits` rules, the timeout and the usage row's model
+and provider. The access check reads the key's `allowed_tools`, else its user's,
+for the tool's name or `*`. With neither set, it follows the key's model access,
+or its user's when the key has none: unrestricted model access runs every search
+tool, and restricted model access runs only a tool named by its deprecated
+`<provider>:<tool>` entry in `allowed_models`
+([access control](access-control.md#users-and-identities)).
 
 **Request.**
 
@@ -516,7 +497,7 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 | The master key without a `user` | 400 | |
 | The body fails schema validation, such as an `include_raw` that is not a boolean | 422 | `invalid_request` |
 | The workspace turned web search off | 403 | |
-| The key's allow-list does not name `<provider>:<tool>` | 403 | |
+| The key's `allowed_tools`, or the deprecated `<provider>:<tool>` entry in `allowed_models`, does not grant the tool | 403 | |
 | A `user` naming another user, where the key rejects a mismatch | 403 | |
 | A service key's `Otari-End-User-Budget` is not one it may use | 403 | `end_user_budget_not_allowed` |
 | A budget refuses the search | 403 | `budget_exceeded` |
@@ -678,6 +659,12 @@ A refusal a caller is expected to act on carries a stable code, both as an
 code: it keeps its meaning across releases, while the `detail` text may be
 reworded.
 
+The Messages routes (`/api/v1/messages` and `/api/v1/messages/count_tokens`)
+answer every error in Anthropic's envelope instead, the body Anthropic's SDKs
+read: `{"type": "error", "error": {"type": "rate_limit_error", "message": "..."}, "code": "rate_limited"}`.
+A body that fails validation there is a 400 `invalid_request_error`, as
+Anthropic answers it, whose message names each failing field.
+
 | `Otari-Error-Code` | Status | Meaning | Also sent |
 |---|---|---|---|
 | `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one |
@@ -691,15 +678,15 @@ reworded.
 | `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
 | `unsupported_content` | 400 | The provider refused content the request carries because the model does not accept it, such as an image sent to a text-only model. Sent only when Otari recognizes the provider's wording for that refusal; a refusal worded otherwise stays a `400` carrying the provider's message and no code. `detail` names the model where it can. A routing policy moves on to its next candidate first, and answers with this code when every candidate gave a refusal Otari recognizes | |
-| `all_candidates_rejected` | 400 | Every model a routing policy, a catalog ID or the control plane tried rejected the request as invalid | |
+| `all_candidates_rejected` | 400 | Every model a routing policy or a catalog ID tried rejected the request as invalid | |
 | `insufficient_funds` | 402 | The model is served on a credential the deployment pays for, and the organization has no funds paid in to cover it. Nothing was sent upstream | |
-| `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price, or a direct search's pricing row is missing (see [Search](#search)). An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
-| `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: declare the provider in `config.yml` with an `api_key` reading the environment variable the detail names (a keyless or ambient-credential provider needs only the entry), store it through the dashboard, or add an organization provider key. The variable alone serves nothing | |
+| `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price, a direct search's pricing row is missing (see [Search](#search)), or a gateway-run tool the request declares has no row to price its calls ([Tools](tools.md#pricing-a-gateway-run-tool)). An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
+| `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: an operator adds the provider as a hosted provider, or the organization adds its own provider key | |
 | `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401, or a 403 other than one rejecting the request, which is a 400). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 | `end_user_limit_reached` | 403 | A service key already has as many end users as its `max_end_users` allows, so a request that would create a new end user or revive a deleted one is refused. End users it already has are unaffected | |
 | `terms_not_accepted` | 400 | The deployment publishes terms (`terms_url`), and creating or first claiming the account needs them accepted: send `terms_accepted` with the signup, the invitation's first password, the password reset, or the OAuth callback | |
-| `invalid_request` | 422 | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type` | |
+| `invalid_request` | 422, or 400 on the Messages routes | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type`; on the Messages routes, `error.message` names them instead | |
 | `provider_error` | 502, or 200 in a stream's error event | As a 502, the provider answered a non-streamed chat completion with no choices. In a stream's error event, the provider failed after the stream started, for a reason no other code names | |
 | `provider_stream_interrupted` | 200, in a stream's error event only | The provider's stream ended before it finished: it closed without reporting a `finish_reason` (Chat Completions) or without the event that ends a response (Responses, from a provider with its own Responses API), or the connection carrying it was cut. The output received so far is truncated | |
 
@@ -733,12 +720,12 @@ A streamed request whose provider fails before producing any output is answered
 with an ordinary HTTP error, with the same status, `detail` and code the request
 would get unstreamed: a `400` for a parameter the provider does not accept, a
 `502` for a provider outage. Otari holds the response until the provider's first
-chunk to make that possible. A standalone gateway holds it for at most
+chunk to make that possible. The gateway holds it for at most
 `streaming_first_chunk_hold_ms` (15 seconds by default; `0` turns the hold off
 and commits the `200` as soon as the stream opens), and does not hold a stream
 that runs gateway tools (MCP, code execution, web search). A provider slower than
 that to start still streams, and a failure after that point is reported as
-below. A hybrid gateway holds every stream for its first-chunk failover timeout.
+below.
 
 A failure after a stream has started arrives as an error event, which carries
 the code as `error.code` on Chat Completions and Responses:
@@ -767,7 +754,7 @@ error where that names a cause (a rejected parameter, the provider's own
 explanation of a rejected request, redacted as described above, or what
 happened upstream, such as the provider's error status), and a fixed
 `An error occurred during streaming` otherwise. An event with no `code` is a
-failure inside the gateway. Either way, a standalone gateway records the
+failure inside the gateway. Either way, the gateway records the
 request's usage row with status `error`.
 On Messages, a stream the provider ends without `message_stop`, including one
 that sent no events at all, also ends in an `api_error` event rather than

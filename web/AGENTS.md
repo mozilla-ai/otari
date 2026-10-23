@@ -27,18 +27,15 @@ A gateway older than a bootstrap field does not send it, whatever the generated
 type promises, so `App` completes the payload once through
 `shared/helpers/bootstrap.ts` before anything below reads a field. Add a field
 to the bootstrap and that module stops compiling until it is given a default.
-The two fields naming the deployment take none, for the reason above.
 
-The bootstrap selects standalone, hosted, or hybrid presentation and publishes:
+The bootstrap publishes:
 
 - sign-in methods and configured OAuth providers
-- management surfaces hosted by this process
-- the control-plane or data-plane URL
+- management surfaces this gateway serves
 - documentation, mail, passkey, and maintenance state
 
-Features read this through `useDeployment()` and `useSurfaces()`. Page
-components do not branch directly on the mode. A surface gate controls
-discoverability; backend authorization remains mandatory.
+Features read this through `useDeployment()` and `useSurfaces()`. A surface
+gate controls discoverability; backend authorization remains mandatory.
 
 Local sign-in exchanges a master key, password, passkey, or OAuth assertion for
 an HttpOnly session cookie. Do not store credentials or copy the cookie into
@@ -48,9 +45,9 @@ Public auth and invitation flows render ahead of the authenticated router in
 `DeploymentRoot`. Their URLs are backend contracts used by email and OAuth
 redirects, so changing one requires changing the producer and its tests.
 
-Request snippets use `shared/helpers/requestSnippets.ts`. Standalone and
-hybrid use the browser origin; hosted uses the bootstrap's `data_plane_url`.
-A missing hosted data-plane URL renders no runnable snippet.
+Request snippets use `shared/helpers/requestSnippets.ts`, which sends them to
+the request policy's origin: the browser's own, unless a build that reaches
+several deployments names the one chosen.
 
 ## Source layers
 
@@ -93,8 +90,8 @@ Playground link through the same predicate. Organization and workspace
 authorization still comes from server responses.
 
 The workspace and organization rails have separate registries. A sidebar item
-points to a real page, never a redirect. `/playground`, `/docs`, and `/account` are chrome
-destinations and do not belong in a rail.
+points to a real page, never a redirect. `/playground`, `/account`, and `/invitations` are
+chrome destinations and do not belong in a rail.
 
 Overlay navigation uses the empty seam modules under `src/app/nav/` for new
 sections, items inserted into base sections, and label overrides. Keep their
@@ -109,6 +106,11 @@ header of the public auth pages), `app/nav/overlayAccountMenuRows.tsx` (extra
 rows in the account menu), and `app/nav/overlayAccountBadge.tsx` (the mark on
 the account control, the monogram here). Each ships inert; `src/overlaySeams.test.ts`
 lists every seam and checks it is reached by its `@/…` specifier.
+
+One seam is a CSS custom property rather than a module: `--shell-corner-clearance`
+(`styles/globals.css`, zero here) is added to the bottom padding of the shell's
+content area, so a superset that fixes a control to the bottom-right corner sets
+it on the root and the end of every page still scrolls clear of that control.
 
 ## Icons
 
@@ -289,8 +291,7 @@ ancestor, before reporting geometry.
 `fullPage: true`, but the shell scrolls its content in an inner container rather
 than scrolling the document, so a capture comes back at the viewport size
 (1280x800 for the desktop projects) and anything further down the page is not in
-it. The docs page is the clearest case: its one code fence sits below the fold
-and appears in no screenshot project. Do not read a page's presence in that
+it. Do not read a page's presence in that
 suite as coverage of the whole page.
 
 **Read the reporter, not the exit code, when a command is in a pipeline.** A

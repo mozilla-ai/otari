@@ -1,8 +1,7 @@
 # Use with Claude Code
 
 Claude Code speaks the Anthropic Messages API. Otari serves
-`POST /api/v1/messages` and `POST /api/v1/messages/count_tokens` in standalone and
-hybrid modes.
+`POST /api/v1/messages` and `POST /api/v1/messages/count_tokens`.
 
 ## Route Claude Code through Otari
 
@@ -18,11 +17,10 @@ export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
-Claude Code puts a telemetry value in `metadata.user_id`. An otari.ai key
-needs no setting for it, because a hybrid gateway does not check that field
-against the key's owner.
+Claude Code puts a telemetry value in `metadata.user_id`; the next section
+says how a key accepts it.
 
-### Standalone
+### On your own gateway
 
 Claude Code sends a telemetry value in `metadata.user_id`. It is not an
 Otari user ID, so create or update its API key with
@@ -42,7 +40,7 @@ curl "$OTARI_URL/api/v1/keys" \
   }'
 ```
 
-Then point Claude Code at the standalone gateway:
+Then point Claude Code at the gateway:
 
 ```bash
 export ANTHROPIC_BASE_URL="http://localhost:8000/api"
@@ -51,16 +49,15 @@ export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
-Use `ANTHROPIC_AUTH_TOKEN`, which sends an Authorization bearer token and works
-in both modes. `ANTHROPIC_API_KEY` uses `x-api-key`; standalone Otari accepts
-it, but hybrid authentication does not.
+`ANTHROPIC_AUTH_TOKEN` sends an Authorization bearer token, and
+`ANTHROPIC_API_KEY` sends `x-api-key`; Otari accepts either.
 
 The same values can go in the `env` block of Claude Code's settings file.
 
 A workload on Google Cloud, or behind another OpenID Connect issuer, can skip
 the key altogether: Claude Code's own workload identity
 (`ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID` and
-`ANTHROPIC_IDENTITY_TOKEN_FILE`) works against a standalone Otari that trusts
+`ANTHROPIC_IDENTITY_TOKEN_FILE`) works against an Otari that trusts
 the issuer. Unset `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` when you switch:
 either one, when set, takes precedence and the federation variables are
 ignored. See
@@ -80,7 +77,7 @@ claude
 Every request the session makes is then recorded with those tags, and the usage
 endpoints filter and group by them (`GET /api/v1/usage?tag=run:1234`), so one
 key can split its cost by agent, run or requester. Percent-encode a `,` or `=`
-inside a value. Tags are recorded in standalone mode only. See
+inside a value. See
 [Request tags](api-reference.md#request-tags) for the format and limits.
 
 A headless run that should read as one session of its own sends a run id too,
@@ -160,16 +157,15 @@ type, the task and the parent's model, which is the cheapest candidate that
 would do the task well? The candidate Jev picks is the recommendation. Any
 active API key may ask. The decision call is billed to the caller and recorded
 in usage like a `POST /api/v1/decisions` call; nothing else is dispatched, and
-the harness acts on the answer with its own provider credentials. Like
-decisions, the route is standalone only: a hybrid gateway does not serve it.
+the harness acts on the answer with its own provider credentials.
 
-Who answers depends on the build. A standalone deployment asks the decision
+Who answers depends on the build. A self-run deployment asks the decision
 model `agent_recommender_model` names, which may be a local one, and the call
 costs what that provider charges. On otari.ai a managed recommender answers
 behind the same route, which you never configure, at the price of one
 recommendation.
 
-A standalone deployment needs a
+A self-run deployment needs a
 [decision provider](configuration.md#decision-providers) the
 `agent_recommender_model` selector resolves to, `typesafe` with an API key by
 default. Without one, the route answers 400 and the plugin falls back to the
@@ -223,8 +219,7 @@ publishes as a plugin marketplace. In a Claude Code session:
 The install asks for the gateway URL and an API key. Both are required; the
 key goes to Claude Code's secure storage, never to a settings file. The URL
 must be `https` unless the gateway runs on the same machine, since the key
-travels in a header, and it must point at a standalone gateway: a hybrid one
-does not serve the route, so every spawn would fall back. The plugin is
+travels in a header. The plugin is
 active from then on, in that session and
 every one after. The
 [plugin's README](../plugins/otari-router/README.md) has the options, the
@@ -239,12 +234,94 @@ one with the model it ran on and its token counts. When Otari does not
 answer, the subagent starts on the model it would have had anyway, and the
 line says so.
 
+## Send Claude Code sessions to Otari
+
+Otari can record each Claude Code session without its model traffic going
+through Otari: every prompt as a turn, with its model requests, tool calls and
+their cost, and each [agent guardrail](agent-guardrails.md) check the hook made
+on the way. Claude Code exports its own spans and usage over OpenTelemetry, and
+`otari hook` reports its checks to the same session.
+
+You need:
+
+- an Otari deployment that records traces (`OTARI_TRACE_CAPTURE_ENABLED`, on by
+  default);
+- an API key created with `exclude_from_budget: true`, since what Claude Code
+  reports is imported, never charged;
+- for the guardrail checks, the hook registered (`otari hook setup`, or once in
+  `~/.claude/settings.json` for every repository; see
+  [Agent guardrails](agent-guardrails.md)).
+
+Put the variables in the `env` block of `~/.claude/settings.json`, so they apply
+to every session and reach the hook:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA": "1",
+    "OTEL_TRACES_EXPORTER": "otlp",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otari.example.com/otlp",
+    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer tk-your-import-key",
+    "OTARI_URL": "https://otari.example.com",
+    "OTARI_API_KEY": "tk-your-import-key"
+  }
+}
+```
+
+Each does one part:
+
+| Variables | What they send |
+| --- | --- |
+| `CLAUDE_CODE_ENABLE_TELEMETRY`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA`, `OTEL_TRACES_EXPORTER` | The session's turns, model requests and tool calls. Span export is a Claude Code beta. |
+| `OTEL_LOGS_EXPORTER` | Each model request's usage, which is what prices the session. Without it a session has tokens but no cost. |
+| `OTEL_EXPORTER_OTLP_*` | Where both go: the Otari origin plus `/otlp`, over HTTP, with the key. Otari does not accept OTLP over gRPC. |
+| `OTARI_URL`, `OTARI_API_KEY` | The hook's guardrail checks. Claude Code passes no `OTEL_*` variable to its hooks, so the hook cannot use the settings above. |
+
+The key sits in the settings file in plaintext, twice. A script that prints the
+header (`otelHeadersHelper`; see Claude Code's
+[monitoring docs](https://code.claude.com/docs/en/monitoring-usage)) replaces
+only `OTEL_EXPORTER_OTLP_HEADERS`; the hook still needs `OTARI_API_KEY`. To keep
+that out of the file too, leave it out of the `env` block and export it in the
+shell that starts Claude Code, since a hook inherits Claude Code's environment.
+On macOS, for example:
+
+```sh
+export OTARI_API_KEY="$(security find-generic-password -s otari-import-key -w)"
+```
+
+To check it works, run Claude Code, ask for something that uses a tool or two,
+and open **Sessions** in the dashboard: the session shows its turns, model
+requests and tools, and At a glance where its time and money went. A gate that
+ran shows under the tool call it checked. A short `claude -p` run can exit
+before its last spans are sent.
+
+By default nothing says what a span was about: no prompt, command or file path.
+To keep them, the deployment needs `OTARI_TRACE_CONTENT_ENABLED=true` and
+`OTARI_SECRET_KEY`, and Claude Code and the hook have to send them:
+
+```json
+{
+  "env": {
+    "OTEL_LOG_USER_PROMPTS": "1",
+    "OTEL_LOG_TOOL_DETAILS": "1",
+    "OTARI_HOOK_REPORT_CONTENT": "1"
+  }
+}
+```
+
+See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about).
+Do not both [route](#route-claude-code-through-otari) and export one session,
+or its cost appears twice.
+
 ## Import Claude Code usage without routing
 
 Claude Code can send subscription usage to Otari over OpenTelemetry. This is for
-sessions that do not already route through Otari. Send it to a standalone
-deployment or a hosted control plane; hybrid gateways do not serve the OTLP
-endpoints.
+sessions that do not already route through Otari. It is the usage part of
+[sending sessions to Otari](#send-claude-code-sessions-to-otari), without the
+session's turns and tools. Send it to any Otari deployment.
 
 Create a dedicated API key with `exclude_from_budget: true`, then configure the
 logs exporter. The optional metrics exporter adds content-free outcome counters.

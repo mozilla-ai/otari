@@ -4,10 +4,9 @@ Otari executes one exact call an application has already authorized. It proves
 no approval and claims none; what it enforces is authentication,
 stored-server access, the stored allowlist, URL safety, and its own bounds.
 
-Exercised in hybrid mode, where the platform resolver is the only seam that has
-to be substituted, so the route, the resolver parsing, the revision check and
-the bounded execution all run for real. The standalone half of the same ladder,
-which needs a database, a key and a stored row, is in
+Exercised with the MCP server port and the key lookup substituted, so the
+route, the revision check and the bounded execution all run for real. The same
+ladder against a real key and a stored row is in
 ``tests/integration/test_mcp_stored_server_endpoints.py``.
 """
 
@@ -17,6 +16,7 @@ import asyncio
 import uuid
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
@@ -26,20 +26,22 @@ from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 from mcp.types import CallToolResult, TextContent
 
-from conftest import InstallControlPlane
 from gateway import log_config
-from gateway.api.deps import reset_config
+from gateway.api.deps import get_workspace_mcp_servers, reset_config
+from gateway.api.routes import mcp as mcp_route
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.services import mcp_stateless
+from gateway.services.secret_box import SecretDecryptionError
 
 SERVER_ID = uuid.UUID("2c948a61-dc96-4cd8-96bb-8e1434bf424e")
 CLIENT_EXECUTION_ID = "6e51b3bc-6f48-4c68-a61e-0786bc80cd67"
 # A public IP literal, so URL safety never reaches a DNS resolver.
 PUBLIC_URL = "https://93.184.216.34/mcp"
-USER_AUTH = {"Authorization": "Bearer platform-user-token"}
+USER_AUTH = {"Authorization": "Bearer sk-workspace-key"}
+WORKSPACE_ID = uuid.UUID("0b6f3c1e-8d2a-4f7b-9c5e-1a2b3c4d5e6f")
 
 RESULT = CallToolResult(
     content=[TextContent(type="text", text="Created issue #42")],
@@ -88,35 +90,29 @@ class _FakeSession:
         return self.result
 
 
-class _Platform:
-    """The platform MCP resolver, and a record of what was asked of it."""
+class _Servers:
+    """The workspace's MCP servers, and a record of what was asked of them."""
 
     def __init__(self) -> None:
-        self.servers: list[dict[str, Any]] | None = [_stored().model_dump(mode="json")]
-        self.status_code = 200
-        self.malformed_json = False
-        self.bodies: list[dict[str, Any]] = []
-        self.retry_after: str | None = None
+        self.server: ResolvedMcpServer | None = _stored()
+        self.raises: Exception | None = None
+        self.asked: list[tuple[uuid.UUID, uuid.UUID]] = []
         self.delay_s = 0.0
 
-    def payload(self) -> Any:
-        return {"servers": self.servers} if self.status_code == 200 else {"detail": "refused"}
+    async def resolve_many(self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> Any:
+        raise AssertionError("the stateless routes resolve one server")
+
+    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+        await asyncio.sleep(self.delay_s)
+        self.asked.append((workspace_id, server_id))
+        if self.raises is not None:
+            raise self.raises
+        return self.server
 
 
 @pytest.fixture
-def platform(monkeypatch: pytest.MonkeyPatch, control_plane_transport: InstallControlPlane) -> _Platform:
-    fake = _Platform()
-
-    async def post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> Any:
-        await asyncio.sleep(fake.delay_s)
-        fake.bodies.append(body)
-        response_headers = {"Retry-After": fake.retry_after} if fake.retry_after else None
-        if fake.malformed_json:
-            return httpx.Response(fake.status_code, content=b"{")
-        return httpx.Response(fake.status_code, json=fake.payload(), headers=response_headers)
-
-    control_plane_transport(post)
-    return fake
+def servers() -> _Servers:
+    return _Servers()
 
 
 @pytest.fixture
@@ -131,10 +127,28 @@ def session(monkeypatch: pytest.MonkeyPatch) -> _FakeSession:
     return fake
 
 
+@pytest.fixture(scope="module")
+def database_url(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """One database for the module: the route reads no row, so migrating it once is enough."""
+    return f"sqlite:///{tmp_path_factory.mktemp('mcp') / 'mcp-execute.db'}"
+
+
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw-test-token")
-    app = create_app(GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}))
+def client(monkeypatch: pytest.MonkeyPatch, database_url: str, servers: _Servers) -> Iterator[TestClient]:
+    """A standalone app whose key lookup answers one workspace key for any bearer token."""
+
+    async def verify(raw_request: Request, *args: Any, **kwargs: Any) -> tuple[Any, bool]:
+        if not raw_request.headers.get("Authorization"):
+            raise HTTPException(status_code=401, detail="Missing API key")
+        return SimpleNamespace(id=uuid.uuid4(), user_id=None), False
+
+    async def workspace_of(*args: Any, **kwargs: Any) -> uuid.UUID:
+        return WORKSPACE_ID
+
+    monkeypatch.setattr(mcp_route, "verify_api_key_or_master_key", verify)
+    monkeypatch.setattr(mcp_route, "resolve_workspace_id", workspace_of)
+    app = create_app(GatewayConfig(database_url=database_url))
+    app.dependency_overrides[get_workspace_mcp_servers] = lambda: servers
     with TestClient(app) as test_client:
         yield test_client
 
@@ -164,7 +178,7 @@ def _error(response: Any) -> dict[str, Any]:
 
 def test_the_exact_authorized_call_runs_and_the_native_result_comes_back(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
@@ -177,28 +191,12 @@ def test_the_exact_authorized_call_runs_and_the_native_result_comes_back(
     }
     assert session.calls == [("create_issue", {"title": "Approved title", "body": "Approved body"})]
     assert session.listed == 0, "authorization comes from the stored allowlist, not live discovery"
-    assert platform.bodies == [{"mcp_server_ids": [str(SERVER_ID)]}]
-
-
-def test_the_legacy_resolver_shape_executes_the_authorized_call(
-    client: TestClient,
-    platform: _Platform,
-    session: _FakeSession,
-) -> None:
-    stored = _stored().model_dump(mode="json")
-    del stored["id"]
-    del stored["enabled"]
-    platform.servers = [stored]
-
-    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
-
-    assert response.status_code == 200, response.text
-    assert session.calls == [("create_issue", {"title": "Approved title", "body": "Approved body"})]
+    assert servers.asked == [(WORKSPACE_ID, SERVER_ID)]
 
 
 def test_the_request_id_is_returned_on_success_without_touching_the_result(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     """The successful body stays the native MCP result, so the id rides a header."""
@@ -210,13 +208,13 @@ def test_the_request_id_is_returned_on_success_without_touching_the_result(
 
 def test_execution_timings_include_server_resolution(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     info = Mock()
     monkeypatch.setattr(log_config.logger, "info", info)
-    platform.delay_s = 0.02
+    servers.delay_s = 0.02
 
     response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
@@ -231,7 +229,7 @@ def test_execution_timings_include_server_resolution(
 
 def test_a_server_reported_error_is_a_definitive_two_hundred(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     session.result = CallToolResult(content=[TextContent(type="text", text="denied")], isError=True)
@@ -244,12 +242,12 @@ def test_a_server_reported_error_is_a_definitive_two_hundred(
 
 def test_an_absent_allowlist_admits_any_live_tool(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     """``null`` carries the same meaning it does in the managed loop."""
     stored = _stored(allowed_tools=None)
-    platform.servers = [stored.model_dump(mode="json")]
+    servers.server = stored
 
     response = client.post(
         f"{API_ROOT}/mcp/execute",
@@ -266,9 +264,9 @@ def test_an_absent_allowlist_admits_any_live_tool(
 # --------------------------------------------------------------------------- #
 
 
-def test_an_unauthenticated_request_reaches_neither_platform_nor_server(
+def test_an_unauthenticated_request_reaches_neither_resolution_nor_server(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     response = client.post(f"{API_ROOT}/mcp/execute", json=_body())
@@ -279,43 +277,19 @@ def test_an_unauthenticated_request_reaches_neither_platform_nor_server(
         "code": "authentication_failed",
         "execution_state": "not_started",
     }
-    assert platform.bodies == []
-    assert session.calls == []
-
-
-def test_a_user_token_for_another_region_is_misdirected_without_the_host(
-    client: TestClient,
-    platform: _Platform,
-    session: _FakeSession,
-) -> None:
-    """The platform's 421 keeps its status and gets this contract's own code.
-
-    The host the platform's detail named is dropped with the detail;
-    a caller learns it from any endpoint outside this contract.
-    """
-    platform.status_code = 421
-
-    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
-
-    assert response.status_code == 421, response.text
-    assert _error(response) == {
-        "detail": "This API key belongs to another deployment",
-        "code": "misdirected_request",
-        "execution_state": "not_started",
-    }
-    assert "refused" not in response.text
+    assert servers.asked == []
     assert session.calls == []
 
 
 @pytest.mark.parametrize("allowed_tools", [[], ["read_issue"]])
 def test_a_tool_outside_the_stored_allowlist_is_refused_before_connecting(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     allowed_tools: list[str],
 ) -> None:
     stored = _stored(allowed_tools=allowed_tools)
-    platform.servers = [stored.model_dump(mode="json")]
+    servers.server = stored
 
     response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body(server_revision=stored.revision))
 
@@ -327,7 +301,7 @@ def test_a_tool_outside_the_stored_allowlist_is_refused_before_connecting(
 
 def test_a_stale_revision_is_refused_without_a_second_resolver_call(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     """The comparison is in memory, over the resolution already needed."""
@@ -335,17 +309,17 @@ def test_a_stale_revision_is_refused_without_a_second_resolver_call(
 
     assert response.status_code == 409, response.text
     assert _error(response)["code"] == "mcp_server_changed"
-    assert len(platform.bodies) == 1
+    assert len(servers.asked) == 1
     assert session.calls == []
 
 
 def test_a_disabled_server_is_not_found(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     stored = _stored(enabled=False)
-    platform.servers = [stored.model_dump(mode="json")]
+    servers.server = stored
 
     response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body(server_revision=stored.revision))
 
@@ -354,12 +328,12 @@ def test_a_disabled_server_is_not_found(
     assert session.calls == []
 
 
-def test_a_server_the_platform_refuses_is_not_found(
+def test_an_id_naming_no_server_is_not_found(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
-    platform.status_code = 404
+    servers.server = None
 
     response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
@@ -372,99 +346,29 @@ def test_a_server_the_platform_refuses_is_not_found(
     assert session.calls == []
 
 
-def test_a_legacy_empty_resolver_answer_is_not_found(
+def test_a_stored_credential_that_cannot_be_decrypted_is_refused_before_connecting(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
-    platform.servers = []
+    """Connecting without the configured credential would send an unauthenticated request."""
+    servers.raises = SecretDecryptionError("stored credential cannot be decrypted")
 
     response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
-    assert response.status_code == 404, response.text
-    assert _error(response)["code"] == "mcp_server_not_found"
-    assert session.calls == []
-
-
-def test_multiple_resolver_entries_are_a_resolution_failure(
-    client: TestClient,
-    platform: _Platform,
-    session: _FakeSession,
-) -> None:
-    platform.servers = [_stored().model_dump(mode="json")] * 2
-
-    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
-
-    assert response.status_code == 502, response.text
-    assert _error(response)["code"] == "mcp_resolution_failed"
-    assert session.calls == []
-
-
-def test_a_malformed_successful_resolver_response_is_a_resolution_failure(
-    client: TestClient,
-    platform: _Platform,
-    session: _FakeSession,
-) -> None:
-    platform.malformed_json = True
-
-    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
-
-    assert response.status_code == 502, response.text
-    assert _error(response)["code"] == "mcp_resolution_failed"
-    assert session.calls == []
-
-
-@pytest.mark.parametrize(
-    ("platform_status", "expected_code", "expected_detail"),
-    [
-        (402, "payment_required", "Payment required"),
-        (403, "forbidden", "Request forbidden"),
-    ],
-)
-def test_platform_payment_and_authorization_refusals_keep_their_status(
-    client: TestClient,
-    platform: _Platform,
-    session: _FakeSession,
-    platform_status: int,
-    expected_code: str,
-    expected_detail: str,
-) -> None:
-    platform.status_code = platform_status
-
-    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
-
-    assert response.status_code == platform_status, response.text
-    assert _error(response) == {
-        "detail": expected_detail,
-        "code": expected_code,
-        "execution_state": "not_started",
-    }
-    assert session.calls == []
-
-
-def test_the_platforms_rate_limit_is_preserved(
-    client: TestClient,
-    platform: _Platform,
-    session: _FakeSession,
-) -> None:
-    platform.status_code = 429
-    platform.retry_after = "7"
-
-    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
-
-    assert response.status_code == 429, response.text
-    assert response.headers["Retry-After"] == "7"
-    assert _error(response)["code"] == "rate_limit_exceeded"
+    assert response.status_code == 500, response.text
+    assert _error(response)["code"] == "mcp_credentials_unavailable"
+    assert _error(response)["execution_state"] == "not_started"
     assert session.calls == []
 
 
 def test_an_unsafe_resolved_url_is_refused_before_connecting(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     stored = _stored(url="http://169.254.169.254/mcp")
-    platform.servers = [stored.model_dump(mode="json")]
+    servers.server = stored
 
     response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body(server_revision=stored.revision))
 
@@ -498,7 +402,7 @@ def test_an_unsafe_resolved_url_is_refused_before_connecting(
 )
 def test_an_invalid_request_is_refused_before_resolution_or_logging(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     overrides: dict[str, Any],
 ) -> None:
@@ -511,13 +415,13 @@ def test_an_invalid_request_is_refused_before_resolution_or_logging(
         "code": "invalid_request",
         "execution_state": "not_started",
     }
-    assert platform.bodies == []
+    assert servers.asked == []
     assert session.calls == []
 
 
 def test_a_non_json_parse_failure_uses_the_shared_invalid_request_error(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -538,13 +442,13 @@ def test_a_non_json_parse_failure_uses_the_shared_invalid_request_error(
         "code": "invalid_request",
         "execution_state": "not_started",
     }
-    assert platform.bodies == []
+    assert servers.asked == []
     assert session.calls == []
 
 
 def test_a_local_service_unavailability_keeps_its_status(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -561,13 +465,13 @@ def test_a_local_service_unavailability_keeps_its_status(
         "code": "service_unavailable",
         "execution_state": "not_started",
     }
-    assert platform.bodies == []
+    assert servers.asked == []
     assert session.calls == []
 
 
 def test_an_inline_server_configuration_is_not_accepted(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     """A caller never transmits a URL, a credential, or a policy."""
@@ -578,12 +482,12 @@ def test_an_inline_server_configuration_is_not_accepted(
 
     assert response.status_code == 422, response.text
     assert _error(response)["code"] == "invalid_request"
-    assert platform.bodies == []
+    assert servers.asked == []
 
 
 def test_oversized_arguments_are_refused(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     response = client.post(
@@ -599,7 +503,7 @@ def test_oversized_arguments_are_refused(
 
 def test_too_deeply_nested_arguments_are_refused(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     nested: dict[str, Any] = {}
@@ -620,7 +524,7 @@ def test_too_deeply_nested_arguments_are_refused(
 
 def test_a_failure_after_dispatch_is_an_unknown_outcome(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     session.call_error = RuntimeError("server-secret connection reset")
@@ -638,7 +542,7 @@ def test_a_failure_after_dispatch_is_an_unknown_outcome(
 
 def test_a_deadline_after_dispatch_is_an_unknown_outcome(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -656,16 +560,16 @@ def test_a_deadline_after_dispatch_is_an_unknown_outcome(
     assert _error(response)["execution_state"] == "outcome_unknown"
 
 
-def test_the_total_deadline_includes_platform_resolution_and_logs_the_outcome(
+def test_the_total_deadline_includes_server_resolution_and_logs_the_outcome(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     info = Mock()
     monkeypatch.setattr(log_config.logger, "info", info)
     monkeypatch.setattr(mcp_stateless, "EXECUTION_TOTAL_TIMEOUT_S", 0.01)
-    platform.delay_s = 10
+    servers.delay_s = 10
 
     response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
@@ -682,7 +586,7 @@ def test_the_total_deadline_includes_platform_resolution_and_logs_the_outcome(
 
 def test_an_oversized_result_is_an_unknown_outcome(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     session.result = CallToolResult(content=[TextContent(type="text", text="x" * (mcp_stateless.RESULT_MAX_BYTES + 1))])
@@ -696,7 +600,7 @@ def test_an_oversized_result_is_an_unknown_outcome(
 
 def test_no_error_body_carries_a_url_credential_argument_or_exception_text(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -717,7 +621,7 @@ def test_no_error_body_carries_a_url_credential_argument_or_exception_text(
 @pytest.mark.parametrize("path", [f"{API_ROOT}/mcp/execute", f"{API_ROOT}/mcp/servers/{SERVER_ID}/tools"])
 def test_a_capacity_refusal_is_the_only_failure_that_invites_a_retry(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
     path: str,
@@ -747,7 +651,7 @@ def test_a_capacity_refusal_is_the_only_failure_that_invites_a_retry(
 
 def test_a_failure_after_dispatch_advertises_no_retry(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
 ) -> None:
     session.call_error = RuntimeError("connection reset")
@@ -767,7 +671,7 @@ def test_a_failure_after_dispatch_advertises_no_retry(
 )
 def test_a_real_transport_failure_shape_still_gets_the_error_contract(
     client: TestClient,
-    platform: _Platform,
+    servers: _Servers,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
     failure: BaseException,

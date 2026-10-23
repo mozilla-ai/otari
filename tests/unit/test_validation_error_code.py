@@ -31,11 +31,10 @@ def _client(tmp_path: Path) -> TestClient:
     ("path", "body"),
     [
         ("/chat/completions", {"model": "openai:gpt-4o-mini"}),
-        ("/messages", {"model": "anthropic:claude-sonnet-4-5", "max_tokens": "many", "messages": []}),
         ("/responses", {"input": "hi"}),
         ("/auth/session", {"email": "operator@example.com"}),
     ],
-    ids=["chat-completions", "messages", "responses", "management"],
+    ids=["chat-completions", "responses", "management"],
 )
 def test_a_body_that_fails_validation_carries_the_invalid_request_code(
     tmp_path: Path, path: str, body: dict[str, Any]
@@ -50,6 +49,35 @@ def test_a_body_that_fails_validation_carries_the_invalid_request_code(
     # The existing contract is untouched: a list of field errors, values not echoed.
     assert payload["detail"]
     assert all(set(error) == {"type", "loc", "msg"} for error in payload["detail"])
+
+
+@pytest.mark.parametrize("path", ["/messages", "/messages/count_tokens"])
+def test_a_messages_body_that_fails_validation_is_refused_in_anthropic_s_envelope(tmp_path: Path, path: str) -> None:
+    """Anthropic answers an invalid body with a 400 ``invalid_request_error``, the shape its SDKs parse."""
+    body = {"model": "anthropic:claude-sonnet-4-5", "max_tokens": "many", "messages": []}
+    with _client(tmp_path) as client:
+        response = client.post(f"{API_ROOT}{path}", json=body, headers={"Otari-Key": MASTER_KEY})
+
+    assert response.status_code == 400, response.text
+    assert response.headers[ERROR_CODE_HEADER] == INVALID_REQUEST
+    payload = response.json()
+    assert payload["type"] == "error"
+    assert payload["code"] == INVALID_REQUEST
+    assert payload["error"]["type"] == "invalid_request_error"
+    assert payload["error"]["message"].startswith("messages: ")
+    assert "many" not in response.text
+
+
+def test_a_malformed_json_body_on_messages_says_so_without_an_offset(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        response = client.post(
+            f"{API_ROOT}/messages",
+            content=b"{not json",
+            headers={"Otari-Key": MASTER_KEY, "Content-Type": "application/json"},
+        )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["error"] == {"type": "invalid_request_error", "message": "JSON decode error"}
 
 
 def test_a_malformed_json_body_is_also_an_invalid_request(tmp_path: Path) -> None:
