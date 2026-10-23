@@ -37,14 +37,14 @@ export function RequestDetail({
 }: {
   entry: UsageEntry
   /**
-   * Null for a caller who does not operate the deployment. Pricing a model is a
+   * Absent for a caller who does not operate the deployment. Pricing a model is a
    * deployment-wide write (`/pricing`), so offering the button to a tenant
    * would be offering a refusal; the sentence beside it is still theirs to read,
    * because "this row cost nothing" is a fact about their own request. The
    * endpoint goes with the model, so the price can open in the unit that
    * endpoint is billed in.
    */
-  onPriceModel: ((model: string, endpoint: string) => void) | null
+  onPriceModel?: (model: string, endpoint: string) => void
 }) {
   const memberLabels = useMemberAttributionLabels()
   // A served request with no cost (cost IS NULL, the same test the "Priced?"

@@ -20,7 +20,6 @@ describe("RequestDetail", () => {
           status_code: 402,
           error_message: "no pricing configured for openai:gpt-4o",
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -40,7 +39,6 @@ describe("RequestDetail", () => {
           api_key_id: "key-1",
           api_key_name: "production-backend-service",
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -62,7 +60,6 @@ describe("RequestDetail", () => {
           error_message:
             "Skipped: Rate limit 'flash-cap' exceeded: 2 requests per minute",
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -92,7 +89,6 @@ describe("RequestDetail", () => {
             completion_tokens: 200,
           },
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -113,7 +109,6 @@ describe("RequestDetail", () => {
           user_id: "81e24d08-7d1e-4287-a074-54aa57d9debc",
           user_alias: "Aleksandra Wiśniewska-Kowalczyk",
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -131,10 +126,7 @@ describe("RequestDetail", () => {
   it("shows the reasoning tokens, and a dash for a row that never recorded them", async () => {
     mockApi()
     const { unmount } = renderPage(
-      <RequestDetail
-        entry={entry({ reasoning_tokens: 1234 })}
-        onPriceModel={null}
-      />,
+      <RequestDetail entry={entry({ reasoning_tokens: 1234 })} />,
     )
     await flushRouter()
 
@@ -143,7 +135,7 @@ describe("RequestDetail", () => {
     ).toHaveTextContent("1,234")
     unmount()
 
-    renderPage(<RequestDetail entry={entry()} onPriceModel={null} />)
+    renderPage(<RequestDetail entry={entry()} />)
     await flushRouter()
 
     expect(
@@ -160,7 +152,6 @@ describe("RequestDetail", () => {
             tools: { web_search: { billed: 3, errors: 1, unit_rate: 0.01 } },
           },
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -176,7 +167,6 @@ describe("RequestDetail", () => {
         entry={entry({
           billing_meters: { tools: { web_search: { billed: 3 } } },
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -231,9 +221,7 @@ describe("RequestDetail", () => {
     // Pricing a model is a deployment-wide write, so offering the button to a
     // tenant would be offering a refusal; the sentence is still theirs to read.
     mockApi()
-    renderPage(
-      <RequestDetail entry={entry({ cost: null })} onPriceModel={null} />,
-    )
+    renderPage(<RequestDetail entry={entry({ cost: null })} />)
     await flushRouter()
 
     expect(
@@ -293,22 +281,14 @@ describe("RequestDetail", () => {
   it("renders the routing plan only for a routed request", async () => {
     mockApi()
     const { unmount } = renderPage(
-      <RequestDetail
-        entry={entry({ policy_name: null })}
-        onPriceModel={null}
-      />,
+      <RequestDetail entry={entry({ policy_name: null })} />,
     )
     await flushRouter()
     expect(screen.queryByText(/Routing plan/)).not.toBeInTheDocument()
     unmount()
 
     mockApi()
-    renderPage(
-      <RequestDetail
-        entry={entry({ policy_name: "cheap-first" })}
-        onPriceModel={null}
-      />,
-    )
+    renderPage(<RequestDetail entry={entry({ policy_name: "cheap-first" })} />)
     await flushRouter()
     expect(await screen.findByText(/Routing plan/)).toBeInTheDocument()
   })
@@ -333,7 +313,6 @@ describe("RequestDetail", () => {
             },
           ],
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -372,7 +351,6 @@ describe("RequestDetail", () => {
             },
           ],
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -392,7 +370,6 @@ describe("RequestDetail", () => {
     renderPage(
       <RequestDetail
         entry={entry({ provider: "groq", provider_latency_ms: 156 })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()

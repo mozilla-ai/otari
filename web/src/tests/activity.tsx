@@ -98,6 +98,8 @@ export function mockApi(
     inFlight?: InFlightResponse | (() => InFlightResponse)
     workspace?: string
     deploymentOperator?: boolean
+    // The caller's organization role; the default is the owner the operator is.
+    role?: string
     members?: OrganizationMember[]
     // The trace explorer's reads: one page of sessions, and the one that opens.
     traces?: TraceSummary[]
@@ -188,6 +190,14 @@ export function mockApi(
           series: [],
         })
       }
+      // The catalog the Overview's setup guide gates on: one model, so a page
+      // under test has something to route to.
+      if (url.endsWith(`${API_ROOT}/models`)) {
+        return jsonResponse({
+          object: "list",
+          data: [{ id: "m", object: "model", created: 0, owned_by: "openai" }],
+        })
+      }
       if (url.includes("/traces/count")) {
         return jsonResponse({ count: (opts.traces ?? []).length })
       }
@@ -243,7 +253,7 @@ export function mockApi(
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse({
           organization_member_id: "om-1",
-          role: "owner",
+          role: opts.role ?? "owner",
           status: "active",
           organization: {
             id: "org-1",
@@ -259,6 +269,7 @@ export function mockApi(
             ? [
                 {
                   workspace_id: opts.workspace,
+                  name: "Production",
                   workspace_name: "Production",
                   role: "owner",
                   status: "active",

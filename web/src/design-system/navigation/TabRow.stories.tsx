@@ -46,6 +46,33 @@ export const Default: Story = {
   },
 }
 
+/**
+ * A tab that cannot be chosen right now stays focusable, and `describedBy`
+ * points at visible text saying why.
+ */
+export const Disabled: Story = {
+  render: () => (
+    <div className="flex flex-col gap-2">
+      <TabRow>
+        <Tab
+          isActive={false}
+          onPress={() => {}}
+          isDisabled={true}
+          describedBy="disabled-tab-reason"
+        >
+          Mine
+        </Tab>
+        <Tab isActive onPress={() => {}}>
+          Everyone
+        </Tab>
+      </TabRow>
+      <p id="disabled-tab-reason" className="text-caption">
+        Not available yet.
+      </p>
+    </div>
+  ),
+}
+
 /** Two tabs, which is the smallest row worth drawing. Below that, use neither. */
 export const TwoTabs: Story = {
   render: () => {

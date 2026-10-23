@@ -1,22 +1,15 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import {
-  FiChevronDown,
-  FiChevronLeft,
-  FiChevronUp,
-  FiMaximize2,
-  FiMinimize2,
-  FiX,
-} from "react-icons/fi"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { FiChevronLeft } from "react-icons/fi"
 
 import { Button } from "@/design-system/actions/Button"
 import { CopyableValue } from "@/design-system/actions/CopyField"
-import { IconButton } from "@/design-system/actions/IconButton"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Skeleton } from "@/design-system/feedback/Skeleton"
-import { Kbd } from "@/design-system/indicators/Kbd"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
+import { RequestLogLink } from "@/features/activity/RequestLogLink"
+import { PeekPanel, ResizeHandle } from "@/shared/components/PeekPanel"
 import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
 import { CostCard } from "./CostCard"
 import { ExplainCard } from "./ExplainCard"
@@ -52,14 +45,6 @@ const FORMAT_OPTIONS = [
   { value: "raw", label: "Raw" },
 ]
 
-const MIN_PX = 640 // 40rem
-const MAX_FRACTION = 0.9
-const DEFAULT_FRACTION = 0.5
-const DEFAULT_CAP_PX = 1400 // 87.5rem
-// One arrow press on the panel's edge, as a share of the window.
-const WIDTH_STEP = 0.05
-const EXIT_MS = 250
-
 // The tree pane's share of the body, between these bounds, and one arrow
 // press on its divider.
 const NAV_DEFAULT_FRACTION = 0.4
@@ -71,82 +56,6 @@ const NAV_STEP = 0.04
 const NAV_MIN = "17.5rem"
 const DETAIL_MIN = "22.5rem"
 const NAV_COLLAPSED = "2.5rem"
-
-function defaultWidth(): number {
-  return Math.max(
-    MIN_PX,
-    Math.min(window.innerWidth * DEFAULT_FRACTION, DEFAULT_CAP_PX),
-  )
-}
-
-// A 4px bar in a 12px strip straddling an edge: transparent at rest, drawn on
-// hover, focus and drag. Shared by the panel's outer edge and the inner divider.
-// A drag writes at most once a frame, from the last pointer position.
-function ResizeHandle({
-  label,
-  className,
-  onDragStart,
-  onDrag,
-  onStep,
-  valueNow,
-  valueMin,
-  valueMax,
-}: {
-  label: string
-  className: string
-  onDragStart?: () => void
-  onDrag: (clientX: number) => void
-  onStep: (direction: -1 | 1) => void
-  valueNow: number
-  valueMin: number
-  valueMax: number
-}) {
-  const [dragging, setDragging] = useState(false)
-  const frame = useRef(0)
-  const latestX = useRef(0)
-  useEffect(() => () => cancelAnimationFrame(frame.current), [])
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: an <hr> cannot take focus or a drag
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label={label}
-      aria-valuenow={valueNow}
-      aria-valuemin={valueMin}
-      aria-valuemax={valueMax}
-      tabIndex={0}
-      className={`otari-trace-ring group absolute inset-y-0 z-10 w-3 cursor-ew-resize touch-none ${className}`}
-      onPointerDown={(event) => {
-        event.currentTarget.setPointerCapture(event.pointerId)
-        onDragStart?.()
-        setDragging(true)
-      }}
-      onPointerMove={(event) => {
-        if (!dragging) return
-        latestX.current = event.clientX
-        if (frame.current) return
-        frame.current = requestAnimationFrame(() => {
-          frame.current = 0
-          onDrag(latestX.current)
-        })
-      }}
-      onPointerUp={() => setDragging(false)}
-      onPointerCancel={() => setDragging(false)}
-      onKeyDown={(event) => {
-        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-          event.preventDefault()
-          onStep(event.key === "ArrowLeft" ? -1 : 1)
-        }
-      }}
-    >
-      <span
-        className={`absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 transition-colors group-hover:bg-control-border group-focus-visible:bg-control-border motion-reduce:transition-none ${
-          dragging ? "bg-control-border" : "bg-transparent"
-        }`}
-      />
-    </div>
-  )
-}
 
 function Breakdown({ rows }: { rows: [string, string | undefined][] }) {
   return (
@@ -356,12 +265,6 @@ export function TracePeek({
 }) {
   const [tab, setTab] = useState<PeekTab>("preview")
   const [format, setFormat] = useState<Format>("formatted")
-  const [width, setWidth] = useState(defaultWidth)
-  const [expanded, setExpanded] = useState(false)
-  const [entered, setEntered] = useState(false)
-  // The session being closed, so a row opened during the exit is not closed
-  // with it.
-  const [leavingId, setLeavingId] = useState<string | null>(null)
   const [navFraction, setNavFraction] = useState(NAV_DEFAULT_FRACTION)
   const [navView, setNavView] = useState<NavView>("tree")
   const [navCollapsed, setNavCollapsed] = useState(false)
@@ -374,14 +277,8 @@ export function TracePeek({
   const headingRef = useRef<HTMLHeadingElement>(null)
   const backRef = useRef<HTMLButtonElement>(null)
   const navRef = useRef<HTMLDivElement>(null)
-  const exitTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const shownTraceId = useRef(trace.id)
-  useLayoutEffect(() => {
-    shownTraceId.current = trace.id
-  })
   const summary = summarizeTrace(trace)
   const loaded = trace.gateway !== undefined
-  const leaving = leavingId === trace.id
   // Below md one pane shows at a time: picking a row (the session's included)
   // shows what it opened, and Back returns to the tree.
   const [selection, setSelection] = useState<{
@@ -532,27 +429,6 @@ export function TracePeek({
         model: summary.models[0],
       }
 
-  // setTimeout rather than requestAnimationFrame: a hidden tab never fires rAF.
-  useEffect(() => {
-    const timer = setTimeout(() => setEntered(true), 20)
-    return () => clearTimeout(timer)
-  }, [])
-
-  // Focus moves into the panel as it opens and back to whatever opened it as
-  // it closes, so a keyboard user is neither left behind on the list nor
-  // dropped to the top of the document.
-  useEffect(() => {
-    const opener =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null
-    headingRef.current?.focus()
-    return () => {
-      clearTimeout(exitTimer.current)
-      if (opener?.isConnected) opener.focus()
-    }
-  }, [])
-
   // A panel opened on a span opens the rows above it and brings it into view
   // once the spans arrive, as picking it from the panel would.
   const isSpanUnseen = useRef(initialSpanId !== "")
@@ -575,41 +451,9 @@ export function TracePeek({
         ?.focus()
   }, [isDetailShown])
 
-  const close = () => {
-    if (leaving) return
-    const closing = trace.id
-    setLeavingId(closing)
-    clearTimeout(exitTimer.current)
-    exitTimer.current = setTimeout(() => {
-      if (shownTraceId.current === closing) onClose()
-    }, EXIT_MS)
-  }
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      // A field owns its own keys, Escape included: in the span search it
-      // clears the query rather than closing the panel.
-      if (event.defaultPrevented) return
-      if (
-        event.target instanceof Element &&
-        event.target.closest("input, textarea, [contenteditable='true']")
-      )
-        return
-      if (event.metaKey || event.ctrlKey || event.altKey) return
-      if (event.key === "Escape") close()
-      else if (event.key === "k") onPrevious?.()
-      else if (event.key === "j") onNext?.()
-    }
-    document.addEventListener("keydown", onKeyDown)
-    return () => document.removeEventListener("keydown", onKeyDown)
-  })
-
-  const clampWidth = (px: number) =>
-    Math.min(window.innerWidth * MAX_FRACTION, Math.max(MIN_PX, px))
   const clampNav = (fraction: number) =>
     Math.min(NAV_MAX_FRACTION, Math.max(NAV_MIN_FRACTION, fraction))
 
-  const shownWidth = expanded ? window.innerWidth * MAX_FRACTION : width
   const model = shown.model
   const navWidth = navCollapsed
     ? NAV_COLLAPSED
@@ -618,99 +462,24 @@ export function TracePeek({
       : `min(max(${navFraction * 100}%, ${NAV_MIN}), calc(100% - ${DETAIL_MIN}))`
 
   return (
-    <aside
-      aria-label={`Trace ${trace.name}`}
-      style={{ "--peek-width": `${shownWidth}px` } as React.CSSProperties}
-      className={`fixed top-14 right-0 bottom-0 z-30 flex w-full flex-col border-l border-border-strong bg-surface transition-transform duration-250 ease-out-fluid motion-reduce:transition-none md:w-(--peek-width) ${
-        entered && !leaving ? "translate-x-0" : "translate-x-full"
-      }`}
+    <PeekPanel
+      label={`Trace ${trace.name}`}
+      kind="Trace"
+      identity={
+        <CopyableValue
+          value={trace.id}
+          label="trace ID"
+          className="text-mono-caption"
+          isTruncated
+        />
+      }
+      noun="trace"
+      recordKey={trace.id}
+      focusRef={headingRef}
+      onClose={onClose}
+      onPrevious={onPrevious}
+      onNext={onNext}
     >
-      <ResizeHandle
-        label="Resize trace panel"
-        className="-left-1 max-md:hidden"
-        onDrag={(clientX) => {
-          setExpanded(false)
-          setWidth(clampWidth(window.innerWidth - clientX))
-        }}
-        onStep={(direction) => {
-          setExpanded(false)
-          setWidth(
-            clampWidth(shownWidth - direction * window.innerWidth * WIDTH_STEP),
-          )
-        }}
-        valueNow={Math.round(shownWidth)}
-        valueMin={MIN_PX}
-        valueMax={Math.round(window.innerWidth * MAX_FRACTION)}
-      />
-
-      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="shrink-0 text-overline">Trace</span>
-          <span className="flex min-w-0">
-            <CopyableValue
-              value={trace.id}
-              label="trace ID"
-              className="text-mono-caption"
-              isTruncated
-            />
-          </span>
-        </div>
-        <div className="otari-toolbar flex shrink-0 items-center gap-1">
-          <Tooltip
-            content={
-              <span className="flex items-center gap-2">
-                Previous trace <Kbd keys={["K"]} />
-              </span>
-            }
-          >
-            <IconButton
-              label="Previous trace"
-              size="sm"
-              onPress={onPrevious}
-              isDisabled={!onPrevious}
-            >
-              <FiChevronUp aria-hidden="true" className="size-4" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip
-            content={
-              <span className="flex items-center gap-2">
-                Next trace <Kbd keys={["J"]} />
-              </span>
-            }
-          >
-            <IconButton
-              label="Next trace"
-              size="sm"
-              onPress={onNext}
-              isDisabled={!onNext}
-            >
-              <FiChevronDown aria-hidden="true" className="size-4" />
-            </IconButton>
-          </Tooltip>
-          <span className="max-md:hidden">
-            <Tooltip content={expanded ? "Collapse" : "Expand"}>
-              <IconButton
-                label={expanded ? "Collapse" : "Expand"}
-                size="sm"
-                onPress={() => setExpanded((value) => !value)}
-              >
-                {expanded ? (
-                  <FiMinimize2 aria-hidden="true" className="size-4" />
-                ) : (
-                  <FiMaximize2 aria-hidden="true" className="size-4" />
-                )}
-              </IconButton>
-            </Tooltip>
-          </span>
-          <Tooltip content="Close">
-            <IconButton label="Close" size="sm" onPress={close}>
-              <FiX aria-hidden="true" className="size-4" />
-            </IconButton>
-          </Tooltip>
-        </div>
-      </div>
-
       <div className="flex shrink-0 flex-col gap-2 px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="grid size-6 shrink-0 place-items-center">
@@ -902,6 +671,19 @@ export function TracePeek({
                 <GateCard gate={observation.gate} />
               ) : observation ? (
                 <>
+                  {/* A gateway LLM call is named after its usage row. */}
+                  {observation.type === "GENERATION" &&
+                  observation.metadata?.Origin === "gateway" ? (
+                    <div className="flex">
+                      <RequestLogLink
+                        requestId={observation.id}
+                        startMs={
+                          Date.parse(trace.timestamp) + observation.startMs
+                        }
+                        endMs={Date.parse(trace.timestamp) + observation.endMs}
+                      />
+                    </div>
+                  ) : null}
                   {observation.explain ? (
                     <ExplainCard explanation={observation.explain} />
                   ) : null}
@@ -926,6 +708,6 @@ export function TracePeek({
           </>
         )}
       </div>
-    </aside>
+    </PeekPanel>
   )
 }
