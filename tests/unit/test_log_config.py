@@ -128,3 +128,85 @@ def test_a_reference_to_where_a_credential_comes_from_is_kept(configured_logger:
     log_config.logger.warning("Name the key it reads (api_key: ${OPENAI_API_KEY})")
 
     assert "api_key: ${OPENAI_API_KEY}" in configured_logger.getvalue()
+
+
+# A Mistral-shaped key: 32 characters mixing cases and digits, built at runtime.
+MISTRAL_KEY = "Ab3dE" * 6 + "Zz"
+
+
+@pytest.mark.parametrize(
+    "secret",
+    ["key-abcdefgh12345678", MISTRAL_KEY],
+)
+def test_a_key_with_no_vendor_prefix_is_masked(configured_logger: io.StringIO, secret: str) -> None:
+    log_config.logger.warning("Provider said: Incorrect API key provided: %s", secret)
+
+    output = configured_logger.getvalue()
+    assert secret not in output
+    assert "Incorrect API key provided: <redacted>" in output
+
+
+def test_prose_and_ids_that_look_like_keys_are_kept(configured_logger: io.StringIO) -> None:
+    line = (
+        "Scheduled key-rotation-schedule for 3f2c9a1b-7e8d-4c6f-9a1b-7e8d4c6f9a1b and 9F8E7D6C5B4A39281706F5E4D3C2B1A0"
+    )
+
+    log_config.logger.warning(line)
+
+    assert line in configured_logger.getvalue()
+
+
+def test_an_access_log_line_is_masked_and_still_formats() -> None:
+    """uvicorn's access formatter unpacks ``record.args``, so masking keeps them a tuple."""
+    from uvicorn.logging import AccessFormatter
+
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        __file__,
+        0,
+        '%s - "%s %s HTTP/%s" %d',
+        ("127.0.0.1:5000", "GET", "/api/v1/models?api_key=s3cr3t", "1.1", 200),
+        None,
+    )
+
+    assert log_config.CredentialMaskingFilter().filter(record)
+    line = AccessFormatter('%(client_addr)s - "%(request_line)s" %(status_code)s', use_colors=False).format(record)
+
+    assert "s3cr3t" not in line
+    assert line == '127.0.0.1:5000 - "GET /api/v1/models?<redacted> HTTP/1.1" 200 OK'
+
+
+def test_every_uvicorn_handler_masks_credentials(capsys: pytest.CaptureFixture[str]) -> None:
+    import logging.config
+
+    config = log_config.uvicorn_log_config()
+    assert config["handlers"], "uvicorn ships handlers of its own"
+    assert all("mask_credentials" in handler["filters"] for handler in config["handlers"].values())
+
+    loggers = [logging.getLogger(name) for name in config["loggers"]]
+    saved = [(each.handlers[:], each.level, each.propagate) for each in loggers]
+    try:
+        logging.config.dictConfig(config)
+        logging.getLogger("uvicorn.error").error("Upstream refused %s", GITHUB_TOKEN)
+    finally:
+        for each, (handlers, level, propagate) in zip(loggers, saved, strict=True):
+            each.handlers, each.level, each.propagate = handlers, level, propagate
+
+    captured = capsys.readouterr()
+    assert GITHUB_TOKEN not in captured.err
+    assert "Upstream refused <redacted>" in captured.err
+
+
+def test_a_library_logger_without_a_handler_is_masked(
+    configured_logger: io.StringIO, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A record no handler takes falls to ``logging.lastResort``, which setup_logger gives the filter."""
+    assert logging.lastResort is not None
+    record = logging.getLogger("httpx").makeRecord(
+        "httpx", logging.WARNING, __file__, 0, "sent %s", (GITHUB_TOKEN,), None
+    )
+
+    logging.lastResort.handle(record)
+
+    assert GITHUB_TOKEN not in capsys.readouterr().err
