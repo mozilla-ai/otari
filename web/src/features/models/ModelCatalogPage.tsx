@@ -1,7 +1,7 @@
 import { Button } from "@heroui/react"
 import { Link, useNavigate } from "@tanstack/react-router"
 import type { ReactNode } from "react"
-import { useEffect, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 import { FiChevronDown } from "react-icons/fi"
 
@@ -588,6 +588,13 @@ export function ModelCatalogView({
   }
   const [railOpen, setRailOpen] = useState(false)
   const [page, setPage] = useState(0)
+  // The card view's counterpart to the table's `scrollResetKey`: each page
+  // opens at its top, without remounting the cards to get there.
+  const cardsRef = useRef<HTMLUListElement>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: page is the trigger, not a value read here
+  useLayoutEffect(() => {
+    if (cardsRef.current) cardsRef.current.scrollTop = 0
+  }, [page])
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [tableSort, setTableSort] = useState<{
     column: CatalogSortColumn
@@ -777,7 +784,15 @@ export function ModelCatalogView({
                 : "No models match these filters."}
             </EmptyMessage>
           ) : (
-            <ul aria-label="Models" className="flex flex-col gap-3">
+            // On trial: from md up the list scrolls inside the viewport cap a
+            // table uses, so the pager below stays in reach; the padding and
+            // its negative margin give a focused card's ring room inside the
+            // scroll. Reverting is these classes.
+            <ul
+              ref={cardsRef}
+              aria-label="Models"
+              className="flex flex-col gap-3 md:not-print:-m-1 md:not-print:max-h-(--table-max-height) md:not-print:overflow-y-auto md:not-print:scroll-py-1 md:not-print:p-1"
+            >
               {pageRows.map((model) => (
                 <li key={model.id}>
                   <ModelCard model={model} publicView={publicView} />

@@ -533,6 +533,25 @@ describe("ModelCatalogPage", () => {
     expect(screen.getByText(/31 models/)).toBeInTheDocument()
   })
 
+  it("opens the next page of cards at the top without remounting the list", async () => {
+    mockApi({
+      list: (params) => ({
+        ...CATALOG,
+        count: 31,
+        facets: { ...CATALOG.facets!, total_count: 31 },
+        models: params.get("skip") === "30" ? [KIMI] : [GLM],
+      }),
+    })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+    const list = await screen.findByRole("list", { name: "Models" })
+    list.scrollTop = 300
+    await user.click(screen.getByRole("button", { name: /next/i }))
+    expect(await within(list).findByText(/Kimi K2.6/)).toBeInTheDocument()
+    expect(screen.getByRole("list", { name: "Models" })).toBe(list)
+    expect(list.scrollTop).toBe(0)
+  })
+
   it("keeps the current rows visible until the next page arrives", async () => {
     let complete!: (response: CatalogResponse) => void
     mockApi({
