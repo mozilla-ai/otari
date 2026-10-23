@@ -711,15 +711,15 @@ async def test_content_deleted_while_its_batch_waits_on_the_key_source_is_never_
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     workspace, _ = tenants
     generation = await store.content_generation(workspace)
-    real_seal = SpanContent.seal
+    real_seal = SpanContent.seal_many
 
-    async def seal_then_delete(self: SpanContent, *args: Any, **kwargs: Any) -> str | None:
-        value = await real_seal(self, *args, **kwargs)
+    async def seal_then_delete(self: SpanContent, *args: Any, **kwargs: Any) -> list[str | None]:
+        values = await real_seal(self, *args, **kwargs)
         async with create_unit_of_work() as other:
             await _store_on(test_config, other).forget_content(workspace)
-        return value
+        return values
 
-    monkeypatch.setattr(SpanContent, "seal", seal_then_delete)
+    monkeypatch.setattr(SpanContent, "seal_many", seal_then_delete)
     await store.write(
         (
             _write(
@@ -782,3 +782,24 @@ async def test_a_delete_waits_for_a_write_already_holding_the_workspace_and_then
         assert await _sealed_of(async_db, "s-1") is None
     finally:
         await dispose_db()
+
+
+async def test_a_rejected_write_cannot_supply_another_writes_content(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    await store.write((_write(workspace, "s-alice", _span("step-0")),))
+
+    result = await store.write(
+        (
+            _write(workspace, "s-alice", _span("tool-1", kind="tool", content={"prompt": "bob's"}), user_id="bob"),
+            _write(workspace, "s-alice", _span("tool-1", kind="tool")),
+        )
+    )
+
+    assert result.rejected == 1
+    sealed = (
+        await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.span_id) == "tool-1"))
+    ).scalar_one()
+    assert sealed is None
