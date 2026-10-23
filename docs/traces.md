@@ -254,9 +254,38 @@ A span shows what it was about as its input, and a tool call is named for its
 command or file in the tree. A span's content is sealed for that span alone, and
 reads back empty once no configured key opens it, so keep a rotated-out key in
 `OTARI_SECRET_KEY`, or in `trace_content_kms_previous_key_ids`, for as long as
-you keep traces. Only the deployment operator, an
-owner or admin of the organization, and the user a session belongs to read its
-content; any other member reads the session with every span's content empty.
+you keep traces.
+
+### Who reads content
+
+A session's content is private to the user it belongs to. Nobody else reads it,
+not the workspace's other members, not its admins, not the organization's owners
+and admins, and not the deployment's operator. They all still see the session:
+that it ran, its tools, models, costs, outcomes and guardrail verdicts. A span
+whose content they may not open says so (`content_private: true`) and shows none.
+
+| Reader | Reads a session's content |
+| --- | --- |
+| The session's own user | Always. |
+| An organization owner or admin | When the user shared it with the organization's admins, and for sessions no user owns (a service key's). |
+| The deployment's operator | When the user shared it with the operator. |
+| Anyone else | Never. |
+
+A user shares one session at a time, from the session's page or with
+`POST /api/v1/organizations/me/traces/{trace_id}/shares`, naming the audience
+(`organization_admins` or `deployment_operator`), an optional note saying why,
+and how many days it lasts (30 by default, 90 at most). The share ends when it
+expires or when the user ends it (`DELETE .../shares/{share_id}`). Every read
+through a share is recorded, and the user sees who read it and when
+(`GET .../shares`). A trace's detail says how the read reached its content in
+`content_access`: `owner`, `share` or `none`.
+
+This is an access rule the gateway enforces, not end-to-end encryption: whoever
+runs the gateway holds the key that opens content, so a self-hosted deployment's
+operator could read it by changing the code or the database. What the rule and
+the encryption give is that nobody reads content through Otari without its
+owner's say, and that the database alone, or a backup of it, shows none. With
+AWS KMS, every opening of a data key is also in CloudTrail.
 
 ### How content is sealed
 

@@ -4097,6 +4097,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/traces/{trace_id}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Trace Content Shares
+         * @description Every share one of your sessions has had, newest first, with each read made through it.
+         */
+        get: operations["organization-traces-list_trace_content_shares"];
+        put?: never;
+        /**
+         * Share Trace Content
+         * @description Let the organization's admins, or the deployment's operator, read what one of your sessions was about.
+         *
+         *     A session's content is private to its own user. A share lets its audience read
+         *     it until it expires or you end it, and each read through it is recorded for you.
+         *     Only the session's own user can share it.
+         */
+        post: operations["organization-traces-share_trace_content"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/traces/{trace_id}/shares/{share_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * End Trace Content Share
+         * @description Stop a share letting its audience read what your session was about.
+         */
+        delete: operations["organization-traces-end_trace_content_share"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/usage": {
         parameters: {
             query?: never;
@@ -9160,6 +9208,95 @@ export interface components {
              * @default false
              */
             shadowed: boolean;
+        };
+        /**
+         * ContentReadPublic
+         * @description One read of a session's content through a share.
+         */
+        ContentReadPublic: {
+            /**
+             * Read At
+             * Format: date-time
+             */
+            read_at: string;
+            /**
+             * Reader Email
+             * @description Their email address when they read it.
+             */
+            reader_email: string;
+            /**
+             * Reader User Id
+             * @description Who read it; null once that account is gone.
+             */
+            reader_user_id: string | null;
+        };
+        /**
+         * ContentShareCreate
+         * @description Let an audience read what one of your sessions was about.
+         */
+        ContentShareCreate: {
+            /**
+             * Audience
+             * @enum {string}
+             */
+            audience: "organization_admins" | "deployment_operator";
+            /**
+             * Days
+             * @description How long the share lasts.
+             * @default 30
+             */
+            days: number;
+            /** Note */
+            note?: string | null;
+        };
+        /** ContentShareListPublic */
+        ContentShareListPublic: {
+            /** Items */
+            items: components["schemas"]["ContentSharePublic"][];
+        };
+        /**
+         * ContentSharePublic
+         * @description A session's owner letting an audience read what it was about.
+         */
+        ContentSharePublic: {
+            /**
+             * Active
+             * @description Whether it still lets its audience read.
+             */
+            active: boolean;
+            /**
+             * Audience
+             * @description Who may read: the organization's owners and admins, or the deployment's operator.
+             * @enum {string}
+             */
+            audience: "organization_admins" | "deployment_operator";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Note
+             * @description Why it was shared, in its owner's words.
+             */
+            note: string | null;
+            /**
+             * Reads
+             * @description Each read made through it, newest first. Only its owner sees them.
+             */
+            reads?: components["schemas"]["ContentReadPublic"][];
+            /** Revoked At */
+            revoked_at: string | null;
         };
         /**
          * CountTokensRequest
@@ -16771,11 +16908,17 @@ export interface components {
             cache_write_tokens: number | null;
             /**
              * Content
-             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the deployment keeps content and the agent sent it. Empty otherwise.
+             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the workspace keeps content, the agent sent it, and the reader may open it. Empty otherwise.
              */
             content: {
                 [key: string]: string;
             };
+            /**
+             * Content Private
+             * @description The span holds content this reader may not open: it is private to the session's own user, unless they share the session.
+             * @default false
+             */
+            content_private: boolean;
             /** Cost */
             cost: number | null;
             /** Duration Ms */
@@ -17208,6 +17351,15 @@ export interface components {
         };
         /** TraceDetailPublic */
         TraceDetailPublic: {
+            /**
+             * Content Access
+             * @description How this read reached the session's content: 'owner' for its own user, 'share' through a share its user made, 'none' otherwise.
+             * @default none
+             * @enum {string}
+             */
+            content_access: "owner" | "share" | "none";
+            /** @description The share the content was read through, with its note. Its reads are not listed. */
+            content_share?: components["schemas"]["ContentSharePublic"] | null;
             /**
              * Gates
              * @description Each agent guardrail gate a coding agent's hook reported, the ones that did something first.
@@ -25955,6 +26107,111 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TraceDetailPublic"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-list_trace_content_shares": {
+        parameters: {
+            query?: {
+                /** @description The workspace the trace is in, as its list entry names it. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentShareListPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-share_trace_content": {
+        parameters: {
+            query?: {
+                /** @description The workspace the trace is in, as its list entry names it. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentShareCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentSharePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-end_trace_content_share": {
+        parameters: {
+            query?: {
+                /** @description The workspace the trace is in, as its list entry names it. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+                share_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

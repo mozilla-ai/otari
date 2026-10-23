@@ -4419,6 +4419,172 @@
         "title": "ConfigSearchToolSchema",
         "type": "object"
       },
+      "ContentReadPublic": {
+        "description": "One read of a session's content through a share.",
+        "properties": {
+          "read_at": {
+            "format": "date-time",
+            "title": "Read At",
+            "type": "string"
+          },
+          "reader_email": {
+            "description": "Their email address when they read it.",
+            "title": "Reader Email",
+            "type": "string"
+          },
+          "reader_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who read it; null once that account is gone.",
+            "title": "Reader User Id"
+          }
+        },
+        "required": [
+          "reader_user_id",
+          "reader_email",
+          "read_at"
+        ],
+        "title": "ContentReadPublic",
+        "type": "object"
+      },
+      "ContentShareCreate": {
+        "description": "Let an audience read what one of your sessions was about.",
+        "properties": {
+          "audience": {
+            "enum": [
+              "organization_admins",
+              "deployment_operator"
+            ],
+            "title": "Audience",
+            "type": "string"
+          },
+          "days": {
+            "default": 30,
+            "description": "How long the share lasts.",
+            "maximum": 90.0,
+            "minimum": 1.0,
+            "title": "Days",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "audience"
+        ],
+        "title": "ContentShareCreate",
+        "type": "object"
+      },
+      "ContentShareListPublic": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ContentSharePublic"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ContentShareListPublic",
+        "type": "object"
+      },
+      "ContentSharePublic": {
+        "description": "A session's owner letting an audience read what it was about.",
+        "properties": {
+          "active": {
+            "description": "Whether it still lets its audience read.",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "audience": {
+            "description": "Who may read: the organization's owners and admins, or the deployment's operator.",
+            "enum": [
+              "organization_admins",
+              "deployment_operator"
+            ],
+            "title": "Audience",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it was shared, in its owner's words.",
+            "title": "Note"
+          },
+          "reads": {
+            "description": "Each read made through it, newest first. Only its owner sees them.",
+            "items": {
+              "$ref": "#/components/schemas/ContentReadPublic"
+            },
+            "title": "Reads",
+            "type": "array"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "required": [
+          "id",
+          "audience",
+          "note",
+          "created_at",
+          "expires_at",
+          "revoked_at",
+          "active"
+        ],
+        "title": "ContentSharePublic",
+        "type": "object"
+      },
       "CountTokensRequest": {
         "description": "Anthropic ``/v1/messages/count_tokens`` request.\n\nA subset of :class:`MessagesRequest`: the input fields that affect the token\ncount, minus ``max_tokens`` and the streaming/sampling controls, since the\nendpoint only counts input tokens. ``context_management`` and ``betas`` are\naccepted for wire compatibility, but the local estimate does not apply\nprovider-side context edits. Clients such as Claude Code call this on every\nturn to keep their prompt within the model's context window.",
         "properties": {
@@ -20207,9 +20373,15 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the deployment keeps content and the agent sent it. Empty otherwise.",
+            "description": "What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the workspace keeps content, the agent sent it, and the reader may open it. Empty otherwise.",
             "title": "Content",
             "type": "object"
+          },
+          "content_private": {
+            "default": false,
+            "description": "The span holds content this reader may not open: it is private to the session's own user, unless they share the session.",
+            "title": "Content Private",
+            "type": "boolean"
           },
           "cost": {
             "anyOf": [
@@ -21162,6 +21334,28 @@
       },
       "TraceDetailPublic": {
         "properties": {
+          "content_access": {
+            "default": "none",
+            "description": "How this read reached the session's content: 'owner' for its own user, 'share' through a share its user made, 'none' otherwise.",
+            "enum": [
+              "owner",
+              "share",
+              "none"
+            ],
+            "title": "Content Access",
+            "type": "string"
+          },
+          "content_share": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContentSharePublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The share the content was read through, with its note. Its reads are not listed."
+          },
           "gates": {
             "description": "Each agent guardrail gate a coding agent's hook reported, the ones that did something first.",
             "items": {
@@ -38854,6 +39048,227 @@
           }
         ],
         "summary": "Get Trace",
+        "tags": [
+          "organization-traces"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/traces/{trace_id}/shares": {
+      "get": {
+        "description": "Every share one of your sessions has had, newest first, with each read made through it.",
+        "operationId": "organization-traces-list_trace_content_shares",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The workspace the trace is in, as its list entry names it.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The workspace the trace is in, as its list entry names it.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentShareListPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Trace Content Shares",
+        "tags": [
+          "organization-traces"
+        ]
+      },
+      "post": {
+        "description": "Let the organization's admins, or the deployment's operator, read what one of your sessions was about.\n\nA session's content is private to its own user. A share lets its audience read\nit until it expires or you end it, and each read through it is recorded for you.\nOnly the session's own user can share it.",
+        "operationId": "organization-traces-share_trace_content",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The workspace the trace is in, as its list entry names it.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The workspace the trace is in, as its list entry names it.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContentShareCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentSharePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Share Trace Content",
+        "tags": [
+          "organization-traces"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/traces/{trace_id}/shares/{share_id}": {
+      "delete": {
+        "description": "Stop a share letting its audience read what your session was about.",
+        "operationId": "organization-traces-end_trace_content_share",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "share_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Share Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The workspace the trace is in, as its list entry names it.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The workspace the trace is in, as its list entry names it.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "End Trace Content Share",
         "tags": [
           "organization-traces"
         ]

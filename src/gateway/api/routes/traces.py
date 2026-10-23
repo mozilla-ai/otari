@@ -12,7 +12,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 
 from gateway.api.deps import (
     TraceServiceDep,
@@ -26,6 +26,9 @@ from gateway.core.config import GatewayConfig
 from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
 from gateway.schemas.traces import (
+    ContentShareCreate,
+    ContentShareListPublic,
+    ContentSharePublic,
     TraceCountPublic,
     TraceDetailPublic,
     TraceListPublic,
@@ -34,6 +37,7 @@ from gateway.schemas.traces import (
     detail_public,
     list_public,
     series_public,
+    share_public,
     summary_public,
 )
 from gateway.services.traces import SpanContent, run_trace_retention
@@ -171,6 +175,53 @@ organization_router = build_trace_router(
     ),
     get_organization_trace_scope,
 )
+
+OrganizationScopeDep = Annotated[TraceScope, Depends(get_organization_trace_scope)]
+WorkspaceQuery = Annotated[
+    uuid.UUID | None, Query(description="The workspace the trace is in, as its list entry names it.")
+]
+
+
+@organization_router.post("/{trace_id}/shares", response_model=ContentSharePublic, status_code=status.HTTP_201_CREATED)
+async def share_trace_content(
+    traces: TraceServiceDep,
+    scope: OrganizationScopeDep,
+    trace_id: str,
+    body: ContentShareCreate,
+    workspace_id: WorkspaceQuery = None,
+) -> ContentSharePublic:
+    """Let the organization's admins, or the deployment's operator, read what one of your sessions was about.
+
+    A session's content is private to its own user. A share lets its audience read
+    it until it expires or you end it, and each read through it is recorded for you.
+    Only the session's own user can share it.
+    """
+    return share_public(
+        await traces.share_content(
+            scope, trace_id, audience=body.audience, note=body.note, days=body.days, workspace_id=workspace_id
+        )
+    )
+
+
+@organization_router.get("/{trace_id}/shares", response_model=ContentShareListPublic)
+async def list_trace_content_shares(
+    traces: TraceServiceDep, scope: OrganizationScopeDep, trace_id: str, workspace_id: WorkspaceQuery = None
+) -> ContentShareListPublic:
+    """Every share one of your sessions has had, newest first, with each read made through it."""
+    shares = await traces.content_shares(scope, trace_id, workspace_id=workspace_id)
+    return ContentShareListPublic(items=[share_public(share) for share in shares])
+
+
+@organization_router.delete("/{trace_id}/shares/{share_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def end_trace_content_share(
+    traces: TraceServiceDep,
+    scope: OrganizationScopeDep,
+    trace_id: str,
+    share_id: uuid.UUID,
+    workspace_id: WorkspaceQuery = None,
+) -> None:
+    """Stop a share letting its audience read what your session was about."""
+    await traces.end_content_share(scope, trace_id, share_id, workspace_id=workspace_id)
 
 
 async def _retention(config: GatewayConfig) -> None:

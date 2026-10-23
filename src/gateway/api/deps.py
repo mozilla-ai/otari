@@ -144,7 +144,7 @@ from gateway.services.traces import SpanContent, TraceService
 from gateway.services.usage_admin_service import usage_in
 from gateway.services.usage_and_telemetry import UsageService
 from gateway.services.workspace_scope import default_workspace_id
-from gateway.types.traces import TraceScope
+from gateway.types.traces import ContentReader, TraceScope
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -1789,10 +1789,19 @@ VisibleWorkspacesDep = Annotated[VisibleWorkspaces, Depends(get_visible_workspac
 async def get_organization_trace_scope(visible: VisibleWorkspacesDep, identity: CurrentIdentity) -> TraceScope:
     """The workspaces of their active organization this caller may read traces in.
 
-    An owner or admin reads every trace's content; anyone else only their own traces'.
+    Each reads their own sessions' content. An owner or admin also reads what a
+    session's user shared with the organization's admins, and the sessions no
+    user owns.
     """
+    manager = visible.whole_organization
     return TraceScope.workspaces(
-        visible.workspace_ids, all_content=visible.whole_organization, content_user_id=str(identity.id)
+        visible.workspace_ids,
+        reader=ContentReader(
+            user_id=identity.id,
+            email=identity.email or str(identity.id),
+            audience="organization_admins" if manager else None,
+            reads_ownerless=manager,
+        ),
     )
 
 
@@ -1964,9 +1973,17 @@ def _caller_usage_scope(workspaces: CallerWorkspaceQuery) -> ColumnElement[bool]
 CallerUsageScope = Annotated[ColumnElement[bool], Depends(_caller_usage_scope)]
 
 
-def get_deployment_trace_scope(workspace_ids: CallerWorkspaces) -> TraceScope:
-    """The scope of the deployment-operator trace routes: every workspace in the caller's organization."""
-    return TraceScope.workspaces(workspace_ids, all_content=True)
+def get_deployment_trace_scope(workspace_ids: CallerWorkspaces, identity: CurrentIdentity) -> TraceScope:
+    """The scope of the deployment-operator trace routes: every workspace in the caller's organization.
+
+    The operator reads a session's content only where its user shared it with the operator, or it is their own.
+    """
+    return TraceScope.workspaces(
+        workspace_ids,
+        reader=ContentReader(
+            user_id=identity.id, email=identity.email or str(identity.id), audience="deployment_operator"
+        ),
+    )
 
 
 async def get_feedback_service(
