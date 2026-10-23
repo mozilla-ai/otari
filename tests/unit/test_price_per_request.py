@@ -41,9 +41,15 @@ def test_a_price_per_request_is_not_combined_with_token_prices(extra: dict[str, 
         PricingConfig.model_validate({"price_per_request": 0.005, **extra})
 
 
-def test_a_negative_price_per_request_is_refused() -> None:
-    with pytest.raises(ValidationError):
-        PricingConfig.model_validate({"price_per_request": -1})
+@pytest.mark.parametrize("price", [-1, "abc", "inf", float("nan")])
+def test_a_price_per_request_that_is_not_a_finite_price_is_refused(price: object) -> None:
+    with pytest.raises(ValidationError, match="price_per_request"):
+        PricingConfig.model_validate({"price_per_request": price})
+
+
+def test_a_malformed_input_price_beside_a_price_per_request_is_refused() -> None:
+    with pytest.raises(ValidationError, match="input_price_per_million"):
+        PricingConfig.model_validate({"price_per_request": 0.005, "input_price_per_million": "abc"})
 
 
 def test_token_pricing_is_unchanged() -> None:

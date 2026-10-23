@@ -138,7 +138,9 @@ class SetPricingRequest(PricedKind):
             "'images' for image generation (USD per million images)."
         ),
     )
-    price_per_request: float | None = Field(default=None, ge=0, description=PRICE_PER_REQUEST_DESCRIPTION)
+    price_per_request: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False, description=PRICE_PER_REQUEST_DESCRIPTION
+    )
 
     @model_validator(mode="before")
     @classmethod

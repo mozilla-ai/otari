@@ -334,3 +334,13 @@ def test_price_per_request_with_a_token_price_is_refused(client: TestClient, mas
 
     assert refused.status_code == 422
     assert "output_price_per_million" in refused.text
+
+
+def test_a_price_per_request_that_is_not_a_number_is_refused(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    refused = client.post(
+        f"{API_ROOT}/pricing", json={"model_key": MODEL_NAME, "price_per_request": "abc"}, headers=master_key_header
+    )
+
+    assert refused.status_code == 422

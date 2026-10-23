@@ -1,7 +1,7 @@
 """Pricing settings."""
 
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -47,6 +47,17 @@ PRICE_PER_REQUEST_DESCRIPTION = (
 )
 
 
+def _finite_decimal(value: Any) -> Decimal | None:
+    """``value`` as an exact finite decimal, or None when field validation should refuse it instead."""
+    if isinstance(value, bool) or not isinstance(value, int | float | str | Decimal):
+        return None
+    try:
+        parsed = Decimal(str(value))
+    except InvalidOperation:
+        return None
+    return parsed if parsed.is_finite() else None
+
+
 def price_per_request_shorthand(data: Any) -> Any:
     """Expand ``price_per_request`` into the per-request rate it stands for, refusing a mix with token prices.
 
@@ -57,16 +68,16 @@ def price_per_request_shorthand(data: Any) -> Any:
     """
     if not isinstance(data, dict) or data.get("price_per_request") is None:
         return data
-    price = data["price_per_request"]
-    if isinstance(price, bool) or not isinstance(price, int | float | str | Decimal):
+    price = _finite_decimal(data["price_per_request"])
+    if price is None:
         return data  # Left for the field's own validation to refuse.
     if data.get("unit", "requests") != "requests":
         raise ValueError("price_per_request is a price per request: leave unit out or set it to 'requests'")
-    per_million = Decimal(str(price)) * 1_000_000
+    per_million = price * 1_000_000
     mixed = [name for name in _TOKEN_PRICE_FIELDS if data.get(name) not in (None, 0, [])]
     # An input rate equal to the expansion is this same price validated again, as a dump of it reads.
     given = data.get("input_price_per_million")
-    if given is not None and Decimal(str(given)) != per_million:
+    if given is not None and _finite_decimal(given) != per_million:
         mixed.insert(0, "input_price_per_million")
     if mixed:
         raise ValueError(f"price_per_request replaces token prices; remove {', '.join(mixed)}")
@@ -109,7 +120,9 @@ class PricingConfig(BaseModel):
             "'images' for image generation (USD per million images)."
         ),
     )
-    price_per_request: float | None = Field(default=None, ge=0, description=PRICE_PER_REQUEST_DESCRIPTION)
+    price_per_request: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False, description=PRICE_PER_REQUEST_DESCRIPTION
+    )
 
     @model_validator(mode="before")
     @classmethod
