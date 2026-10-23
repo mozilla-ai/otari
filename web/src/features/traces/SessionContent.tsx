@@ -196,7 +196,15 @@ function OwnerSharing({
   const shares = useTraceShares(traceId, workspaceId, true)
   const endShare = useEndTraceShare()
   const [isSharing, setIsSharing] = useState(false)
-  const items = (shares.data?.pages ?? []).flatMap((page) => page.items)
+  // Pages are offsets over an order that moves as shares end, so a share can
+  // appear on two of them; each is listed once.
+  const items = [
+    ...new Map(
+      (shares.data?.pages ?? [])
+        .flatMap((page) => page.items)
+        .map((share) => [share.id, share]),
+    ).values(),
+  ]
 
   // A session that never kept content and was never shared has nothing to say.
   if (!canShare && items.length === 0 && !shares.error) return null
