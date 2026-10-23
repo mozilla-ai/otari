@@ -6,27 +6,29 @@ The one place that knows how content is sealed. A sealed value reads::
 
 each part url-safe base64. The data key is made for the workspace, which the
 key source binds (KMS as encryption context), and the ciphertext is
-authenticated with the workspace and the span as associated data. So a value
-copied onto another span, or into another workspace, opens as nothing.
+authenticated with the workspace, the trace and the span as associated data.
+So a value copied onto another span, another session or another workspace
+opens as nothing.
 
 A value without the ``otc1.`` prefix is a bare ``OTARI_SECRET_KEY`` Fernet token,
 the form content was stored in before; it opens as it always did.
 
 Data keys are cached, so a busy workspace costs its key source one call every
 few minutes rather than one a span: one write key per workspace, reused for
-``_WRITE_KEY_MAX_AGE_S`` or ``_WRITE_KEY_MAX_USES`` seals, and an LRU of opened
-keys. After the key source fails for lack of reach or permission, it is not
+``_KEY_MAX_AGE_S`` or ``_WRITE_KEY_MAX_USES`` seals, and an LRU of opened
+keys, each held for ``_KEY_MAX_AGE_S``. After the key source fails for lack of reach or permission, it is not
 asked again for ``_PAUSE_AFTER_FAILURE_S``: content is dropped, or reads back
 empty, rather than every batch waiting on a source that is down.
 """
 
+import asyncio
 import base64
 import binascii
 import json
 import os
 import uuid
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass
 from time import monotonic
 
@@ -43,11 +45,13 @@ _FORMAT = "otc1"
 _NONCE_BYTES = 12
 _PURPOSE = "trace-content"
 
-_WRITE_KEY_MAX_AGE_S = 300.0
+_KEY_MAX_AGE_S = 300.0
 _WRITE_KEY_MAX_USES = 10_000
-_OPEN_KEY_MAX_AGE_S = 300.0
-_OPEN_KEY_CACHE_SIZE = 1_024
+_KEY_CACHE_SIZE = 1_024
 _PAUSE_AFTER_FAILURE_S = 30.0
+# Well inside the trace writer's batch time limit, so a slow key source leaves
+# the batch time to store its spans without their content.
+_KEY_SOURCE_BUDGET_S = 1.5
 
 UNSEALED = Counter(
     "gateway_trace_content_unsealed",
@@ -74,23 +78,40 @@ class SpanContent:
     """Seals and opens span content under the data keys ``keys`` makes and opens.
 
     One per process, so its caches serve every request and the trace writer.
+    Each call to the key source is held to ``_KEY_SOURCE_BUDGET_S``, so a slow
+    source costs a batch its content and never the batch. Expired keys are
+    dropped on every call and by a timer of their own, so an idle process holds
+    none past its age; dropping a reference cannot make Python overwrite the
+    bytes, which stay in memory until reused.
     """
 
     def __init__(self, keys: ContentKeyPort | None) -> None:
         self._keys = keys
-        self._write_keys: dict[str, _WriteKey] = {}
+        self._write_keys: OrderedDict[str, _WriteKey] = OrderedDict()
         self._open_keys: OrderedDict[tuple[str, bytes, str], tuple[bytes, float]] = OrderedDict()
         self._paused_until = 0.0
+        self._sweep: asyncio.TimerHandle | None = None
 
     @classmethod
     def disabled(cls) -> "SpanContent":
         """One that seals nothing and opens only legacy values, for work that never reads content."""
         return cls(None)
 
-    async def seal(self, content: Mapping[str, str], *, workspace_id: uuid.UUID, span_id: str) -> str | None:
+    def clear(self) -> None:
+        """Drop every cached key, as the process stops."""
+        self._write_keys.clear()
+        self._open_keys.clear()
+        if self._sweep is not None:
+            self._sweep.cancel()
+            self._sweep = None
+
+    async def seal(
+        self, content: Mapping[str, str], *, workspace_id: uuid.UUID, trace_id: str, span_id: str
+    ) -> str | None:
         """The span's content sealed for its row; None when there is none, or it could not be sealed."""
         if not content or self._keys is None or self._keys.wrapper is None:
             return None
+        self._prune()
         if self._paused():
             UNSEALED.labels(reason="paused").inc()
             return None
@@ -102,11 +123,11 @@ class SpanContent:
             return None
         nonce = os.urandom(_NONCE_BYTES)
         ciphertext = AESGCM(key.plaintext).encrypt(
-            nonce, json.dumps(dict(content)).encode(), _associated_data(workspace_id, span_id)
+            nonce, json.dumps(dict(content)).encode(), _associated_data(workspace_id, trace_id, span_id)
         )
         return ".".join((_FORMAT, key.wrapper, _b64(key.wrapped), _b64(nonce + ciphertext)))
 
-    async def open(self, sealed: str | None, *, workspace_id: uuid.UUID, span_id: str) -> dict[str, str]:
+    async def open(self, sealed: str | None, *, workspace_id: uuid.UUID, trace_id: str, span_id: str) -> dict[str, str]:
         """The content sealed for this row; empty when none was, or it cannot be opened."""
         if not sealed:
             return {}
@@ -120,15 +141,20 @@ class SpanContent:
         except (binascii.Error, ValueError):
             UNOPENED.labels(reason="rejected").inc()
             return {}
+        self._prune()
         try:
             data_key = await self._open_key(wrapper, wrapped, workspace_id)
         except ContentKeyError as exc:
             self._failed(exc, "opened")
             UNOPENED.labels(reason=exc.reason).inc()
             return {}
+        if data_key is None:
+            # Not asked while paused, which is no new failure: the pause runs out as set.
+            UNOPENED.labels(reason="paused").inc()
+            return {}
         try:
             plaintext = AESGCM(data_key).decrypt(
-                body[:_NONCE_BYTES], body[_NONCE_BYTES:], _associated_data(workspace_id, span_id)
+                body[:_NONCE_BYTES], body[_NONCE_BYTES:], _associated_data(workspace_id, trace_id, span_id)
             )
             content = json.loads(plaintext)
         except (InvalidTag, ValueError):
@@ -137,36 +163,59 @@ class SpanContent:
         return _allowed(content)
 
     async def _write_key(self, keys: ContentKeyPort, workspace_id: uuid.UUID) -> DataKey:
-        now = monotonic()
         workspace = str(workspace_id)
         held = self._write_keys.get(workspace)
-        if held is None or now - held.made_at >= _WRITE_KEY_MAX_AGE_S or held.uses >= _WRITE_KEY_MAX_USES:
-            held = _WriteKey(await keys.new_data_key(_context(workspace_id)), made_at=now)
-            # A workspace gone quiet keeps no key in memory past its age.
-            self._write_keys = {
-                other: key for other, key in self._write_keys.items() if now - key.made_at < _WRITE_KEY_MAX_AGE_S
-            }
+        if held is None or held.uses >= _WRITE_KEY_MAX_USES:
+            made = await _within_budget(keys.new_data_key(_context(workspace_id)))
+            held = _WriteKey(made, made_at=monotonic())
             self._write_keys[workspace] = held
+            while len(self._write_keys) > _KEY_CACHE_SIZE:
+                self._write_keys.popitem(last=False)
+            self._schedule_sweep()
+        self._write_keys.move_to_end(workspace)
         held.uses += 1
         return held.key
 
-    async def _open_key(self, wrapper: str, wrapped: bytes, workspace_id: uuid.UUID) -> bytes:
+    async def _open_key(self, wrapper: str, wrapped: bytes, workspace_id: uuid.UUID) -> bytes | None:
+        """The opened key; None when it is not cached and the source is paused."""
         if self._keys is None:
             raise ContentKeyError("unavailable", "no content key is configured")
         cache_key = (wrapper, wrapped, str(workspace_id))
-        now = monotonic()
         cached = self._open_keys.get(cache_key)
-        if cached is not None and now - cached[1] < _OPEN_KEY_MAX_AGE_S:
+        if cached is not None:
             self._open_keys.move_to_end(cache_key)
             return cached[0]
         if self._paused():
-            raise ContentKeyError("unavailable", "the content key source is paused after a failure")
-        data_key = await self._keys.open_data_key(wrapper, wrapped, _context(workspace_id))
-        self._open_keys[cache_key] = (data_key, now)
-        self._open_keys.move_to_end(cache_key)
-        while len(self._open_keys) > _OPEN_KEY_CACHE_SIZE:
+            return None
+        data_key = await _within_budget(self._keys.open_data_key(wrapper, wrapped, _context(workspace_id)))
+        self._open_keys[cache_key] = (data_key, monotonic())
+        while len(self._open_keys) > _KEY_CACHE_SIZE:
             self._open_keys.popitem(last=False)
+        self._schedule_sweep()
         return data_key
+
+    def _prune(self) -> None:
+        """Drop every key past its age, written or opened."""
+        now = monotonic()
+        for workspace in [w for w, held in self._write_keys.items() if now - held.made_at >= _KEY_MAX_AGE_S]:
+            del self._write_keys[workspace]
+        for cache_key in [k for k, (_, at) in self._open_keys.items() if now - at >= _KEY_MAX_AGE_S]:
+            del self._open_keys[cache_key]
+
+    def _schedule_sweep(self) -> None:
+        if self._sweep is not None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._sweep = loop.call_later(_KEY_MAX_AGE_S, self._run_sweep)
+
+    def _run_sweep(self) -> None:
+        self._sweep = None
+        self._prune()
+        if self._write_keys or self._open_keys:
+            self._schedule_sweep()
 
     def _paused(self) -> bool:
         return monotonic() < self._paused_until
@@ -185,13 +234,23 @@ class SpanContent:
         )
 
 
+async def _within_budget[T](call: Awaitable[T]) -> T:
+    """A key source's answer, or ``unavailable`` once it has taken longer than a batch can spare."""
+    try:
+        return await asyncio.wait_for(call, timeout=_KEY_SOURCE_BUDGET_S)
+    except TimeoutError:
+        raise ContentKeyError("unavailable", "the content key source did not answer in time") from None
+
+
 def _context(workspace_id: uuid.UUID) -> dict[str, str]:
     return {"otari:purpose": _PURPOSE, "otari:workspace": str(workspace_id)}
 
 
-def _associated_data(workspace_id: uuid.UUID, span_id: str) -> bytes:
+def _associated_data(workspace_id: uuid.UUID, trace_id: str, span_id: str) -> bytes:
     return json.dumps(
-        {"v": 1, "workspace_id": str(workspace_id), "span_id": span_id}, sort_keys=True, separators=(",", ":")
+        {"v": 1, "workspace_id": str(workspace_id), "trace_id": trace_id, "span_id": span_id},
+        sort_keys=True,
+        separators=(",", ":"),
     ).encode()
 
 

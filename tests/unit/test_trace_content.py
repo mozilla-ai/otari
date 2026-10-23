@@ -3,6 +3,7 @@
 KMS is moto's, or a fake client for the failures moto does not model; never real AWS.
 """
 
+import asyncio
 import base64
 import json
 import logging
@@ -36,6 +37,7 @@ _WORKSPACE = uuid.UUID("00000000-0000-0000-0000-000000000001")
 _OTHER_WORKSPACE = uuid.UUID("00000000-0000-0000-0000-000000000002")
 _CONTENT = {"command": "cat ~/.aws/credentials"}
 _REGION = "us-east-1"
+_TRACE = "session-1"
 _CONTEXT = {"otari:purpose": "trace-content", "otari:workspace": str(_WORKSPACE)}
 
 
@@ -122,59 +124,68 @@ def _client_error(code: str) -> ClientError:
 
 async def test_sealed_content_hides_what_it_holds_and_opens_on_its_row(key: str) -> None:
     content = _secret_key_content()
-    sealed = await content.seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-1")
+    sealed = await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
 
     assert sealed is not None and sealed.startswith("otc1.sk.") and "credentials" not in sealed
-    assert await content.open(sealed, workspace_id=_WORKSPACE, span_id="tool-1") == _CONTENT
+    assert await content.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
 
 
-@pytest.mark.parametrize(("workspace_id", "span_id"), [(_WORKSPACE, "tool-2"), (_OTHER_WORKSPACE, "tool-1")])
+@pytest.mark.parametrize(
+    ("workspace_id", "trace_id", "span_id"),
+    [(_WORKSPACE, _TRACE, "tool-2"), (_WORKSPACE, "session-2", "tool-1"), (_OTHER_WORKSPACE, _TRACE, "tool-1")],
+)
 async def test_content_copied_onto_another_row_opens_as_nothing(
-    key: str, workspace_id: uuid.UUID, span_id: str
+    key: str, workspace_id: uuid.UUID, trace_id: str, span_id: str
 ) -> None:
-    sealed = await _secret_key_content().seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-1")
+    sealed = await _secret_key_content().seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
 
-    assert await _secret_key_content().open(sealed, workspace_id=workspace_id, span_id=span_id) == {}
+    assert await _secret_key_content().open(sealed, workspace_id=workspace_id, trace_id=trace_id, span_id=span_id) == {}
 
 
 async def test_a_tampered_value_opens_as_nothing(key: str) -> None:
     content = _secret_key_content()
-    sealed = await content.seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-1")
+    sealed = await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
     assert sealed is not None
     head, body = sealed.rsplit(".", 1)
     flipped = body[:10] + ("A" if body[10] != "A" else "B") + body[11:]
 
-    assert await content.open(f"{head}.{flipped}", workspace_id=_WORKSPACE, span_id="tool-1") == {}
-    assert await content.open("otc1.sk.not-base64!", workspace_id=_WORKSPACE, span_id="tool-1") == {}
+    assert await content.open(f"{head}.{flipped}", workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == {}
+    assert await content.open("otc1.sk.not-base64!", workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == {}
 
 
 async def test_without_a_key_nothing_is_sealed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
 
-    assert await _secret_key_content().seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-1") is None
+    assert (
+        await _secret_key_content().seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") is None
+    )
 
 
 async def test_content_opens_under_a_rotated_key_list_and_not_once_its_key_is_gone(
     key: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    sealed = await _secret_key_content().seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-1")
+    sealed = await _secret_key_content().seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
     newer = generate_secret_key()
 
     monkeypatch.setenv("OTARI_SECRET_KEY", f"{newer},{key}")
-    assert await _secret_key_content().open(sealed, workspace_id=_WORKSPACE, span_id="tool-1") == _CONTENT
+    assert (
+        await _secret_key_content().open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
+    )
     monkeypatch.setenv("OTARI_SECRET_KEY", newer)
-    assert await _secret_key_content().open(sealed, workspace_id=_WORKSPACE, span_id="tool-1") == {}
+    assert await _secret_key_content().open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == {}
 
 
 async def test_no_content_seals_to_nothing(key: str) -> None:
     content = _secret_key_content()
 
-    assert await content.seal({}, workspace_id=_WORKSPACE, span_id="tool-1") is None
-    assert await content.open(None, workspace_id=_WORKSPACE, span_id="tool-1") == {}
+    assert await content.seal({}, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") is None
+    assert await content.open(None, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == {}
 
 
 async def test_content_disabled_seals_nothing(key: str) -> None:
-    assert await SpanContent.disabled().seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-1") is None
+    assert (
+        await SpanContent.disabled().seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") is None
+    )
 
 
 # Rows sealed before data keys.
@@ -188,22 +199,27 @@ async def test_an_old_fernet_row_still_opens_on_its_row_and_nowhere_else(key: st
     legacy = _legacy(_WORKSPACE, "tool-1")
     content = _secret_key_content()
 
-    assert await content.open(legacy, workspace_id=_WORKSPACE, span_id="tool-1") == _CONTENT
-    assert await content.open(legacy, workspace_id=_WORKSPACE, span_id="tool-2") == {}
-    assert await content.open(legacy, workspace_id=_OTHER_WORKSPACE, span_id="tool-1") == {}
+    assert await content.open(legacy, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
+    assert await content.open(legacy, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2") == {}
+    assert await content.open(legacy, workspace_id=_OTHER_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == {}
 
 
 async def test_old_rows_open_after_the_deployment_moves_to_kms(key: str, kms: Any) -> None:
     legacy = _legacy(_WORKSPACE, "tool-1")
-    sealed_with_secret_key = await _secret_key_content().seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-2")
+    sealed_with_secret_key = await _secret_key_content().seal(
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2"
+    )
     content = SpanContent(_kms_keyring(kms, _new_kms_key(kms)))
 
-    new = await content.seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-3")
+    new = await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-3")
 
     assert new is not None and new.startswith("otc1.kms.")
-    assert await content.open(legacy, workspace_id=_WORKSPACE, span_id="tool-1") == _CONTENT
-    assert await content.open(sealed_with_secret_key, workspace_id=_WORKSPACE, span_id="tool-2") == _CONTENT
-    assert await content.open(new, workspace_id=_WORKSPACE, span_id="tool-3") == _CONTENT
+    assert await content.open(legacy, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
+    assert (
+        await content.open(sealed_with_secret_key, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2")
+        == _CONTENT
+    )
+    assert await content.open(new, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-3") == _CONTENT
 
 
 # Data-key caching.
@@ -213,11 +229,13 @@ async def test_a_busy_workspace_makes_one_data_key_and_opens_it_once(key: str) -
     keys = _CountingKeys()
     content = SpanContent(keys)
 
-    sealed = [await content.seal(_CONTENT, workspace_id=_WORKSPACE, span_id=f"tool-{n}") for n in range(500)]
-    await content.seal(_CONTENT, workspace_id=_OTHER_WORKSPACE, span_id="tool-1")
+    sealed = [
+        await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id=f"tool-{n}") for n in range(500)
+    ]
+    await content.seal(_CONTENT, workspace_id=_OTHER_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
     reader = SpanContent(keys)
     for n, value in enumerate(sealed):
-        assert await reader.open(value, workspace_id=_WORKSPACE, span_id=f"tool-{n}") == _CONTENT
+        assert await reader.open(value, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id=f"tool-{n}") == _CONTENT
 
     assert keys.made == 2
     assert keys.opened == 1
@@ -231,13 +249,13 @@ async def test_a_write_key_is_replaced_once_old_or_used_enough(key: str, monkeyp
     monkeypatch.setattr(_content, "_WRITE_KEY_MAX_USES", 3)
 
     for n in range(3):
-        await content.seal(_CONTENT, workspace_id=_WORKSPACE, span_id=f"tool-{n}")
+        await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id=f"tool-{n}")
     assert keys.made == 1
-    await content.seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-3")
+    await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-3")
     assert keys.made == 2
 
-    now[0] += _content._WRITE_KEY_MAX_AGE_S
-    await content.seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-4")
+    now[0] += _content._KEY_MAX_AGE_S
+    await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-4")
     assert keys.made == 3
 
 
@@ -246,49 +264,55 @@ async def test_a_write_key_is_replaced_once_old_or_used_enough(key: str, monkeyp
 
 async def test_kms_seals_under_the_workspace_as_encryption_context(kms: Any) -> None:
     key_id = _new_kms_key(kms)
-    sealed = await SpanContent(_kms_keyring(kms, key_id)).seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-1")
+    sealed = await SpanContent(_kms_keyring(kms, key_id)).seal(
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
+    )
 
     assert kms.decrypt(CiphertextBlob=_wrapped(sealed), EncryptionContext=_CONTEXT)["KeyId"].endswith(key_id)
     reader = SpanContent(_kms_keyring(kms, key_id))
-    assert await reader.open(sealed, workspace_id=_WORKSPACE, span_id="tool-1") == _CONTENT
+    assert await reader.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
 
 
 async def test_kms_content_moved_to_another_workspace_is_refused_by_kms(kms: Any) -> None:
     key_id = _new_kms_key(kms)
-    sealed = await SpanContent(_kms_keyring(kms, key_id)).seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-1")
+    sealed = await SpanContent(_kms_keyring(kms, key_id)).seal(
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
+    )
     before = _count(UNOPENED, "rejected")
 
     reader = SpanContent(_kms_keyring(kms, key_id))
-    assert await reader.open(sealed, workspace_id=_OTHER_WORKSPACE, span_id="tool-1") == {}
+    assert await reader.open(sealed, workspace_id=_OTHER_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == {}
     assert _count(UNOPENED, "rejected") == before + 1
     # A rejected key is the row's fault, not the source's, so the next read still asks KMS.
-    assert await reader.open(sealed, workspace_id=_WORKSPACE, span_id="tool-1") == _CONTENT
+    assert await reader.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
 
 
 async def test_kms_key_replaced_keeps_old_content_open_while_listed(kms: Any) -> None:
     old, new = _new_kms_key(kms), _new_kms_key(kms)
     kms.create_alias(AliasName="alias/otari-trace-content", TargetKeyId=old)
     sealed = await SpanContent(_kms_keyring(kms, "alias/otari-trace-content")).seal(
-        _CONTENT, workspace_id=_WORKSPACE, span_id="tool-1"
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
     )
     listed = SpanContent(_kms_keyring(kms, new, previous=("alias/otari-trace-content",)))
     unlisted = SpanContent(_kms_keyring(kms, new))
 
-    assert await listed.open(sealed, workspace_id=_WORKSPACE, span_id="tool-1") == _CONTENT
-    assert await unlisted.open(sealed, workspace_id=_WORKSPACE, span_id="tool-1") == {}
-    resealed = await listed.seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-2")
+    assert await listed.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
+    assert await unlisted.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == {}
+    resealed = await listed.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2")
     assert kms.decrypt(CiphertextBlob=_wrapped(resealed), EncryptionContext=_CONTEXT)["KeyId"].endswith(new)
 
 
 async def test_kms_automatic_rotation_leaves_content_readable(kms: Any) -> None:
     key_id = _new_kms_key(kms)
-    sealed = await SpanContent(_kms_keyring(kms, key_id)).seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-1")
+    sealed = await SpanContent(_kms_keyring(kms, key_id)).seal(
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
+    )
 
     kms.enable_key_rotation(KeyId=key_id)
     kms.rotate_key_on_demand(KeyId=key_id)
 
     reader = SpanContent(_kms_keyring(kms, key_id))
-    assert await reader.open(sealed, workspace_id=_WORKSPACE, span_id="tool-1") == _CONTENT
+    assert await reader.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
 
 
 @pytest.mark.parametrize(
@@ -308,8 +332,8 @@ async def test_kms_failing_stores_no_content_and_pauses_before_asking_again(
     before, paused = _count(UNSEALED, reason), _count(UNSEALED, "paused")
 
     with caplog.at_level(logging.WARNING):
-        assert await content.seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-1") is None
-        assert await content.seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-2") is None
+        assert await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") is None
+        assert await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2") is None
 
     assert client.calls == 1
     assert _count(UNSEALED, reason) == before + 1
@@ -326,13 +350,13 @@ async def test_kms_failing_stores_no_content_and_pauses_before_asking_again(
 )
 async def test_kms_failing_on_read_returns_empty_content(kms: Any, error: Exception, reason: str) -> None:
     sealed = await SpanContent(_kms_keyring(kms, _new_kms_key(kms))).seal(
-        _CONTENT, workspace_id=_WORKSPACE, span_id="tool-1"
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
     )
     before = _count(UNOPENED, reason)
 
     content = SpanContent(_kms_keyring(_FailingKmsClient(error), "alias/otari-trace-content"))
 
-    assert await content.open(sealed, workspace_id=_WORKSPACE, span_id="tool-1") == {}
+    assert await content.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == {}
     assert _count(UNOPENED, reason) == before + 1
 
 
@@ -384,12 +408,14 @@ async def test_the_secret_key_backend_writes_only_while_a_key_is_set(key: str, m
 
 async def test_a_kms_key_beside_the_secret_key_backend_still_opens_what_it_sealed(key: str, kms: Any) -> None:
     key_id = _new_kms_key(kms)
-    sealed = await SpanContent(_kms_keyring(kms, key_id)).seal(_CONTENT, workspace_id=_WORKSPACE, span_id="tool-1")
+    sealed = await SpanContent(_kms_keyring(kms, key_id)).seal(
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
+    )
 
     keys = build_content_key_port(_config(trace_content_kms_key_id=key_id))
 
     assert keys.wrapper == SECRET_KEY_WRAPPER
-    assert await SpanContent(keys).open(sealed, workspace_id=_WORKSPACE, span_id="tool-1") == _CONTENT
+    assert await SpanContent(keys).open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
 
 
 async def test_previous_key_ids_accept_commas_and_whitespace(kms: Any) -> None:
@@ -403,3 +429,108 @@ async def test_previous_key_ids_accept_commas_and_whitespace(kms: Any) -> None:
 
     assert keys.wrapper == KMS_WRAPPER
     assert cast(Any, keys)._wrappers[KMS_WRAPPER]._key_ids == ("k1", "k2", "k3", "k4")
+
+
+# Outages, slowness and idle keys.
+
+
+class _FlakyKeys(_CountingKeys):
+    """A key source that fails while ``down``, and can be made slow."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.down = False
+        self.delay = 0.0
+
+    async def new_data_key(self, context: dict[str, str]) -> DataKey:
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if self.down:
+            raise ContentKeyError("unavailable", "down")
+        return await super().new_data_key(context)
+
+    async def open_data_key(self, wrapper: str, wrapped: bytes, context: dict[str, str]) -> bytes:
+        if self.down:
+            self.opened += 1
+            raise ContentKeyError("unavailable", "down")
+        return await super().open_data_key(wrapper, wrapped, context)
+
+
+async def test_polling_through_an_outage_does_not_hold_the_pause_open(
+    key: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = [1_000.0]
+    monkeypatch.setattr(_content, "monotonic", lambda: now[0])
+    keys = _FlakyKeys()
+    sealed = await SpanContent(keys).seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
+    reader = SpanContent(keys)
+    keys.down = True
+    assert await reader.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == {}
+    asked = keys.opened
+
+    # The dashboard polls every five seconds; the source recovers ten seconds in.
+    opened: dict[str, str] = {}
+    for tick in range(1, 14):
+        now[0] += 5
+        if tick == 2:
+            keys.down = False
+        opened = await reader.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
+        if opened:
+            break
+
+    assert opened == _CONTENT
+    # Asked again once the pause ran out, thirty seconds after the failure, and not before.
+    assert now[0] - 1_000.0 == _content._PAUSE_AFTER_FAILURE_S
+    assert keys.opened == asked + 1
+
+
+async def test_a_slow_key_source_costs_the_content_and_not_the_batch(key: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_content, "_KEY_SOURCE_BUDGET_S", 0.05)
+    keys = _FlakyKeys()
+    keys.delay = 1.0
+    content = SpanContent(keys)
+    before, paused = _count(UNSEALED, "unavailable"), _count(UNSEALED, "paused")
+
+    started = asyncio.get_running_loop().time()
+    assert await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") is None
+    assert await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2") is None
+
+    assert asyncio.get_running_loop().time() - started < 0.5
+    assert _count(UNSEALED, "unavailable") == before + 1
+    assert _count(UNSEALED, "paused") == paused + 1
+
+
+async def test_an_idle_process_holds_no_key_past_its_age(key: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [1_000.0]
+    monkeypatch.setattr(_content, "monotonic", lambda: now[0])
+    content = SpanContent(_CountingKeys())
+    sealed = await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
+    await content.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
+    assert content._write_keys and content._open_keys
+    assert content._sweep is not None
+
+    now[0] += _content._KEY_MAX_AGE_S
+    content._run_sweep()
+
+    assert not content._write_keys and not content._open_keys
+    assert content._sweep is None
+
+
+async def test_stopping_drops_every_cached_key(key: str) -> None:
+    content = SpanContent(_CountingKeys())
+    sealed = await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
+    await content.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
+
+    content.clear()
+
+    assert not content._write_keys and not content._open_keys and content._sweep is None
+
+
+async def test_the_write_cache_is_bounded(key: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_content, "_KEY_CACHE_SIZE", 2)
+    content = SpanContent(_CountingKeys())
+
+    for n in range(3):
+        await content.seal(_CONTENT, workspace_id=uuid.uuid4(), trace_id=_TRACE, span_id=f"tool-{n}")
+
+    assert len(content._write_keys) == 2

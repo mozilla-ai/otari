@@ -531,9 +531,9 @@ def test_the_detail_counts_each_gate_an_agents_hook_reported_and_names_the_ones_
     assert _operator_get(client, world, "/traces/s-two").json()["gates"] == []
 
 
-def _sealed(content: dict[str, str], *, workspace_id: uuid.UUID, span_id: str) -> str | None:
+def _sealed(content: dict[str, str], *, workspace_id: uuid.UUID, trace_id: str, span_id: str) -> str | None:
     keys = ContentKeyring(SECRET_KEY_WRAPPER, {SECRET_KEY_WRAPPER: SecretKeyContentKeys()})
-    return asyncio.run(SpanContent(keys).seal(content, workspace_id=workspace_id, span_id=span_id))
+    return asyncio.run(SpanContent(keys).seal(content, workspace_id=workspace_id, trace_id=trace_id, span_id=span_id))
 
 
 def _seal_tool_call(db_session_factory: Callable[[], Session], command: str = "pytest -x") -> None:
@@ -541,7 +541,9 @@ def _seal_tool_call(db_session_factory: Callable[[], Session], command: str = "p
         span = session.scalars(
             select(TraceSpan).where(col(TraceSpan.trace_id) == "s-one", col(TraceSpan.span_id) == "call-toolu_1")
         ).one()
-        span.content_sealed = _sealed({"command": command}, workspace_id=span.workspace_id, span_id=span.span_id)
+        span.content_sealed = _sealed(
+            {"command": command}, workspace_id=span.workspace_id, trace_id=span.trace_id, span_id=span.span_id
+        )
         session.commit()
 
 
@@ -747,7 +749,9 @@ def test_a_workspaces_managers_delete_its_stored_content_and_keep_its_sessions(
     with db_session_factory() as session:
         span = session.scalars(select(TraceSpan).where(col(TraceSpan.span_id) == "call-toolu_1")).first()
         assert span is not None
-        span.content_sealed = _sealed({"command": "pytest -x"}, workspace_id=span.workspace_id, span_id=span.span_id)
+        span.content_sealed = _sealed(
+            {"command": "pytest -x"}, workspace_id=span.workspace_id, trace_id=span.trace_id, span_id=span.span_id
+        )
         session.commit()
 
     refused = _as(client, world["member"], "DELETE", f"/workspaces/{workspace_id}/trace-content")

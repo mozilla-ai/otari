@@ -998,6 +998,10 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             if trace_writer is not None and trace_writer_started:
                 app.state.trace_writer = None
                 await trace_writer.stop()
+            # After the writer's last batch, which may still seal with them.
+            trace_content: SpanContent | None = getattr(app.state, "trace_content", None)
+            if trace_content is not None:
+                trace_content.clear()
             # Removed before it closes, so a route served after shutdown fails plainly
             # rather than on a closed client.
             web_provider_client = getattr(app.state, "web_provider_client", None)
