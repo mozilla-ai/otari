@@ -19805,9 +19805,7 @@
           }
         },
         "required": [
-          "model_key",
-          "input_price_per_million",
-          "output_price_per_million"
+          "model_key"
         ],
         "title": "SetPricingRequest",
         "type": "object"

@@ -16551,7 +16551,7 @@ export interface components {
              * Input Price Per Million
              * @description Price per 1M of the rate's unit: input tokens, requests or images
              */
-            input_price_per_million: number;
+            input_price_per_million?: number;
             /**
              * Kind
              * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
@@ -16566,7 +16566,7 @@ export interface components {
              * Output Price Per Million
              * @description Price per 1M output tokens; unused by a rate in requests or images
              */
-            output_price_per_million: number;
+            output_price_per_million?: number;
             /**
              * Price Per Request
              * @description USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not combined with token prices.
