@@ -15,6 +15,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, Query, status
 
 from gateway.api.deps import (
+    NoSessionOwners,
     TraceServiceDep,
     build_trace_service,
     get_deployment_trace_scope,
@@ -252,7 +253,7 @@ async def end_trace_content_share(
 async def _retention(config: GatewayConfig) -> None:
     # Retention deletes by age and never reads content.
     await run_trace_retention(
-        lambda uow: build_trace_service(uow, SpanContent.disabled()),
+        lambda uow: build_trace_service(uow, SpanContent.disabled(), NoSessionOwners()),
         retention_days=config.trace_retention_days,
         max_age_days=config.trace_session_max_age_days,
         interval=_RETENTION_INTERVAL_S,

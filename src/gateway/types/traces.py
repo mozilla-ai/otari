@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, Protocol
 
 from otari_agent.domain.definitions import GateDefinition
 from otari_agent.domain.policy import MAX_GATE_ID_LENGTH
@@ -354,8 +354,14 @@ class ContentReader:
     email: str
     audience: ShareAudience | None = None
     """The shares this reader may read through: none for a member who manages nothing."""
-    reads_ownerless: bool = False
-    """Whether they read a session no user owns, a service key's: an organization owner or admin does."""
+
+
+class SessionOwners(Protocol):
+    """Who still belongs where a session was kept, asked before content opens for anyone but its owner."""
+
+    async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
+        """Whether ``user_id`` names a person who currently sees ``workspace_id``."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -368,8 +374,9 @@ class TraceScope:
 
     A session's content (prompts, commands, file paths) opens for the user it
     belongs to and nobody else, managers and operators included, unless its owner
-    shared it with them. ``all_content`` is for the deployment's own reads, never
-    a person's.
+    shared it with them while still a member. Content is kept only for a session
+    a current member owns, so no session's content belongs to nobody.
+    ``all_content`` is for the deployment's own reads, never a person's.
     """
 
     workspace_ids: frozenset[uuid.UUID]
@@ -393,9 +400,7 @@ class TraceScope:
 
     def reads_content_of(self, user_id: str | None) -> bool:
         """Whether a read in this scope opens the content of a session ``user_id`` owns, without a share."""
-        if self.all_content or self.owns(user_id):
-            return True
-        return user_id is None and self.reader is not None and self.reader.reads_ownerless
+        return self.all_content or self.owns(user_id)
 
 
 @dataclass(frozen=True)

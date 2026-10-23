@@ -21,6 +21,7 @@ import any_fetch
 import any_search
 from gateway import features
 from gateway.api.deps import (
+    NoSessionOwners,
     build_budget_service,
     build_file_service,
     build_hosted_discovery,
@@ -329,7 +330,8 @@ def _records_traces(enabled_features: tuple[CoreFeature, ...]) -> bool:
 def _build_trace_writer(config: GatewayConfig, content: SpanContent) -> TraceWriter:
     """The writer every request's trace is handed to, sealing what it keeps with ``content``."""
     return TraceWriter(
-        stored_by(lambda uow: build_trace_service(uow, content)),
+        # The writer opens no share, so it asks nobody's membership.
+        stored_by(lambda uow: build_trace_service(uow, content, NoSessionOwners())),
         max_queued_spans=config.trace_queue_max_spans,
         batch_spans=config.trace_flush_max_spans,
         interval_s=config.trace_flush_interval_s,

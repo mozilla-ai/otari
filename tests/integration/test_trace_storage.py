@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.adapters.content_key_adapter import build_content_key_port
+from gateway.api.deps import NoSessionOwners
 from gateway.core.config import GatewayConfig
 from gateway.core.database import dispose_db, init_db
 from gateway.core.unit_of_work import create_unit_of_work
@@ -54,7 +55,11 @@ async def store(test_config: GatewayConfig, clean_database: None) -> AsyncIterat
     try:
         async with create_unit_of_work() as uow:
             yield TraceService(
-                uow, TracesRepositories.on(uow), SpanContent(build_content_key_port(test_config)), _no_window
+                uow,
+                TracesRepositories.on(uow),
+                SpanContent(build_content_key_port(test_config)),
+                NoSessionOwners(),
+                _no_window,
             )
     finally:
         await dispose_db()
@@ -469,7 +474,11 @@ async def test_two_writers_sharing_traces_in_opposite_order_do_not_deadlock(
     async def write(order: list[str], tag: str) -> None:
         async with create_unit_of_work() as uow:
             await TraceService(
-                uow, TracesRepositories.on(uow), SpanContent(build_content_key_port(test_config)), _no_window
+                uow,
+                TracesRepositories.on(uow),
+                SpanContent(build_content_key_port(test_config)),
+                NoSessionOwners(),
+                _no_window,
             ).write(tuple(_write(workspace, trace_id, _span(f"{tag}-{trace_id}")) for trace_id in order))
 
     for attempt in range(5):
@@ -680,7 +689,7 @@ async def test_concurrent_new_guardrail_versions_never_pass_the_workspace_cap(
         async with create_unit_of_work() as uow:
             try:
                 await TraceService(
-                    uow, TracesRepositories.on(uow), SpanContent.disabled(), _no_window
+                    uow, TracesRepositories.on(uow), SpanContent.disabled(), NoSessionOwners(), _no_window
                 ).record_definition(workspace, version, definition_digest(version))
             except GuardrailVersionLimitError:
                 return False
@@ -723,7 +732,9 @@ async def test_two_users_spans_sharing_an_id_in_one_batch_keep_their_own_content
 
 
 def _store_on(config: GatewayConfig, uow: Any) -> TraceService:
-    return TraceService(uow, TracesRepositories.on(uow), SpanContent(build_content_key_port(config)))
+    return TraceService(
+        uow, TracesRepositories.on(uow), SpanContent(build_content_key_port(config)), NoSessionOwners(), _no_window
+    )
 
 
 async def _sealed_of(async_db: AsyncSession, trace_id: str) -> str | None:
