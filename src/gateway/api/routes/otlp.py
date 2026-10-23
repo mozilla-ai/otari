@@ -635,7 +635,9 @@ async def receive_traces(
         # The generation first and the switch after: content captured while the
         # switch is turned off then carries the generation the turning off ends.
         generation = await _content_generation(traces, config, api_key.workspace_id)
-        keeps_content = generation is not None and await workspace_keeps_trace_content(db, config, api_key.workspace_id)
+        keeps_content = generation is not None and await workspace_keeps_trace_content(
+            db, config, api_key.workspace_id, api_key.user_id
+        )
         record_otlp_export(
             writer,
             (_otlp_span(span, scope) for scope, span in received),

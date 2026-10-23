@@ -21,6 +21,7 @@ from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnava
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
+from gateway.models.tenancy import MANAGEMENT_ROLES
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
@@ -61,6 +62,7 @@ from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
     OrgProviderKeyRepository,
+    WorkspaceMemberRepository,
     WorkspaceRepository,
     ids_in_organization,
 )
@@ -141,7 +143,7 @@ from gateway.services.traces import SpanContent, TraceService
 from gateway.services.usage_admin_service import usage_in
 from gateway.services.usage_and_telemetry import UsageService
 from gateway.services.workspace_scope import default_workspace_id
-from gateway.types.traces import ContentReader, TraceScope
+from gateway.types.traces import ContentReader, SessionOwners, TraceScope
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -902,9 +904,9 @@ def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayC
     return FileService(uow, FileRepositories.on(uow), backends, config, reject_unscoped_upload)
 
 
-def build_trace_service(uow: UnitOfWork, content: SpanContent) -> TraceService:
+def build_trace_service(uow: UnitOfWork, content: SpanContent, owners: SessionOwners) -> TraceService:
     """Build the traces operations for a request or a worker job, sealing and opening content with ``content``."""
-    return TraceService(uow, TracesRepositories.on(uow), content)
+    return TraceService(uow, TracesRepositories.on(uow), content, owners)
 
 
 def _file_backends(request: Request) -> FileBackends | None:
@@ -1716,18 +1718,72 @@ HealthCheckServiceDep = Annotated[HealthCheckService, Depends(get_health_check_s
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
 
 
-async def workspace_keeps_trace_content(db: AsyncSession, config: GatewayConfig, workspace_id: uuid.UUID) -> bool:
-    """Whether what a span in this workspace was about is kept: the deployment allows it and the workspace turned it on.
+async def is_workspace_member(db: AsyncSession, workspace_id: uuid.UUID, user_id: str | None) -> bool:
+    """Whether ``user_id`` names a person who currently sees the workspace.
+
+    An active owner or admin of its organization, or an active member of the
+    workspace itself: the people whose own sessions' content they can read. A
+    billing user no dashboard identity stands behind is none of them.
+    """
+    if user_id is None:
+        return False
+    try:
+        person = uuid.UUID(user_id)
+    except ValueError:
+        return False
+    workspace = await WorkspaceRepository(db).get(workspace_id)
+    if workspace is None:
+        return False
+    membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
+        workspace.organization_id, person
+    )
+    if membership is None:
+        return False
+    if membership.role in MANAGEMENT_ROLES:
+        return True
+    member = await WorkspaceMemberRepository(db).get_by_workspace_and_user(workspace_id, person)
+    return member is not None and member.status == "active"
+
+
+class DatabaseSessionOwners:
+    """:class:`SessionOwners` over this deployment's memberships, on the request's session."""
+
+    def __init__(self, db: AsyncSession) -> None:
+        self._db = db
+
+    async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
+        return await is_workspace_member(self._db, workspace_id, user_id)
+
+
+class NoSessionOwners:
+    """:class:`SessionOwners` for work that never opens a share: nobody is anybody's member."""
+
+    async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
+        return False
+
+
+async def workspace_keeps_trace_content(
+    db: AsyncSession, config: GatewayConfig, workspace_id: uuid.UUID, user_id: str | None
+) -> bool:
+    """Whether what a span in this workspace was about is kept for this exporter.
+
+    The deployment allows it, the workspace turned it on, and the key exports for a
+    current member of the workspace: content nobody could ever read is not kept, so
+    a key with no user, or one for a billing user no person stands behind, keeps none.
 
     Read fresh, not cached, so a workspace that turns it off keeps nothing from its next export on.
-    Fails closed: where the workspace cannot be read, nothing is kept. The transaction the read
-    opens is ended at once, so no connection idles while the export's spans are handed on.
+    Fails closed: where any of it cannot be read, nothing is kept. The transaction the reads
+    open is ended at once, so no connection idles while the export's spans are handed on.
     """
     if not config.trace_content_enabled:
         return False
     try:
         workspace = await WorkspaceRepository(db).get(workspace_id)
-        keeps = workspace is not None and workspace.trace_content_enabled
+        keeps = (
+            workspace is not None
+            and workspace.trace_content_enabled
+            and await is_workspace_member(db, workspace_id, user_id)
+        )
         await release_session(db)
     except DATABASE_ERRORS as exc:
         logger.warning("Could not read whether a workspace keeps trace content (%s)", describe_database_error(exc))
@@ -1735,10 +1791,12 @@ async def workspace_keeps_trace_content(db: AsyncSession, config: GatewayConfig,
     return keeps
 
 
-def get_trace_service(uow: UnitOfWorkDep, request: Request) -> TraceService:
+def get_trace_service(
+    uow: UnitOfWorkDep, request: Request, db: Annotated[AsyncSession, Depends(get_db)]
+) -> TraceService:
     """Build the request's traces service on the request's Unit of Work, with the process's content keys."""
     content: SpanContent = getattr(request.app.state, "trace_content", None) or SpanContent.disabled()
-    return build_trace_service(uow, content)
+    return build_trace_service(uow, content, DatabaseSessionOwners(db))
 
 
 TraceServiceDep = Annotated[TraceService, Depends(get_trace_service)]
@@ -1783,17 +1841,14 @@ async def get_organization_trace_scope(visible: VisibleWorkspacesDep, identity: 
     """The workspaces of their active organization this caller may read traces in.
 
     Each reads their own sessions' content. An owner or admin also reads what a
-    session's user shared with the organization's admins, and the sessions no
-    user owns.
+    session's user shared with the organization's admins.
     """
-    manager = visible.whole_organization
     return TraceScope.workspaces(
         visible.workspace_ids,
         reader=ContentReader(
             user_id=identity.id,
             email=identity.email or str(identity.id),
-            audience="organization_admins" if manager else None,
-            reads_ownerless=manager,
+            audience="organization_admins" if visible.whole_organization else None,
         ),
     )
 

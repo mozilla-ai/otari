@@ -601,7 +601,22 @@ def test_a_sessions_content_opens_for_its_own_user_and_is_private_to_everyone_el
         assert request["content_private"] is False
 
 
-def test_a_session_no_user_owns_opens_for_the_organizations_admins_only(
+def test_a_session_no_member_owns_opens_for_nobody(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Content kept before the rule, on a session no person owns, opens for no admin and no operator."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+
+    assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
+    assert _tool_call(_detail(client, world["member"]))["content_private"] is True
+    assert _tool_call(_operator_get(client, world, "/traces/s-one").json())["content_private"] is True
+
+
+def test_a_share_ends_for_good_once_its_owner_leaves_the_workspace(
     client: TestClient,
     world: dict[str, str],
     db_session_factory: Callable[[], Session],
@@ -609,10 +624,32 @@ def test_a_session_no_user_owns_opens_for_the_organizations_admins_only(
 ) -> None:
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     _seal_tool_call(db_session_factory)
-
+    _give_s_one_to(db_session_factory, "m@a.test")
+    share = _as(
+        client,
+        world["member"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "organization_admins"},
+    ).json()
     assert _tool_call(_detail(client, world["admin"]))["content"] == {"command": "pytest -x"}
-    assert _tool_call(_detail(client, world["member"]))["content_private"] is True
-    assert _tool_call(_operator_get(client, world, "/traces/s-one").json())["content_private"] is True
+
+    with db_session_factory() as session:
+        member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+        for row in session.scalars(select(WorkspaceMember).where(col(WorkspaceMember.user_id) == member.id)):
+            session.delete(row)
+        session.commit()
+
+    assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
+    with db_session_factory() as session:
+        stored = session.get(TraceContentShare, uuid.UUID(share["id"]))
+        assert stored is not None and stored.revoked_at is not None
+        member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+        workspace_id = session.scalars(select(Workspace.id).where(col(Workspace.name) == "One")).one()
+        session.add(WorkspaceMember(workspace_id=workspace_id, user_id=member.id, role="member", status="active"))
+        session.commit()
+    # Back in the workspace, the ended share stays ended.
+    assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
 
 
 def test_a_share_lets_its_audience_read_until_its_owner_ends_it_and_records_each_read(

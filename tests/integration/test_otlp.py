@@ -25,7 +25,8 @@ from sqlalchemy.orm import Session
 from gateway.api.routes import otlp as otlp_routes
 from gateway.core.config import API_ROOT
 from gateway.models.api_keys import APIKey
-from gateway.models.tenancy import Workspace
+from gateway.models.tenancy import OrganizationMember, Workspace
+from gateway.models.tenancy import User as TenancyUser
 from gateway.models.traces import TraceSpan
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
@@ -699,39 +700,57 @@ def test_otlp_spans_are_recorded_only_once_the_exports_usage_is_taken(
     assert writer.writes == []
 
 
-def test_otlp_keeps_content_only_where_the_deployment_and_the_workspace_both_allow_it(
+def test_otlp_keeps_content_only_for_a_member_where_the_deployment_and_the_workspace_allow_it(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    headers = _exempt_key(client, master_key_header)
     _install_writer(client, monkeypatch)
     kept: list[bool] = []
     monkeypatch.setattr(
         otlp_routes, "record_otlp_export", lambda *args, **kwargs: kept.append(kwargs["content_enabled"])
     )
     config = cast(FastAPI, client.app).state.config
+    # A billing user no person stands behind, as /api/v1/keys mints one.
+    billing = _exempt_key(client, master_key_header)
+    with db_session_factory() as session:
+        key = session.scalars(select(APIKey).where(APIKey.key_name == "cc-otlp")).one()
+        workspace = session.get(Workspace, key.workspace_id)
+        person = TenancyUser(
+            email="dev@example.test", full_name="Dev", active_organization_id=workspace.organization_id
+        )
+        session.add(person)
+        session.flush()
+        session.add(
+            OrganizationMember(
+                organization_id=workspace.organization_id, user_id=person.id, role="admin", status="active"
+            )
+        )
+        session.commit()
+        person_id = str(person.id)
+    member = _exempt_key(client, master_key_header, user_id=person_id)
 
-    def export() -> bool:
+    def export(headers: dict[str, str]) -> bool:
         resp = client.post("/otlp/v1/traces", json=_otlp_traces(_agent_span("1" * 32, "2" * 16)), headers=headers)
         assert resp.status_code == 200, resp.text
         return kept[-1]
 
     def workspace_keeps(value: bool) -> None:
         with db_session_factory() as session:
-            key = session.scalars(select(APIKey).where(APIKey.key_name == "cc-otlp")).one()
-            workspace = session.get(Workspace, key.workspace_id)
-            workspace.trace_content_enabled = value
+            key = session.scalars(select(APIKey).where(APIKey.key_name == "cc-otlp")).first()
+            session.get(Workspace, key.workspace_id).trace_content_enabled = value
             session.commit()
 
-    assert export() is False
+    assert export(member) is False
     monkeypatch.setattr(config, "trace_content_enabled", True)
-    assert export() is False
+    assert export(member) is False
     workspace_keeps(True)
-    assert export() is True
+    assert export(member) is True
+    # Content nobody could read is not kept: a key for no person keeps none.
+    assert export(billing) is False
     monkeypatch.setattr(config, "trace_content_enabled", False)
-    assert export() is False
+    assert export(member) is False
     monkeypatch.setattr(config, "trace_content_enabled", True)
     workspace_keeps(False)
-    assert export() is False
+    assert export(member) is False
 
 
 def test_otlp_json_hex_ids_are_read_as_the_spec_encodes_them(
