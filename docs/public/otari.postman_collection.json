@@ -7803,6 +7803,140 @@
               ]
             }
           }
+        },
+        {
+          "name": "List Trace Content Shares",
+          "request": {
+            "description": "Every share one of your sessions has had, newest first, with each read made through it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                ":trace_id",
+                "shares"
+              ],
+              "query": [
+                {
+                  "description": "The workspace the trace is in, as its list entry names it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id/shares?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Share Trace Content",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"audience\": \"organization_admins\"\n}"
+            },
+            "description": "Let the organization's admins, or the deployment's operator, read what one of your sessions was about.\n\nA session's content is private to its own user. A share lets its audience read\nit until it expires or you end it, and each read through it is recorded for you.\nOnly the session's own user can share it.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                ":trace_id",
+                "shares"
+              ],
+              "query": [
+                {
+                  "description": "The workspace the trace is in, as its list entry names it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id/shares?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "End Trace Content Share",
+          "request": {
+            "description": "Stop a share letting its audience read what your session was about.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                ":trace_id",
+                "shares",
+                ":share_id"
+              ],
+              "query": [
+                {
+                  "description": "The workspace the trace is in, as its list entry names it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id/shares/:share_id?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "share_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
         }
       ],
       "name": "organization-traces"

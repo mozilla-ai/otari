@@ -291,4 +291,6 @@ def trace_view(detail: TraceDetail, *, now: datetime) -> TraceView:
         truncated=detail.truncated,
         gates=_gate_summaries(spans, detail.definitions),
         tool_costs=costs,
+        content_access=detail.content_access,
+        content_share=detail.content_share,
     )

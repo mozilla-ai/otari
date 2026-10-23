@@ -1,14 +1,26 @@
 """Response models for the trace read API, and their mapping from the traces service's views."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gateway.models.money import as_float
 from gateway.types.trace_views import TraceView, TurnView
-from gateway.types.traces import SpanRecord, TraceBucket, TraceBucketGrain, TracePage, TraceSummary
+from gateway.types.traces import (
+    SHARE_DEFAULT_DAYS,
+    SHARE_MAX_DAYS,
+    SHARE_NOTE_MAX_LENGTH,
+    ContentAccess,
+    ContentShare,
+    ShareAudience,
+    SpanRecord,
+    TraceBucket,
+    TraceBucketGrain,
+    TracePage,
+    TraceSummary,
+)
 from otari_agent.domain.definitions import DIGEST_LENGTH, MAX_DEFINITION_GATES, MAX_GATE_MESSAGE_LENGTH, MAX_GATE_RUNS
 from otari_agent.domain.policy import MAX_GATE_ID_LENGTH
 from otari_agent.domain.types import GateType, RunsAt
@@ -104,8 +116,15 @@ class SpanPublic(BaseModel):
     content: dict[str, str] = Field(
         description=(
             "What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the "
-            "deployment keeps content and the agent sent it. Empty otherwise."
+            "workspace keeps content, the agent sent it, and the reader may open it. Empty otherwise."
         )
+    )
+    content_private: bool = Field(
+        default=False,
+        description=(
+            "The span holds content this reader may not open: it is private to the session's own user, unless "
+            "they share the session."
+        ),
     )
 
 
@@ -163,6 +182,43 @@ class ToolCostPublic(BaseModel):
     subagent: float | None = Field(description="What a subagent the call ran cost, exactly.")
 
 
+class ContentReadPublic(BaseModel):
+    """One read of a session's content through a share."""
+
+    reader_user_id: uuid.UUID | None = Field(description="Who read it; null once that account is gone.")
+    reader_email: str = Field(description="Their email address when they read it.")
+    read_at: datetime
+
+
+class ContentSharePublic(BaseModel):
+    """A session's owner letting an audience read what it was about."""
+
+    id: uuid.UUID
+    audience: ShareAudience = Field(
+        description="Who may read: the organization's owners and admins, or the deployment's operator."
+    )
+    note: str | None = Field(description="Why it was shared, in its owner's words.")
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+    active: bool = Field(description="Whether it still lets its audience read.")
+    reads: list[ContentReadPublic] = Field(
+        default_factory=list, description="Each read made through it, newest first. Only its owner sees them."
+    )
+
+
+class ContentShareListPublic(BaseModel):
+    items: list[ContentSharePublic]
+
+
+class ContentShareCreate(BaseModel):
+    """Let an audience read what one of your sessions was about."""
+
+    audience: ShareAudience
+    note: str | None = Field(default=None, max_length=SHARE_NOTE_MAX_LENGTH)
+    days: int = Field(default=SHARE_DEFAULT_DAYS, ge=1, le=SHARE_MAX_DAYS, description="How long the share lasts.")
+
+
 class TraceDetailPublic(BaseModel):
     summary: TraceSummaryPublic
     state: Literal["active", "idle"]
@@ -174,6 +230,16 @@ class TraceDetailPublic(BaseModel):
     )
     tool_costs: list[ToolCostPublic] = Field(
         description="An estimate for each tool call between two priced model requests, in the order they were made.",
+    )
+    content_access: ContentAccess = Field(
+        default="none",
+        description=(
+            "How this read reached the session's content: 'owner' for its own user, 'share' through a share its "
+            "user made, 'none' otherwise."
+        ),
+    )
+    content_share: ContentSharePublic | None = Field(
+        default=None, description="The share the content was read through, with its note. Its reads are not listed."
     )
 
 
@@ -240,6 +306,7 @@ def _span_public(span: SpanRecord, approximate: frozenset[str]) -> SpanPublic:
         otel_span_id=span.otel_span_id,
         attributes=dict(span.attributes),
         content=dict(span.content),
+        content_private=span.content_private,
     )
 
 
@@ -258,6 +325,22 @@ def _turn_public(turn: TurnView) -> TurnPublic:
         output_tokens=turn.output_tokens,
         cache_read_tokens=turn.cache_read_tokens,
         cost=as_float(turn.cost) or 0.0,
+    )
+
+
+def share_public(share: ContentShare, *, now: datetime | None = None) -> ContentSharePublic:
+    return ContentSharePublic(
+        id=share.id,
+        audience=share.audience,
+        note=share.note,
+        created_at=share.created_at,
+        expires_at=share.expires_at,
+        revoked_at=share.revoked_at,
+        active=share.active(now or datetime.now(UTC)),
+        reads=[
+            ContentReadPublic(reader_user_id=read.reader_user_id, reader_email=read.reader_email, read_at=read.read_at)
+            for read in share.reads
+        ],
     )
 
 
@@ -300,6 +383,8 @@ def detail_public(view: TraceView) -> TraceDetailPublic:
             )
             for cost in view.tool_costs
         ],
+        content_access=view.content_access,
+        content_share=share_public(view.content_share) if view.content_share is not None else None,
     )
 
 
