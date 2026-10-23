@@ -70,7 +70,9 @@ export function SandboxCredentialRow({
             <Button
               variant="ghost"
               aria-label="Clear the stored sandbox key"
-              isDisabled={isBusy}
+              // Disabled while a key is typed: pressing Clear blurs the field,
+              // which saves that key, and the two writes would race.
+              isDisabled={isBusy || apiKey !== ""}
               onPress={() => void save.run(() => clear.mutateAsync(undefined))}
             >
               Clear

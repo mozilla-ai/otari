@@ -14,6 +14,7 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.exceptions.tools_exceptions import SandboxCredentialRefusedError
@@ -49,6 +50,9 @@ class SandboxCredentialStatus:
 
 
 _stored: dict[SandboxProvider, _StoredKey] = {}
+# Bumped by every write this worker makes, so a refresh that read the table
+# before the write does not publish its older answer over it.
+_writes = 0
 
 
 def _env_key(provider: SandboxProvider) -> str | None:
@@ -73,6 +77,16 @@ def sandbox_credential_status(provider: SandboxProvider) -> SandboxCredentialSta
     return SandboxCredentialStatus(source=None)
 
 
+def _publish_write(provider: SandboxProvider, stored: _StoredKey | None) -> None:
+    global _stored, _writes  # noqa: PLW0603
+
+    updated = {key: value for key, value in _stored.items() if key != provider}
+    if stored is not None:
+        updated[provider] = stored
+    _stored = updated
+    _writes += 1
+
+
 def _hosted(provider: SandboxProvider) -> None:
     if provider not in SANDBOX_KEY_ENV:
         raise SandboxCredentialRefusedError(
@@ -93,7 +107,7 @@ async def store_sandbox_api_key(uow: UnitOfWork, provider: SandboxProvider, api_
         raise SecretBoxUnavailableTenancyError("sandbox credentials") from None
     async with uow:
         await SandboxCredentialRepository(uow).put(provider.value, encrypted_api_key=ciphertext, last4=api_key[-4:])
-    _stored[provider] = _StoredKey(api_key=api_key, last4=api_key[-4:])
+    _publish_write(provider, _StoredKey(api_key=api_key, last4=api_key[-4:]))
     logger.info("Sandbox credential for %s stored via dashboard", provider.value)
     return sandbox_credential_status(provider)
 
@@ -103,7 +117,7 @@ async def clear_sandbox_api_key(uow: UnitOfWork, provider: SandboxProvider) -> S
     _hosted(provider)
     async with uow:
         removed = await SandboxCredentialRepository(uow).remove(provider.value)
-    _stored.pop(provider, None)
+    _publish_write(provider, None)
     if removed:
         logger.info("Sandbox credential for %s cleared via dashboard", provider.value)
     return sandbox_credential_status(provider)
@@ -117,6 +131,7 @@ async def refresh_sandbox_credential_cache(uow: UnitOfWork) -> None:
     """
     global _stored  # noqa: PLW0603
 
+    writes_before = _writes
     loaded: dict[SandboxProvider, _StoredKey] = {}
     async with uow:
         repository = SandboxCredentialRepository(uow)
@@ -131,7 +146,8 @@ async def refresh_sandbox_credential_cache(uow: UnitOfWork) -> None:
                     "Ignoring the stored %s sandbox credential: it could not be decrypted (check OTARI_SECRET_KEY).",
                     provider.value,
                 )
-    _stored = loaded
+    if _writes == writes_before:
+        _stored = loaded
 
 
 def reset_sandbox_credential_cache() -> None:
@@ -154,8 +170,15 @@ async def load_sandbox_credentials_at_startup(provider: SandboxProvider) -> None
     reset_sandbox_credential_cache()
     try:
         await _refresh_on_a_session_of_its_own()
-    except Exception:
-        logger.exception("Failed to load stored sandbox credentials; continuing with the environment's")
+    except DATABASE_ERRORS as exc:
+        logger.error(
+            "Failed to load stored sandbox credentials; continuing with the environment's: %s",
+            describe_database_error(exc),
+        )
+    except Exception as exc:  # noqa: BLE001 - the environment's key still serves
+        logger.error(
+            "Failed to load stored sandbox credentials; continuing with the environment's: %s", type(exc).__name__
+        )
     if provider in SANDBOX_KEY_ENV and sandbox_api_key(provider) is None:
         logger.error(
             "sandbox_provider '%s' has no key: code execution fails until one is set on the Tools settings page "
@@ -173,5 +196,9 @@ async def run_sandbox_credential_refresher(interval: float = SANDBOX_CREDENTIAL_
             await _refresh_on_a_session_of_its_own()
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.warning("Sandbox credential refresh failed; retrying in %ss", interval, exc_info=True)
+        except DATABASE_ERRORS as exc:
+            logger.warning(
+                "Sandbox credential refresh failed; retrying in %ss: %s", interval, describe_database_error(exc)
+            )
+        except Exception as exc:  # noqa: BLE001 - retried next tick
+            logger.warning("Sandbox credential refresh failed; retrying in %ss: %s", interval, type(exc).__name__)

@@ -99,4 +99,18 @@ describe("SandboxCredentialRow", () => {
       await screen.findByText(/OTARI_SECRET_KEY is not set/),
     ).toBeInTheDocument()
   })
+
+  it("disables Clear while a key is typed, so it cannot race that key's save", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      jsonResponse({ source: "stored", last4: "dddd", env_var: "E2B_API_KEY" }),
+    )
+    const user = userEvent.setup()
+    renderRow({ source: "stored", last4: "cccc", env_var: "E2B_API_KEY" })
+
+    await user.type(screen.getByLabelText("API key"), "e2b_typed_dddd")
+
+    expect(
+      screen.getByRole("button", { name: "Clear the stored sandbox key" }),
+    ).toBeDisabled()
+  })
 })
