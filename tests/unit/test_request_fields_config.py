@@ -19,6 +19,14 @@ def test_a_listed_field_goes_in_extra_body() -> None:
     assert fields == {"temperature": 0.2, "extra_body": {"text": True}}
 
 
+def test_an_extra_body_the_fields_already_carry_is_kept() -> None:
+    config = _config(request_fields=["text"])
+
+    fields = with_request_fields(config, "exa", {"extra_body": {"labels": "x"}}, {"text": True})
+
+    assert fields == {"extra_body": {"text": True, "labels": "x"}}
+
+
 def test_nothing_listed_or_sent_leaves_the_fields_alone() -> None:
     fields = {"temperature": 0.2}
 
