@@ -10089,6 +10089,16 @@ export interface components {
              * @description Whether this deployment lets a workspace keep what its agent sessions were about. A workspace keeps it only once its managers turn it on as well.
              */
             trace_content_available: boolean;
+            /**
+             * Trace Retention Days
+             * @description Days after its last activity that a session, with what it was about, its shares and their reads, is deleted.
+             */
+            trace_retention_days: number;
+            /**
+             * Trace Session Max Age Days
+             * @description Days after it started that a session is deleted, however active it still is.
+             */
+            trace_session_max_age_days: number;
         };
         /**
          * DeploymentProviderMigrationPublic

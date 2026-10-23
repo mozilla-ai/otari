@@ -218,6 +218,15 @@ class DeploymentBootstrap(BaseModel):
             "keeps it only once its managers turn it on as well."
         )
     )
+    trace_retention_days: int = Field(
+        description=(
+            "Days after its last activity that a session, with what it was about, its shares and their reads, is "
+            "deleted."
+        )
+    )
+    trace_session_max_age_days: int = Field(
+        description="Days after it started that a session is deleted, however active it still is."
+    )
     mail_ready: bool = Field(
         description=(
             "Whether this deployment can deliver a message carrying a link back to itself "
@@ -264,6 +273,8 @@ async def get_bootstrap(
         federation_member_rules=config.federation_member_rules,
         mail_ready=config.mail_ready,
         trace_content_available=config.trace_capture_enabled and config.trace_content_enabled,
+        trace_retention_days=config.trace_retention_days,
+        trace_session_max_age_days=config.trace_session_max_age_days,
         # Gated on mail as well as on the setting, and not only because the
         # route refuses without it: an operator who turned open signup on and
         # has no transport would otherwise get a page inviting registrations
