@@ -53,6 +53,7 @@ from gateway.exceptions import TenancyError
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
+from gateway.ports.content_key_port import ContentKeyPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
@@ -149,7 +150,7 @@ from gateway.services.tools import (
     run_sandbox_credential_refresher,
     warn_about_tool_instances,
 )
-from gateway.services.traces import RequestTraces, TraceWriter, stored_by
+from gateway.services.traces import RequestTraces, SpanContent, TraceWriter, stored_by
 from gateway.services.workspace_scope import default_workspace_id
 from gateway.version import __version__
 
@@ -275,6 +276,22 @@ def _resolve_file_store(config: GatewayConfig, container: Container) -> FileStor
         return None
 
 
+def _resolve_trace_content(config: GatewayConfig, container: Container) -> SpanContent:
+    """The keys trace content is sealed and opened with, built once for every request and the writer.
+
+    Keys that cannot be built stop the boot while content is kept, because none
+    would be. With content off the deployment starts and says so, since a
+    stored span's content then only reads back empty.
+    """
+    try:
+        return SpanContent(container.resolve(ContentKeyPort, None))
+    except (ValueError, ImportError) as exc:
+        if config.trace_content_enabled:
+            raise
+        logger.warning("Trace content keys cannot be built, so stored trace content will read back empty: %s", exc)
+        return SpanContent.disabled()
+
+
 def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutine[Any, Any, None] | None:
     """Return the file retention sweep, or None when files or the interval disable it.
 
@@ -301,10 +318,10 @@ def _records_traces(enabled_features: tuple[CoreFeature, ...]) -> bool:
     return any(feature.name == "traces" for feature in enabled_features)
 
 
-def _build_trace_writer(config: GatewayConfig) -> TraceWriter:
-    """The writer every request's trace is handed to."""
+def _build_trace_writer(config: GatewayConfig, content: SpanContent) -> TraceWriter:
+    """The writer every request's trace is handed to, sealing what it keeps with ``content``."""
     return TraceWriter(
-        stored_by(build_trace_service),
+        stored_by(lambda uow: build_trace_service(uow, content)),
         max_queued_spans=config.trace_queue_max_spans,
         batch_spans=config.trace_flush_max_spans,
         interval_s=config.trace_flush_interval_s,
@@ -927,6 +944,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # The retention sweep below resolves this same port, so both it and
         # the request path use whatever store this build bound.
         app.state.file_store = _resolve_file_store(config, container)
+        app.state.trace_content = _resolve_trace_content(config, container)
         app.state.provider_files = container.resolve(ProviderFilePort, None)
         workers = _start_lifespan_workers(config, container)
         # Workers of the enabled features. Same supervisor as the registry
@@ -957,7 +975,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             if request_traces is not None:
                 # Each usage row a request settles also becomes an LLM span on its trace.
                 log_writer = TracingLogWriter(log_writer, request_traces)
-                trace_writer = _build_trace_writer(config)
+                trace_writer = _build_trace_writer(config, app.state.trace_content)
             await log_writer.start()
             log_writer_started = True
             app.state.log_writer = log_writer
@@ -1100,7 +1118,11 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()
-    if config.trace_content_enabled and not secret_box_configured():
+    if (
+        config.trace_content_enabled
+        and config.trace_content_key_backend == "secret_key"
+        and not secret_box_configured()
+    ):
         logger.warning("OTARI_TRACE_CONTENT_ENABLED is on but OTARI_SECRET_KEY is not set, so no trace content is kept")
     set_config(config)
     # The search and fetch libraries leave their log filters to the host, so a

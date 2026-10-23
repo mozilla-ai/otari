@@ -40,7 +40,6 @@ from decimal import Decimal
 from typing import Any
 
 from gateway.log_config import logger
-from gateway.services.secret_box import secret_box_configured
 from gateway.services.traces._collector import call_id_digest, identifier_or_none
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._writer import SPANS_DROPPED, TraceWriter
@@ -668,7 +667,7 @@ def record_otlp_export(
     Only a key that may import is traced (``budget_exempt``), the rule the usage
     import holds it to, whatever the export carries: an export of agent spans
     alone never reaches that import's own check. What a span was about is kept
-    only where the deployment enabled it and can store it encrypted.
+    only where ``content_enabled``, and the writer drops it where no key seals it.
     """
     if not budget_exempt:
         return
@@ -680,7 +679,7 @@ def record_otlp_export(
             user_id=user_id,
             api_key_id=api_key_id,
             retention=retention,
-            keep_content=content_enabled and secret_box_configured(),
+            keep_content=content_enabled,
         )
         truncated = max(0, total - len(kept))
         for index, write in enumerate(projection.writes):

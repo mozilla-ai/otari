@@ -47,6 +47,8 @@ _EXPOSED_FAMILIES: set[tuple[str, str, tuple[str, ...]]] = {
     ("gateway_tokens", "counter", ("provider", "model", "type")),
     ("gateway_trace_queue_spans", "gauge", ()),
     ("gateway_trace_spans_dropped", "counter", ("reason",)),
+    ("gateway_trace_content_unsealed", "counter", ("reason",)),
+    ("gateway_trace_content_unopened", "counter", ("reason",)),
     ("gateway_trace_spans_written", "counter", ("result",)),
     ("gateway_upstream_attempts", "counter", ("provider", "model", "outcome", "status_code", "fallback")),
     ("gateway_usage_log_batch_size", "histogram", ("writer",)),
