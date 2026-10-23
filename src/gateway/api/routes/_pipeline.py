@@ -2617,8 +2617,9 @@ async def resolve_request_context(
     is not gated or refundable).
 
     ``safety_identifier`` is the caller's tag for the end user, which wins over
-    ``user_id_from_request`` as the subject of the provider's end-user
-    identifier. Unlike ``user``, it names nobody billed, so nothing checks it.
+    ``user_id_from_request`` as the tag in the provider's end-user identifier.
+    Unlike ``user``, it names nobody billed, so nothing checks it: a tag only
+    subdivides the resolved user's identifier.
     """
     # Earliest point in the shared handler preamble; anchors the request's
     # latency_ms (measured monotonically, so it is immune to wall-clock steps).

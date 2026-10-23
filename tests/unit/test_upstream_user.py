@@ -109,6 +109,12 @@ def test_without_a_key_the_identifier_is_an_unkeyed_digest() -> None:
     assert upstream_user_identifier("ws", "alice", None) == hashlib.sha256(payload).hexdigest()
 
 
+def test_a_tag_is_digested_after_its_user() -> None:
+    payload = json.dumps(["otari-upstream-user-v1", "ws", "alice", "end-user-7"], separators=(",", ":")).encode()
+
+    assert upstream_user_identifier("ws", "alice", None, tag="end-user-7") == hashlib.sha256(payload).hexdigest()
+
+
 def test_the_identifier_is_stable_and_never_the_raw_value() -> None:
     identifier = upstream_user_identifier("ws", "alice@example.com", _KEY)
 
@@ -317,9 +323,20 @@ def _identifier(**overrides: Any) -> str:
     return end_user_identifier(**{**inputs, **overrides})
 
 
-def test_the_tag_wins_over_the_resolved_user() -> None:
-    assert _identifier(tag="end-user-7") == upstream_user_identifier("ws", "end-user-7", None)
+def test_a_tag_subdivides_the_resolved_users_identifier() -> None:
+    assert _identifier(tag="end-user-7") == upstream_user_identifier("ws", "alice", None, tag="end-user-7")
+    assert _identifier(tag="end-user-7") != _identifier(tag="end-user-8")
     assert _identifier() == upstream_user_identifier("ws", "alice", None)
+
+
+def test_no_tag_gives_one_user_anothers_identifier() -> None:
+    """A caller who tags with another user's id gets an identifier of their own, not that user's."""
+    assert _identifier(tag="bob") != _identifier(user_id="bob")
+    assert _identifier(tag="bob") != _identifier(user_id="bob", tag="bob")
+
+
+def test_tagging_with_your_own_user_is_no_tag() -> None:
+    assert _identifier(tag="alice") == _identifier()
 
 
 def test_a_session_s_tag_is_ignored() -> None:

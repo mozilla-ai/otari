@@ -131,13 +131,13 @@ def test_azure_openai_gets_a_safety_identifier(make_client: ClientFactory, captu
     assert "user" not in captured[0]
 
 
-def test_a_user_tag_replaces_the_resolved_user(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
+def test_a_user_tag_subdivides_the_resolved_user(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
     client = make_client(reject_user_mismatch=False)
     headers, workspace = _keyed_user(client)
 
     _chat(client, headers, user="end-user-7")
 
-    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "end-user-7", None)
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None, tag="end-user-7")
 
 
 def test_a_safety_identifier_is_the_tag(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
@@ -147,8 +147,8 @@ def test_a_safety_identifier_is_the_tag(make_client: ClientFactory, captured: li
     _chat(client, headers, safety_identifier="a")
     _chat(client, headers, safety_identifier="b")
 
-    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "a", None)
-    assert captured[1]["safety_identifier"] == upstream_user_identifier(workspace, "b", None)
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None, tag="a")
+    assert captured[1]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None, tag="b")
 
 
 def test_a_safety_identifier_wins_over_user(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
@@ -157,7 +157,23 @@ def test_a_safety_identifier_wins_over_user(make_client: ClientFactory, captured
 
     _chat(client, headers, user="alice", safety_identifier="end-user-7")
 
-    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "end-user-7", None)
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None, tag="end-user-7")
+
+
+def test_a_tag_naming_another_user_never_gives_their_identifier(
+    make_client: ClientFactory, captured: list[dict[str, Any]]
+) -> None:
+    client = make_client()
+    alice, workspace = _keyed_user(client)
+    bob, bobs_workspace = _keyed_user(client, "bob")
+
+    _chat(client, bob)
+    _chat(client, alice, safety_identifier="bob")
+
+    assert workspace == bobs_workspace
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "bob", None)
+    assert captured[1]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None, tag="bob")
+    assert captured[1]["safety_identifier"] != captured[0]["safety_identifier"]
 
 
 def test_the_callers_safety_identifier_never_reaches_the_provider(
@@ -168,7 +184,7 @@ def test_the_callers_safety_identifier_never_reaches_the_provider(
 
     _chat(client, headers, model="anthropic:claude-sonnet-4-5", safety_identifier="end-user-7")
 
-    assert captured[0]["metadata"] == {"user_id": upstream_user_identifier(workspace, "end-user-7", None)}
+    assert captured[0]["metadata"] == {"user_id": upstream_user_identifier(workspace, "alice", None, tag="end-user-7")}
     assert "safety_identifier" not in captured[0]
 
 
@@ -305,7 +321,7 @@ def test_the_image_describe_call_carries_the_requests_identifier(
     )
 
     assert len(captured) == 1
-    identifier = upstream_user_identifier(workspace, "end-user-7", None)
+    identifier = upstream_user_identifier(workspace, "alice", None, tag="end-user-7")
     end_user_fields = {"user", "safety_identifier", "metadata", UPSTREAM_USER_FIELD}
     assert {key: value for key, value in described[0].items() if key in end_user_fields} == fields(identifier)
 
@@ -364,7 +380,9 @@ def test_the_usage_row_stores_the_identifier_the_provider_got(
 
     _chat(client, headers, safety_identifier="end-user-7", stream=stream)
 
-    assert _logged_identifiers(postgres_url, 1) == [upstream_user_identifier(workspace, "end-user-7", None)]
+    assert _logged_identifiers(postgres_url, 1) == [
+        upstream_user_identifier(workspace, "alice", None, tag="end-user-7")
+    ]
 
 
 @pytest.mark.usefixtures("captured")
@@ -390,7 +408,9 @@ def test_a_refusal_after_the_user_is_resolved_stores_the_identifier(
 
     _chat(client, headers, safety_identifier="end-user-7")
 
-    assert _logged_identifiers(postgres_url, 1) == [upstream_user_identifier(workspace, "end-user-7", None)]
+    assert _logged_identifiers(postgres_url, 1) == [
+        upstream_user_identifier(workspace, "alice", None, tag="end-user-7")
+    ]
 
 
 @pytest.mark.usefixtures("served")
@@ -412,7 +432,7 @@ def test_the_image_describe_row_stores_the_requests_identifier(
         messages=[{"role": "user", "content": [{"type": "image_url", "image_url": {"url": _IMAGE}}]}],
     )
 
-    identifier = upstream_user_identifier(workspace, "end-user-7", None)
+    identifier = upstream_user_identifier(workspace, "alice", None, tag="end-user-7")
     assert _logged_identifiers(postgres_url, 2) == [identifier, identifier]
 
 
@@ -460,8 +480,8 @@ def test_responses_digests_the_callers_safety_identifier(
     _respond(client, headers, user="alice", safety_identifier="a")
     _respond(client, headers, user="alice", safety_identifier="b")
 
-    assert responses_captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "a", None)
-    assert responses_captured[1]["safety_identifier"] == upstream_user_identifier(workspace, "b", None)
+    assert responses_captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None, tag="a")
+    assert responses_captured[1]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None, tag="b")
 
 
 def test_responses_to_anthropic_sends_metadata_user_id_and_never_user(
@@ -515,7 +535,9 @@ def test_messages_replaces_the_callers_user_id_with_the_identifier(
 
     _message(client, headers, metadata={"user_id": "end-user-7"})
 
-    assert messages_captured[0]["metadata"] == {"user_id": upstream_user_identifier(workspace, "end-user-7", None)}
+    assert messages_captured[0]["metadata"] == {
+        "user_id": upstream_user_identifier(workspace, "alice", None, tag="end-user-7")
+    }
     assert UPSTREAM_USER_FIELD not in messages_captured[0]
 
 
