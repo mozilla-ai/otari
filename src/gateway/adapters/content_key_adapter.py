@@ -114,7 +114,13 @@ class AwsKmsContentKeys(DataKeySource):
                 raise ImportError(msg) from exc
             # Tight timeouts and few retries: a KMS outage drops content, and must
             # not hold the trace writer's batch past its own time limit.
-            config = Config(connect_timeout=1, read_timeout=1, retries={"max_attempts": 2, "mode": "standard"})
+            # Enough connections for a batch fetching many sessions' keys at once.
+            config = Config(
+                connect_timeout=1,
+                read_timeout=1,
+                retries={"max_attempts": 2, "mode": "standard"},
+                max_pool_connections=32,
+            )
             client = boto3.client("kms", region_name=region, endpoint_url=endpoint_url, config=config)
         self._client = client
         self._key_id = key_id

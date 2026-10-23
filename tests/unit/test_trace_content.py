@@ -38,7 +38,7 @@ _OTHER_WORKSPACE = uuid.UUID("00000000-0000-0000-0000-000000000002")
 _CONTENT = {"command": "cat ~/.aws/credentials"}
 _REGION = "us-east-1"
 _TRACE = "session-1"
-_CONTEXT = {"otari:purpose": "trace-content", "otari:workspace": str(_WORKSPACE)}
+_CONTEXT = {"otari:purpose": "trace-content", "otari:workspace": str(_WORKSPACE), "otari:session": _TRACE}
 
 
 @pytest.fixture
@@ -624,3 +624,25 @@ async def test_an_alias_pointed_at_a_new_key_is_followed_without_a_restart(
     now[0] += content_key_adapter._ALLOWED_KEYS_TTL_S
 
     assert await SpanContent(keyring).open(resealed, workspace_id=other, trace_id=_TRACE, span_id="tool-1") == _CONTENT
+
+
+async def test_kms_opens_a_sessions_data_key_for_that_session_alone(kms: Any) -> None:
+    sealed = await SpanContent(_kms_keyring(kms, _new_kms_key(kms))).seal(
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
+    )
+
+    with pytest.raises(ClientError) as refused:
+        kms.decrypt(CiphertextBlob=_wrapped(sealed), EncryptionContext={**_CONTEXT, "otari:session": "session-2"})
+
+    assert refused.value.response["Error"]["Code"] == "InvalidCiphertextException"
+
+
+async def test_each_session_gets_a_data_key_of_its_own(key: str) -> None:
+    keys = _CountingKeys()
+    content = SpanContent(keys)
+
+    for session in ("session-1", "session-2", "session-3"):
+        for n in range(10):
+            await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=session, span_id=f"tool-{n}")
+
+    assert keys.made == 3
