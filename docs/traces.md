@@ -339,9 +339,9 @@ which cover the operator's own organization. On a deployment where the operator
 supports other organizations, as on otari.ai, reaching a share in another
 organization needs the operator to act in that organization.
 
-**A member who leaves.** Their shares end, and nobody reads their sessions'
-content in the normal course. It stays sealed until retention deletes it, and
-only break-glass opens it.
+**A member who leaves.** Leaving the workspace or the organization ends their
+shares, for good. Nothing new is kept for them, but what was already stored stays
+until retention deletes it, and only break-glass opens it.
 
 **Break-glass.** For an investigation a session's owner cannot be asked to share
 for, such as an HR or legal matter, an owner of the organization (not an admin)
@@ -358,12 +358,15 @@ a reference such as a legal request's number. Each opening:
 - is listed for the organization's owners at
   `GET /api/v1/organizations/me/traces/audit/break-glass` (their own openings) and
   for the operator at `GET /api/v1/traces/audit/break-glass` (every opening);
-- is logged as an event naming ids only, and, with AWS KMS, is a `Decrypt` in
+- is logged as an event naming ids only, and, with AWS KMS, opens its data keys
+  afresh rather than from the gateway's cache, so each opening is a `Decrypt` in
   CloudTrail naming the session;
 - is not told to the session's owner.
 
 Records are kept for `trace_break_glass_retention_days` (365 by default), apart
-from the session they opened, and go with the organization.
+from the session and the organization: deleting an organization does not delete
+the record of the operator's access to it. Erasing a user clears their id from
+the records of openings of their sessions; the openings stay recorded.
 
 A trace's detail says how the read reached its content in `content_access`:
 `owner`, `share`, `break_glass` or `none`.
@@ -499,7 +502,8 @@ Deleting a user erases their traces, as it erases their telemetry.
 Retention runs whether or not traces are captured, so a deployment that stops
 capturing still deletes what it captured on this schedule. Erasing a user deletes
 their traces on every replica: spans another replica took in for them before the
-erasure, and still holds, are never stored.
+erasure, and still holds, are never stored. The gateway keeps the erased user's id
+for about an hour to enforce that, then deletes it.
 
 Traces are written off the request path, within fixed limits: a trace never
 slows or fails a request, and when the writer cannot keep up it drops whole
