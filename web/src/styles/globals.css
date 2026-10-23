@@ -2409,7 +2409,7 @@ main {
   position: sticky;
   left: 0;
   z-index: 1;
-  background-color: var(--color-background);
+  background-color: var(--table-fill, var(--color-background));
 }
 /* The boundary appears only while there is something behind it. At rest a table
    has no internal verticals: its columns are not regions, which is what makes it
@@ -2468,7 +2468,7 @@ main {
   position: sticky;
   left: 0;
   z-index: 1;
-  background-color: var(--color-background);
+  background-color: var(--table-fill, var(--color-background));
 }
 .otari-models-table[data-scrolled="true"] .table__column:first-child,
 .otari-models-table[data-scrolled="true"] .table__row .table__cell:first-child,
@@ -2567,21 +2567,21 @@ main {
   position: sticky;
   left: 0;
   z-index: 1;
-  background-color: var(--color-background);
+  background-color: var(--table-fill, var(--color-background));
 }
 .otari-activity-table .table__column[data-key="user"],
 .otari-activity-table .table__cell[data-column="user"] {
   position: sticky;
   left: 5.25rem;
   z-index: 1;
-  background-color: var(--color-background);
+  background-color: var(--table-fill, var(--color-background));
 }
 .otari-activity-table .table__column[data-key="model"],
 .otari-activity-table .table__cell[data-column="model"] {
   position: sticky;
   left: 13.25rem;
   z-index: 1;
-  background-color: var(--color-background);
+  background-color: var(--table-fill, var(--color-background));
 }
 /* One boundary, at the edge of the held region, and only while it is holding
    something back. */
@@ -2642,14 +2642,14 @@ main {
     position: sticky;
     left: 0;
     z-index: 1;
-    background-color: var(--color-background);
+    background-color: var(--table-fill, var(--color-background));
   }
   .otari-sessions-table .table__column[data-key="name"],
   .otari-sessions-table .table__cell[data-column="name"] {
     position: sticky;
     left: 11.375rem;
     z-index: 1;
-    background-color: var(--color-background);
+    background-color: var(--table-fill, var(--color-background));
   }
   .otari-sessions-table[data-scrolled="true"] .table__column[data-key="name"],
   .otari-sessions-table[data-scrolled="true"] .table__cell[data-column="name"] {
@@ -2725,7 +2725,7 @@ main {
   position: sticky;
   left: 0;
   z-index: 1;
-  background-color: var(--color-background);
+  background-color: var(--table-fill, var(--color-background));
   width: 14rem;
   min-width: 14rem;
 }
@@ -2783,7 +2783,7 @@ main {
   position: sticky;
   left: 0;
   z-index: 1;
-  background-color: var(--color-background);
+  background-color: var(--table-fill, var(--color-background));
   width: 18.75rem;
   min-width: 18.75rem;
 }
@@ -2815,7 +2815,7 @@ main {
   position: sticky;
   left: 0;
   z-index: 1;
-  background-color: var(--color-background);
+  background-color: var(--table-fill, var(--color-background));
   width: 27.5rem;
   min-width: 27.5rem;
 }
@@ -2861,7 +2861,7 @@ main {
   position: sticky;
   left: 0;
   z-index: 1;
-  background-color: var(--color-background);
+  background-color: var(--table-fill, var(--color-background));
 }
 .otari-provider-keys-table[data-scrolled="true"]
   .table__column[data-key="name"],
@@ -2989,7 +2989,7 @@ main {
   position: sticky;
   left: 0;
   z-index: 1;
-  background-color: var(--color-background);
+  background-color: var(--table-fill, var(--color-background));
 }
 /* One boundary, at the edge of the held lane, and only while it is holding
    something back. */

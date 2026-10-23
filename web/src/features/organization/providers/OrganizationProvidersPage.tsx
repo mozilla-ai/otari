@@ -694,7 +694,7 @@ export function OrganizationProvidersPage() {
         <section
           key={expandedKey.id}
           aria-label={`Models on ${expandedKey.name}`}
-          className="mt-4 rounded-lg border border-border bg-surface"
+          className="mt-4 rounded-lg border border-border bg-surface [--table-fill:var(--color-surface)]"
         >
           <ProviderModelsPanel
             providerKey={expandedKey}
