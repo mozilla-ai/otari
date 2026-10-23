@@ -15,7 +15,7 @@ from gateway.services.api_keys._access_tokens import (
     AccessTokenClaims,
     FederationGrantError,
     access_token_expiry,
-    grant_names_key,
+    grant_names_organization,
     mint_access_token,
 )
 from gateway.services.api_keys._admission import key_refusal
@@ -50,7 +50,7 @@ class FederationTokenExchange:
 
     The RFC 7523 ``jwt-bearer`` grant. The identity token must verify and match the named rule, whether an operator's
     rule on an allow-listed issuer or a member's on the issuer it names; the rule's key must be active and unexpired,
-    and any organization, workspace or service account the request names must be that key's own. A member's rule
+    and any organization the request names must be that key's own. A member's rule
     exchanges only while the deployment admits members' rules. Its Unit of Work blocks only read, and a refusal raised
     inside one rolls it back, so an exchange, refused or not, writes nothing.
     """
@@ -80,8 +80,6 @@ class FederationTokenExchange:
         assertion: str | None,
         federation_rule_id: str | None,
         organization_id: str | None,
-        workspace_id: str | None,
-        service_account_id: str | None,
     ) -> tuple[str, int]:
         """Return the access token and its lifetime in seconds.
 
@@ -125,13 +123,8 @@ class FederationTokenExchange:
                 if api_key is None:
                     raise FederationRefusedError("federation_no_rule")
                 key_organization_id = await self._organization_of_workspace(api_key.workspace_id)
-                if key_organization_id is None or not grant_names_key(
-                    organization_id=organization_id,
-                    workspace_id=workspace_id,
-                    service_account_id=service_account_id,
-                    key_organization_id=key_organization_id,
-                    key_workspace_id=api_key.workspace_id,
-                    api_key_id=api_key.id,
+                if key_organization_id is None or not grant_names_organization(
+                    organization_id=organization_id, key_organization_id=key_organization_id
                 ):
                     raise FederationRefusedError("federation_grant_mismatch")
                 refusal = key_refusal(api_key, datetime.now(UTC))

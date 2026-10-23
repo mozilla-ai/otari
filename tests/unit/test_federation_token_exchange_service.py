@@ -117,8 +117,6 @@ async def _exchange(exchange: FederationTokenExchange, **overrides: Any) -> tupl
         "assertion": ASSERTION,
         "federation_rule_id": "rule-1",
         "organization_id": str(ORGANIZATION),
-        "workspace_id": None,
-        "service_account_id": None,
     }
     grant.update(overrides)
     return await exchange.exchange(**grant)
@@ -145,8 +143,6 @@ async def test_a_matching_grant_mints_a_token_for_the_rules_key_and_stages_nothi
     [
         (_Rows(_rule(), None), {}, "federation_no_rule"),
         (_Rows(_rule(), _key()), {"organization_id": str(uuid.uuid4())}, "federation_grant_mismatch"),
-        (_Rows(_rule(), _key()), {"workspace_id": str(uuid.uuid4())}, "federation_grant_mismatch"),
-        (_Rows(_rule(), _key()), {"service_account_id": "key-2"}, "federation_grant_mismatch"),
         (_Rows(_rule(), _key(is_active=False)), {}, "inactive_key"),
         (
             _Rows(_rule(), _key(expires_at=datetime.now(UTC) - timedelta(minutes=1))),
@@ -154,7 +150,7 @@ async def test_a_matching_grant_mints_a_token_for_the_rules_key_and_stages_nothi
             "expired_key",
         ),
     ],
-    ids=["no-key", "organization", "workspace", "service-account", "inactive", "expired"],
+    ids=["no-key", "organization", "inactive", "expired"],
 )
 async def test_a_refusal_rolls_the_block_back_and_answers_invalid_grant(
     rows: _Rows, overrides: dict[str, Any], reason: str

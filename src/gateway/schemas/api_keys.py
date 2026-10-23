@@ -121,8 +121,14 @@ class FederationTokenRequest(BaseModel):
     organization_id: str | None = Field(
         default=None, description="When set, the UUID of the organization of the rule's key."
     )
-    workspace_id: str | None = Field(default=None, description="When set, the UUID of the rule's key's workspace.")
-    service_account_id: str | None = Field(default=None, description="When set, the id of the rule's key.")
+    workspace_id: str | None = Field(
+        default=None,
+        description="Ignored. Accepted so that a client configured for Anthropic's workspace id is not refused.",
+    )
+    service_account_id: str | None = Field(
+        default=None,
+        description="Ignored. Accepted so that a client configured for Anthropic's service account id is not refused.",
+    )
 
 
 class FederationTokenResponse(BaseModel):
