@@ -80,7 +80,7 @@ from gateway.services.provider_kwargs import (
     require_declared_credential,
     resolve_provider_selector,
 )
-from gateway.services.providers import hosted_implementation, serve_on_hosted_provider
+from gateway.services.providers import CountryNotServedError, hosted_implementation, serve_on_hosted_provider
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -496,7 +496,7 @@ async def create_batch(
             headers=error_headers(refusal.code),
         )
     country_gate = country_gate_for(config, raw_request)
-    if country_gate is not None and country_gate.refuses(config, resolved.instance):
+    if country_gate.refuses(config, resolved.instance):
         raise country_not_supported(country_gate, request.model)
 
     # Validate provider supports batch operations
@@ -516,6 +516,7 @@ async def create_batch(
             resolved,
             organization_id=organization_id,
             workspace_id=workspace_id,
+            country_gate=country_gate,
         )
     except HostedAccessDeniedError as exc:
         raise HTTPException(
@@ -523,6 +524,8 @@ async def create_batch(
             detail=model_not_allowed_detail(request.model),
             headers=error_headers(MODEL_NOT_ALLOWED),
         ) from exc
+    except CountryNotServedError as exc:
+        raise country_not_supported(exc.gate, request.model) from exc
     except Exception as exc:
         raise _hosted_credential_unusable(resolved.instance, exc) from exc
     if served is not None:

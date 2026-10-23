@@ -138,7 +138,12 @@ from gateway.services.provider_kwargs import (
     require_declared_credential,
     resolve_provider_selector,
 )
-from gateway.services.providers import serve_on_hosted_provider, unpriced_model_refusal
+from gateway.services.providers import (
+    CountryGate,
+    CountryNotServedError,
+    serve_on_hosted_provider,
+    unpriced_model_refusal,
+)
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
 ResultT = TypeVar("ResultT")
@@ -393,7 +398,7 @@ async def run_passthrough(
         return HTTPException(status_code=status_code, detail=detail, headers=headers or None)
 
     async def _serve_hosted(
-        resolved: ResolvedProvider, reservation: ReservationHandle
+        resolved: ResolvedProvider, reservation: ReservationHandle, country_gate: CountryGate
     ) -> tuple[ResolvedProvider, DeploymentCharge | None] | None:
         """Serve ``resolved`` on the deployment's own credential where nothing declared serves it.
 
@@ -404,7 +409,12 @@ async def run_passthrough(
         port = model_provider_port_on(raw_request, db)
         try:
             served = await serve_on_hosted_provider(
-                config, port, resolved, organization_id=organization_id, workspace_id=workspace_id
+                config,
+                port,
+                resolved,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                country_gate=country_gate,
             )
         except asyncio.CancelledError:
             await refund_reservation(db, reservation)
@@ -416,6 +426,11 @@ async def run_passthrough(
                 status.HTTP_403_FORBIDDEN,
                 model_not_allowed_detail(model),
                 **error_headers(MODEL_NOT_ALLOWED),
+            ) from exc
+        except CountryNotServedError as exc:
+            refused = country_not_supported(exc.gate, model)
+            raise await _refuse(
+                reservation, resolved, refused.status_code, str(refused.detail), **(refused.headers or {})
             ) from exc
         except Exception as exc:
             logger.error(
@@ -613,7 +628,7 @@ async def run_passthrough(
         )
 
     country_gate = country_gate_for(config, raw_request)
-    if country_gate is not None and country_gate.refuses(config, resolved.instance):
+    if country_gate.refuses(config, resolved.instance):
         await refund_reservation(db, reservation)
         refused = country_not_supported(country_gate, model)
         await _log_rejection(
@@ -626,7 +641,7 @@ async def run_passthrough(
 
     # The last rung of the credential ladder, past every gate on the name the caller wrote.
     deployment_charge: DeploymentCharge | None = None
-    hosted = await _serve_hosted(resolved, reservation)
+    hosted = await _serve_hosted(resolved, reservation, country_gate)
     if hosted is not None:
         resolved, deployment_charge = hosted
         if lookup_pricing:
@@ -1105,7 +1120,7 @@ async def run_decision(
         await log_rejection(not_allowed_detail, row_model=model, row_provider=provider_name, status_code=403)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
     country_gate = country_gate_for(config, raw_request)
-    if country_gate is not None and country_gate.refuses(config, provider_name):
+    if country_gate.refuses(config, provider_name):
         refused = country_not_supported(country_gate, selector)
         await log_rejection(str(refused.detail), row_model=model, row_provider=provider_name, status_code=403)
         raise refused
