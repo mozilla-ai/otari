@@ -57,7 +57,10 @@ _POLL_SECONDS = 1.0
 
 
 class AnyLlmProviderFiles(ProviderFilePort):
-    """The files providers hold, through any-llm: sessions over Anthropic and OpenAI files, and Gemini attachment uploads."""
+    """The files providers hold, through any-llm.
+
+    Sessions over Anthropic and OpenAI files, and Gemini attachment uploads.
+    """
 
     def serves(self, provider: LLMProvider) -> bool:
         return provider in _FILE_PROVIDERS

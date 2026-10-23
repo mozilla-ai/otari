@@ -164,6 +164,25 @@ async def test_the_same_bytes_are_uploaded_once_per_account_and_workspace(monkey
 
 
 @pytest.mark.asyncio
+async def test_the_same_bytes_under_another_type_are_uploaded_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    gemini = _Gemini("ACTIVE", "ACTIVE")
+    _stub(monkeypatch, gemini)
+
+    for mime_type in ("application/pdf", "text/plain"):
+        await upload_attachment(
+            AnyLlmProviderFiles(),
+            provider=LLMProvider.GEMINI,
+            credential=_KEY,
+            workspace_id=None,
+            data=b"%PDF",
+            mime_type=mime_type,
+            filename="report",
+        )
+
+    assert [mime for _, _, mime in gemini.uploads] == ["application/pdf", "text/plain"]
+
+
+@pytest.mark.asyncio
 async def test_an_upload_is_bounded_as_a_whole(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Stalled:
         async def upload_attachment(self, **_: Any) -> str:

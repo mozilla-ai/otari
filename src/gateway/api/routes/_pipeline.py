@@ -3114,6 +3114,10 @@ async def resolve_request_context(
         except HTTPException:
             await refund_reservation(db, reservation)
             raise
+        except asyncio.CancelledError:
+            # A client that disconnects during an attachment upload, which can run for minutes.
+            await refund_reservation(db, reservation)
+            raise
         except TenancyError as exc:
             await refund_reservation(db, reservation)
             raise domain_error(adapter, exc) from exc

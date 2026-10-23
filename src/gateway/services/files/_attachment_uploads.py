@@ -42,7 +42,7 @@ _UPLOAD_SECONDS = 300.0
 # the credential, so the memory holds no key. Per process, as the memory is.
 _ACCOUNT_KEY = os.urandom(32)
 
-_remembered: OrderedDict[tuple[str, str, str], tuple[str, float]] = OrderedDict()
+_remembered: OrderedDict[tuple[str, str, str, str], tuple[str, float]] = OrderedDict()
 
 
 def uploads_attachments(provider: LLMProvider | str | None) -> bool:
@@ -65,7 +65,7 @@ def _account(provider: LLMProvider, credential: ResolvedCredential) -> str:
     return hashlib.scrypt(canonical.encode(), salt=_ACCOUNT_KEY, n=2**12, r=8, p=1, dklen=32).hex()
 
 
-def _recall(key: tuple[str, str, str]) -> str | None:
+def _recall(key: tuple[str, str, str, str]) -> str | None:
     entry = _remembered.get(key)
     if entry is None:
         return None
@@ -77,7 +77,7 @@ def _recall(key: tuple[str, str, str]) -> str | None:
     return uri
 
 
-def _remember(key: tuple[str, str, str], uri: str) -> None:
+def _remember(key: tuple[str, str, str, str], uri: str) -> None:
     _remembered[key] = (uri, time.monotonic() + _REMEMBER_SECONDS)
     _remembered.move_to_end(key)
     while len(_remembered) > _REMEMBERED_MAX:
@@ -96,9 +96,9 @@ async def upload_attachment(
 ) -> str:
     """Upload ``data`` with ``credential`` and return the URI a request references it by.
 
-    Remembered per account and workspace as well as per content, because a URI
-    is only readable by the account that uploaded it, and one workspace must not
-    learn what another has uploaded.
+    Remembered per account and workspace as well as per content and MIME type,
+    because a URI is only readable by the account that uploaded it, one workspace
+    must not learn what another has uploaded, and the upload carries its type.
 
     Raises:
         ProviderUploadFailedError: the provider refused the file, left it
@@ -107,7 +107,7 @@ async def upload_attachment(
     if provider not in _UPLOAD_PROVIDERS:
         raise ProviderUploadFailedError
     account = await asyncio.to_thread(_account, provider, credential)
-    key = (account, str(workspace_id or ""), hashlib.sha256(data).hexdigest())
+    key = (account, str(workspace_id or ""), mime_type, hashlib.sha256(data).hexdigest())
     if (uri := _recall(key)) is not None:
         return uri
     try:

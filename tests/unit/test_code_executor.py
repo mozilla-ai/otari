@@ -549,6 +549,18 @@ async def test_each_way_of_running_the_keyword_is_admitted_on_its_own() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_sandboxed_attempt_forwards_no_second_keyword() -> None:
+    user_tool = {"type": "function", "function": {"name": "get_weather"}}
+    declared = await _declare([dict(ANTHROPIC_DATED), user_tool, dict(BARE)])
+
+    sandboxed = await declared.admit(claimed=True, beside_sandbox=True)
+
+    assert sandboxed.use_sandbox
+    # Left in place, the second keyword would reach a Gemini attempt as its native tool.
+    assert sandboxed.tools_after_sandbox == [user_tool]
+
+
+@pytest.mark.asyncio
 async def test_a_refusal_of_one_way_leaves_the_other_admitted() -> None:
     declared = await _declare([ANTHROPIC_DATED], policy=_disabled())
 
