@@ -39,6 +39,7 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDebounced } from "@/shared/hooks/useDebounced"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { BreakGlassLog } from "./BreakGlassLog"
+import { exceptionalAccess } from "./exceptionalAccess"
 import { formatDuration, formatTraceTimestamp } from "./format"
 import { toTrace } from "./fromApi"
 import { SessionContent } from "./SessionContent"
@@ -206,8 +207,10 @@ export function SessionsPage() {
   // Said on the page as well as in the workspace's settings, because a manager
   // turns it on and a member may never have opted in themselves.
   const workspaces = useWorkspaces()
+  const deployment = useDeployment()
+  const platformBreakGlass = deployment.trace_platform_break_glass
   const keepsContent =
-    useDeployment().trace_content_available &&
+    deployment.trace_content_available &&
     (workspaces.data ?? []).some(
       (candidate) =>
         candidate.trace_content_enabled &&
@@ -376,9 +379,10 @@ export function SessionsPage() {
         </PageIntro>
         {keepsContent ? (
           <InfoBanner>
-            This workspace keeps what your sessions were about: the prompts,
-            commands and file paths your agents send. Only you can read yours,
-            unless you share a session.
+            {workspace ? "This workspace keeps" : "Your workspaces keep"} what
+            your sessions were about: the prompts, commands and file paths your
+            agents send. Otari shows yours only to you, unless you share a
+            session. {exceptionalAccess(platformBreakGlass)}
           </InfoBanner>
         ) : null}
 
