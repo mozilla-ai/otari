@@ -21,7 +21,15 @@ from gateway.exceptions.traces_exceptions import (
     TraceContentShareNotFoundError,
     TraceNotFoundError,
 )
-from gateway.models.traces import Trace, TraceContentRead, TraceContentShare, TraceGuardrailDefinition, TraceSpan
+from gateway.log_config import logger
+from gateway.models.traces import (
+    Trace,
+    TraceBreakGlassRead,
+    TraceContentRead,
+    TraceContentShare,
+    TraceGuardrailDefinition,
+    TraceSpan,
+)
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
 from gateway.services.traces._collector import CALL_ID_DIGEST, call_id_digest
 from gateway.services.traces._content import SealItem, SpanContent
@@ -30,6 +38,9 @@ from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
     TRACE_BUCKET_DURATION,
     USAGE_OPERATION,
+    BreakGlass,
+    BreakGlassKind,
+    BreakGlassRead,
     ContentAccess,
     ContentRead,
     ContentReader,
@@ -94,6 +105,7 @@ class TraceService:
         self._shares = repositories.shares
         self._barriers = repositories.barriers
         self._erasures = repositories.erasures
+        self._break_glass = repositories.break_glass
 
     async def write(self, traces: Sequence[TraceWrite]) -> WriteResult:
         """Store these traces' spans, creating each trace on its first span.
@@ -217,7 +229,13 @@ class TraceService:
             return await self._traces.count_matching(_workspace_ids(scope), filters)
 
     async def get(
-        self, scope: TraceScope, trace_id: str, *, span_limit: int, workspace_id: uuid.UUID | None = None
+        self,
+        scope: TraceScope,
+        trace_id: str,
+        *,
+        span_limit: int,
+        workspace_id: uuid.UUID | None = None,
+        break_glass: BreakGlass | None = None,
     ) -> TraceDetail | None:
         """Return one trace with up to ``span_limit`` spans, or None when the scope holds no such trace.
 
@@ -226,6 +244,10 @@ class TraceService:
         Its content opens for the user it belongs to, or for a reader its owner
         shared it with, in which case the read is recorded for the owner to see.
         For anyone else a span that holds content says so, and shows none.
+
+        With ``break_glass`` the content opens whoever owns the session, and the
+        opening is recorded first, in the same block that read the session: if the
+        record cannot be written, nothing opens.
 
         Raises:
             TraceAmbiguousError: no ``workspace_id`` was given and the id is in more
@@ -248,7 +270,28 @@ class TraceService:
             sealed = any(span.content_sealed for span in spans[:span_limit])
             access: ContentAccess = "owner" if scope.reads_content_of(row.user_id) else "none"
             share = None
-            if access == "none" and sealed and scope.reader is not None and scope.reader.audience is not None:
+            if break_glass is not None:
+                await self._break_glass.record(
+                    kind=break_glass.kind,
+                    organization_id=break_glass.organization_id,
+                    workspace_id=row.workspace_id,
+                    trace_id=row.trace_id,
+                    session_user_id=row.user_id,
+                    reader_user_id=break_glass.reader_user_id,
+                    reader_email=break_glass.reader_email,
+                    reason=break_glass.reason,
+                    reference=break_glass.reference,
+                )
+                # Ids only: the reason is the reader's own prose, and stays in the record.
+                logger.info(
+                    "Break-glass opening of a session's content: kind=%s workspace=%s trace=%s reader=%s",
+                    break_glass.kind,
+                    row.workspace_id,
+                    row.trace_id,
+                    break_glass.reader_user_id,
+                )
+                access = "break_glass"
+            elif access == "none" and sealed and scope.reader is not None and scope.reader.audience is not None:
                 share = await self._shares.active(row.workspace_id, row.trace_id, scope.reader.audience, now)
                 # A share lasts only while its owner belongs: one who left can no longer manage it,
                 # so nobody reads through it, and it is ended for good rather than revived on a return.
@@ -280,6 +323,37 @@ class TraceService:
             content_access=access,
             content_share=_share(share) if share is not None else None,
         )
+
+    async def break_glass_detail(
+        self, scope: TraceScope, trace_id: str, *, break_glass: BreakGlass, workspace_id: uuid.UUID | None = None
+    ) -> TraceView:
+        """One session with its turns and its content, opened without its owner's share and recorded first.
+
+        Raises:
+            TraceNotFoundError: the scope holds no such trace.
+            TraceAmbiguousError: no ``workspace_id`` was given and the id is in more than one workspace.
+        """
+        stored = await self.get(
+            scope, trace_id, span_limit=MAX_SPANS_PER_READ, workspace_id=workspace_id, break_glass=break_glass
+        )
+        if stored is None:
+            raise TraceNotFoundError(trace_id)
+        return trace_view(stored, now=datetime.now(UTC))
+
+    async def break_glass_reads(
+        self, *, organization_id: uuid.UUID | None, kind: BreakGlassKind | None, limit: int, offset: int = 0
+    ) -> tuple[tuple[BreakGlassRead, ...], bool]:
+        """A page of the recorded break-glass openings, newest first, and whether more follow."""
+        async with self._uow:
+            rows = list(
+                await self._break_glass.page(organization_id=organization_id, kind=kind, limit=limit + 1, offset=offset)
+            )
+        return tuple(_break_glass_read(row) for row in rows[:limit]), len(rows) > limit
+
+    async def expire_break_glass(self, *, before: datetime) -> int:
+        """Delete the records of break-glass openings made before ``before``."""
+        async with self._uow:
+            return await self._break_glass.delete_before(before)
 
     async def share_content(
         self,
@@ -662,6 +736,22 @@ def _owner(scope: TraceScope) -> ContentReader:
     if scope.reader is None:
         raise TraceContentShareForbiddenError
     return scope.reader
+
+
+def _break_glass_read(row: TraceBreakGlassRead) -> BreakGlassRead:
+    return BreakGlassRead(
+        id=row.id,
+        kind=row.kind,  # type: ignore[arg-type]
+        organization_id=row.organization_id,
+        workspace_id=row.workspace_id,
+        trace_id=row.trace_id,
+        session_user_id=row.session_user_id,
+        reader_user_id=row.reader_user_id,
+        reader_email=row.reader_email,
+        reason=row.reason,
+        reference=row.reference,
+        read_at=row.read_at,
+    )
 
 
 def _read(row: TraceContentRead) -> ContentRead:

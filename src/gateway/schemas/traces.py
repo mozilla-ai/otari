@@ -10,9 +10,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from gateway.models.money import as_float
 from gateway.types.trace_views import TraceView, TurnView
 from gateway.types.traces import (
+    BREAK_GLASS_REASON_MAX_LENGTH,
+    BREAK_GLASS_REASON_MIN_LENGTH,
+    BREAK_GLASS_REFERENCE_MAX_LENGTH,
     SHARE_DEFAULT_DAYS,
     SHARE_MAX_DAYS,
     SHARE_NOTE_MAX_LENGTH,
+    BreakGlassKind,
+    BreakGlassRead,
     ContentAccess,
     ContentRead,
     ContentShare,
@@ -236,6 +241,61 @@ class ContentShareCreate(BaseModel):
     days: int = Field(default=SHARE_DEFAULT_DAYS, ge=1, le=SHARE_MAX_DAYS, description="How long the share lasts.")
 
 
+class BreakGlassCreate(BaseModel):
+    """Why you are opening a session's content without its owner's share. Recorded with the opening."""
+
+    reason: str = Field(min_length=BREAK_GLASS_REASON_MIN_LENGTH, max_length=BREAK_GLASS_REASON_MAX_LENGTH)
+
+
+class PlatformBreakGlassCreate(BreakGlassCreate):
+    """Why the deployment's operator is opening a session's content, and what asked for it."""
+
+    reference: str = Field(
+        min_length=1,
+        max_length=BREAK_GLASS_REFERENCE_MAX_LENGTH,
+        description="What the opening answers: a legal request's number, a ticket.",
+    )
+
+
+class BreakGlassReadPublic(BaseModel):
+    """One recorded opening of a session's content without its owner's share."""
+
+    id: uuid.UUID
+    kind: BreakGlassKind = Field(
+        description="'organization' for an owner of the organization, 'deployment' for the deployment's operator."
+    )
+    organization_id: uuid.UUID
+    workspace_id: uuid.UUID
+    trace_id: str
+    session_user_id: str | None = Field(description="Whose session it is.")
+    reader_user_id: uuid.UUID | None = Field(description="Who opened it; null once that account is gone.")
+    reader_email: str = Field(description="Their email address when they opened it.")
+    reason: str
+    reference: str | None
+    read_at: datetime
+
+
+class BreakGlassReadListPublic(BaseModel):
+    items: list[BreakGlassReadPublic]
+    has_more: bool
+
+
+def break_glass_read_public(read: BreakGlassRead) -> BreakGlassReadPublic:
+    return BreakGlassReadPublic(
+        id=read.id,
+        kind=read.kind,
+        organization_id=read.organization_id,
+        workspace_id=read.workspace_id,
+        trace_id=read.trace_id,
+        session_user_id=read.session_user_id,
+        reader_user_id=read.reader_user_id,
+        reader_email=read.reader_email,
+        reason=read.reason,
+        reference=read.reference,
+        read_at=read.read_at,
+    )
+
+
 class TraceDetailPublic(BaseModel):
     summary: TraceSummaryPublic
     state: Literal["active", "idle"]
@@ -252,7 +312,7 @@ class TraceDetailPublic(BaseModel):
         default="none",
         description=(
             "How this read reached the session's content: 'owner' for its own user, 'share' through a share its "
-            "user made, 'none' otherwise."
+            "user made, 'break_glass' for a recorded opening without one, 'none' otherwise."
         ),
     )
     content_share: ContentSharePublic | None = Field(

@@ -93,6 +93,7 @@ def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
         "federation_member_rules": False,
         "mail_ready": False,
         "trace_content_available": False,
+        "trace_platform_break_glass": False,
         "trace_retention_days": 30,
         "trace_session_max_age_days": 90,
         "public_catalog": False,

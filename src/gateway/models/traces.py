@@ -33,7 +33,12 @@ from gateway.models.base import Base, UtcDateTime
 from gateway.models.money import UsdCost
 
 # The vocabulary lives with the records, so the records import nothing from here.
-from gateway.types.traces import SHARE_NOTE_MAX_LENGTH, TRACE_ID_MAX_LENGTH
+from gateway.types.traces import (
+    BREAK_GLASS_REASON_MAX_LENGTH,
+    BREAK_GLASS_REFERENCE_MAX_LENGTH,
+    SHARE_NOTE_MAX_LENGTH,
+    TRACE_ID_MAX_LENGTH,
+)
 
 
 class Trace(Base):
@@ -262,3 +267,36 @@ class TraceUserBarrier(Base):
 
     user_id: Mapped[str] = mapped_column(String, primary_key=True)
     erased_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+
+
+class TraceBreakGlassRead(Base):
+    """One opening of a session's content without its owner's share, and why.
+
+    Written before the content is opened, and never changed. Kept apart from the
+    session, so the record outlives what it opened: it goes with the organization,
+    or when it is older than ``trace_break_glass_retention_days``.
+    """
+
+    __tablename__ = "trace_break_glass_reads"
+    __table_args__ = (
+        CheckConstraint("kind IN ('organization', 'deployment')", name="check_trace_break_glass_reads_kind"),
+        Index("ix_trace_break_glass_reads_organization_read_at", "organization_id", "read_at"),
+        Index("ix_trace_break_glass_reads_read_at", "read_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    # ``organization`` for an organization owner, ``deployment`` for the deployment's operator.
+    kind: Mapped[str] = mapped_column(String(16))
+    organization_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("organization.id", ondelete="CASCADE"))
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    trace_id: Mapped[str] = mapped_column(String(TRACE_ID_MAX_LENGTH))
+    session_user_id: Mapped[str | None] = mapped_column(String)
+    reader_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("user.id", ondelete="SET NULL"), index=True
+    )
+    reader_email: Mapped[str] = mapped_column(String(320))
+    reason: Mapped[str] = mapped_column(String(BREAK_GLASS_REASON_MAX_LENGTH))
+    reference: Mapped[str | None] = mapped_column(String(BREAK_GLASS_REFERENCE_MAX_LENGTH))
+    read_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )

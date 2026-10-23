@@ -7604,6 +7604,43 @@
           }
         },
         {
+          "name": "List Organization Break Glass Reads",
+          "request": {
+            "description": "The organization's owners' break-glass openings, newest first. Owners only.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                "audit",
+                "break-glass"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/audit/break-glass?skip=&limit="
+            }
+          }
+        },
+        {
           "name": "Count Traces",
           "request": {
             "description": "Count the agent sessions that match.",
@@ -7822,6 +7859,58 @@
                 }
               ],
               "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Organization Break Glass",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"reason\": \"string\"\n}"
+            },
+            "description": "Open a session's content without its owner's share, as an owner of the organization.\n\nFor an investigation the session's owner cannot be asked to share for, a member\nwho left included. The opening is recorded with its reason before anything\nopens, and listed for every owner at ``GET .../audit/break-glass``. The\nsession's owner is not told.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                ":trace_id",
+                "break-glass"
+              ],
+              "query": [
+                {
+                  "description": "The workspace the trace is in, as its list entry names it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id/break-glass?workspace_id=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -11380,6 +11469,41 @@
           }
         },
         {
+          "name": "List Break Glass Reads",
+          "request": {
+            "description": "Every recorded break-glass opening on the deployment, by owners and the operator alike, newest first.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "traces",
+                "audit",
+                "break-glass"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/traces/audit/break-glass?skip=&limit="
+            }
+          }
+        },
+        {
           "name": "Count Traces",
           "request": {
             "description": "Count the agent sessions that match.",
@@ -11590,6 +11714,56 @@
                 }
               ],
               "raw": "{{baseUrl}}/api/v1/traces/:trace_id?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Platform Break Glass",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"reason\": \"string\",\n  \"reference\": \"string\"\n}"
+            },
+            "description": "Open a session's content in any organization without its owner's share, as the deployment's operator.\n\nOnly where ``trace_platform_break_glass_enabled`` is on; a 404 otherwise. The\nopening is recorded with its reason and reference before anything opens, and\nlisted at ``GET /traces/audit/break-glass``.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "traces",
+                ":trace_id",
+                "break-glass"
+              ],
+              "query": [
+                {
+                  "description": "The workspace the session is in.",
+                  "disabled": false,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/traces/:trace_id/break-glass?workspace_id=",
               "variable": [
                 {
                   "description": "path parameter",
