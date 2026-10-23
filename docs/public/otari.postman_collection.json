@@ -12402,9 +12402,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"description\": \"string\",\n  \"name\": \"string\"\n}"
+              "raw": "{\n  \"description\": \"string\",\n  \"name\": \"string\",\n  \"trace_content_enabled\": false\n}"
             },
-            "description": "Rename a workspace or change its description.",
+            "description": "Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.\n\nTurning content off keeps nothing new from the next export on; what is already\nstored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.",
             "header": [
               {
                 "key": "Content-Type",
@@ -12614,6 +12614,34 @@
                 {
                   "description": "path parameter",
                   "key": "user_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Workspace Trace Content",
+          "request": {
+            "description": "Delete what this workspace's agent sessions were about, keeping the sessions. Its managers only.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "trace-content"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/trace-content",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
                   "value": ""
                 }
               ]

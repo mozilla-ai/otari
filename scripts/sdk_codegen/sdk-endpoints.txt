@@ -362,6 +362,7 @@ GET /api/v1/workspaces                                          # dashboard-only
 GET /api/v1/workspaces/{workspace_id}                           # dashboard-only
 PATCH /api/v1/workspaces/{workspace_id}                         # dashboard-only
 DELETE /api/v1/workspaces/{workspace_id}                        # dashboard-only
+DELETE /api/v1/workspaces/{workspace_id}/trace-content          # dashboard-only
 GET /api/v1/workspaces/{workspace_id}/members                   # dashboard-only
 POST /api/v1/workspaces/{workspace_id}/members/{user_id}        # dashboard-only
 PATCH /api/v1/workspaces/{workspace_id}/members/{user_id}       # dashboard-only

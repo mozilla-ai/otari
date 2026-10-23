@@ -1,10 +1,10 @@
-"""Data access for ``trace_spans``. Flushes, never commits; a span once stored is never updated."""
+"""Data access for ``trace_spans``. Flushes, never commits; a span once stored changes only by losing its content."""
 
 import uuid
 from collections.abc import Collection, Sequence
 from typing import Any, Never
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -20,6 +20,15 @@ class SpanRepository(BaseRepository[TraceSpan, Never, Never]):
 
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, TraceSpan)
+
+    async def clear_content(self, workspace_id: uuid.UUID) -> int:
+        """Drop the sealed content of every span in the workspace, returning how many held any."""
+        result = await self.db.execute(
+            update(TraceSpan)
+            .where(TraceSpan.workspace_id == workspace_id, TraceSpan.content_sealed.is_not(None))
+            .values(content_sealed=None)
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
 
     async def insert_new(self, rows: Sequence[dict[str, Any]]) -> set[tuple[uuid.UUID, str, str]]:
         """Stage the spans not stored yet, in one statement, and return the keys of those it inserted.

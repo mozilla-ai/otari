@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.auth.models import hash_key
 from gateway.container import Container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, X_API_KEY_HEADER, GatewayConfig
-from gateway.core.database import DATABASE_ERRORS, create_session, get_db, release_session
+from gateway.core.database import DATABASE_ERRORS, create_session, describe_database_error, get_db, release_session
 from gateway.core.feature import CoreFeature
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
@@ -1787,6 +1787,25 @@ def get_health_check_service(
 
 HealthCheckServiceDep = Annotated[HealthCheckService, Depends(get_health_check_service)]
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
+
+
+async def workspace_keeps_trace_content(db: AsyncSession, config: GatewayConfig, workspace_id: uuid.UUID) -> bool:
+    """Whether what a span in this workspace was about is kept: the deployment allows it and the workspace turned it on.
+
+    Read fresh, not cached, so a workspace that turns it off keeps nothing from its next export on.
+    Fails closed: where the workspace cannot be read, nothing is kept. The transaction the read
+    opens is ended at once, so no connection idles while the export's spans are handed on.
+    """
+    if not config.trace_content_enabled:
+        return False
+    try:
+        workspace = await WorkspaceRepository(db).get(workspace_id)
+        keeps = workspace is not None and workspace.trace_content_enabled
+        await release_session(db)
+    except DATABASE_ERRORS as exc:
+        logger.warning("Could not read whether a workspace keeps trace content (%s)", describe_database_error(exc))
+        return False
+    return keeps
 
 
 def get_trace_service(uow: UnitOfWorkDep, request: Request) -> TraceService:
