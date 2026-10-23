@@ -6480,7 +6480,10 @@ export interface paths {
         head?: never;
         /**
          * Update Workspace
-         * @description Rename a workspace or change its description.
+         * @description Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.
+         *
+         *     Turning content off keeps nothing new from the next export on; what is already
+         *     stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
          */
         patch: operations["workspaces-update_workspace"];
         trace?: never;
@@ -6918,6 +6921,26 @@ export interface paths {
          * @description Remove one model from this workspace's allow-list for a key. Idempotent.
          */
         delete: operations["provider-keys-remove_workspace_provider_key_model_restriction"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/trace-content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Workspace Trace Content
+         * @description Delete what this workspace's agent sessions were about, keeping the sessions. Its managers only.
+         */
+        delete: operations["workspaces-delete_workspace_trace_content"];
         options?: never;
         head?: never;
         patch?: never;
@@ -9882,6 +9905,11 @@ export interface components {
              * @description Where this deployment's terms of service live. Set, the account menu carries a Terms of service row pointing at them; null, no address is configured and the menu carries no such row. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
              */
             terms_url: string | null;
+            /**
+             * Trace Content Available
+             * @description Whether this deployment lets a workspace keep what its agent sessions were about. A workspace keeps it only once its managers turn it on as well.
+             */
+            trace_content_available: boolean;
         };
         /**
          * DeploymentProviderMigrationPublic
@@ -18813,6 +18841,12 @@ export interface components {
              * Format: uuid
              */
             organization_id: string;
+            /**
+             * Trace Content Enabled
+             * @description Whether this workspace keeps what its agent sessions were about.
+             * @default false
+             */
+            trace_content_enabled: boolean;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -18822,6 +18856,11 @@ export interface components {
             description?: string | null;
             /** Name */
             name?: string | null;
+            /**
+             * Trace Content Enabled
+             * @description Keep what this workspace's agent sessions were about: the prompts, commands and file paths its agents report. Only where the deployment keeps content at all.
+             */
+            trace_content_enabled?: boolean | null;
         };
         /**
          * WorkspaceWebSearchConfigPublic
@@ -30753,6 +30792,37 @@ export interface operations {
                 workspace_id: string;
                 key_id: string;
                 model: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspaces-delete_workspace_trace_content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
             };
             cookie?: never;
         };

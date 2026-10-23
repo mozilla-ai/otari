@@ -92,6 +92,7 @@ def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
         "feedback_enabled": True,
         "federation_member_rules": False,
         "mail_ready": False,
+        "trace_content_available": False,
         "public_catalog": False,
         "open_signup": False,
     }

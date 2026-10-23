@@ -6042,6 +6042,11 @@
             ],
             "description": "Where this deployment's terms of service live. Set, the account menu carries a Terms of service row pointing at them; null, no address is configured and the menu carries no such row. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.",
             "title": "Terms Url"
+          },
+          "trace_content_available": {
+            "description": "Whether this deployment lets a workspace keep what its agent sessions were about. A workspace keeps it only once its managers turn it on as well.",
+            "title": "Trace Content Available",
+            "type": "boolean"
           }
         },
         "required": [
@@ -6058,6 +6063,7 @@
           "open_signup",
           "feedback_enabled",
           "federation_member_rules",
+          "trace_content_available",
           "mail_ready"
         ],
         "title": "DeploymentBootstrap",
@@ -25595,6 +25601,12 @@
             "title": "Organization Id",
             "type": "string"
           },
+          "trace_content_enabled": {
+            "default": false,
+            "description": "Whether this workspace keeps what its agent sessions were about.",
+            "title": "Trace Content Enabled",
+            "type": "boolean"
+          },
           "updated_at": {
             "anyOf": [
               {
@@ -25642,6 +25654,18 @@
               }
             ],
             "title": "Name"
+          },
+          "trace_content_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Keep what this workspace's agent sessions were about: the prompts, commands and file paths its agents report. Only where the deployment keeps content at all.",
+            "title": "Trace Content Enabled"
           }
         },
         "title": "WorkspaceUpdate",
@@ -48437,7 +48461,7 @@
         ]
       },
       "patch": {
-        "description": "Rename a workspace or change its description.",
+        "description": "Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.\n\nTurning content off keeps nothing new from the next export on; what is already\nstored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.",
         "operationId": "workspaces-update_workspace",
         "parameters": [
           {
@@ -50188,6 +50212,58 @@
         "summary": "Remove Workspace Provider Key Model Restriction",
         "tags": [
           "provider-keys"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/trace-content": {
+      "delete": {
+        "description": "Delete what this workspace's agent sessions were about, keeping the sessions. Its managers only.",
+        "operationId": "workspaces-delete_workspace_trace_content",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Workspace Trace Content",
+        "tags": [
+          "workspaces"
         ]
       }
     },

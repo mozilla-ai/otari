@@ -65,6 +65,7 @@ from sqlalchemy import (
     Index,
     UniqueConstraint,
     Uuid,
+    false,
     func,
     text,
 )
@@ -931,12 +932,22 @@ class WorkspaceCreate(WorkspaceBase):
 class WorkspaceUpdate(SQLModel):
     name: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=1024)
+    trace_content_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Keep what this workspace's agent sessions were about: the prompts, commands and file paths its agents "
+            "report. Only where the deployment keeps content at all."
+        ),
+    )
 
 
 class WorkspacePublic(WorkspaceBase):
     id: uuid.UUID
     organization_id: uuid.UUID
     created_by_user_id: uuid.UUID | None = None
+    trace_content_enabled: bool = Field(
+        default=False, description="Whether this workspace keeps what its agent sessions were about."
+    )
     created_at: datetime
     updated_at: datetime | None = None
 
@@ -969,6 +980,9 @@ class Workspace(WorkspaceBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
     # lives here because the overlay adds no tables of its own, so the column
     # has to exist in the one schema both editions boot.
     activation_classification: str = Field(default="eligible", max_length=32)
+    # Off until a workspace's managers turn it on. Read by the OTLP receiver,
+    # under the deployment's own ``trace_content_enabled``.
+    trace_content_enabled: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
 
 
 class WorkspaceMemberBase(SQLModel):

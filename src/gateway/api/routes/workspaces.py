@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     CurrentIdentity,
     MembershipListenerDep,
+    TraceServiceDep,
     UnitOfWorkDep,
     get_db,
     verify_master_key,
@@ -96,12 +97,29 @@ async def update_workspace(
     workspace_id: uuid.UUID,
     body: WorkspaceUpdate,
 ) -> WorkspacePublic:
-    """Rename a workspace or change its description."""
+    """Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.
+
+    Turning content off keeps nothing new from the next export on; what is already
+    stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
+    """
     return await service.update_workspace(
         user=current_identity,
         workspace_id=workspace_id,
         workspace_update=body,
     )
+
+
+@router.delete("/{workspace_id}/trace-content")
+async def delete_workspace_trace_content(
+    service: WorkspaceServiceDep,
+    traces: TraceServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+) -> Message:
+    """Delete what this workspace's agent sessions were about, keeping the sessions. Its managers only."""
+    await service.require_management_access(user=current_identity, workspace_id=workspace_id)
+    await traces.forget_content(workspace_id)
+    return Message(message="Session content deleted")
 
 
 @router.delete("/{workspace_id}")
