@@ -857,10 +857,13 @@ archive it, and make one key of each kind the organization's default. Only the
 last four characters of a key are ever shown. A key carries an API key when its
 provider needs one, and may carry its own `api_base` and provider `options`,
 which are checked against the provider when the key is written. An `api_base`
-must use https when the key carries an API key, and the deployment's
-`OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false` refuses one on an internal address,
-as for an organization's model provider keys. A `tavily` or `brave` key takes
-neither, since the older backend that runs them calls their public endpoints.
+must use https when the key carries an API key, and must reach public addresses
+only, whatever `OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS` says, since an organization
+rather than the operator chose it. Calls to it are held to the same rule: each
+one connects to the address that was checked, follows no redirect, and bypasses
+any environment proxy, as calls to a workspace's own model endpoint do. A
+`tavily` or `brave` key takes neither, since the older backend that runs them
+calls their public endpoints.
 A key's calls never fall back to the deployment's own key or endpoint for its
 provider.
 

@@ -448,12 +448,12 @@ def test_a_key_has_a_kind_and_may_carry_its_own_endpoint_and_options(
         name="pages",
         api_key="tbs-1",
         kind="fetch",
-        api_base="https://tabstack.example/v1",
+        api_base="https://1.1.1.1/v1",
         options={"effort": "standard", "geo_target": {"api_token": "masked-in-the-answer"}},
     )
 
     assert (search["kind"], search["api_base"], search["options"]) == ("search", None, None)
-    assert (fetch["kind"], fetch["api_base"]) == ("fetch", "https://tabstack.example/v1")
+    assert (fetch["kind"], fetch["api_base"]) == ("fetch", "https://1.1.1.1/v1")
     assert fetch["options"]["effort"] == "standard"
     assert "masked-in-the-answer" not in str(fetch)
     cleared = client.patch(f"{_KEYS}/{fetch['id']}", json={"api_base": None}, headers=master_key_header)

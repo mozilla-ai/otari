@@ -80,7 +80,7 @@ from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tool_settings_service import validate_url
 from gateway.services.tools._web_search import in_loop_default, resolve_fetch
-from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
+from gateway.services.web_retrieval_network import RetrievalTargetError, validate_retrieval_target
 from gateway.services.web_search_providers import is_sendable_api_key
 
 # Takes the workspace's row lock for the rest of the transaction.
@@ -590,11 +590,14 @@ def _check_options(kind: ToolKind, provider: str, options: Mapping[str, Any] | N
 
 
 async def _gate_api_base(api_base: str) -> None:
-    """Refuse an endpoint on an internal address, where the deployment gates those off."""
+    """Refuse an endpoint that does not reach public addresses alone.
+
+    A tenant chose it, so ``provider_allow_private_hosts`` does not apply; calls to it are pinned the same way.
+    """
     try:
-        await validate_provider_api_base(api_base)
-    except UnsafeURLError as exc:
-        raise WebSearchKeySettingRefusedError("api_base", str(exc)) from None
+        await validate_retrieval_target(api_base)
+    except RetrievalTargetError as exc:
+        raise WebSearchKeySettingRefusedError("api_base", f"must reach a public address: {exc}") from None
 
 
 def _blank_to_none(value: str | None) -> str | None:

@@ -22,7 +22,11 @@ from gateway.api.deps import (
 from gateway.core.config import GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
-from gateway.services.tools import build_web_provider_client
+from gateway.services.providers import owned_endpoint_http_client
+from gateway.services.tools import ResolvedFetch, build_web_provider_client
+from gateway.services.tools._web_fetch import FetchFailure, fetch_page
+from gateway.services.tools._web_provider_client import web_provider_client_for
+from gateway.services.web_retrieval_policy import DomainPolicy
 
 
 @pytest.fixture(autouse=True)
@@ -114,3 +118,57 @@ async def test_the_client_caps_no_connections_and_keeps_20_idle(monkeypatch: pyt
     # httpx's defaults otherwise, so environment proxies still apply.
     assert "trust_env" not in kwargs
     assert "timeout" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_a_tenants_endpoint_is_dialed_as_an_owned_endpoint_and_others_on_the_shared_client() -> None:
+    async with httpx.AsyncClient() as shared:
+        assert web_provider_client_for(shared, tenant_endpoint=False) is shared
+        assert web_provider_client_for(shared, tenant_endpoint=True) is owned_endpoint_http_client()
+
+
+@pytest.mark.asyncio
+async def test_the_owned_endpoint_client_keeps_no_cookie() -> None:
+    """It serves every tenant's endpoints, so it keeps no cookie, as the shared client does not."""
+    client = owned_endpoint_http_client()
+    request = httpx.Request("GET", "https://provider.example/search")
+    client.cookies.extract_cookies(httpx.Response(200, headers={"set-cookie": "session=tenant-a"}, request=request))
+    assert not client.cookies
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("api_base", ["https://10.0.0.7/v1", "https://169.254.169.254/v1"])
+async def test_a_fetch_on_a_tenants_internal_endpoint_is_refused_at_the_call(api_base: str) -> None:
+    """A key stored before its endpoint was checked, or a name re-pointed since, still reaches no internal address."""
+    sent: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json={})
+
+    resolved = ResolvedFetch(
+        name=None,
+        provider="tabstack",
+        runner="library",
+        api_key="org-key",
+        api_base=api_base,
+        options={},
+        timeout=5.0,
+        label=None,
+        rate_keys=(),
+        max_chars=None,
+        on_credential=True,
+        tenant_endpoint=True,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as shared:
+        outcome = await fetch_page(
+            resolved,
+            "https://example.com/page",
+            client=shared,
+            policy=DomainPolicy(),
+            allow_private=False,
+            max_chars=None,
+        )
+
+    assert isinstance(outcome, FetchFailure)
+    assert sent == []

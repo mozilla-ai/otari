@@ -47,6 +47,7 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential
 from gateway.schemas.tools import SearchRequest, SearchResponse, SearchResultItem
+from gateway.services.tools._web_provider_client import web_provider_client_for
 from gateway.services.tools._web_search._litellm import (
     SearchQuery,
     direct_count,
@@ -280,7 +281,7 @@ async def _on_any_search(search: DirectSearch, client: httpx.AsyncClient) -> Dir
         api_key=resolved.api_key,
         api_base=resolved.api_base,
         timeout=resolved.timeout,
-        client=client,
+        client=web_provider_client_for(client, tenant_endpoint=resolved.tenant_endpoint),
     ) as engine:
         result = await engine.search(search.query.query, max_results=search.query.max_results, **options)
     if result.error is not None:
