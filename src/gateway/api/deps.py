@@ -145,7 +145,7 @@ from gateway.services.tools import (
     WorkspaceSearchKeys,
     web_search_configured,
 )
-from gateway.services.traces import TraceService
+from gateway.services.traces import SpanContent, TraceService
 from gateway.services.usage_admin_service import usage_in
 from gateway.services.usage_and_telemetry import UsageService
 from gateway.services.workspace_scope import default_workspace_id
@@ -888,9 +888,9 @@ def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayC
     return FileService(uow, FileRepositories.on(uow), backends, config, reject_unscoped_upload)
 
 
-def build_trace_service(uow: UnitOfWork) -> TraceService:
-    """Build the traces operations for a request or a worker job."""
-    return TraceService(uow, TracesRepositories.on(uow), model_context_window)
+def build_trace_service(uow: UnitOfWork, content: SpanContent) -> TraceService:
+    """Build the traces operations for a request or a worker job, sealing and opening content with ``content``."""
+    return TraceService(uow, TracesRepositories.on(uow), content, model_context_window)
 
 
 def _file_backends(request: Request) -> FileBackends | None:
@@ -1789,9 +1789,10 @@ HealthCheckServiceDep = Annotated[HealthCheckService, Depends(get_health_check_s
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
 
 
-def get_trace_service(uow: UnitOfWorkDep) -> TraceService:
-    """Build the request's traces service on the request's Unit of Work."""
-    return build_trace_service(uow)
+def get_trace_service(uow: UnitOfWorkDep, request: Request) -> TraceService:
+    """Build the request's traces service on the request's Unit of Work, with the process's content keys."""
+    content: SpanContent = getattr(request.app.state, "trace_content", None) or SpanContent.disabled()
+    return build_trace_service(uow, content)
 
 
 TraceServiceDep = Annotated[TraceService, Depends(get_trace_service)]

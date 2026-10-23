@@ -267,10 +267,10 @@ moving a tool's work, or a subagent, to a smaller model.
 ### Keeping what a span was about
 
 A trace keeps no prompt, command or file path. A deployment can keep them by
-setting `OTARI_TRACE_CONTENT_ENABLED=true`. They are stored encrypted with
-`OTARI_SECRET_KEY`, the key that encrypts stored provider credentials, and are
-not kept at all on a deployment without it. They are kept only when the agent
-sends them:
+setting `OTARI_TRACE_CONTENT_ENABLED=true`. They are stored encrypted, under
+`OTARI_SECRET_KEY` (the key that encrypts stored provider credentials) by
+default or under an AWS KMS key, and are not kept at all on a deployment with
+neither. They are kept only when the agent sends them:
 
 - Claude Code sends the prompt that opened a turn with `OTEL_LOG_USER_PROMPTS=1`,
   and each tool's command or file path with `OTEL_LOG_TOOL_DETAILS=1`. Otari
@@ -282,9 +282,76 @@ sends them:
 A span shows what it was about as its input, and a tool call is named for its
 command or file in the tree. A span's content is sealed for that span alone, and
 reads back empty once no configured key opens it, so keep a rotated-out key in
-`OTARI_SECRET_KEY` for as long as you keep traces. Only the deployment operator, an
+`OTARI_SECRET_KEY`, or in `trace_content_kms_previous_key_ids`, for as long as
+you keep traces. Only the deployment operator, an
 owner or admin of the organization, and the user a session belongs to read its
 content; any other member reads the session with every span's content empty.
+
+### How content is sealed
+
+Each span's content is encrypted with AES-256-GCM under a data key, and the
+data key is stored beside it in wrapped form: wrapped with `OTARI_SECRET_KEY`,
+or made by AWS KMS. The ciphertext is bound to its workspace and its span, so a
+value copied onto another span, or into another workspace, reads back empty.
+
+A data key serves one workspace for up to five minutes, so the key source is
+asked once every few minutes per workspace and replica rather than once per
+span. A busy Claude Code session, around 14,000 spans an hour, costs KMS about
+12 `GenerateDataKey` calls an hour, and reading that hour back about 12
+`Decrypt` calls, then none while they are cached.
+
+When the key source cannot be reached or refuses the gateway, spans are still
+stored, without their content, and the gateway does not ask it again for 30
+seconds. Content that cannot be opened reads back empty. Both are counted, on
+`gateway_trace_content_unsealed` and `gateway_trace_content_unopened`, by reason.
+
+Content stored by earlier versions, sealed with `OTARI_SECRET_KEY` alone, still
+reads back, and ages out with the session; nothing needs re-encrypting.
+
+### Sealing content with AWS KMS
+
+Set `trace_content_key_backend: aws_kms` and name a symmetric customer-managed
+key. The gateway needs the `kms` extra (`boto3`) and AWS credentials from the
+usual chain (an ECS task role, an instance profile, environment variables).
+
+| Setting | Purpose |
+| --- | --- |
+| `trace_content_key_backend` | `secret_key` (the default) or `aws_kms`. |
+| `trace_content_kms_key_id` | The key new content is sealed under: a key id, key ARN or alias. Required by `aws_kms`. Set beside `secret_key`, it still opens what it sealed, so a deployment can move back. |
+| `trace_content_kms_previous_key_ids` | Earlier keys whose content still opens, separated by commas. |
+| `trace_content_kms_region` | The key's region. Unset uses the AWS SDK's default. |
+| `trace_content_kms_endpoint_url` | A KMS endpoint other than the region's, such as a VPC endpoint. |
+
+The gateway calls `kms:GenerateDataKey`, `kms:Decrypt` and `kms:DescribeKey`,
+always with the encryption context `otari:purpose=trace-content` and
+`otari:workspace=<workspace id>`, so a policy can allow only that purpose:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["kms:GenerateDataKey", "kms:Decrypt"],
+  "Resource": "<key arn>",
+  "Condition": {
+    "StringEquals": {"kms:EncryptionContext:otari:purpose": "trace-content"},
+    "ForAllValues:StringEquals": {"kms:EncryptionContextKeys": ["otari:purpose", "otari:workspace"]}
+  }
+}
+```
+
+plus `kms:DescribeKey` on the key, which the gateway calls once to learn which
+keys it may open. Every `Decrypt` lands in CloudTrail with the workspace it was
+for.
+
+To rotate:
+
+- **KMS automatic rotation** needs nothing: KMS keeps the earlier key material
+  inside the same key.
+- **Replacing the key**: set `trace_content_kms_key_id` to the new key and list
+  the old one in `trace_content_kms_previous_key_ids` until traces older than the
+  change have aged out. Content under a key that is not listed reads back empty.
+- **Moving from `OTARI_SECRET_KEY` to KMS**: switch the backend. New content is
+  sealed with KMS, and content sealed before opens with `OTARI_SECRET_KEY` for as
+  long as it is set.
 
 ## Reading traces
 

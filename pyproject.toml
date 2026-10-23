@@ -118,6 +118,11 @@ ocr = [
 s3 = [
     "boto3>=1.43.115",
 ]
+# AWS KMS as the source of trace content's data keys (trace_content_key_backend:
+# aws_kms). Present transitively too, for the reason the s3 extra gives.
+kms = [
+    "boto3>=1.42.0",
+]
 # The generic files backend (`FsspecFileStore`): one URL reaches whichever
 # filesystem the operator has an fsspec implementation installed for. fsspec
 # is already in the tree through any-llm-sdk[all], but as with s3 the extra is
@@ -176,7 +181,7 @@ dev = [
     # uses it: the gateway parses that contract with its own Pydantic models.
     "jsonschema>=4.26.0",
     "types-jsonschema",
-    "moto[s3]>=5.2.4",
+    "moto[s3,kms]>=5.2.4",
     "mypy",
     # Parses the mcp dependency spec straight out of this file's own
     # [project.dependencies], in the regression test for #689, instead of

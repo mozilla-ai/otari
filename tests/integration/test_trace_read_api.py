@@ -8,6 +8,7 @@ reads another organization's traces, whose ids answer 404 like ones that do
 not exist.
 """
 
+import asyncio
 import time
 import uuid
 from collections.abc import Callable
@@ -22,13 +23,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from gateway.adapters.content_key_adapter import SECRET_KEY_WRAPPER, ContentKeyring, SecretKeyContentKeys
 from gateway.core.config import API_ROOT
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import generate_secret_key
-from gateway.services.traces._content import seal_content
+from gateway.services.traces import SpanContent
 
 from .test_otlp import _agent_span, _exempt_key, _otlp_traces
 
@@ -529,6 +531,11 @@ def test_the_detail_counts_each_gate_an_agents_hook_reported_and_names_the_ones_
     assert _operator_get(client, world, "/traces/s-two").json()["gates"] == []
 
 
+def _sealed(content: dict[str, str], *, workspace_id: uuid.UUID, span_id: str) -> str | None:
+    keys = ContentKeyring(SECRET_KEY_WRAPPER, {SECRET_KEY_WRAPPER: SecretKeyContentKeys()})
+    return asyncio.run(SpanContent(keys).seal(content, workspace_id=workspace_id, span_id=span_id))
+
+
 def test_the_detail_returns_what_a_span_was_about_where_it_was_kept(
     client: TestClient,
     world: dict[str, str],
@@ -540,9 +547,7 @@ def test_the_detail_returns_what_a_span_was_about_where_it_was_kept(
         span = session.scalars(
             select(TraceSpan).where(col(TraceSpan.trace_id) == "s-one", col(TraceSpan.span_id) == "call-toolu_1")
         ).one()
-        span.content_sealed = seal_content(
-            {"command": "pytest -x"}, workspace_id=span.workspace_id, span_id=span.span_id
-        )
+        span.content_sealed = _sealed({"command": "pytest -x"}, workspace_id=span.workspace_id, span_id=span.span_id)
         session.commit()
 
     detail = _operator_get(client, world, "/traces/s-one").json()
@@ -563,9 +568,7 @@ def test_only_a_manager_or_the_sessions_own_user_reads_what_its_spans_were_about
         span = session.scalars(
             select(TraceSpan).where(col(TraceSpan.trace_id) == "s-one", col(TraceSpan.span_id) == "call-toolu_1")
         ).one()
-        span.content_sealed = seal_content(
-            {"command": "pytest -x"}, workspace_id=span.workspace_id, span_id=span.span_id
-        )
+        span.content_sealed = _sealed({"command": "pytest -x"}, workspace_id=span.workspace_id, span_id=span.span_id)
         session.commit()
 
     def content(cookie: str) -> dict[str, str]:

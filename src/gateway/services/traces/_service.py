@@ -22,7 +22,7 @@ from gateway.exceptions.traces_exceptions import (
 from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
 from gateway.services.traces._collector import CALL_ID_DIGEST, call_id_digest
-from gateway.services.traces._content import open_content, seal_content
+from gateway.services.traces._content import SpanContent
 from gateway.services.traces._reading import MAX_SPANS_PER_READ, ContextWindowOf, trace_view
 from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
@@ -60,8 +60,15 @@ class TraceService:
     settles in a block of its own on the Unit of Work it was built with.
     """
 
-    def __init__(self, uow: UnitOfWork, repositories: TracesRepositories, context_window_of: ContextWindowOf) -> None:
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        repositories: TracesRepositories,
+        content: SpanContent,
+        context_window_of: ContextWindowOf,
+    ) -> None:
         self._uow = uow
+        self._content = content
         self._context_window_of = context_window_of
         self._traces = repositories.traces
         self._spans = repositories.spans
@@ -76,6 +83,8 @@ class TraceService:
         the same order.
         """
         written_at = datetime.now(UTC)
+        # Sealed before the block, so a key source's round trip holds no connection.
+        sealed = await self._seal(traces)
         async with self._uow:
             new_traces: dict[TraceKey, dict[str, Any]] = {}
             for trace in traces:
@@ -96,7 +105,9 @@ class TraceService:
                     continue
                 kept.append((trace, spans))
                 for span in spans:
-                    rows.setdefault((trace.workspace_id, trace.trace_id, span.span_id), _span_values(trace, span))
+                    rows.setdefault(
+                        (trace.workspace_id, trace.trace_id, span.span_id), _span_values(trace, span, sealed)
+                    )
             inserted = await self._spans.insert_new(list(rows.values()))
 
             accepted = duplicate = 0
@@ -113,6 +124,19 @@ class TraceService:
                         duplicate += 1
             await self._traces.add_totals([_growth(key, spans, written_at) for key, spans in grown.items()])
         return WriteResult(accepted=accepted, duplicate=duplicate, rejected=rejected)
+
+    async def _seal(self, traces: Sequence[TraceWrite]) -> dict[tuple[uuid.UUID, str], str]:
+        sealed: dict[tuple[uuid.UUID, str], str] = {}
+        for trace in traces:
+            for span in trace.spans:
+                key = (trace.workspace_id, span.span_id)
+                if span.content and key not in sealed:
+                    value = await self._content.seal(
+                        span.content, workspace_id=trace.workspace_id, span_id=span.span_id
+                    )
+                    if value is not None:
+                        sealed[key] = value
+        return sealed
 
     async def search(
         self, scope: TraceScope, filters: TraceFilter, *, limit: int, offset: int, sort: TraceSort = TraceSort()
@@ -146,18 +170,25 @@ class TraceService:
                 raise TraceAmbiguousError(trace_id)
             row = rows[0]
             spans = await self._spans.for_trace(row.workspace_id, row.trace_id, limit=span_limit + 1)
-            with_content = scope.reads_content_of(row.user_id)
-            records = tuple(_span_record(span, with_content=with_content) for span in spans[:span_limit])
+            records = [_span_record(span) for span in spans[:span_limit]]
             digests = {
                 digest for span in records if isinstance(digest := span.attributes.get("otari.policy.digest"), str)
             }
             definitions = await self._definitions.for_digests(row.workspace_id, digests)
-            return TraceDetail(
-                summary=_summary(row),
-                spans=records,
-                truncated=len(spans) > span_limit,
-                definitions=tuple(_definition(definition) for definition in definitions),
-            )
+        # Opened after the block, so a key source's round trip holds no connection.
+        if scope.reads_content_of(row.user_id):
+            for position, span in enumerate(spans[:span_limit]):
+                if span.content_sealed:
+                    content = await self._content.open(
+                        span.content_sealed, workspace_id=span.workspace_id, span_id=span.span_id
+                    )
+                    records[position] = dataclasses.replace(records[position], content=content)
+        return TraceDetail(
+            summary=_summary(row),
+            spans=tuple(records),
+            truncated=len(spans) > span_limit,
+            definitions=tuple(_definition(definition) for definition in definitions),
+        )
 
     async def record_definition(self, workspace_id: uuid.UUID, gates: Sequence[GateDefinition], digest: str) -> str:
         """Store this version of a workspace's agent guardrail, once, and return its fingerprint.
@@ -320,7 +351,7 @@ def _growth(key: TraceKey, spans: list[SpanRecord], written_at: datetime) -> Tra
     )
 
 
-def _span_values(trace: TraceWrite, span: SpanRecord) -> dict[str, Any]:
+def _span_values(trace: TraceWrite, span: SpanRecord, sealed: dict[tuple[uuid.UUID, str], str]) -> dict[str, Any]:
     return {
         "workspace_id": trace.workspace_id,
         "trace_id": trace.trace_id,
@@ -352,7 +383,7 @@ def _span_values(trace: TraceWrite, span: SpanRecord) -> dict[str, Any]:
         "otel_trace_id": span.otel_trace_id,
         "otel_span_id": span.otel_span_id,
         "attributes": dict(span.attributes) or None,
-        "content_sealed": seal_content(span.content, workspace_id=trace.workspace_id, span_id=span.span_id),
+        "content_sealed": sealed.get((trace.workspace_id, span.span_id)),
     }
 
 
@@ -363,7 +394,8 @@ def _stored_call_id(row: TraceSpan) -> str | None:
     return call_id_digest(row.workspace_id, row.tool_call_id)
 
 
-def _span_record(row: TraceSpan, *, with_content: bool) -> SpanRecord:
+def _span_record(row: TraceSpan) -> SpanRecord:
+    """A stored span without its content, which is opened apart, only for a reader it belongs to."""
     return SpanRecord(
         span_id=row.span_id,
         kind=row.kind,
@@ -393,9 +425,6 @@ def _span_record(row: TraceSpan, *, with_content: bool) -> SpanRecord:
         otel_trace_id=row.otel_trace_id,
         otel_span_id=row.otel_span_id,
         attributes=row.attributes or {},
-        content=open_content(row.content_sealed, workspace_id=row.workspace_id, span_id=row.span_id)
-        if with_content
-        else {},
     )
 
 
