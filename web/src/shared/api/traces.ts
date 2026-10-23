@@ -1,5 +1,6 @@
 import {
   keepPreviousData,
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -173,26 +174,38 @@ function sharesPath(
   traceId: string,
   workspaceId: string,
   shareId = "",
+  page: Record<string, string> = {},
 ): string {
-  const query = workspaceId
-    ? `?${new URLSearchParams({ workspace_id: workspaceId }).toString()}`
-    : ""
+  const params = new URLSearchParams(page)
+  if (workspaceId) params.set("workspace_id", workspaceId)
+  const query = params.toString() ? `?${params.toString()}` : ""
   const tail = shareId ? `/${encodeURIComponent(shareId)}` : ""
   return `${SHARE_BASE}/${encodeURIComponent(traceId)}/shares${tail}${query}`
 }
 
-// Every share the session has had, with the reads made through each. Only the
-// session's own user may ask, so it is asked only for them.
+const SHARES_PAGE = 20
+
+// The shares the session has had, a page at a time, running ones first, with
+// the newest reads made through each. Only the session's own user may ask, so
+// it is asked only for them.
 export function useTraceShares(
   traceId: string,
   workspaceId: string,
   enabled: boolean,
 ) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: [TRACES, "shares", traceId, workspaceId],
     meta: workspaceMeta(workspaceId),
-    queryFn: () =>
-      apiFetch<TraceContentShareList>(sharesPath(traceId, workspaceId)),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
+      apiFetch<TraceContentShareList>(
+        sharesPath(traceId, workspaceId, "", {
+          skip: String(pageParam),
+          limit: String(SHARES_PAGE),
+        }),
+      ),
+    getNextPageParam: (last, pages) =>
+      last.has_more ? pages.length * SHARES_PAGE : undefined,
     enabled: enabled && traceId !== "",
     staleTime: 10_000,
   })
