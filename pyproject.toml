@@ -54,7 +54,7 @@ dependencies = [
     # a claimed domain whose nameservers are gone takes the full timeout, and the
     # blocking resolver would hold the event loop for it.
     "dnspython>=2.9.0",
-    "fastapi>=0.115.0",
+    "fastapi>=0.152.0",
     # Direct dependency for gateway-managed HTTP clients and the public
     # transport API used by pinned web retrieval.
     "httpx>=0.28.1",
@@ -90,7 +90,7 @@ dependencies = [
     "pillow>=13.0.0",
     "pypdfium2>=4.30.0",
     "psycopg2-binary>=2.9.9",
-    "pydantic-settings>=2.14.2",
+    "pydantic-settings>=2.16.1",
     "python-dotenv>=1.0.0",
     "python-multipart>=0.0.31",
     "pyyaml>=6.0",
@@ -114,7 +114,7 @@ ocr = [
 # this extra is what the S3 adapter checks for and documents, so the backend
 # stays decoupled from that implementation detail.
 s3 = [
-    "boto3>=1.42.0",
+    "boto3>=1.43.115",
 ]
 # The generic files backend (`FsspecFileStore`): one URL reaches whichever
 # filesystem the operator has an fsspec implementation installed for. fsspec
@@ -133,8 +133,8 @@ fsspec = [
 # is the line it was written against rather than the first release to carry the
 # names.
 e2b = [
-    "e2b>=2.55.1",
-    "e2b-code-interpreter>=2.10.5",
+    "e2b>=2.56.0",
+    "e2b-code-interpreter>=2.11.0",
 ]
 # A rate-limit store every gateway process shares (`rate_limit_store: redis`),
 # so a limit holds across replicas rather than per process. The adapter imports
@@ -170,14 +170,14 @@ dev = [
     # [project.dependencies], in the regression test for #689, instead of
     # relying on packaging being pulled in transitively.
     "packaging>=24.0",
-    "pre-commit>=4.6.2",
+    "pre-commit>=4.7.0",
     "pytest>=9.0.3,<10",
     "pytest-asyncio>=0.26.0",
     "pytest-cov>=6.2.1,<8",
     "pytest-rerunfailures>=16.0",
     "pytest-timeout",
     "pytest-xdist>=3.6.1",
-    "ruff>=0.17.0",
+    "ruff>=0.17.1",
     # The fsspec file store test reaches a real S3-compatible store through s3fs.
     # Its aiobotocore dependency pins botocore, so it also bounds the boto3 this lock can take.
     "s3fs>=2026.3.0",
