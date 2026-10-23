@@ -94,12 +94,14 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
             share.revoked_at = now
             await self.db.flush()
 
-    async def revoke_by(self, workspace_id: uuid.UUID, user_id: uuid.UUID, now: datetime) -> None:
-        """Stage the end of every share this user made of a session in the workspace that is still running."""
+    async def revoke_by(self, workspace_ids: Collection[uuid.UUID], user_id: uuid.UUID, now: datetime) -> None:
+        """Stage the end of every running share this user made in any of the workspaces, in one statement."""
+        if not workspace_ids:
+            return
         await self.db.execute(
             update(TraceContentShare)
             .where(
-                TraceContentShare.workspace_id == workspace_id,
+                TraceContentShare.workspace_id.in_(list(workspace_ids)),
                 TraceContentShare.shared_by_user_id == user_id,
                 TraceContentShare.revoked_at.is_(None),
             )

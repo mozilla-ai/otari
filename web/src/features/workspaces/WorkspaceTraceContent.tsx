@@ -42,6 +42,9 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
   const close = () => {
     setPending(undefined)
     setDeleteStored(false)
+    // Cleared on the way out, so an earlier action's error never shows on the next dialog.
+    setContent.reset()
+    deleteContent.reset()
   }
   const confirm = async () => {
     // A failure stays on the dialog, through `error` below, rather than escaping as an unhandled rejection.
