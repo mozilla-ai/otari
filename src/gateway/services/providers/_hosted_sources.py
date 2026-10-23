@@ -84,6 +84,7 @@ class HostedSource:
             client_args=entry.client_args,
             name=entry.name,
             implementation=entry.provider,
+            supported_countries=entry.supported_countries,
         )
 
     def withheld_from(self, organization_id: uuid.UUID | None) -> bool:

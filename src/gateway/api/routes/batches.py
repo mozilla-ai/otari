@@ -499,8 +499,9 @@ async def create_batch(
             detail=refusal.detail,
             headers=error_headers(refusal.code),
         )
+    country_gate = country_gate_for(config, raw_request)
     try:
-        ensure_provider_country(config, country_gate_for(config, raw_request), resolved.instance)
+        ensure_provider_country(config, country_gate, resolved.instance)
     except CountryNotServedError as exc:
         raise country_not_supported(exc.gate, request.model) from exc
 
@@ -521,6 +522,7 @@ async def create_batch(
             resolved,
             organization_id=organization_id,
             workspace_id=workspace_id,
+            country_gate=country_gate,
         )
     except HostedAccessDeniedError as exc:
         raise HTTPException(
@@ -528,6 +530,8 @@ async def create_batch(
             detail=model_not_allowed_detail(request.model),
             headers=error_headers(MODEL_NOT_ALLOWED),
         ) from exc
+    except CountryNotServedError as exc:
+        raise country_not_supported(exc.gate, request.model) from exc
     except Exception as exc:
         raise _hosted_credential_unusable(resolved.instance, exc) from exc
     if served is not None:

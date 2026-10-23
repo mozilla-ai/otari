@@ -139,12 +139,8 @@ def client_country(
     return None
 
 
-def request_country_gate(
-    config: "GatewayConfig", headers: Mapping[str, str], client_host: str | None
-) -> CountryGate | None:
-    """The country gate for one request, or None when no provider type lists countries."""
-    if not config.provider_supported_countries:
-        return None
+def request_country_gate(config: "GatewayConfig", headers: Mapping[str, str], client_host: str | None) -> CountryGate:
+    """The country gate for one request: ``provider_supported_countries``, and a hosted provider's own list."""
     return CountryGate(
         client_country(
             headers, client_host, header=config.client_country_header, database=config.client_country_database

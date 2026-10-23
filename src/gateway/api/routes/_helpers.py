@@ -516,8 +516,8 @@ async def erase_user_records(
         ) from None
 
 
-def country_gate_for(config: GatewayConfig, raw_request: Request) -> CountryGate | None:
-    """The country gate for ``raw_request``, or None when no provider type lists countries."""
+def country_gate_for(config: GatewayConfig, raw_request: Request) -> CountryGate:
+    """The country gate for ``raw_request``."""
     client = raw_request.client
     return request_country_gate(config, raw_request.headers, client.host if client is not None else None)
 

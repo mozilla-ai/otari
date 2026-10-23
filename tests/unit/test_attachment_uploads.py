@@ -15,9 +15,16 @@ from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.files_exceptions import ProviderUploadFailedError
 from gateway.ports.provider_file_port import ProviderFilePort
-from gateway.services.content_normalizer import inline_limit_for
+from gateway.services.content_normalizer import (
+    InlineLimit,
+    NormalizationStats,
+    _Source,
+    _within_inline_limit,
+    inline_limit_for,
+)
 from gateway.services.files import FileService, _attachment_uploads, uploads_attachments
 from gateway.services.files._attachment_uploads import upload_attachment
+from gateway.services.providers import CountryGate, CountryNotServedError
 from gateway.types.provider_account import ResolvedCredential
 
 _URI = "https://generativelanguage.googleapis.com/v1beta/files/abc"
@@ -280,3 +287,18 @@ async def test_with_no_key_anywhere_the_upload_is_refused() -> None:
     with pytest.raises(LookupError):
         await _hosted_limit(files, None).upload(b"%PDF", "application/pdf", "report.pdf")
     assert files.credentials == []
+
+
+@pytest.mark.asyncio
+async def test_a_country_the_hosted_provider_does_not_serve_is_no_oversized_attachment() -> None:
+    """The request is refused for its country, rather than for an attachment too large to send."""
+
+    async def _refused(data: bytes, mime: str, filename: str) -> str:
+        raise CountryNotServedError(CountryGate("FR"))
+
+    stats = NormalizationStats()
+    source = _Source(kind="image", data=b"0123456789", mime="image/png", filename=None, data_url=None)
+
+    with pytest.raises(CountryNotServedError):
+        await _within_inline_limit({}, source, InlineLimit(max_bytes=1, upload=_refused), stats)
+    assert stats.oversized == 0

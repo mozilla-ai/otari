@@ -1,5 +1,6 @@
 """Which providers the country a request comes from may reach (``provider_supported_countries``)."""
 
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from gateway.core.config import PROVIDER_TYPE_ALIASES, GatewayConfig
@@ -34,6 +35,10 @@ class CountryGate:
         allowed = config.provider_supported_countries.get(vendor) if vendor is not None else None
         return allowed is not None and self.country not in allowed
 
+    def excludes(self, countries: Collection[str] | None) -> bool:
+        """Whether a hosted provider's own ``countries`` leave this request's out; None serves every country."""
+        return countries is not None and self.country not in countries
+
     def refusal_detail(self, selector: str) -> str:
         """The caller-facing reason ``selector`` is refused."""
         origin = f"from country '{self.country}'" if self.country is not None else "from an unknown country"
@@ -46,6 +51,16 @@ class CountryNotServedError(Exception):
     def __init__(self, gate: CountryGate) -> None:
         super().__init__(gate.country)
         self.gate = gate
+
+
+def ensure_hosted_country(gate: CountryGate | None, countries: Collection[str] | None) -> None:
+    """Refuse a request a hosted provider's own ``countries`` leave out.
+
+    Raises:
+        CountryNotServedError: ``countries`` does not hold the request's country.
+    """
+    if gate is not None and gate.excludes(countries):
+        raise CountryNotServedError(gate)
 
 
 def ensure_provider_country(config: GatewayConfig, gate: CountryGate | None, instance: str) -> None:

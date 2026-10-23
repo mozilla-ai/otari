@@ -145,3 +145,20 @@ def test_the_lists_are_settable_as_json_in_the_environment(tmp_path: Path, monke
 
     assert config.provider_supported_countries == {"openai": ["US"]}
     assert config.client_country_header == _HEADER
+
+
+@pytest.mark.parametrize(
+    ("country", "countries", "excluded"),
+    [
+        ("US", ("US", "DE"), False),
+        ("FR", ("US", "DE"), True),
+        (None, ("US",), True),
+        ("FR", (), True),
+        ("FR", None, False),
+        (None, None, False),
+    ],
+)
+def test_a_hosted_providers_own_list_excludes_the_countries_it_leaves_out(
+    country: str | None, countries: tuple[str, ...] | None, excluded: bool
+) -> None:
+    assert CountryGate(country).excludes(countries) is excluded

@@ -69,6 +69,7 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
             response_provider=resolved.name or provider,
             client_args=resolved.client_args,
             implementation=resolved.implementation,
+            supported_countries=resolved.supported_countries,
         )
 
     async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
