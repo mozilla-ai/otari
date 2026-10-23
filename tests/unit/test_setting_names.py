@@ -23,6 +23,7 @@ _SETTING_NAMES = frozenset(
         "aliases",
         "api_keys",
         "auto_migrate",
+        "automatic_routing",
         "bootstrap",
         "bootstrap_api_key",
         "budget_estimate_default_output_tokens",

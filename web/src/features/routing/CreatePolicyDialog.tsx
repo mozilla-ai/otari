@@ -44,7 +44,6 @@ import { TierDownSection } from "./TierDownSection"
 const TITLES: Record<Intent, string> = {
   fallback: "New fallback",
   weighted: "New traffic split",
-  knn: "New smart router",
   priority: "New spill-over policy",
   tierdown: "New budget tier-down",
 }
@@ -52,7 +51,6 @@ const TITLES: Record<Intent, string> = {
 const DESCRIPTIONS: Record<Intent, string> = {
   fallback: "the model that serves it, and the backups tried when it fails.",
   weighted: "and the models its traffic is split across.",
-  knn: "and the models a router picks between.",
   priority: "and the models tried in order as each fills up.",
   tierdown: "its main model, and the cheaper one used once the budget fills.",
 }

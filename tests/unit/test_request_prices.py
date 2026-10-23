@@ -3,21 +3,23 @@
 import uuid
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from gateway.repositories.pricing import OrganizationModelPricingRepository
 from gateway.services import pricing_service
 from gateway.services.pricing_service import RequestPrices
 
 
 @pytest.mark.asyncio
 async def test_a_model_is_resolved_once_per_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Repeated pricing of the same provider/model reuses one organization-scoped lookup."""
     resolved: Any = SimpleNamespace(pricing=object())
     lookup = AsyncMock(return_value=resolved)
     monkeypatch.setattr(pricing_service, "resolve_model_pricing", lookup)
     organization = uuid.uuid4()
-    prices = RequestPrices(organization)
+    prices = RequestPrices(organization, Mock(spec=OrganizationModelPricingRepository))
     db: Any = object()
 
     assert await prices.resolve(db, "openai", "gpt-5") is resolved
@@ -28,13 +30,14 @@ async def test_a_model_is_resolved_once_per_request(monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.asyncio
 async def test_each_model_is_resolved_on_its_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Distinct provider/model pairs retain separate cached pricing results."""
     by_model: dict[tuple[str, str], Any] = {
         ("openai", "gpt-5"): SimpleNamespace(pricing=object()),
         ("together", "llama"): SimpleNamespace(pricing=object()),
     }
     lookup = AsyncMock(side_effect=lambda _db, provider, model, **_: by_model[(provider, model)])
     monkeypatch.setattr(pricing_service, "resolve_model_pricing", lookup)
-    prices = RequestPrices(None)
+    prices = RequestPrices(None, Mock(spec=OrganizationModelPricingRepository))
 
     assert await prices.resolve(None, "openai", "gpt-5") is by_model[("openai", "gpt-5")]  # type: ignore[arg-type]
     assert await prices.resolve(None, "together", "llama") is by_model[("together", "llama")]  # type: ignore[arg-type]
@@ -43,9 +46,10 @@ async def test_each_model_is_resolved_on_its_own(monkeypatch: pytest.MonkeyPatch
 
 @pytest.mark.asyncio
 async def test_an_unpriced_model_is_remembered_as_unpriced(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing price is cached so later phases do not repeat the lookup."""
     lookup = AsyncMock(return_value=None)
     monkeypatch.setattr(pricing_service, "resolve_model_pricing", lookup)
-    prices = RequestPrices(None)
+    prices = RequestPrices(None, Mock(spec=OrganizationModelPricingRepository))
 
     assert await prices.resolve(None, "local", "free") is None  # type: ignore[arg-type]
     assert await prices.resolve(None, "local", "free") is None  # type: ignore[arg-type]

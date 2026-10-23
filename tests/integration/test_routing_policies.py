@@ -34,6 +34,7 @@ from any_llm.types.completion import (
     Function,
     Usage,
 )
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
@@ -2300,3 +2301,275 @@ def test_a_streamed_fallback_is_skipped_when_its_providers_cap_is_full(client: T
 
     assert resp.status_code == 200, resp.text
     assert calls == ["openai:gpt-5-mini", "openai:gpt-5-nano"]
+
+
+def test_automatic_routing_prices_output_before_reserving(catalog_client: TestClient) -> None:
+    """Selection includes output cost and records usage against the chosen offering."""
+    _create_user(catalog_client)
+    for key, input_rate, output_rate in [("openai:m1-a", 1, 20), ("anthropic:m1-b", 3, 1)]:
+        response = catalog_client.post(
+            f"{API_ROOT}/pricing",
+            json={"model_key": key, "input_price_per_million": input_rate, "output_price_per_million": output_rate},
+            headers=HEADERS,
+        )
+        assert response.status_code in (200, 201), response.text
+    mock = AsyncMock(return_value=_completion("m1-b"))
+    with patch("gateway.api.routes.chat.acompletion", new=mock):
+        response = _chat(catalog_client, _CATALOG_ID, max_tokens=1000)
+    assert response.status_code == 200, response.text
+    assert _awaited_model(mock) == "anthropic:m1-b"
+    rows = _usage_rows(catalog_client)
+    assert len(rows) == 1
+    assert rows[0]["attempt_position"] == 1
+    assert rows[0]["cost"] == pytest.approx(0.000035)
+    assert rows[0]["selection_reason"] == "catalog"
+
+
+@pytest.mark.parametrize("country,expected", [("US", "openai:m1-a"), ("PT", "anthropic:m1-b")])
+def test_automatic_routing_prefers_the_users_region(catalog_client: TestClient, country: str, expected: str) -> None:
+    """A configured trusted country header selects the corresponding regional offering."""
+    from gateway.core.settings.routing import AutomaticRouting
+
+    _create_user(catalog_client)
+    cast(FastAPI, catalog_client.app).state.config.automatic_routing = AutomaticRouting.model_validate(
+        {
+            "country_header": "Trusted-Country",
+            "offerings": {"openai": {"region": "us"}, "anthropic": {"region": "eu"}},
+        }
+    )
+    mock = AsyncMock(return_value=_completion("m1"))
+    with patch("gateway.api.routes.chat.acompletion", new=mock):
+        response = catalog_client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": _CATALOG_ID, "messages": [{"role": "user", "content": "hi"}], "user": "test-user"},
+            headers={**HEADERS, "Trusted-Country": country},
+        )
+    assert response.status_code == 200, response.text
+    assert _awaited_model(mock) == expected
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_automatic_routing_learns_from_failover_and_releases_load(catalog_client: TestClient, stream: bool) -> None:
+    """A successful fallback keeps the session after recovery and releases load in both response modes."""
+    from gateway.services.routing import AutomaticRouter
+
+    _create_user(catalog_client)
+    now = [100.0]
+    cast(FastAPI, catalog_client.app).state.automatic_router = AutomaticRouter(clock=lambda: now[0])
+    calls: list[str] = []
+
+    async def dispatch(**kwargs: Any) -> Any:
+        """Fail the first offering and complete the fallback in the requested response mode."""
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "openai:m1-a":
+            raise _http_error(429)
+        if not stream:
+            return _completion("m1-b")
+
+        async def chunks() -> Any:
+            """Yield a completed provider stream with usage for settlement assertions."""
+            from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
+
+            yield ChatCompletionChunk(
+                id="c1",
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason="stop")],
+                created=0,
+                model="m1-b",
+                object="chat.completion.chunk",
+                usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+        return chunks()
+
+    with patch("gateway.api.routes.chat.acompletion", new=dispatch):
+        first = _session_chat(catalog_client, stream=stream)
+        now[0] += 30  # The original provider has recovered; the session stays on its fallback.
+        second = _session_chat(catalog_client, stream=stream)
+    assert first.status_code == second.status_code == 200
+    assert calls == ["openai:m1-a", "anthropic:m1-b", "anthropic:m1-b"]
+    assert all(
+        health.active == 0 for health in cast(FastAPI, catalog_client.app).state.automatic_router.health.values()
+    )
+
+
+def test_automatic_routing_can_be_disabled(catalog_client: TestClient) -> None:
+    """Disabling automatic routing preserves catalog order without creating feedback state."""
+    _create_user(catalog_client)
+    cast(FastAPI, catalog_client.app).state.config.automatic_routing.enabled = False
+    mock = AsyncMock(return_value=_completion("m1-a"))
+    with patch("gateway.api.routes.chat.acompletion", new=mock):
+        response = _chat(catalog_client, _CATALOG_ID)
+    assert response.status_code == 200
+    assert _awaited_model(mock) == "openai:m1-a"
+    assert cast(FastAPI, catalog_client.app).state.automatic_router is None
+
+
+def _session_chat(
+    client: TestClient, *, session: str = "conversation", region: str | None = None, stream: bool = False
+) -> Any:
+    """Send a catalog chat with an explicit conversation ID and optional region preference."""
+    headers = {**HEADERS, "Otari-Conversation-Id": session}
+    if region:
+        headers["Otari-Region"] = region
+    return client.post(
+        f"{API_ROOT}/chat/completions",
+        json={
+            "model": _CATALOG_ID,
+            "messages": [{"role": "user", "content": "hi"}],
+            "user": "test-user",
+            "stream": stream,
+        },
+        headers=headers,
+    )
+
+
+def _price_catalog(client: TestClient, *, openai: float, anthropic: float) -> None:
+    """Set both token rates for each catalog offering through the pricing API."""
+    for model, price in [("openai:m1-a", openai), ("anthropic:m1-b", anthropic)]:
+        response = client.post(
+            f"{API_ROOT}/pricing",
+            json={"model_key": model, "input_price_per_million": price, "output_price_per_million": price},
+            headers=HEADERS,
+        )
+        assert response.status_code in (200, 201), response.text
+
+
+def test_sticky_session_survives_price_change_but_new_sessions_reconsider(catalog_client: TestClient) -> None:
+    """Existing sessions keep an eligible provider while new or unbound calls reconsider price."""
+    _create_user(catalog_client)
+    _price_catalog(catalog_client, openai=1, anthropic=2)
+    mock = AsyncMock(return_value=_completion("m1"))
+    with patch("gateway.api.routes.chat.acompletion", new=mock):
+        assert _session_chat(catalog_client).status_code == 200
+        _price_catalog(catalog_client, openai=20, anthropic=2)
+        assert _session_chat(catalog_client).status_code == 200
+        assert _session_chat(catalog_client, session="new-conversation").status_code == 200
+        assert _chat(catalog_client, _CATALOG_ID).status_code == 200
+    assert [c.kwargs["model"] for c in mock.await_args_list] == [
+        "openai:m1-a",
+        "openai:m1-a",
+        "anthropic:m1-b",
+        "anthropic:m1-b",
+    ]
+
+
+def test_sticky_session_changes_region(catalog_client: TestClient) -> None:
+    """An explicit region change moves the conversation to the matching offering."""
+    from gateway.core.settings.routing import AutomaticRouting
+
+    _create_user(catalog_client)
+    cast(FastAPI, catalog_client.app).state.config.automatic_routing = AutomaticRouting.model_validate(
+        {"offerings": {"openai": {"region": "us"}, "anthropic": {"region": "eu"}}}
+    )
+    mock = AsyncMock(return_value=_completion("m1"))
+    with patch("gateway.api.routes.chat.acompletion", new=mock):
+        assert _session_chat(catalog_client, region="us").status_code == 200
+        assert _session_chat(catalog_client, region="eu").status_code == 200
+    assert [c.kwargs["model"] for c in mock.await_args_list] == ["openai:m1-a", "anthropic:m1-b"]
+
+
+@pytest.mark.parametrize("provider_only", [False, True])
+def test_sticky_session_switches_when_its_budget_no_longer_fits(
+    catalog_client: TestClient, provider_only: bool
+) -> None:
+    """Budget refusal moves affinity to an affordable fallback without leaving reserved spend."""
+    _create_user(catalog_client)
+    _price_catalog(catalog_client, openai=1, anthropic=2)
+    mock = AsyncMock(return_value=_completion("m1"))
+    with patch("gateway.api.routes.chat.acompletion", new=mock):
+        assert _session_chat(catalog_client).status_code == 200
+        _price_catalog(catalog_client, openai=100, anthropic=2)
+        body = {
+            "scope_type": "workspace",
+            "scope_id": _a_workspace_id(catalog_client, HEADERS),
+            "budget_id": _a_budget_id(catalog_client, HEADERS, max_budget=0.01),
+        }
+        if provider_only:
+            body["provider_key_id"] = "openai"
+        response = catalog_client.post(f"{API_ROOT}/scoped-budgets", json=body, headers=HEADERS)
+        assert response.status_code == 200, response.text
+        second = _session_chat(catalog_client)
+        assert second.status_code == 200, second.text
+        assert _session_chat(catalog_client).status_code == 200
+    assert [c.kwargs["model"] for c in mock.await_args_list] == ["openai:m1-a", "anthropic:m1-b", "anthropic:m1-b"]
+    ceilings = catalog_client.get(f"{API_ROOT}/scoped-budgets", headers=HEADERS).json()
+    assert all(row["reserved_spend"] == 0 for row in ceilings)
+
+
+def test_sticky_session_skips_rate_limited_provider(catalog_client: TestClient) -> None:
+    """A model rate limit moves the conversation to its fallback for subsequent calls."""
+    _create_user(catalog_client)
+    response = catalog_client.post(
+        f"{API_ROOT}/rate-limits",
+        json={"name": "session-cap", "per": "model", "models": ["openai:m1-a"], "rpm": 1},
+        headers=HEADERS,
+    )
+    assert response.status_code == 201, response.text
+    mock = AsyncMock(return_value=_completion("m1"))
+    with patch("gateway.api.routes.chat.acompletion", new=mock):
+        for _ in range(3):
+            response = _session_chat(catalog_client)
+            assert response.status_code == 200, response.text
+    assert [c.kwargs["model"] for c in mock.await_args_list] == ["openai:m1-a", "anthropic:m1-b", "anthropic:m1-b"]
+
+
+def test_sticky_session_falls_back_while_provider_concurrency_is_full(catalog_client: TestClient) -> None:
+    """A full concurrency slot permits fallback without leaking load or disabling explicit pins."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    _create_user(catalog_client)
+    response = catalog_client.post(
+        f"{API_ROOT}/rate-limits",
+        json={"name": "session-concurrency", "per": "model", "models": ["openai:m1-a"], "max_concurrent": 1},
+        headers=HEADERS,
+    )
+    assert response.status_code == 201, response.text
+    calls: list[str] = []
+    entered, release = Event(), Event()
+
+    async def dispatch(**kwargs: Any) -> ChatCompletion:
+        """Hold the second upstream call until released to exercise concurrent admission."""
+        calls.append(kwargs["model"])
+        if len(calls) == 2:
+            entered.set()
+            assert await asyncio.to_thread(release.wait, 10)
+        return _completion("m1")
+
+    with patch("gateway.api.routes.chat.acompletion", new=dispatch), ThreadPoolExecutor(max_workers=1) as pool:
+        assert _session_chat(catalog_client).status_code == 200
+        active = pool.submit(_session_chat, catalog_client)
+        try:
+            assert entered.wait(10)
+            fallback = _session_chat(catalog_client)
+            assert fallback.status_code == 200, fallback.text
+        finally:
+            release.set()
+        assert active.result(timeout=10).status_code == 200
+        assert _chat(catalog_client, "openai:m1-a").status_code == 200
+    assert calls == ["openai:m1-a", "openai:m1-a", "anthropic:m1-b", "openai:m1-a"]
+    assert all(h.active == 0 for h in cast(FastAPI, catalog_client.app).state.automatic_router.health.values())
+
+
+def test_sticky_session_cannot_escape_a_full_shared_budget(catalog_client: TestClient) -> None:
+    """Switching providers cannot bypass an exhausted shared budget or dispatch an unreserved call."""
+    _create_user(catalog_client)
+    _price_catalog(catalog_client, openai=1, anthropic=2)
+    mock = AsyncMock(return_value=_completion("m1"))
+    with patch("gateway.api.routes.chat.acompletion", new=mock):
+        assert _session_chat(catalog_client).status_code == 200
+        response = catalog_client.post(
+            f"{API_ROOT}/scoped-budgets",
+            json={
+                "scope_type": "workspace",
+                "scope_id": _a_workspace_id(catalog_client, HEADERS),
+                "budget_id": _a_budget_id(catalog_client, HEADERS, max_budget=0.000001),
+            },
+            headers=HEADERS,
+        )
+        assert response.status_code == 200, response.text
+        refused = _session_chat(catalog_client)
+        assert refused.status_code == 403, refused.text
+    assert mock.await_count == 1
+    ceilings = catalog_client.get(f"{API_ROOT}/scoped-budgets", headers=HEADERS).json()
+    assert all(row["reserved_spend"] == 0 for row in ceilings)

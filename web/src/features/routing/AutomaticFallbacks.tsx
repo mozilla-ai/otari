@@ -145,7 +145,7 @@ const COLUMNS: DataTableColumn<AutomaticFallback>[] = [
   },
   {
     id: "order",
-    header: "Tried in order",
+    header: "Available providers",
     cell: (row) => <OrderCell row={row} />,
   },
 ]
@@ -171,7 +171,7 @@ export function AutomaticFallbacks({
     <SettingsGroup
       title="Automatic fallback"
       count={isLoading || error ? undefined : fallbacks.length}
-      description="Models used in the last 30 days. Sent by catalog ID, they move to the next provider when one fails, no policy needed."
+      description="Models used in the last 30 days. Catalog IDs can select providers by estimated cost, load, region, latency and cache continuity, with fallback on failure. The order can vary per request."
       docsHref={docsSourceHref("models.md", "catalog-spellings")}
     >
       {toolsNote ? (

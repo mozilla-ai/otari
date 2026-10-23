@@ -102,6 +102,7 @@ from gateway.services.organizations import InvitationMailLimit, UserAccess
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
+from gateway.services.pricing_service import RequestPrices
 from gateway.services.providers import (
     HostedProviderService,
     HostedSources,
@@ -110,7 +111,7 @@ from gateway.services.providers import (
     refresh_provider_endpoint_cache,
 )
 from gateway.services.rate_limits import RateLimitService
-from gateway.services.routing import RoutingService, clear_router_backend_cache
+from gateway.services.routing import AutomaticRouter, RoutingService, clear_router_backend_cache
 from gateway.services.secret_box import configured_secret_keys
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
@@ -1757,6 +1758,22 @@ VisibleWorkspacesDep = Annotated[VisibleWorkspaces, Depends(get_visible_workspac
 async def get_organization_trace_scope(visible: VisibleWorkspacesDep) -> TraceScope:
     """The workspaces of their active organization this caller may read traces in."""
     return TraceScope.workspaces(visible.workspace_ids)
+
+
+def get_request_prices(db: AsyncSession, organization_id: uuid.UUID | None) -> RequestPrices:
+    """Build the request pricing cache with its batched pricing repository."""
+    return RequestPrices(organization_id, OrganizationModelPricingRepository(db))
+
+
+def get_automatic_router(request: Request) -> AutomaticRouter:
+    """Build one automatic router per application worker."""
+    app_state = getattr(request.scope.get("app"), "state", None)
+    router = getattr(app_state, "automatic_router", None)
+    if router is None:
+        router = AutomaticRouter()
+        if app_state is not None:
+            app_state.automatic_router = router
+    return router
 
 
 def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> RoutingService:
