@@ -244,6 +244,9 @@ class ContentShareCreate(BaseModel):
 class BreakGlassCreate(BaseModel):
     """Why you are opening a session's content without its owner's share. Recorded with the opening."""
 
+    # Stripped first, so a reason of spaces is no reason.
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     reason: str = Field(min_length=BREAK_GLASS_REASON_MIN_LENGTH, max_length=BREAK_GLASS_REASON_MAX_LENGTH)
 
 

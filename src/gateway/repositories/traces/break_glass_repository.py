@@ -1,11 +1,11 @@
-"""Data access for ``trace_break_glass_reads``. Flushes, never commits; a record is never changed."""
+"""Data access for ``trace_break_glass_reads``. Flushes, never commits; a record changes only by an erasure."""
 
 import uuid
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import TraceBreakGlassRead
@@ -38,6 +38,14 @@ class BreakGlassRepository(BaseRepository[TraceBreakGlassRead, Never, Never]):
             query.order_by(TraceBreakGlassRead.read_at.desc(), TraceBreakGlassRead.id).limit(limit).offset(offset)
         )
         return result.scalars().all()
+
+    async def forget_session_user(self, user_id: str) -> None:
+        """Clear whose session a record opened, for that user's erasure; the opening itself stays recorded."""
+        await self.db.execute(
+            update(TraceBreakGlassRead)
+            .where(TraceBreakGlassRead.session_user_id == user_id)
+            .values(session_user_id=None)
+        )
 
     async def delete_before(self, cutoff: datetime) -> int:
         """Delete every record older than ``cutoff``, returning how many."""

@@ -322,6 +322,8 @@ class RequestTrace:
             harness=self.harness,
             name=self.session.name if self.session else None,
             spans=(step, *self._client_tool_spans(), *self.spans),
+            # When the request came in, so one that outlasts an erasure of its user is not stored.
+            captured_at=self.started_at,
         )
 
     def _client_tool_spans(self) -> list[SpanRecord]:

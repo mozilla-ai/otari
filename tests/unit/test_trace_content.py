@@ -646,3 +646,61 @@ async def test_each_session_gets_a_data_key_of_its_own(key: str) -> None:
             await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=session, span_id=f"tool-{n}")
 
     assert keys.made == 3
+
+
+class _ThrottledOnceKms:
+    """A KMS client whose first DescribeKey of ``throttled`` fails, the rest passing through."""
+
+    def __init__(self, inner: Any, throttled: str) -> None:
+        self._inner, self._throttled, self._failed = inner, throttled, False
+        self.generate_data_key = inner.generate_data_key
+        self.decrypt = inner.decrypt
+
+    def describe_key(self, **kwargs: Any) -> Any:
+        if kwargs["KeyId"] == self._throttled and not self._failed:
+            self._failed = True
+            raise _client_error("ThrottlingException")
+        return self._inner.describe_key(**kwargs)
+
+
+async def test_one_throttled_describe_does_not_shut_out_the_current_key(
+    kms: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gateway.adapters import content_key_adapter
+
+    now = [1_000.0]
+    monkeypatch.setattr(content_key_adapter, "monotonic", lambda: now[0])
+    monkeypatch.setattr(_content, "monotonic", lambda: now[0])
+    current, old = _new_kms_key(kms), _new_kms_key(kms)
+    sealed = await SpanContent(_kms_keyring(kms, current)).seal(
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
+    )
+    reader = SpanContent(_kms_keyring(_ThrottledOnceKms(kms, current), current, previous=(old,)))
+    before = _count(UNOPENED, "unavailable")
+
+    # The current key could not be described: an outage, which pauses reads, not tampering.
+    assert await reader.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == {}
+    assert _count(UNOPENED, "unavailable") == before + 1
+
+    now[0] += max(content_key_adapter._PARTIAL_KEYS_TTL_S, _content._PAUSE_AFTER_FAILURE_S)
+    assert await reader.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
+
+
+async def test_a_reading_with_its_own_keys_asks_the_source_afresh_and_leaves_nothing_cached(key: str) -> None:
+    keys = _CountingKeys()
+    content = SpanContent(keys)
+    sealed = [await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id=f"t{n}") for n in range(3)]
+    for n, value in enumerate(sealed):
+        await content.open(value, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id=f"t{n}")
+    assert keys.opened == 1
+
+    for _ in range(2):
+        opened: dict[Any, bytes] = {}
+        for n, value in enumerate(sealed):
+            assert (
+                await content.open(value, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id=f"t{n}", keys_opened=opened)
+                == _CONTENT
+            )
+
+    # Once per reading, however warm the shared cache was.
+    assert keys.opened == 3

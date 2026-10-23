@@ -22,7 +22,7 @@ from gateway.exceptions.traces_exceptions import TraceBreakGlassForbiddenError
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
-from gateway.models.tenancy import MANAGEMENT_ROLES
+from gateway.models.tenancy import MANAGEMENT_ROLES, Workspace
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
@@ -1793,7 +1793,9 @@ HealthCheckServiceDep = Annotated[HealthCheckService, Depends(get_health_check_s
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
 
 
-async def is_workspace_member(db: AsyncSession, workspace_id: uuid.UUID, user_id: str | None) -> bool:
+async def is_workspace_member(
+    db: AsyncSession, workspace_id: uuid.UUID, user_id: str | None, workspace: Workspace | None = None
+) -> bool:
     """Whether ``user_id`` names a person who currently sees the workspace.
 
     An active owner or admin of its organization, or an active member of the
@@ -1806,7 +1808,12 @@ async def is_workspace_member(db: AsyncSession, workspace_id: uuid.UUID, user_id
         person = uuid.UUID(user_id)
     except ValueError:
         return False
-    workspace = await WorkspaceRepository(db).get(workspace_id)
+    # The canonical spelling only: ownership compares the id as a string, so another
+    # spelling of the same id would keep content its owner could never open.
+    if str(person) != user_id:
+        return False
+    if workspace is None:
+        workspace = await WorkspaceRepository(db).get(workspace_id)
     if workspace is None:
         return False
     membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
@@ -1857,7 +1864,7 @@ async def workspace_keeps_trace_content(
         keeps = (
             workspace is not None
             and workspace.trace_content_enabled
-            and await is_workspace_member(db, workspace_id, user_id)
+            and await is_workspace_member(db, workspace_id, user_id, workspace)
         )
         await release_session(db)
     except DATABASE_ERRORS as exc:

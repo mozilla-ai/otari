@@ -37,6 +37,8 @@ async def run_trace_retention(
                 )
             if forgotten:
                 logger.info("Trace retention removed %d break-glass records", forgotten)
+            async with create_unit_of_work() as uow:
+                await build_service(uow).expire_erasures(now=datetime.now(UTC))
         except asyncio.CancelledError:
             raise
         except Exception:
