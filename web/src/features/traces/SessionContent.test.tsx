@@ -17,6 +17,7 @@ const SHARE: TraceContentShare = {
   expires_at: "2026-11-22T10:00:00Z",
   revoked_at: null,
   active: true,
+  read_count: 1,
   reads: [
     {
       reader_user_id: null,
@@ -146,6 +147,74 @@ describe("SessionContent", () => {
 
     expect(
       screen.queryByRole("button", { name: "Share this session" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps an owner's share controls while the content cannot be opened", async () => {
+    mockApi([SHARE])
+    renderWith(
+      <SessionContent
+        detail={traceDetail({
+          summary: traceSummary({ user_id: "alice" }),
+          content_access: "owner",
+          // A key-source outage: the content reads back empty.
+          spans: [tool],
+        })}
+      />,
+    )
+
+    expect(
+      await screen.findByRole("button", { name: "Stop sharing" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Share this session" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps ended and expired shares listed with who read them", async () => {
+    const reads = (email: string) => [
+      {
+        reader_user_id: null,
+        reader_email: email,
+        read_at: "2026-10-20T11:00:00Z",
+      },
+    ]
+    mockApi([
+      {
+        ...SHARE,
+        id: "ended",
+        active: false,
+        revoked_at: "2026-10-21T10:00:00Z",
+        reads: reads("ended@example.test"),
+      },
+      {
+        ...SHARE,
+        id: "expired",
+        active: false,
+        expires_at: "2026-10-22T10:00:00Z",
+        reads: reads("expired@example.test"),
+        read_count: 12,
+      },
+    ])
+    renderWith(
+      <SessionContent
+        detail={traceDetail({
+          summary: traceSummary({ user_id: "alice" }),
+          content_access: "owner",
+          spans: [{ ...tool, content: { command: "pytest -x" } }],
+        })}
+      />,
+    )
+
+    expect(
+      await screen.findByText(/Read by ended@example.test/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Read by expired@example.test/)).toBeInTheDocument()
+    expect(screen.getByText(/ended /)).toBeInTheDocument()
+    expect(screen.getByText(/expired /)).toBeInTheDocument()
+    expect(screen.getByText("The newest 1 of 12 reads.")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Stop sharing" }),
     ).not.toBeInTheDocument()
   })
 })
