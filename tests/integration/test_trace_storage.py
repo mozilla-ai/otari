@@ -852,3 +852,29 @@ async def test_break_glass_records_go_once_past_their_retention(
 
     assert await store.expire_break_glass(before=datetime.now(UTC) - timedelta(days=1)) == 0
     assert await store.expire_break_glass(before=datetime.now(UTC) + timedelta(seconds=1)) == 1
+
+
+async def test_an_erased_users_id_goes_from_the_barrier_and_the_break_glass_records(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession
+) -> None:
+    workspace, _ = tenants
+    await store.write((_write(workspace, "s-1", _span("step-0")),))
+    organization_id = (
+        await async_db.execute(select(col(Workspace.organization_id)).where(col(Workspace.id) == workspace))
+    ).scalar_one()
+    break_glass = BreakGlass(
+        kind="deployment",
+        organization_id=organization_id,
+        reader_user_id=None,
+        reader_email="operator@example.test",
+        reason="Legal request from the regulator",
+        reference="LEGAL-1",
+    )
+    await store.break_glass_detail(TraceScope.deployment(), "s-1", break_glass=break_glass, workspace_id=workspace)
+
+    await store.purge_user("alice")
+
+    [read], _ = await store.break_glass_reads(organization_id=None, kind=None, limit=10)
+    assert read.session_user_id is None and read.reason == "Legal request from the regulator"
+    assert await store.expire_erasures(now=datetime.now(UTC)) == 0
+    assert await store.expire_erasures(now=datetime.now(UTC) + timedelta(hours=2)) == 1

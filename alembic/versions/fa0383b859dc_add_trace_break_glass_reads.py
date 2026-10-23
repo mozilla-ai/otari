@@ -3,7 +3,7 @@
 An organization owner, or the deployment's operator where it is turned on, can
 open a session's content with a reason (and, for the operator, a reference).
 Each opening is recorded before the content opens, kept apart from the session
-so it outlives it, and deleted with the organization or after its retention.
+and the organization so it outlives both, and deleted after its retention.
 
 Revision ID: fa0383b859dc
 Revises: a536c003bcf5
@@ -36,7 +36,6 @@ def upgrade() -> None:
         sa.Column("reference", sa.String(length=200), nullable=True),
         sa.Column("read_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.CheckConstraint("kind IN ('organization', 'deployment')", name="check_trace_break_glass_reads_kind"),
-        sa.ForeignKeyConstraint(["organization_id"], ["organization.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["reader_user_id"], ["user.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )

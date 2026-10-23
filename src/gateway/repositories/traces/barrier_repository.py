@@ -5,7 +5,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -85,6 +85,13 @@ class UserBarrierRepository(BaseRepository[TraceUserBarrier, Never, Never]):
             .with_for_update()
         )
         return dict(result.tuples().all())
+
+    async def forget_erased_before(self, cutoff: datetime) -> int:
+        """Delete the rows of users erased before ``cutoff``, so an erased user's id is not kept past its use."""
+        result = await self.db.execute(
+            delete(TraceUserBarrier).where(TraceUserBarrier.erased_at.is_not(None), TraceUserBarrier.erased_at < cutoff)
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
 
     async def erase(self, user_id: str, at: datetime) -> None:
         """Record the user's erasure, holding their row until the transaction ends."""

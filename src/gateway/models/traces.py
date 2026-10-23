@@ -272,9 +272,11 @@ class TraceUserBarrier(Base):
 class TraceBreakGlassRead(Base):
     """One opening of a session's content without its owner's share, and why.
 
-    Written before the content is opened, and never changed. Kept apart from the
-    session, so the record outlives what it opened: it goes with the organization,
-    or when it is older than ``trace_break_glass_retention_days``.
+    Written before the content is opened, and changed only by an erasure clearing
+    whose session it was. Kept apart from the session and the organization, with no
+    foreign key to either, so the record outlives both: an organization cannot
+    delete the record of the deployment's access to it. It goes once it is older
+    than ``trace_break_glass_retention_days``.
     """
 
     __tablename__ = "trace_break_glass_reads"
@@ -287,7 +289,7 @@ class TraceBreakGlassRead(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     # ``organization`` for an organization owner, ``deployment`` for the deployment's operator.
     kind: Mapped[str] = mapped_column(String(16))
-    organization_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("organization.id", ondelete="CASCADE"))
+    organization_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     trace_id: Mapped[str] = mapped_column(String(TRACE_ID_MAX_LENGTH))
     session_user_id: Mapped[str | None] = mapped_column(String)
