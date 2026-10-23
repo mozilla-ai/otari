@@ -1,7 +1,8 @@
-"""Data access for ``trace_content_barriers``. Flushes, never commits."""
+"""Data access for ``trace_content_barriers`` and ``trace_user_barriers``. Flushes, never commits."""
 
 import uuid
 from collections.abc import Collection
+from datetime import datetime
 from typing import Never
 
 from sqlalchemy import select, update
@@ -10,7 +11,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from gateway.core.sql import dialect_name
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.traces import TraceContentBarrier
+from gateway.models.traces import TraceContentBarrier, TraceUserBarrier
 from gateway.repositories.base_repository import BaseRepository
 
 
@@ -58,3 +59,34 @@ class ContentBarrierRepository(BaseRepository[TraceContentBarrier, Never, Never]
             .where(TraceContentBarrier.workspace_id == workspace_id)
             .values(generation=TraceContentBarrier.generation + 1)
         )
+
+
+class UserBarrierRepository(BaseRepository[TraceUserBarrier, Never, Never]):
+    """Lock and move on each user's erasure time."""
+
+    def __init__(self, uow: UnitOfWork) -> None:
+        super().__init__(uow, TraceUserBarrier)
+
+    async def lock(self, user_ids: Collection[str]) -> dict[str, datetime | None]:
+        """Lock each user's row until the transaction ends, creating any missing, and return when each was erased."""
+        if not user_ids:
+            return {}
+        ordered = sorted(user_ids)
+        insert = postgresql_insert if dialect_name(self.db) == "postgresql" else sqlite_insert
+        await self.db.execute(
+            insert(TraceUserBarrier)
+            .values([{"user_id": user_id} for user_id in ordered])
+            .on_conflict_do_nothing(index_elements=[TraceUserBarrier.user_id])
+        )
+        result = await self.db.execute(
+            select(TraceUserBarrier.user_id, TraceUserBarrier.erased_at)
+            .where(TraceUserBarrier.user_id.in_(ordered))
+            .order_by(TraceUserBarrier.user_id)
+            .with_for_update()
+        )
+        return dict(result.tuples().all())
+
+    async def erase(self, user_id: str, at: datetime) -> None:
+        """Record the user's erasure, holding their row until the transaction ends."""
+        await self.lock([user_id])
+        await self.db.execute(update(TraceUserBarrier).where(TraceUserBarrier.user_id == user_id).values(erased_at=at))

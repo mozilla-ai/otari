@@ -1740,6 +1740,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/traces/barrier_repository.py",
         "baseline": (),
     },
+    "gateway.models.traces.TraceUserBarrier": {
+        "repository": "gateway/repositories/traces/barrier_repository.py",
+        "baseline": (),
+    },
     "gateway.models.usage.AgentTelemetry": {
         "repository": None,
         "baseline": ("gateway/adapters/telemetry_storage_adapter.py",),
