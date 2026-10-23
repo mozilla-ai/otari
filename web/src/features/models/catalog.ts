@@ -5,7 +5,9 @@ import type {
   CatalogQueryParams,
   CatalogVendorFacet,
 } from "@/client"
+import { PAGE_SIZE_OPTIONS } from "@/design-system/data/TablePagination"
 import { providerDisplayName } from "@/shared/helpers/providers"
+import type { UrlState } from "@/shared/helpers/urlState"
 
 // What the list can be narrowed by, and how a row is sorted. Pure, so the page
 // stays a composition and these can be pinned on their own.
@@ -212,6 +214,134 @@ export const SORT_OPTIONS: {
     direction: "desc",
   },
 ]
+
+const SORT_COLUMNS: readonly CatalogSortColumn[] = [
+  "name",
+  "released",
+  "input",
+  "output",
+  "context",
+  "providers",
+]
+
+/** What the list shows: its filters, both sorts and its page. */
+export interface CatalogListState {
+  filters: CatalogFilters
+  /** A `SORT_OPTIONS` value, for the list view. */
+  sort: string
+  /** The table view's sort, which its headers set. */
+  tableSort: { column: CatalogSortColumn; direction: "asc" | "desc" }
+  page: number
+  pageSize: number
+}
+
+export const EMPTY_CATALOG_LIST: CatalogListState = {
+  filters: EMPTY_FILTERS,
+  sort: "newest",
+  tableSort: { column: "name", direction: "asc" },
+  page: 0,
+  pageSize: PAGE_SIZE_OPTIONS[0],
+}
+
+/**
+ * The list's URL params and their defaults, for `useUrlState`. The Providers
+ * page links here with `provider`.
+ */
+export const CATALOG_URL_DEFAULTS = {
+  q: "",
+  input: "",
+  output: "",
+  provider: "",
+  vendor: "",
+  capability: "",
+  context: "0",
+  max_input: "0",
+  pricing: "all",
+  source: "all",
+  released: "0",
+  sort: "newest",
+  column: "name",
+  order: "asc",
+  page: "0",
+  size: String(PAGE_SIZE_OPTIONS[0]),
+}
+
+export type CatalogUrlKey = keyof typeof CATALOG_URL_DEFAULTS
+
+// The unknown vendor's facet value is "", which `useUrlState` would drop as a
+// cleared filter.
+const UNKNOWN_VENDOR_PARAM = "-"
+
+/**
+ * The list read off its URL. A value the rail does not offer (a hand-edited
+ * URL) falls back to the default, so it never reaches the API as a filter it
+ * refuses.
+ */
+export function catalogListFromUrl(
+  url: Pick<UrlState<CatalogUrlKey>, "get" | "getAll" | "getNumber">,
+): CatalogListState {
+  const offered = (options: { value: string }[], key: CatalogUrlKey) => {
+    const value = url.get(key)
+    return options.some((option) => option.value === value)
+      ? value
+      : CATALOG_URL_DEFAULTS[key]
+  }
+  const known = (values: readonly string[]) => (value: string) =>
+    values.includes(value)
+  const column = url.get("column")
+  const size = url.getNumber("size")
+  return {
+    filters: {
+      query: url.get("q"),
+      inputModalities: url.getAll("input").filter(known(MODALITIES)),
+      outputModalities: url.getAll("output").filter(known(MODALITIES)),
+      providers: url.getAll("provider"),
+      vendors: url
+        .getAll("vendor")
+        .map((value) => (value === UNKNOWN_VENDOR_PARAM ? "" : value)),
+      capabilities: url
+        .getAll("capability")
+        .filter(known(CAPABILITY_FILTERS.map((filter) => filter.value))),
+      minContext: Number(offered(CONTEXT_OPTIONS, "context")),
+      maxInput: Number(offered(PRICE_OPTIONS, "max_input")),
+      pricing: offered(PRICING_OPTIONS, "pricing"),
+      source: offered(SOURCE_OPTIONS, "source"),
+      releasedWithinDays: Number(offered(RELEASE_OPTIONS, "released")),
+    },
+    sort: offered(SORT_OPTIONS, "sort"),
+    tableSort: {
+      column: SORT_COLUMNS.find((known) => known === column) ?? "name",
+      direction: url.get("order") === "desc" ? "desc" : "asc",
+    },
+    page: Math.max(0, url.getNumber("page")),
+    pageSize: PAGE_SIZE_OPTIONS.includes(size) ? size : PAGE_SIZE_OPTIONS[0],
+  }
+}
+
+/** The URL params that set `list`, for `UrlState.patch`. */
+export function catalogListToUrl(
+  list: CatalogListState,
+): Record<CatalogUrlKey, string | number | string[]> {
+  const { filters } = list
+  return {
+    q: filters.query,
+    input: filters.inputModalities,
+    output: filters.outputModalities,
+    provider: filters.providers,
+    vendor: filters.vendors.map((value) => value || UNKNOWN_VENDOR_PARAM),
+    capability: filters.capabilities,
+    context: filters.minContext,
+    max_input: filters.maxInput,
+    pricing: filters.pricing,
+    source: filters.source,
+    released: filters.releasedWithinDays,
+    sort: list.sort,
+    column: list.tableSort.column,
+    order: list.tableSort.direction,
+    page: list.page,
+    size: list.pageSize,
+  }
+}
 
 /**
  * The vendor slug a row's catalog id carries, or `undefined` when it carries

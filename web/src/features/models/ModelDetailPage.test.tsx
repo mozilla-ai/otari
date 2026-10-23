@@ -203,7 +203,7 @@ describe("ModelDetailPage", () => {
     expect(screen.getByText("Z.ai's flagship.")).toBeInTheDocument()
     // Derived limits carry their rule: the largest any offering serves.
     expect(screen.getByText("up to 200K")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "← All models" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "← Models" })).toHaveAttribute(
       "href",
       "/models",
     )

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { ReactElement } from "react"
+import type { ReactElement, ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
@@ -13,6 +13,7 @@ import type {
   OrganizationContext,
 } from "@/client"
 import { ModelCatalogPage } from "@/features/models/ModelCatalogPage"
+import { ModelDetailPage } from "@/features/models/ModelDetailPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
@@ -364,6 +365,88 @@ describe("ModelCatalogPage", () => {
     // The rail says one provider is in force.
     // The rail names the vendor and filters on the instance id (otari#990).
     expect(screen.getByRole("checkbox", { name: "Fireworks AI" })).toBeChecked()
+  })
+
+  it("goes back from a model to the list as it was left", async () => {
+    mockApi()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    // The providers sit outside the router here, unlike `renderPage`, so the
+    // model page the card opens has them too.
+    const Router = withRouter({
+      url: "/models",
+      routes: [
+        {
+          path: "/models/$vendor/$model",
+          element: <ModelDetailPage modelId="z-ai/glm-5.3" />,
+        },
+      ],
+    })
+    render(<ModelCatalogPage />, {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <DeploymentProvider value={bootstrap()}>
+          <QueryClientProvider client={client}>
+            <Router>{children}</Router>
+          </QueryClientProvider>
+        </DeploymentProvider>
+      ),
+    })
+    const user = userEvent.setup()
+
+    await screen.findByRole("list", { name: "Models" })
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search models" }),
+      "glm",
+    )
+    await user.click(screen.getByRole("button", { name: "Capabilities" }))
+    await user.click(screen.getByRole("checkbox", { name: "Reasoning" }))
+    await user.click(screen.getByRole("button", { name: /Newest/ }))
+    await user.click(screen.getByRole("option", { name: "Name" }))
+    const list = screen.getByRole("list", { name: "Models" })
+    await waitFor(() =>
+      expect(within(list).queryByText(/Kimi K2.6/)).toBeNull(),
+    )
+
+    await user.click(within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }))
+    await user.click(await screen.findByRole("link", { name: "← Models" }))
+
+    const search = await screen.findByRole("searchbox", {
+      name: "Search models",
+    })
+    expect(search).toHaveValue("glm")
+    expect(screen.getByRole("checkbox", { name: "Reasoning" })).toBeChecked()
+    expect(screen.getByRole("button", { name: /Name/ })).toBeInTheDocument()
+
+    // Clear empties the search box too, which shows the URL while unfocused.
+    await user.click(screen.getByRole("button", { name: "Clear" }))
+    await waitFor(() => expect(search).toHaveValue(""))
+  })
+
+  it("reads a hand-edited URL, falling back where the rail offers no such value", async () => {
+    const fetchMock = mockApi()
+    renderPage(
+      <ModelCatalogPage />,
+      "/models?sort=bogus&size=7&page=-2&capability=evil&pricing=free&vendor=-&output=image",
+    )
+
+    await screen.findByRole("list", { name: "Models" })
+    const request = new URL(
+      String(
+        fetchMock.mock.calls
+          .map(([input]) => String(input))
+          .find((url) => url.includes(`${API_ROOT}/catalog/models?`)),
+      ),
+      "http://localhost",
+    ).searchParams
+    expect(request.get("sort")).toBe("released")
+    expect(request.get("limit")).toBe("25")
+    expect(request.get("skip")).toBe("0")
+    expect(request.get("pricing")).toBe("all")
+    expect(request.getAll("capability")).toEqual([])
+    // `vendor=-` is the unknown vendor, whose facet value is blank.
+    expect(request.getAll("vendor")).toEqual([""])
+    expect(request.getAll("output_modality")).toEqual(["image"])
   })
 
   it("debounces search and sends the vendor term to the server", async () => {

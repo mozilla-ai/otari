@@ -185,7 +185,7 @@ describe("PublicCatalogPage", () => {
     expect(screen.queryByRole("link", { name: "Set your rate" })).toBeNull()
     expect(screen.queryByRole("link", { name: /route across/ })).toBeNull()
     expect(screen.queryByText(/Your effective price/)).toBeNull()
-    expect(screen.getByRole("link", { name: "← All models" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "← Models" })).toHaveAttribute(
       "href",
       "#/models",
     )
