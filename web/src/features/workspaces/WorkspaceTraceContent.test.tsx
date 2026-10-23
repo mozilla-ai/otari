@@ -186,4 +186,35 @@ describe("WorkspaceTraceContent", () => {
       screen.getByRole("button", { name: "Delete content" }),
     ).toBeInTheDocument()
   })
+
+  it("says owners can open content by break-glass, and the operator only where it is on", () => {
+    mockApi()
+    const { unmount } = renderToggle(
+      <WorkspaceTraceContent workspace={workspace()} />,
+    )
+    expect(
+      screen.getByText(
+        /organization's owners can still open it without a share/,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/where required by law/)).not.toBeInTheDocument()
+    unmount()
+
+    const client = new QueryClient()
+    render(
+      <QueryClientProvider client={client}>
+        <DeploymentProvider
+          value={bootstrap({
+            trace_content_available: true,
+            trace_platform_break_glass: true,
+          })}
+        >
+          <WorkspaceTraceContent workspace={workspace()} />
+        </DeploymentProvider>
+      </QueryClientProvider>,
+    )
+    expect(
+      screen.getByText(/where required by law, recorded with a reference/),
+    ).toBeInTheDocument()
+  })
 })

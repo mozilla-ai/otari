@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { TraceContentShare } from "@/client"
 import { SessionContent } from "@/features/traces/SessionContent"
 import { API_ROOT } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap } from "@/tests/fixtures"
 import { traceDetail, traceSpan, traceSummary } from "@/tests/traceFixtures"
 
 const SHARE: TraceContentShare = {
@@ -64,7 +66,11 @@ function renderWith(ui: ReactNode) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+  return render(
+    <QueryClientProvider client={client}>
+      <DeploymentProvider value={bootstrap()}>{ui}</DeploymentProvider>
+    </QueryClientProvider>,
+  )
 }
 
 const tool = traceSpan({ span_id: "tool-1", kind: "tool" })

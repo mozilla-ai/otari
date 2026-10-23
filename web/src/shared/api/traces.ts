@@ -279,12 +279,23 @@ export function useBreakGlass() {
   })
 }
 
-// The organization's owners' break-glass openings, newest first. Owners only.
+const BREAK_GLASS_PAGE = 50
+
+// The organization's owners' break-glass openings, newest first, a page at a
+// time, so every opening stays reachable however many follow it. Owners only.
 export function useBreakGlassLog(enabled: boolean) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: [TRACES, "break-glass"],
-    queryFn: () =>
-      apiFetch<TraceBreakGlassReadList>(`${SHARE_BASE}/audit/break-glass`),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
+      apiFetch<TraceBreakGlassReadList>(
+        `${SHARE_BASE}/audit/break-glass?${new URLSearchParams({
+          skip: String(pageParam),
+          limit: String(BREAK_GLASS_PAGE),
+        }).toString()}`,
+      ),
+    getNextPageParam: (last, pages) =>
+      last.has_more ? pages.length * BREAK_GLASS_PAGE : undefined,
     enabled,
     staleTime: 30_000,
   })
