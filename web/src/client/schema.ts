@@ -3637,6 +3637,10 @@ export interface paths {
         /**
          * Update Org Provider Key
          * @description Change a key's name, credential, base URL, or client args. Organization owners and admins only.
+         *
+         *     A new base URL on a key that holds a credential needs that credential in the
+         *     same request, `api_key` and any masked `client_args` entry, since the next call
+         *     sends it to the new host. Clearing the base URL needs neither.
          */
         patch: operations["provider-keys-update_org_provider_key"];
         trace?: never;
@@ -4246,7 +4250,10 @@ export interface paths {
          * Update Org Web Search Key
          * @description Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.
          *
-         *     Its kind and provider are fixed.
+         *     Its kind and provider are fixed. A new api_base on a key that holds a secret
+         *     needs that secret in the same request, `api_key` and any masked `options`
+         *     entry, since the next call sends it to the new host. Clearing api_base needs
+         *     neither.
          */
         patch: operations["web-search-keys-update_org_web_search_key"];
         trace?: never;

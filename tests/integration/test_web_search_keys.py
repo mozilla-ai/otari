@@ -461,6 +461,45 @@ def test_a_key_has_a_kind_and_may_carry_its_own_endpoint_and_options(
     assert (cleared.json()["api_base"], cleared.json()["options"]["effort"]) == (None, "standard")
 
 
+def test_moving_a_key_to_another_host_needs_its_secret_again(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The next call sends what the key holds to the new api_base, and an admin only ever reads ``last4``."""
+    key = _add_key(
+        client,
+        master_key_header,
+        provider="tabstack",
+        name="pages",
+        api_key="tbs-1",
+        kind="fetch",
+        api_base="https://1.1.1.1/v1",
+        options={"geo_target": {"api_token": "hidden-1"}},
+    )
+    url = f"{_KEYS}/{key['id']}"
+    elsewhere = "https://8.8.8.8/v1"
+
+    refused = [
+        client.patch(url, json=body, headers=master_key_header)
+        for body in (
+            {"api_base": elsewhere},
+            {"api_base": elsewhere, "api_key": "tbs-2"},
+            {"api_base": elsewhere, "api_key": "tbs-2", "options": {"geo_target": {"api_token": "***"}}},
+        )
+    ]
+    same_host = client.patch(url, json={"api_base": "https://1.1.1.1/v1", "name": "renamed"}, headers=master_key_header)
+    moved = client.patch(
+        url,
+        json={"api_base": elsewhere, "api_key": "tbs-2", "options": {"geo_target": {"api_token": "hidden-2"}}},
+        headers=master_key_header,
+    )
+
+    assert [response.status_code for response in refused] == [400, 400, 400], [r.text for r in refused]
+    assert "api_key" in refused[0].json()["detail"]
+    assert same_host.status_code == 200, same_host.text
+    assert moved.status_code == 200, moved.text
+    assert (moved.json()["api_base"], moved.json()["last4"]) == (elsewhere, "bs-2")
+
+
 def test_a_keys_kind_is_fixed(client: TestClient, master_key_header: dict[str, str]) -> None:
     key = _add_key(client, master_key_header, provider="exa", api_key="exa-1")
 

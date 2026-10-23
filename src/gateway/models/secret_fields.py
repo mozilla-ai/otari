@@ -135,6 +135,11 @@ def _restore_list(incoming: list[Any], stored: list[Any], depth: int) -> list[An
     return out
 
 
+def holds_secret_like_values(values: dict[str, Any] | None) -> bool:
+    """Whether a stored object has an entry a read masks, which is a credential it carries."""
+    return values is not None and redact_secret_like_values(values) != values
+
+
 def carries_redaction(values: dict[str, Any] | None) -> bool:
     """Whether a submitted object still holds the mask somewhere a read could have put it."""
     return values is not None and _carries_mask(values, 0)

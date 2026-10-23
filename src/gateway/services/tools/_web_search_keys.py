@@ -33,6 +33,7 @@ from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyErro
 from gateway.exceptions.tools_exceptions import (
     WebSearchKeyAlreadyExistsError,
     WebSearchKeyArchivedError,
+    WebSearchKeyCredentialRequiredError,
     WebSearchKeyDefaultConflictError,
     WebSearchKeyIncompleteError,
     WebSearchKeyMalformedError,
@@ -44,7 +45,7 @@ from gateway.exceptions.tools_exceptions import (
     WorkspaceWebSearchKeyOverrideConflictError,
 )
 from gateway.log_config import logger
-from gateway.models.secret_fields import restore_redacted_values
+from gateway.models.secret_fields import carries_redaction, holds_secret_like_values, restore_redacted_values
 from gateway.models.tenancy import User
 from gateway.models.tools import (
     OrgWebSearchKey,
@@ -294,6 +295,15 @@ class WebSearchKeyService:
                 key = await self._live_key(key_id, organization_id)
                 provider, kind = key.provider, _kind(key)
                 adds_a_key = request.api_key is not None and key.encrypted_api_key is None
+                if sets_api_base and api_base is not None and api_base != key.api_base:
+                    # The stored credential would go to the new host on the next call.
+                    stored_options_follow = (
+                        carries_redaction(request.options)
+                        if "options" in request.model_fields_set
+                        else holds_secret_like_values(key.options)
+                    )
+                    if (key.encrypted_api_key is not None and request.api_key is None) or stored_options_follow:
+                        raise WebSearchKeyCredentialRequiredError
                 if sets_api_base or adds_a_key:
                     _check_endpoint(
                         kind,

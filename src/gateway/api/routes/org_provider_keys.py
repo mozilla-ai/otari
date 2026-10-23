@@ -119,7 +119,12 @@ async def update_org_provider_key(
     key_id: uuid.UUID,
     body: OrgProviderKeyUpdateRequest,
 ) -> OrgProviderKeyPublic:
-    """Change a key's name, credential, base URL, or client args. Organization owners and admins only."""
+    """Change a key's name, credential, base URL, or client args. Organization owners and admins only.
+
+    A new base URL on a key that holds a credential needs that credential in the
+    same request, `api_key` and any masked `client_args` entry, since the next call
+    sends it to the new host. Clearing the base URL needs neither.
+    """
     return await service.update_key_for_user(user=current_identity, key_id=key_id, request=body)
 
 

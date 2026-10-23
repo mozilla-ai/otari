@@ -6816,7 +6816,7 @@
               },
               "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"client_args\": {},\n  \"name\": \"string\"\n}"
             },
-            "description": "Change a key's name, credential, base URL, or client args. Organization owners and admins only.",
+            "description": "Change a key's name, credential, base URL, or client args. Organization owners and admins only.\n\nA new base URL on a key that holds a credential needs that credential in the\nsame request, `api_key` and any masked `client_args` entry, since the next call\nsends it to the new host. Clearing the base URL needs neither.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8463,7 +8463,7 @@
               },
               "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"name\": \"string\",\n  \"options\": {}\n}"
             },
-            "description": "Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.\n\nIts kind and provider are fixed.",
+            "description": "Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.\n\nIts kind and provider are fixed. A new api_base on a key that holds a secret\nneeds that secret in the same request, `api_key` and any masked `options`\nentry, since the next call sends it to the new host. Clearing api_base needs\nneither.",
             "header": [
               {
                 "key": "Content-Type",

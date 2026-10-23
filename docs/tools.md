@@ -894,7 +894,10 @@ must use https when the key carries an API key, and must reach public addresses
 only, whatever `OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS` says, since an organization
 rather than the operator chose it. Calls to it are held to the same rule: each
 one connects to the address that was checked, follows no redirect, and bypasses
-any environment proxy, as calls to a workspace's own model endpoint do. A
+any environment proxy, as calls to a workspace's own model endpoint do. Moving
+a key that holds a secret to another `api_base` needs the secret in the same
+request (`api_key`, and any masked `options` entry), since the next call sends
+it there; an organization's model provider keys follow the same rule. A
 `tavily` or `brave` key takes neither, since the older backend that runs them
 calls their public endpoints.
 A key's calls never fall back to the deployment's own key or endpoint for its
