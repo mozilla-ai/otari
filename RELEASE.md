@@ -182,7 +182,8 @@ secret of that name is granted to.
   variable, not a secret).
 - `RELEASE_APP_CLIENT_ID` (a repository variable, not a secret) and
   `RELEASE_APP_PRIVATE_KEY`, used by `otari-release.yml`,
-  `otari-tag-release.yml` and `otari-homebrew.yml`, which is why the key is in
+  `otari-tag-release.yml`, `otari-lock-refresh.yml` (to open the weekly lock
+  refresh PR) and `otari-homebrew.yml`, which is why the key is in
   both the `release` and `homebrew-tap` environments. They identify the
   `otari-bot` GitHub App, org-owned and installed on this repo and on
   `mozilla-ai/homebrew-tap`, holding exactly `contents: write` +
