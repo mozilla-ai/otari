@@ -147,7 +147,7 @@ from gateway.services.tools import (
     WorkspaceSearchKeys,
     web_search_configured,
 )
-from gateway.services.traces import SpanContent, TraceService
+from gateway.services.traces import SpanContent, TraceMembershipListener, TraceService
 from gateway.services.usage_admin_service import usage_in
 from gateway.services.usage_and_telemetry import UsageService
 from gateway.services.workspace_scope import default_workspace_id
@@ -991,13 +991,14 @@ UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 
 
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
-    """Return the listener that keeps members' budget ceilings and own keys in step with their memberships.
+    """Return the listener that keeps members' budget ceilings, own keys and session shares in step with their memberships.
 
     It writes through the request's Unit of Work, so a service that changes membership must be built on the same one.
     """
     return MembershipListeners(
         BudgetMembershipListener(BudgetRepositories.on(uow)),
         ApiKeyMembershipListener(ApiKeyRepositories.on(uow)),
+        TraceMembershipListener(TracesRepositories.on(uow)),
     )
 
 
