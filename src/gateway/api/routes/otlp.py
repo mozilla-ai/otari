@@ -568,6 +568,9 @@ async def receive_traces(
 ) -> Response:
     """Ingest LLM usage from OTLP spans (GenAI semantic conventions)."""
     api_key = _require_import_key(auth_result[0])
+    # As the export is let in, before its body uploads: an upload that outlasts an
+    # erasure of its user is measured from here, so its spans are never stored.
+    admitted_at = datetime.now(UTC)
     await _release_after_auth(db)
     content_type = _content_type(request)
     body = _decode_body(await request.body(), request.headers.get("content-encoding"))
@@ -649,6 +652,7 @@ async def receive_traces(
             retention=timedelta(days=config.trace_retention_days),
             content_enabled=keeps_content,
             content_generation=generation,
+            admitted_at=admitted_at,
         )
     _record_priced(request, priced, api_key=api_key, config=config)
     return _otlp_response(content_type, response)

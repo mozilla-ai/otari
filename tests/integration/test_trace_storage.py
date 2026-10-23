@@ -7,6 +7,7 @@ the tenancy rows it points at are committed before it runs.
 """
 
 import asyncio
+import dataclasses
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -27,7 +28,7 @@ from gateway.core.database import dispose_db, init_db
 from gateway.core.unit_of_work import create_unit_of_work
 from gateway.exceptions.traces_exceptions import TraceAmbiguousError
 from gateway.models.tenancy import Workspace
-from gateway.models.traces import TraceSpan
+from gateway.models.traces import Trace, TraceSpan
 from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
 from gateway.repositories.traces import TracesRepositories
@@ -825,6 +826,8 @@ async def test_a_batch_another_replica_held_from_before_an_erasure_is_never_stor
     assert result.accepted == 0
     async_db.expire_all()
     assert (await async_db.execute(select(TraceSpan.span_id))).scalars().all() == []
+    # Nor does it bring back the session it names, with the erased user's id on it.
+    assert (await async_db.execute(select(Trace.trace_id))).scalars().all() == []
     # Someone else's spans are stored as ever.
     bob = await store.write((_write(workspace, "s-bob", _span("step-0"), user_id="bob"),))
     assert bob.accepted == 1
@@ -878,3 +881,22 @@ async def test_an_erased_users_id_goes_from_the_barrier_and_the_break_glass_reco
     assert read.session_user_id is None and read.reason == "Legal request from the regulator"
     assert await store.expire_erasures(now=datetime.now(UTC)) == 0
     assert await store.expire_erasures(now=datetime.now(UTC) + timedelta(hours=2)) == 1
+
+
+async def test_an_upload_admitted_before_an_erasure_and_finished_long_after_is_never_stored(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    admitted = datetime.now(UTC)
+    await store.purge_user("alice")
+    late = dataclasses.replace(
+        _write(workspace, "s-late", _span("tool-1", kind="tool", content={"prompt": "x"})),
+        captured_at=admitted,
+    )
+    # However long the upload took, it is judged from when it was let in.
+    result = await store.write((late,))
+
+    assert result.accepted == 0
+    async_db.expire_all()
+    assert (await async_db.execute(select(Trace.trace_id))).scalars().all() == []
