@@ -4,7 +4,7 @@ The one place that knows how content is sealed. A sealed value reads::
 
     otc1.<wrapper>.<wrapped data key>.<nonce + AES-256-GCM ciphertext>
 
-each part url-safe base64. The data key is made for the workspace, which the
+each part url-safe base64. The data key is made for the session, which the
 key source binds (KMS as encryption context), and the ciphertext is
 authenticated with the workspace, the trace and the span as associated data.
 So a value copied onto another span, another session or another workspace
@@ -13,8 +13,10 @@ opens as nothing.
 A value without the ``otc1.`` prefix is a bare ``OTARI_SECRET_KEY`` Fernet token,
 the form content was stored in before; it opens as it always did.
 
-Data keys are cached, so a busy workspace costs its key source one call every
-few minutes rather than one a span: one write key per workspace, reused for
+Each session has data keys of its own, made for its workspace and itself (KMS
+binds both as encryption context), so a key that leaked would open one session.
+Data keys are cached, so a busy session costs its key source one call every
+few minutes rather than one a span: one write key per session, reused for
 ``_KEY_MAX_AGE_S`` or ``_WRITE_KEY_MAX_USES`` seals, and an LRU of opened
 keys, each held for ``_KEY_MAX_AGE_S``. After the key source fails for lack of reach or permission, it is not
 asked again for ``_PAUSE_AFTER_FAILURE_S``: content is dropped, or reads back
@@ -47,7 +49,7 @@ _PURPOSE = "trace-content"
 
 _KEY_MAX_AGE_S = 300.0
 _WRITE_KEY_MAX_USES = 10_000
-_KEY_CACHE_SIZE = 1_024
+_KEY_CACHE_SIZE = 4_096
 _PAUSE_AFTER_FAILURE_S = 30.0
 # Well inside the trace writer's batch time limit, so a slow key source leaves
 # the batch time to store its spans without their content.
@@ -65,6 +67,10 @@ UNOPENED = Counter(
     ["reason"],
     registry=REGISTRY,
 )
+
+
+# A session: the workspace it is in and its trace id. Each has data keys of its own.
+Session = tuple[uuid.UUID, str]
 
 
 @dataclass(frozen=True)
@@ -99,8 +105,8 @@ class SpanContent:
 
     def __init__(self, keys: ContentKeyPort | None) -> None:
         self._keys = keys
-        self._write_keys: OrderedDict[str, _WriteKey] = OrderedDict()
-        self._open_keys: OrderedDict[tuple[str, bytes, str], tuple[bytes, float]] = OrderedDict()
+        self._write_keys: OrderedDict[Session, _WriteKey] = OrderedDict()
+        self._open_keys: OrderedDict[tuple[str, bytes, Session], tuple[bytes, float]] = OrderedDict()
         self._write_paused_until = 0.0
         self._read_paused_until = 0.0
         self._sweep: asyncio.TimerHandle | None = None
@@ -128,18 +134,19 @@ class SpanContent:
     async def seal_many(self, items: Sequence[SealItem]) -> list[str | None]:
         """Each item's content sealed for its row, in order; None where there is none or it could not be sealed.
 
-        The keys the batch lacks are fetched together, under one deadline for the
-        batch. An item whose workspace's key is not in hand by then is not sealed.
+        Each session has data keys of its own. The keys the batch lacks are fetched
+        together, under one deadline for the batch; an item whose session's key is
+        not in hand by then is not sealed.
         """
         keys = self._keys
         if keys is None or keys.wrapper is None:
             return [None] * len(items)
         self._prune()
-        wanted = list(dict.fromkeys(item.workspace_id for item in items if item.content))
+        wanted = list(dict.fromkeys((item.workspace_id, item.trace_id) for item in items if item.content))
         held, reason = await self._write_keys_for(keys, wanted) if wanted else ({}, "paused")
         sealed: list[str | None] = []
         for item in items:
-            key = held.get(item.workspace_id) if item.content else None
+            key = held.get((item.workspace_id, item.trace_id)) if item.content else None
             if key is None:
                 if item.content:
                     UNSEALED.labels(reason=reason).inc()
@@ -155,26 +162,24 @@ class SpanContent:
         return sealed
 
     async def _write_keys_for(
-        self, keys: ContentKeyPort, workspaces: Sequence[uuid.UUID]
-    ) -> tuple[dict[uuid.UUID, DataKey], str]:
-        """A write key for each workspace that has one cached or gets one in time, and why the others went without."""
-        held: dict[uuid.UUID, DataKey] = {}
-        missing: list[uuid.UUID] = []
-        for workspace_id in workspaces:
-            cached = self._write_keys.get(str(workspace_id))
+        self, keys: ContentKeyPort, sessions: Sequence[Session]
+    ) -> tuple[dict[Session, DataKey], str]:
+        """A write key for each session that has one cached or gets one in time, and why the others went without."""
+        held: dict[Session, DataKey] = {}
+        missing: list[Session] = []
+        for session in sessions:
+            cached = self._write_keys.get(session)
             if cached is not None and cached.uses < _WRITE_KEY_MAX_USES:
-                self._write_keys.move_to_end(str(workspace_id))
+                self._write_keys.move_to_end(session)
                 cached.uses += 1
-                held[workspace_id] = cached.key
+                held[session] = cached.key
             else:
-                missing.append(workspace_id)
+                missing.append(session)
         if not missing:
             return held, "unavailable"
         if self._write_paused():
             return held, "paused"
-        tasks = {
-            asyncio.ensure_future(keys.new_data_key(_context(workspace_id))): workspace_id for workspace_id in missing
-        }
+        tasks = {asyncio.ensure_future(keys.new_data_key(_context(*session))): session for session in missing}
         done, pending = await asyncio.wait(tasks, timeout=_KEY_SOURCE_BUDGET_S)
         for task in pending:
             task.cancel()
@@ -184,8 +189,8 @@ class SpanContent:
         for task in done:
             exc = task.exception()
             if exc is None:
-                workspace_id = tasks[task]
-                held[workspace_id] = self._cache_write_key(workspace_id, task.result())
+                session = tasks[task]
+                held[session] = self._cache_write_key(session, task.result())
             elif isinstance(exc, ContentKeyError):
                 failure = failure or exc
             else:
@@ -195,8 +200,8 @@ class SpanContent:
             return held, failure.reason
         return held, "unavailable"
 
-    def _cache_write_key(self, workspace_id: uuid.UUID, key: DataKey) -> DataKey:
-        self._write_keys[str(workspace_id)] = _WriteKey(key, made_at=monotonic(), uses=1)
+    def _cache_write_key(self, session: Session, key: DataKey) -> DataKey:
+        self._write_keys[session] = _WriteKey(key, made_at=monotonic(), uses=1)
         while len(self._write_keys) > _KEY_CACHE_SIZE:
             self._write_keys.popitem(last=False)
         self._schedule_sweep()
@@ -218,7 +223,7 @@ class SpanContent:
             return {}
         self._prune()
         try:
-            data_key = await self._open_key(wrapper, wrapped, workspace_id)
+            data_key = await self._open_key(wrapper, wrapped, (workspace_id, trace_id))
         except ContentKeyError as exc:
             self._failed(exc, "opened")
             UNOPENED.labels(reason=exc.reason).inc()
@@ -237,18 +242,18 @@ class SpanContent:
             return {}
         return _allowed(content)
 
-    async def _open_key(self, wrapper: str, wrapped: bytes, workspace_id: uuid.UUID) -> bytes | None:
+    async def _open_key(self, wrapper: str, wrapped: bytes, session: Session) -> bytes | None:
         """The opened key; None when it is not cached and the source is paused."""
         if self._keys is None:
             raise ContentKeyError("unavailable", "no content key is configured")
-        cache_key = (wrapper, wrapped, str(workspace_id))
+        cache_key = (wrapper, wrapped, session)
         cached = self._open_keys.get(cache_key)
         if cached is not None:
             self._open_keys.move_to_end(cache_key)
             return cached[0]
         if self._read_paused():
             return None
-        data_key = await _within_budget(self._keys.open_data_key(wrapper, wrapped, _context(workspace_id)))
+        data_key = await _within_budget(self._keys.open_data_key(wrapper, wrapped, _context(*session)))
         self._open_keys[cache_key] = (data_key, monotonic())
         while len(self._open_keys) > _KEY_CACHE_SIZE:
             self._open_keys.popitem(last=False)
@@ -258,8 +263,8 @@ class SpanContent:
     def _prune(self) -> None:
         """Drop every key past its age, written or opened."""
         now = monotonic()
-        for workspace in [w for w, held in self._write_keys.items() if now - held.made_at >= _KEY_MAX_AGE_S]:
-            del self._write_keys[workspace]
+        for session in [key for key, held in self._write_keys.items() if now - held.made_at >= _KEY_MAX_AGE_S]:
+            del self._write_keys[session]
         for cache_key in [k for k, (_, at) in self._open_keys.items() if now - at >= _KEY_MAX_AGE_S]:
             del self._open_keys[cache_key]
 
@@ -311,8 +316,9 @@ async def _within_budget[T](call: Awaitable[T]) -> T:
         raise ContentKeyError("unavailable", "the content key source did not answer in time") from None
 
 
-def _context(workspace_id: uuid.UUID) -> dict[str, str]:
-    return {"otari:purpose": _PURPOSE, "otari:workspace": str(workspace_id)}
+def _context(workspace_id: uuid.UUID, trace_id: str) -> dict[str, str]:
+    """What a data key is bound to: KMS opens it for this session of this workspace and no other."""
+    return {"otari:purpose": _PURPOSE, "otari:workspace": str(workspace_id), "otari:session": trace_id}
 
 
 def _associated_data(workspace_id: uuid.UUID, trace_id: str, span_id: str) -> bytes:
