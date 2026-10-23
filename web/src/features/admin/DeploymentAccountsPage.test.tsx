@@ -310,7 +310,7 @@ describe("DeploymentAccountsPage", () => {
   })
 
   it("disables them on the caller's own row when it is also the bootstrap one", async () => {
-    // The ordinary standalone shape: one operator identity, marked, and reading
+    // The ordinary shape: one operator identity, marked, and reading
     // its own row. Both controls are still off, and the reason is the one that
     // stays true whoever is reading.
     mockApi({ accounts: [OPERATOR, ANALYST] })

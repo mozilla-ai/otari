@@ -6,6 +6,7 @@ import { secretCaption } from "./secretCaption"
 
 const result = (over: Partial<CreateKeyResponse> = {}): CreateKeyResponse => ({
   allowed_models: null,
+  allowed_tools: null,
   capture_agent_telemetry: null,
   created_at: "2026-09-10T00:00:00Z",
   exclude_from_budget: false,

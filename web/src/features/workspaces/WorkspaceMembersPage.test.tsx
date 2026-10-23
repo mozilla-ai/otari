@@ -118,8 +118,8 @@ describe("WorkspaceMembersPage", () => {
   // surface that survives.
 
   it("says why there is nobody left to add once the roster is exhausted", async () => {
-    // The one organization member is already in the workspace, which in a
-    // standalone deployment is the permanent state until sign-in lands.
+    // The one organization member is already in the workspace, which is where a
+    // fresh deployment starts.
     mockApi()
     await renderPage()
 

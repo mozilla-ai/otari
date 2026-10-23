@@ -17,7 +17,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from enum import Enum
@@ -28,6 +28,7 @@ import click
 import yaml
 
 from otari_agent.domain.check import PolicyCheckError, check_policy
+from otari_agent.domain.definitions import GateDefinition, bounded, definition_digest
 from otari_agent.domain.evaluators import matched_changed_paths
 from otari_agent.domain.policy import (
     MAX_POLICY_FILES,
@@ -54,6 +55,7 @@ from otari_agent.domain.types import (
     by_priority,
 )
 from otari_agent.domain.validation import validate_policy
+from otari_agent.report import CheckReport, GateReport, ModelUsage, enqueue
 
 # What a judge or verifier gate's caller-observed outcome may be
 # (domain.types.JudgeVerdict.outcome); the gate runners produce it as a plain
@@ -1283,7 +1285,14 @@ _HOOK_JUDGE_PROMPT_TOO_LONG_MARKER = "prompt is too long"
 _HOOK_MAX_JUDGE_REASONING_LENGTH = 4_096
 
 
-def _hook_run_judge_subprocess(argv: list[str], prompt: str, *, deadline: float, label: str) -> tuple[str, str]:
+def _hook_run_judge_subprocess(
+    argv: list[str],
+    prompt: str,
+    *,
+    deadline: float,
+    label: str,
+    unwrap: Callable[[str], str] | None = None,
+) -> tuple[str, str]:
     """Shared tail of every judge-CLI backend's own invocation: run `argv`, parse its
     stdout as the one JSON verdict object the judge prompt demands; return (outcome, reasoning).
 
@@ -1311,6 +1320,8 @@ def _hook_run_judge_subprocess(argv: list[str], prompt: str, *, deadline: float,
     "error" without ever touching `subprocess`; still short of it, the
     subprocess timeout is capped to whatever is left, never more than
     `_HOOK_JUDGE_TIMEOUT_SECONDS`.
+
+    `unwrap` takes the answer out of a backend's output envelope before it is read.
     """
     remaining = deadline - time.monotonic()
     if remaining <= 0:
@@ -1341,24 +1352,68 @@ def _hook_run_judge_subprocess(argv: list[str], prompt: str, *, deadline: float,
         # included.
         return "error", f"could not run {label} ({exc})"
 
+    stdout = unwrap(result.stdout) if unwrap else result.stdout
     if result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip()
+        detail = result.stderr.strip() or stdout.strip() or result.stdout.strip()
         return "error", f"{label} exited {result.returncode}: {detail[:500]}"
 
     try:
-        verdict = json.loads(_hook_strip_judge_code_fence(result.stdout))
+        verdict = json.loads(_hook_strip_judge_code_fence(stdout))
     except ValueError:
-        return "error", f"{label} did not return valid JSON: {result.stdout[:500]!r}"
+        return "error", f"{label} did not return valid JSON: {stdout[:500]!r}"
 
     outcome = verdict.get("outcome") if isinstance(verdict, dict) else None
     reasoning = verdict.get("reasoning") if isinstance(verdict, dict) else None
     if outcome not in ("pass", "fail") or not isinstance(reasoning, str):
-        return "error", f"{label} returned an unrecognized verdict shape: {result.stdout[:500]!r}"
+        return "error", f"{label} returned an unrecognized verdict shape: {stdout[:500]!r}"
 
     return outcome, reasoning[:_HOOK_MAX_JUDGE_REASONING_LENGTH]
 
 
-def _hook_call_claude_p(claude_path: str, model: str, prompt: str, *, deadline: float) -> tuple[str, str]:
+def _claude_p_usage(envelope: Mapping[str, Any]) -> list[ModelUsage]:
+    """What each model a `claude -p` call ran on used, from its JSON envelope's `modelUsage`."""
+    by_model = envelope.get("modelUsage")
+    if not isinstance(by_model, dict):
+        return []
+
+    def tokens(counts: Mapping[str, Any], key: str) -> int:
+        value = counts.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+    return [
+        ModelUsage(
+            provider="anthropic",
+            model=model,
+            input_tokens=tokens(counts, "inputTokens"),
+            output_tokens=tokens(counts, "outputTokens"),
+            cache_read_tokens=tokens(counts, "cacheReadInputTokens"),
+            cache_write_tokens=tokens(counts, "cacheCreationInputTokens"),
+        )
+        for model, counts in by_model.items()
+        if isinstance(model, str) and isinstance(counts, dict)
+    ]
+
+
+def _claude_p_answer(stdout: str, usage: list[ModelUsage] | None) -> str:
+    """The answer inside `claude -p --output-format json`'s envelope, noting in `usage` what it used.
+
+    Output that is not that envelope is the answer as it stands.
+    """
+    try:
+        envelope = json.loads(stdout)
+    except ValueError:
+        return stdout
+    if not isinstance(envelope, dict) or envelope.get("type") != "result":
+        return stdout
+    if usage is not None:
+        usage.extend(_claude_p_usage(envelope))
+    answer = envelope.get("result")
+    return answer if isinstance(answer, str) else ""
+
+
+def _hook_call_claude_p(
+    claude_path: str, model: str, prompt: str, *, deadline: float, usage: list[ModelUsage] | None = None
+) -> tuple[str, str]:
     """One `claude -p --model <model>` invocation; return (outcome, reasoning).
 
     `claude -p`'s own "prompt is too long" rejection exits nonzero with the
@@ -1376,9 +1431,13 @@ def _hook_call_claude_p(claude_path: str, model: str, prompt: str, *, deadline: 
     repo being judged. Confirmed this still produces a normal verdict (and,
     since it skips loading tool/MCP definitions into the system prompt,
     measured cheaper than the same call without these flags).
+
+    `--output-format json` wraps the answer with the tokens the call used, noted in `usage`.
     """
-    argv = [claude_path, "--model", model, "--tools", "", "--strict-mcp-config", "-p"]
-    return _hook_run_judge_subprocess(argv, prompt, deadline=deadline, label="claude -p")
+    argv = [claude_path, "--model", model, "--tools", "", "--strict-mcp-config", "--output-format", "json", "-p"]
+    return _hook_run_judge_subprocess(
+        argv, prompt, deadline=deadline, label="claude -p", unwrap=lambda stdout: _claude_p_answer(stdout, usage)
+    )
 
 
 def _hook_call_codex_exec(codex_path: str, model: str | None, prompt: str, *, deadline: float) -> tuple[str, str]:
@@ -1489,6 +1548,7 @@ def _hook_run_judge(
     model: str | None,
     deadline: float,
     dry_run: bool = False,
+    usage: list[ModelUsage] | None = None,
 ) -> tuple[str, str]:
     """Invoke the first available `judge_cli` backend for one judge gate's rubric; return (outcome, reasoning).
 
@@ -1531,6 +1591,8 @@ def _hook_run_judge(
     (`_hook_call_codex_exec`'s own docstring says why Codex gets no
     equivalent yet): any other failure, or a rejection that persists with no
     transcript left to drop, reports "error" as it always has.
+
+    `usage` collects what each call used, where the backend says (only `claude` does).
     """
     if dry_run:
         prompt = _hook_build_judge_prompt(rubric, diff, transcript)
@@ -1551,7 +1613,11 @@ def _hook_run_judge(
     def call(prompt_text: str) -> tuple[str, str]:
         if backend == "claude":
             return _hook_call_claude_p(
-                binary_path, model if model is not None else _HOOK_JUDGE_DEFAULT_MODEL, prompt_text, deadline=deadline
+                binary_path,
+                model if model is not None else _HOOK_JUDGE_DEFAULT_MODEL,
+                prompt_text,
+                deadline=deadline,
+                usage=usage,
             )
         return _hook_call_codex_exec(binary_path, model, prompt_text, deadline=deadline)
 
@@ -1564,6 +1630,41 @@ def _hook_run_judge(
     ):
         outcome, reasoning = call(_hook_build_judge_prompt(rubric, diff, ""))
     return outcome, reasoning
+
+
+class _GateRun(NamedTuple):
+    """When a judge or verifier gate ran, and what a judge's model calls used."""
+
+    started_ns: int
+    ended_ns: int
+    usage: tuple[ModelUsage, ...] = ()
+
+
+def _usage_by_model(usages: list[ModelUsage]) -> tuple[ModelUsage, ...]:
+    """One gate's model calls, a retry's tokens added in, as one total per model, the most used first."""
+    totals: dict[tuple[str, str], ModelUsage] = {}
+    for usage in usages:
+        key = (usage.provider, usage.model)
+        seen = totals.get(key)
+        totals[key] = (
+            usage
+            if seen is None
+            else ModelUsage(
+                provider=usage.provider,
+                model=usage.model,
+                input_tokens=seen.input_tokens + usage.input_tokens,
+                output_tokens=seen.output_tokens + usage.output_tokens,
+                cache_read_tokens=seen.cache_read_tokens + usage.cache_read_tokens,
+                cache_write_tokens=seen.cache_write_tokens + usage.cache_write_tokens,
+            )
+        )
+    return tuple(
+        sorted(
+            totals.values(),
+            key=lambda usage: usage.input_tokens + usage.output_tokens + usage.cache_read_tokens,
+            reverse=True,
+        )
+    )
 
 
 class _JudgedChange(NamedTuple):
@@ -1590,7 +1691,7 @@ class _JudgeSettings(NamedTuple):
 
 
 def _hook_collect_judge_verdicts(
-    spec: PolicySpec, change: _JudgedChange, settings: _JudgeSettings
+    spec: PolicySpec, change: _JudgedChange, settings: _JudgeSettings, runs: dict[str, _GateRun] | None = None
 ) -> list[JudgeVerdict]:
     """Run the highest-priority applicable judge gates, up to `settings.max_gates`, one model-CLI call each,
     up to `_HOOK_GATE_MAX_WORKERS` of them concurrently.
@@ -1633,6 +1734,7 @@ def _hook_collect_judge_verdicts(
     given, not completion order.
     Each gate past `settings.max_gates` makes no model call.
     Its `not_run` verdict names the cap, and comes after the verdicts of the gates that ran.
+    `runs` collects when each gate that ran did, and what its model calls used.
     """
     changed_paths_tuple = tuple(change.changed_paths)
     judge_gates = by_priority(
@@ -1701,6 +1803,8 @@ def _hook_collect_judge_verdicts(
         # silently vanishing along with the process that would have logged
         # its outcome.
         _hook_log_judge_call(change.repo_root, gate.id, "invoking")
+        started_ns = time.time_ns()
+        usage: list[ModelUsage] = []
         if diff_collection_failed:
             # No model call at all: a diff this gate cannot see is not
             # evidence to judge against, and every other pre-flight failure
@@ -1721,7 +1825,10 @@ def _hook_collect_judge_verdicts(
                 model=settings.model,
                 deadline=deadline,
                 dry_run=settings.dry_run,
+                usage=usage,
             )
+        if runs is not None:
+            runs[gate.id] = _GateRun(started_ns, time.time_ns(), _usage_by_model(usage))
         _hook_log_judge_call(change.repo_root, gate.id, outcome, detail=reasoning if settings.dry_run else None)
         return JudgeVerdict(gate_id=gate.id, outcome=cast(_VerdictOutcome, outcome), reasoning=reasoning)
 
@@ -1951,6 +2058,7 @@ def _hook_collect_check_verdicts(
     repo_root: Path,
     changed_paths: list[str],
     scopes: Mapping[str, _VerifierScope],
+    runs: dict[str, _GateRun] | None = None,
 ) -> list[CheckVerdict]:
     """Run every applicable verifier gate's verifier locally; return check_results.
 
@@ -1983,6 +2091,8 @@ def _hook_collect_check_verdicts(
     in this repo only ever reads the tree (`git status`/`git diff`, a file
     scan), which is safe under concurrency for free; a verifier that needs to
     write should not assume it is the only one running.
+
+    `runs` collects when each verifier ran.
     """
     changed_paths_tuple = tuple(changed_paths)
     check_gates = by_priority(
@@ -2010,11 +2120,24 @@ def _hook_collect_check_verdicts(
     deadline = time.monotonic() + _HOOK_CHECK_TOTAL_BUDGET_SECONDS
 
     def run_one(gate: VerifierGate) -> CheckVerdict:
+        started_ns = time.time_ns()
         outcome, detail = _hook_run_check_verifier(repo_root, gate.verifier, scope=scopes[gate.id], deadline=deadline)
+        if runs is not None:
+            runs[gate.id] = _GateRun(started_ns, time.time_ns())
         return CheckVerdict(gate_id=gate.id, outcome=cast(_VerdictOutcome, outcome), detail=detail)
 
     with ThreadPoolExecutor(max_workers=min(len(check_gates), _HOOK_GATE_MAX_WORKERS)) as executor:
         return list(executor.map(run_one, check_gates))
+
+
+# When this process began loading the CLI, set by the console script, so a check's
+# report counts the hook's own startup. A command invoked in process has none.
+_process_loaded_ns: int | None = None
+
+
+def time_checks_from(loaded_ns: int) -> None:
+    global _process_loaded_ns  # noqa: PLW0603 - set once, by the console script, before any command runs
+    _process_loaded_ns = loaded_ns
 
 
 def _stdin_is_a_terminal() -> bool:
@@ -2047,6 +2170,76 @@ _max_judges_option = click.option(
     show_default=True,
     help=_MAX_JUDGES_HELP,
 )
+
+
+def _hook_report(
+    payload: Mapping[str, Any],
+    *,
+    harness: str,
+    moment: str,
+    guardrail: _LoadedGuardrail,
+    results: tuple[GateResult, ...],
+    started_ns: int,
+    runs: Mapping[str, _GateRun],
+    evaluated_ns: int,
+) -> None:
+    """Queue this check's gates for the agent's session on its Otari server; see `otari_agent.report`.
+
+    A judge or verifier gate is timed by its own run. Any other gate is timed
+    from `started_ns` to `evaluated_ns`, since what it waits on is the hook
+    starting and reading the evidence.
+
+    Never raises: a report that cannot be made must not change the verdict.
+    """
+    try:
+        session_id = payload.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            return
+        definition = bounded(
+            GateDefinition(
+                gate_id=gate.id,
+                gate_type=gate.type,
+                enforcement=gate.enforcement,
+                origin="user" if guardrail.origins.get(gate.id) is GuardrailOrigin.USER else "repo",
+                runs=tuple(gate.runs),
+                message=gate.message,
+            )
+            for gate in guardrail.spec.gates
+        )
+        types = {gate.gate_id: gate.gate_type for gate in definition}
+        gates = tuple(
+            GateReport(
+                gate_id=result.gate_id,
+                gate_type=types.get(result.gate_id, "unknown"),
+                origin="user" if guardrail.origins.get(result.gate_id) is GuardrailOrigin.USER else "repo",
+                enforcement=result.enforcement,
+                outcome=result.outcome.value,
+                blocked=result.enforcement == "required" and result.outcome.is_blocking,
+                started_ns=run.started_ns if (run := runs.get(result.gate_id)) else started_ns,
+                ended_ns=run.ended_ns if run else evaluated_ns,
+                usage=run.usage if run else (),
+            )
+            for result in results
+            if result.outcome is not Outcome.NOT_APPLICABLE
+        )
+        tool_call_id = payload.get("tool_use_id") if payload.get("hook_event_name") == "PreToolUse" else None
+        tool_name = payload.get("tool_name") if tool_call_id else None
+        enqueue(
+            CheckReport(
+                harness=harness,
+                session_id=session_id,
+                moment=moment,
+                policy_digest=definition_digest(definition),
+                started_ns=started_ns,
+                gates=gates,
+                tool_call_id=tool_call_id if isinstance(tool_call_id, str) else None,
+                tool_name=tool_name if isinstance(tool_name, str) else None,
+            ),
+            os.environ,
+            definition=definition,
+        )
+    except Exception:  # noqa: BLE001, S110 - reporting is best-effort by design
+        pass
 
 
 def _hook_judge_gate_cap(raw: str | None) -> tuple[int, str | None]:
@@ -2187,6 +2380,7 @@ def hook(
         )
         return
 
+    started_ns = _process_loaded_ns or time.time_ns()
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
@@ -2266,6 +2460,9 @@ def hook(
     # gets (see check_policy's own check_results, evaluate_verifier).
     # Only the Stop branch below ever reassigns this.
     check_results: list[CheckVerdict] | None = None
+    runs: dict[str, _GateRun] = {}
+    # When the evidence was in hand, where judges and verifiers ran after it.
+    evidence_ns: int | None = None
     if event == "PreToolUse":
         tool_name = payload.get("tool_name", "")
         tool_input = payload.get("tool_input") or {}
@@ -2382,6 +2579,7 @@ def hook(
         max_gates, cap_notice = _hook_judge_gate_cap(max_judges)
         if cap_notice is not None:
             load_notice = cap_notice if load_notice is None else f"{load_notice}; {cap_notice}"
+        evidence_ns = time.time_ns()
         judge_results = _hook_collect_judge_verdicts(
             spec,
             _JudgedChange(repo_root=root, changed_paths=paths, transcript_path=transcript_path),
@@ -2392,13 +2590,15 @@ def hook(
                 cli_override=judge_cli,
                 max_gates=max_gates,
             ),
+            runs,
         )
-        check_results = _hook_collect_check_verdicts(spec, root, paths, _verifier_scopes(guardrail.origins, root))
+        check_results = _hook_collect_check_verdicts(spec, root, paths, _verifier_scopes(guardrail.origins, root), runs)
     else:
         return  # An event this harness integration does not check yet.
 
     # Evaluated in process against the guardrail this repository (and the
     # user's own `~/.otari/`) declares: no server, no credential, no network.
+    evaluating_ns = time.time_ns()
     try:
         check_result = check_policy(
             spec,
@@ -2412,6 +2612,19 @@ def hook(
     except PolicyCheckError as exc:
         _hook_not_enforcing(f"could not evaluate {guardrail_name} ({exc}); no gate is being enforced.")
         return
+    _hook_report(
+        payload,
+        harness=harness,
+        # A Stop check runs working-tree and session gates together, so it is named for the event.
+        moment="stop" if event == "Stop" else path_source or str(event),
+        guardrail=guardrail,
+        results=tuple(check_result.results),
+        started_ns=started_ns,
+        runs=runs,
+        # Judges and verifiers ran before the evaluation, so the other gates' share
+        # is the hook's own work before them, plus the evaluation.
+        evaluated_ns=(evidence_ns or evaluating_ns) + time.time_ns() - evaluating_ns,
+    )
     failing = [
         {
             "gate_id": gate_result.gate_id,

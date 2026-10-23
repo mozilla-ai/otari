@@ -232,3 +232,51 @@ async def test_a_tool_price_under_its_old_slash_key_is_reported_and_prices_no_mo
 
     assert "exa/exa-search (deployment)" in caplog.text
     assert _WARNING_MARKER in caplog.text
+
+
+_TOOL_WARNING_MARKER = "Gateway tool(s)"
+
+
+async def _warn_for_gateway_tools(db: AsyncSession, caplog: pytest.LogCaptureFixture, config: GatewayConfig) -> None:
+    _capture_gateway_logs(caplog)
+    try:
+        await warn_if_gateway_tools_lack_pricing(config, db)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config", "name", "kind"),
+    [
+        (
+            GatewayConfig(require_pricing=True, search_tools={"fake-search": {"provider": "fake"}}),
+            "fake-search",
+            "search",
+        ),
+        (GatewayConfig(require_pricing=True, web_fetch_enabled=True), "builtin_fetch", "fetch"),
+    ],
+)
+async def test_no_gateway_tool_warning_for_an_instance_priced_under_its_own_row(
+    async_db: AsyncSession, caplog: pytest.LogCaptureFixture, config: GatewayConfig, name: str, kind: str
+) -> None:
+    """The row the check at admission finds first silences the warning, as it lets the calls through."""
+    async_db.add(_tool_row(name, kind=kind))
+    await async_db.commit()
+
+    await _warn_for_gateway_tools(async_db, caplog, config)
+
+    assert _TOOL_WARNING_MARKER not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_the_gateway_tool_warning_names_the_row_for_an_unpriced_instance(
+    async_db: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    config = GatewayConfig(require_pricing=True, search_tools={"fake-search": {"provider": "fake"}})
+
+    await _warn_for_gateway_tools(async_db, caplog, config)
+
+    assert _TOOL_WARNING_MARKER in caplog.text
+    assert "otari:web_search" in caplog.text
+    assert "HTTP 402" in caplog.text

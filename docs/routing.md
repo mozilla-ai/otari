@@ -6,9 +6,6 @@ spill-over past a rate limit, learned selection, or guardrails the caller cannot
 remove. Use an
 [alias](models.md#model-aliases) when one name always maps to one target.
 
-Policies are a standalone feature. Hybrid gateways receive their attempt plan
-from the connected control plane.
-
 ## Failover
 
 ```yaml
@@ -47,7 +44,7 @@ the policy moves on to the next; a provider nothing declares has none, keyless
 local backends included, and an entry that names no key has none, whatever the
 provider's own environment variable holds. A candidate nothing declares that one of the
 deployment's hosted providers serves is sent on the deployment's own credential, as a single model is
-([modes](modes.md#deployment-paid-credentials-in-standalone)). When no candidate has a credential, the request is
+([modes](hosted-providers.md#deployment-paid-credentials)). When no candidate has a credential, the request is
 refused with `424 provider_not_configured`. A candidate whose provider rejects
 the configured credential (401, or a 403 that does not reject the request itself) moves on too; when every candidate
 either lacks a credential or had it rejected, and at least one was rejected, the
@@ -256,7 +253,7 @@ effective weighted shares, and mandatory guardrails. The API equivalent is
 
 A policy decides the model of a request that reaches Otari. A coding agent that
 talks to its provider directly can still ask Otari which model a new subagent
-should run on, through `POST /api/v1/routing/recommend`. A standalone
+should run on, through `POST /api/v1/routing/recommend`. A self-run
 deployment puts one choice question to the decision model it configured and
 recommends the candidate it picks; on otari.ai a managed recommender answers
 instead. The harness that asks picks the candidates: Claude Code chooses among
@@ -269,7 +266,7 @@ else is dispatched. See
 
 ## Managing policies at runtime
 
-Config-file policies apply to every workspace. Standalone operators can also
+Config-file policies apply to every workspace. Operators can also
 manage stored policies through the Routing page or `/api/v1/routing/policies`.
 Stored policies belong to one workspace and can optionally be scoped to one
 user. The operator's list, like `/api/v1/aliases`, shows the stored entries of
@@ -336,14 +333,14 @@ without reading the usage log:
 | `Otari-Attempt-Count` | How many candidates the request was sent to, including the one that served. A candidate skipped without being called, such as a model a rate limit had no room on, is not counted. |
 | `Otari-Fallback` | `true` when a candidate other than the plan's first served the request, whether the first failed or was skipped; otherwise `false`. |
 | `Otari-Response-Duration-Ms` | Whole milliseconds from the start of the handler preamble to the provider answering the request, failed candidates included. For a streamed response, to the stream opening or its first chunk, since the headers go out then. |
+| `Server-Timing` | The same duration split into Otari's time and the provider's, in [W3C Server Timing](https://www.w3.org/TR/server-timing/) form: `otari;dur=4.2;desc="Otari before the provider", upstream;dur=812.5;desc="Provider until its answer or first chunk", total;dur=816.7;desc="Otari and the provider"`. `otari` runs until the first candidate is sent: the budget hold, routing, rate limits and preparing the call. `upstream` runs from there to the answer, failed candidates included, or for a stream to its first chunk, or to the end of the first-chunk hold when the provider is slower. Gateway tools that run between provider calls, such as web search or code execution, count toward `upstream`. A stream that uses gateway tools opens before its first provider call answers, so for one of those `upstream` and `total` end when the stream opens, as `Otari-Response-Duration-Ms` does. Durations are milliseconds to a tenth. |
 
 A request naming a model or an alias reports `1` and `false`. Streaming responses
 carry the same values: failover happens before the stream opens, so the serving
 candidate and the attempt count are already known when the headers are sent. A
 failure later in the stream is reported in the stream and changes neither. The
 request's cost is `usage.cost_usd` in the body, as described in the
-[API reference](api-reference.md#request-id-and-inline-cost). These headers are
-sent by a standalone gateway.
+[API reference](api-reference.md#request-id-and-inline-cost).
 
 Built-in tool charges settle on the final row. Candidate price and remaining budget, including a budget narrowed to that candidate's provider, are checked before each attempt, so a fallback cannot silently bypass pricing or spend limits. A fallback is skipped when a budget narrowed to its provider has no room, and the next candidate is tried. A budget on every provider that cannot cover a pricier fallback stops the chain instead. What a fallback spends counts against its own provider's budgets.
 

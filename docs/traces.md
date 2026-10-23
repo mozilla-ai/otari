@@ -28,6 +28,7 @@ Otari never guesses that two requests belong together from their content.
 | The agent harness's own session id | Codex's `thread-id`, or `session-id` without one, on a request whose `originator` or `User-Agent` starts with `codex` | `harness` |
 | An OTLP span's Claude session | `anthropic.session.id` on an exported span | `otlp` |
 | An OTLP span's conversation | `gen_ai.conversation.id` on an exported span | `otlp` |
+| A Claude Code span's session | `session.id` on a span Claude Code exported | `otlp` |
 
 A request that names no session is a trace of its own. To group a custom
 client's requests, send one of the signals above.
@@ -131,6 +132,34 @@ each of these spans with the `otel_trace_id` and `otel_span_id` it was exported
 with, in lowercase hex, so it can be joined back to the same trace in another
 backend. A span the gateway records itself has neither.
 
+### Claude Code without routing
+
+Claude Code can export its own spans, so a session is traced without sending
+its model traffic through Otari. Use a budget-exempt API key, as for
+[importing its usage](use-with-claude-code.md#import-claude-code-usage-without-routing):
+
+```bash
+export CLAUDE_CODE_ENABLE_TELEMETRY=1
+export CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1
+export OTEL_TRACES_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com/otlp"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer tk-your-import-key"
+claude
+```
+
+Span export is a Claude Code beta. Each prompt becomes a turn, with its model
+calls and the tools it ran. A tool call keeps a digest of its id, never the id
+itself, and records who allowed it
+or refused it: a tool a hook refused, such as an
+[agent guardrail](agent-guardrails.md), is `blocked` with the decision source
+`hook`. A blocked tool call is a guardrail doing its job, not an error, and does
+not count toward a session's errors. Nor does a tool call that returned an
+error, such as a command that exited non-zero: the agent reads that error like
+any other result, and `grep` finding nothing or a test failing on purpose
+returns one too. A short `claude -p` run can exit before its last spans are
+exported.
+
 ## Reading traces
 
 | Endpoint | Who |
@@ -150,8 +179,6 @@ where the scope holds no trace of it. A trace outside the caller's scope answers
 404.
 
 Deleting a user erases their traces, as it erases their telemetry.
-
-A hybrid data plane records no traces yet: it holds no database to keep them in.
 
 ## Settings
 

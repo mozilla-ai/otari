@@ -1,10 +1,11 @@
 from datetime import datetime
-from typing import Annotated, Literal
+from decimal import Decimal
+from typing import Annotated, Any, Literal
 
 from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -18,6 +19,7 @@ from gateway.api.deps import (
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
+from gateway.core.settings.pricing import PRICE_PER_REQUEST_DESCRIPTION, price_per_request_shorthand
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float, to_usd, to_usd_or_none
@@ -102,8 +104,19 @@ def _refuse_if_withheld(model_key: str, candidates: list[str], withheld: frozens
 _PENDING_CHANGED_DETAIL = "The pending models.dev refresh changed since it was previewed"
 
 
+def _token_prices_not_required(schema: dict[str, Any]) -> None:
+    # The before-validator fills both from price_per_request; a body with neither is still refused.
+    schema["required"] = [
+        name
+        for name in schema.get("required", [])
+        if name not in ("input_price_per_million", "output_price_per_million")
+    ]
+
+
 class SetPricingRequest(PricedKind):
     """Create a versioned per-model price, with optional cache and context tiers."""
+
+    model_config = ConfigDict(json_schema_extra=_token_prices_not_required)
 
     model_key: str = Field(
         description="Model identifier in format 'provider:model', or a search or fetch instance's name for those kinds"
@@ -136,6 +149,14 @@ class SetPricingRequest(PricedKind):
             "'images' for image generation (USD per million images)."
         ),
     )
+    price_per_request: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False, description=PRICE_PER_REQUEST_DESCRIPTION
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _expand_price_per_request(cls, data: Any) -> Any:
+        return price_per_request_shorthand(data)
 
     @model_validator(mode="after")
     def validate_unique_tier_thresholds(self) -> "SetPricingRequest":
@@ -158,6 +179,9 @@ class PricingResponse(BaseModel):
     cache_write_price_per_million: float | None
     pricing_tiers: list[PricingTier]
     unit: str = Field(description="What the rates are per: tokens, requests, or images.")
+    price_per_request: float | None = Field(
+        default=None, description="USD for each request, for a rate in requests; null for any other unit."
+    )
     origin: str | None = Field(
         description="Which writer set this row: config, api, or migration. Null when recorded before origins were.",
     )
@@ -177,6 +201,9 @@ class PricingResponse(BaseModel):
             cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in pricing.pricing_tiers or []],
             unit=pricing.unit or "tokens",
+            price_per_request=(
+                float(Decimal(str(pricing.input_price_per_million)) / 1_000_000) if pricing.unit == "requests" else None
+            ),
             origin=pricing.origin,
             created_at=pricing.created_at.isoformat(),
             updated_at=pricing.updated_at.isoformat(),

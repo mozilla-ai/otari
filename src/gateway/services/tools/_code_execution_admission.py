@@ -225,21 +225,19 @@ class DeclaredCodeExecution:
         # One claim on a held sandbox per request, however many of its candidates run the code there.
         self._leases: dict[str, ContainerLease | TenancyError] = {}
 
-    def provider_declaration(self, *, follow_head: bool = False) -> ProviderToolDeclaration | None:
+    def provider_declaration(self) -> ProviderToolDeclaration | None:
         """The provider's keyword this request declared, to decide for each candidate; ``None`` where it made none.
 
         Beside the explicit type, which always runs on the sandbox, every candidate is decided alike.
         """
         if self.keyword_entry is None:
             return None
-        uniform = self.sandbox_tool_entry is not None
         return ProviderToolDeclaration(
             tool=_code_execution_tool.TOOL,
             entry=self.keyword_entry,
             preference=self.preference,
             backend_configured=self.sandbox_available,
-            uniform=uniform,
-            follow_head=follow_head and not uniform,
+            uniform=self.sandbox_tool_entry is not None,
         )
 
     async def admit(self, *, claimed: bool, beside_sandbox: bool) -> AdmittedCodeExecution:
@@ -282,6 +280,10 @@ class DeclaredCodeExecution:
                 # An explicit type beside it is folded in and adds only its hint.
                 claimed, tools_after_sandbox = extract_code_execution_tool(tools_after_sandbox, intercept=True)
                 assert claimed is not None  # ``provider_code_entry`` was found in the same list
+                # A further keyword left in ``tools`` would have the provider run code that ``otari`` keeps here.
+                extra, tools_after_sandbox = extract_code_execution_tool(tools_after_sandbox, intercept=True)
+                while extra is not None:
+                    extra, tools_after_sandbox = extract_code_execution_tool(tools_after_sandbox, intercept=True)
                 # A copy, since a provider's attempt of the same request forwards the caller's own entry.
                 claimed = dict(claimed)
                 if sandbox_tool_entry is not None and not claimed.get("purpose_hint"):

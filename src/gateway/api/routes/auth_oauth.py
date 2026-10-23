@@ -1,4 +1,4 @@
-"""Google and GitHub sign-in for the dashboard (standalone mode only).
+"""Google and GitHub sign-in for the dashboard.
 
 Two calls per provider, and the split from ``auth_session.py`` is the one that
 file's docstring already anticipated: an OAuth sign-in is a redirect through a

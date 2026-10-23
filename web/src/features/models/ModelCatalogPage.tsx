@@ -49,7 +49,6 @@ import {
   formatContext,
   formatNumber,
   formatRate,
-  formatRelative,
   formatReleaseDate,
 } from "@/shared/helpers/format"
 import { useUrlValue } from "@/shared/helpers/urlState"
@@ -639,7 +638,6 @@ export function ModelCatalogView({
     setPage(0)
   }
 
-  const defaultsAsOf = catalog.data?.defaults_as_of
   return (
     <div className="flex flex-col gap-5">
       <header className="flex flex-col gap-1">
@@ -657,16 +655,11 @@ export function ModelCatalogView({
               ) : null}
               .{" "}
               {publicView
-                ? "Prices are this deployment's list rates, cheapest offering first."
-                : "Prices are what your organization is charged, cheapest offering first."}{" "}
-              {defaultsAsOf
-                ? `Default rates as of ${formatRelative(defaultsAsOf)}.`
-                : catalog.data.default_pricing
-                  ? "Default rates come from the bundled models.dev snapshot."
-                  : "Default pricing is off: a model with no stored rate is unpriced."}
+                ? "Prices start from the cheapest offering."
+                : "Prices are what your organization is charged, cheapest offering first."}
             </>
           ) : (
-            "Every model this deployment can serve, grouped by model, with each provider's offering and price."
+            "Every model available, grouped by model, with each provider's offering and price."
           )}
         </p>
       </header>

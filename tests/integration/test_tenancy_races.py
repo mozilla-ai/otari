@@ -24,6 +24,7 @@ from sqlmodel import col
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
+from gateway.api.deps import get_api_key_service
 from gateway.api.routes.scoped_budgets import create_scoped_budget
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
@@ -47,6 +48,7 @@ from gateway.exceptions.organizations_exceptions import (
     SignupRegistrationUnresolvedError,
     WorkspaceAlreadyExistsError,
     WorkspaceMemberAlreadyExistsError,
+    WorkspaceNotFoundError,
 )
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import SCOPE_WORKSPACE, SCOPE_WORKSPACE_MEMBER, ScopedBudget, ScopeType
@@ -64,7 +66,6 @@ from gateway.models.tenancy import (
     WorkspacePublic,
 )
 from gateway.models.users import User as BillingUser
-from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.budgets import BudgetRepositories, EndUserRepository
 from gateway.repositories.tenancy import (
     InvitationRepository,
@@ -81,7 +82,6 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetPublic,
     WorkspaceMemberBudgetPolicyCreate,
 )
-from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService
 from gateway.services.password_service import (
     hash_password_async,
@@ -102,7 +102,6 @@ from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
     WorkspaceActivationService,
 )
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 from .tenancy_helpers import (
     NO_MAIL_LIMIT,
@@ -370,6 +369,43 @@ async def test_concurrent_workspace_member_adds_conflict(
     assert len(conflicts) == _RACERS - 1
 
 
+async def test_a_member_added_to_a_workspace_deleted_mid_join_gets_not_found(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The membership insert is refused by the workspace foreign key, which is not a duplicate."""
+    organization, owner = await _seed_owner(async_db)
+    service = WorkspaceService(async_db, **membership_writes(async_db))
+    target = await service.create_workspace(user=owner, workspace_create=WorkspaceCreate(name="Target"))
+    await service.create_workspace(user=owner, workspace_create=WorkspaceCreate(name="Survivor"))
+    joiner = await create_member(async_db, organization, role="member", full_name="Joiner")
+    await async_db.commit()
+
+    async with sessions() as session:
+        actor = await UserRepository(session).get(owner.id)
+        assert actor is not None
+        adder = WorkspaceService(session, **membership_writes(session))
+        take_lock = adder.workspaces.lock
+
+        # Pins the interleaving: the delete commits after the adder's pre-checks and before its insert.
+        async def delete_then_lock(workspace_id: uuid.UUID) -> None:
+            async with sessions() as other:
+                deleter = await UserRepository(other).get(owner.id)
+                assert deleter is not None
+                await WorkspaceService(other, **membership_writes(other)).delete_workspace(
+                    user=deleter, workspace_id=workspace_id
+                )
+            await take_lock(workspace_id)
+
+        monkeypatch.setattr(adder.workspaces, "lock", delete_then_lock)
+        with pytest.raises(WorkspaceNotFoundError):
+            await adder.add_member(user=actor, workspace_id=target.id, user_id=joiner.id)
+
+    joined = await async_db.execute(select(col(WorkspaceMember.id)).where(col(WorkspaceMember.user_id) == joiner.id))
+    assert joined.all() == []
+
+
 async def test_provisioning_refuses_to_shadow_an_organization_it_did_not_create(
     test_db: Session,
     sessions: async_sessionmaker[AsyncSession],
@@ -535,7 +571,6 @@ def _pausing(session: AsyncSession, let_the_writer_run: Callable[[], Awaitable[N
     return {
         "uow": writes["uow"],
         "membership_listener": _PausingListener(writes["membership_listener"], let_the_writer_run),
-        "workspace_listener": writes["workspace_listener"],
     }
 
 
@@ -622,14 +657,12 @@ async def test_a_join_during_a_workspace_delete_leaves_no_orphaned_ceiling(
 
 def _budget_service(db: AsyncSession, organizations: OrganizationService | None = None) -> BudgetService:
     uow = UnitOfWork(db)
-    organizations = organizations or OrganizationService(
-        db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-    )
+    organizations = organizations or OrganizationService(db, membership_listener=None)
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
         organizations,
-        ApiKeyService(uow, ApiKeyRepositories.on(uow)),
+        get_api_key_service(uow),
         WorkspaceAccess(db, organizations),
     )
 
@@ -777,7 +810,7 @@ async def test_a_deployment_ceiling_created_during_a_workspace_delete_leaves_no_
         return await create_scoped_budget(
             CreateScopedBudgetRequest(scope_type=scope_type, scope_id=scope_id, budget_id=budget_id),
             session,
-            OrganizationService(session, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+            OrganizationService(session, membership_listener=None),
         )
 
     race = await _race_a_workspace_delete(
@@ -820,9 +853,7 @@ async def test_a_workspace_delete_sweeps_a_ceiling_that_won_the_lock(
         async with sessions() as session:
             actor = await UserRepository(session).get(owner.id)
             assert actor is not None
-            organizations = OrganizationService(
-                session, membership_listener=None, workspace_listener=NullWorkspaceListener()
-            )
+            organizations = OrganizationService(session, membership_listener=None)
             creator = _budget_service(session, organizations)
             take_lock = organizations.lock_workspace
 
@@ -1201,7 +1232,7 @@ async def test_a_revocation_waits_for_the_transaction_a_live_membership_check_ad
             ).revoke_organization_member_invitation_for_user(user=user, invitation_id=invited.invitation_id)
 
     async with sessions() as checking:
-        reader = OrganizationService(checking, membership_listener=None, workspace_listener=NullWorkspaceListener())
+        reader = OrganizationService(checking, membership_listener=None)
         assert await reader.has_live_membership(invitee_id)
         revocation = asyncio.create_task(revoke())
         done, _ = await asyncio.wait({revocation}, timeout=_WRITER_WINDOW)
@@ -1210,7 +1241,7 @@ async def test_a_revocation_waits_for_the_transaction_a_live_membership_check_ad
     await revocation
 
     async with sessions() as after:
-        reader = OrganizationService(after, membership_listener=None, workspace_listener=NullWorkspaceListener())
+        reader = OrganizationService(after, membership_listener=None)
         assert not await reader.has_live_membership(invitee_id)
 
 

@@ -3,7 +3,9 @@
 Each carries the HTTP status it renders as.
 """
 
-from gateway.exceptions import TenancyConflictError, TenancyNotFoundError
+from fastapi import status
+
+from gateway.exceptions import TenancyConflictError, TenancyNotFoundError, TenancyValidationError
 
 
 class TraceNotFoundError(TenancyNotFoundError):
@@ -25,3 +27,12 @@ class TraceAmbiguousError(TenancyConflictError):
 
     def __init__(self, trace_id: str):
         super().__init__(f"Trace '{trace_id}' is in more than one workspace; name one with workspace_id")
+
+
+class GuardrailDigestMismatchError(TenancyValidationError):
+    """A guardrail version sent under a fingerprint its gates do not hash to: storing it would name another's."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+
+    def __init__(self) -> None:
+        super().__init__("The digest does not match these gates.")

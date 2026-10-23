@@ -271,6 +271,8 @@ _MODELS_DEV: dict[str, Any] = {
             "Qwen/Qwen3-30B-A3B-Instruct-2507": {
                 "id": "Qwen/Qwen3-30B-A3B-Instruct-2507",
                 "name": "Qwen3 30B A3B Instruct 2507",
+                "tool_call": True,
+                "modalities": {"input": ["text"], "output": ["text"]},
                 "limit": {"context": 262144, "output": 8192},
             },
         },
@@ -351,6 +353,28 @@ def test_the_listing_and_the_catalog_report_the_same_limits(limits_client: TestC
     shared = listed.keys() & offered.keys()
     assert {_QWEN, _UNKNOWN, "openai:gpt-4o"} <= shared
     assert {selector: listed[selector] for selector in shared} == {selector: offered[selector] for selector in shared}
+
+
+def _capabilities(model: dict[str, Any]) -> tuple[Any, Any, Any]:
+    return model["name"], model["supported_parameters"], model["architecture"]
+
+
+def test_the_listing_carries_each_models_capabilities(limits_client: TestClient) -> None:
+    """models.dev's name, tool support and modalities, in the fields OpenRouter's listing uses."""
+    listed = {model["id"]: _capabilities(model) for model in _read(limits_client, f"{API_ROOT}/models")["data"]}
+
+    qwen = (
+        "Qwen3 30B A3B Instruct 2507",
+        ["tools", "tool_choice"],
+        {"input_modalities": ["text"], "output_modalities": ["text"]},
+    )
+    assert listed[_QWEN] == qwen
+    assert listed[_UNKNOWN] == (None, None, None)
+    # An alias takes its target's capabilities, but not the name that would reveal the target.
+    assert listed["house-gemini"] == (None, [], {"input_modalities": [], "output_modalities": []})
+
+    assert _capabilities(_read(limits_client, f"{API_ROOT}/models/{_QWEN}")) == qwen
+    assert _capabilities(_read(limits_client, f"{API_ROOT}/models/house-gemini"))[0] is None
 
 
 def test_without_models_dev_the_window_comes_from_the_snapshot(limits_client: TestClient) -> None:

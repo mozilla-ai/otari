@@ -10,6 +10,9 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/shared/api/client"
 import {
   deploymentOperatorAnswer,
+  isNoOrganizationError,
+  useDeploymentOperator,
+  useOrganizationContext,
   useSwitchOrganization,
 } from "@/shared/api/organizations"
 import { ORGANIZATION_CONTEXT, workspaceMeta } from "@/shared/api/queryKeys"
@@ -54,6 +57,126 @@ describe("deploymentOperatorAnswer", () => {
         isFetched: true,
       }),
     ).toBe("unavailable")
+  })
+})
+
+describe("useOrganizationContext for a caller with no organization", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  // A new account that has not accepted its invitation yet. Anything that
+  // rereads the context (otari.ai's wallet chip does on every 403) used to put
+  // the query back to pending, where the shell hides its rows and then fails
+  // open onto the operator ones: the sidebar and top bar flickered with it.
+  it("keeps answering no organization while the context is read again", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    let reads = 0
+    let release = () => {}
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      reads += 1
+      if (reads > 1) {
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+      }
+      return Response.json(
+        { detail: "Organization not found" },
+        { status: 404 },
+      )
+    })
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children)
+    const { result } = renderHook(
+      () => ({
+        context: useOrganizationContext(),
+        operator: useDeploymentOperator(),
+      }),
+      { wrapper },
+    )
+    await waitFor(() =>
+      expect(result.current.operator.answer).toBe("no-organization"),
+    )
+    expect(isNoOrganizationError(result.current.context.error)).toBe(true)
+    expect(result.current.context.data).toBeUndefined()
+
+    act(() => {
+      void client.invalidateQueries({ queryKey: ORGANIZATION_CONTEXT })
+    })
+    await waitFor(() => expect(reads).toBe(2))
+
+    expect(result.current.context.isPending).toBe(false)
+    expect(isNoOrganizationError(result.current.context.error)).toBe(true)
+    expect(result.current.operator).toEqual({
+      answer: "no-organization",
+      isOperator: false,
+      isSettled: true,
+    })
+    await act(async () => release())
+  })
+
+  it("still reports any other failure as one", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ detail: "Internal server error" }, { status: 500 }),
+    )
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children)
+    const { result } = renderHook(() => useDeploymentOperator(), { wrapper })
+    await waitFor(() => expect(result.current.answer).toBe("unavailable"))
+  })
+
+  it("reports a failed reread as a failure, not as the 404 before it", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const statuses = [404, 500]
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ detail: "x" }, { status: statuses.shift() ?? 500 }),
+    )
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children)
+    const { result } = renderHook(
+      () => ({
+        context: useOrganizationContext(),
+        operator: useDeploymentOperator(),
+      }),
+      { wrapper },
+    )
+    await waitFor(() =>
+      expect(result.current.operator.answer).toBe("no-organization"),
+    )
+
+    await act(() => client.refetchQueries({ queryKey: ORGANIZATION_CONTEXT }))
+
+    await waitFor(() =>
+      expect(result.current.operator.answer).toBe("unavailable"),
+    )
+    expect(result.current.context.data).toBeUndefined()
+    expect(result.current.context.error).toBeInstanceOf(ApiError)
+    expect((result.current.context.error as ApiError).status).toBe(500)
+  })
+
+  it("answers a refetch the caller awaits the same way", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ detail: "Organization not found" }, { status: 404 }),
+    )
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children)
+    const { result } = renderHook(() => useOrganizationContext(), { wrapper })
+    await waitFor(() => expect(result.current.isFetched).toBe(true))
+
+    const refetched = await act(() => result.current.refetch())
+
+    expect(refetched.data).toBeUndefined()
+    expect(isNoOrganizationError(refetched.error)).toBe(true)
   })
 })
 

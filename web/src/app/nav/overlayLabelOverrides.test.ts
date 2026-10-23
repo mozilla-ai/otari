@@ -54,8 +54,7 @@ describe("a build that replaces the label-override module", () => {
       "Observe",
       "People & access",
       "Cost & billing",
-      "Gateway",
-      // The one the mocked list renames; the four around it are untouched.
+      // The one the mocked list renames; the three before it are untouched.
       "Deployment",
     ])
   })

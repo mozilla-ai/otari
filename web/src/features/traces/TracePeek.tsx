@@ -24,6 +24,7 @@ import {
   formatRelativeTime,
   formatTraceTimestamp,
 } from "./format"
+import { GatesView, stoppedBy } from "./GatesView"
 import { GatewayPanel } from "./GatewayPanel"
 import { type Format, IOBlock } from "./IOBlock"
 import { LogView } from "./LogView"
@@ -33,13 +34,14 @@ import { TraceTimelineView } from "./TraceTimelineView"
 import { TraceTreeView } from "./TraceTreeView"
 import { type Observation, summarizeTrace, type Trace } from "./types"
 
-type PeekTab = "preview" | "attributes" | "log"
+type PeekTab = "preview" | "attributes" | "log" | "gates"
 
 // Attributes belong to a span, so that tab shows only while one is selected.
 const ALL_TABS: { id: PeekTab; label: string }[] = [
   { id: "preview", label: "Preview" },
   { id: "attributes", label: "Attributes" },
   { id: "log", label: "Log View" },
+  { id: "gates", label: "Gates" },
 ]
 
 const FORMAT_OPTIONS = [
@@ -342,9 +344,14 @@ export function TracePeek({
     setSelection({ traceId: trace.id, id: selectedId, isDetailShown: false })
   const observation =
     trace.observations.find((o) => o.id === selectedId) ?? null
-  const tabs = observation
-    ? ALL_TABS
-    : ALL_TABS.filter((t) => t.id !== "attributes")
+  const gates = trace.gateway?.gates ?? []
+  const blockedChecks = gates.reduce((sum, gate) => sum + stoppedBy(gate), 0)
+  // Attributes only for a picked span, Gates only for a session a hook reported to.
+  const tabs = ALL_TABS.filter(
+    (t) =>
+      (t.id !== "attributes" || observation) &&
+      (t.id !== "gates" || gates.length > 0),
+  )
   const parentIds = useMemo(
     () => [
       ...new Set(
@@ -357,6 +364,34 @@ export function TracePeek({
   )
   const everythingCollapsed =
     parentIds.length > 0 && parentIds.every((id) => collapsedIds.has(id))
+  // Opens a span from outside the tree (a gate, a gateway decision): selects it,
+  // opens every collapsed parent above it and clears a search that hides it, then
+  // scrolls it into view once that has rendered.
+  const isRevealPending = useRef(false)
+  const reveal = (spanId: string) => {
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+    const ancestors = new Set<string>()
+    let parent = byId.get(spanId)?.parentObservationId ?? null
+    while (parent && !ancestors.has(parent)) {
+      ancestors.add(parent)
+      parent = byId.get(parent)?.parentObservationId ?? null
+    }
+    setCollapsedIds(
+      (current) => new Set([...current].filter((id) => !ancestors.has(id))),
+    )
+    setNavQuery("")
+    setNavCollapsed(false)
+    setTab("preview")
+    setSelectedId(spanId)
+    isRevealPending.current = true
+  }
+  useEffect(() => {
+    if (!isRevealPending.current) return
+    isRevealPending.current = false
+    navRef.current
+      ?.querySelector('[aria-current="true"]')
+      ?.scrollIntoView({ block: "center" })
+  })
   const toggleCollapsed = (id: string) =>
     setCollapsedIds((current) => {
       const next = new Set(current)
@@ -632,6 +667,12 @@ export function TracePeek({
               onPress={() => setTab(id)}
             >
               {label}
+              {id === "gates" && blockedChecks > 0 ? (
+                <>
+                  {" "}
+                  <span className="text-warning">{`· ${blockedChecks} blocked`}</span>
+                </>
+              ) : null}
             </Tab>
           ))}
         </TabRow>
@@ -659,6 +700,8 @@ export function TracePeek({
           </div>
         ) : activeTab === "log" ? (
           <LogView trace={trace} format={format} />
+        ) : activeTab === "gates" ? (
+          <GatesView gates={gates} onSelect={reveal} />
         ) : (
           <>
             <div
@@ -741,7 +784,7 @@ export function TracePeek({
                 <GatewayPanel
                   gateway={trace.gateway}
                   startedAt={trace.timestamp}
-                  onSelect={setSelectedId}
+                  onSelect={reveal}
                 />
               ) : observation ? (
                 <PreviewBody

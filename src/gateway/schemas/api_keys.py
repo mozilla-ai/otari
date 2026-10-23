@@ -28,7 +28,12 @@ class FederationRuleCreate(BaseModel):
     )
 
     issuer: str = Field(
-        min_length=1, max_length=512, description="The token's 'iss', one of the deployment's federation_issuers."
+        min_length=1,
+        max_length=512,
+        description=(
+            "The token's 'iss'. On an operator's rule, one of the deployment's federation_issuers; on a member's own "
+            "key, any https issuer, whose discovery document and signing keys are fetched only from a public host."
+        ),
     )
     audience: str = Field(min_length=1, max_length=512, description="A value the token's 'aud' must contain.")
     subject: str | None = Field(
@@ -69,6 +74,9 @@ class FederationRulePublic(BaseModel):
     audience: str
     subject: str | None
     email: str | None
+    member_managed: bool = Field(
+        description="Whether a member gave the rule to their own key: it then matches only in the token exchange."
+    )
     created_at: datetime
 
     @classmethod
@@ -81,6 +89,7 @@ class FederationRulePublic(BaseModel):
             audience=row.audience,
             subject=row.subject,
             email=row.email,
+            member_managed=row.member_managed,
             created_at=row.created_at,
         )
 

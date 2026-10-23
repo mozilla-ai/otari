@@ -3,8 +3,8 @@
  *
  * `main.tsx` fetches `/bootstrap` before it mounts anything and hands the
  * answer to `App`, which puts it here. That ordering is the point: which
- * deployment served this page decides whether a sign-in screen, a management
- * dashboard, or a data-plane landing page is the right first paint, so the app
+ * deployment served this page decides whether a sign-in screen or a management
+ * dashboard is the right first paint, so the app
  * must not have to guess it and then correct itself.
  *
  * It lives in `shared/` rather than in `app/` because features read it and a
@@ -163,7 +163,7 @@ export function useDeployment(): DeploymentBootstrap {
 export function useSurfaces(): (surface: string) => boolean {
   const { surfaces } = useDeployment()
   return useMemo(() => {
-    const hosted = new Set(surfaces)
-    return (surface: string) => hosted.has(surface)
+    const published = new Set(surfaces)
+    return (surface: string) => published.has(surface)
   }, [surfaces])
 }

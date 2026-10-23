@@ -1,4 +1,4 @@
-"""Request and response models of the inference domain's decisions, rerank and embeddings endpoints.
+"""Request and response models of the inference domain's endpoints, and the Messages error envelope.
 
 The decisions shape is TypeSafe's ``/v1/systemone``, which OpenRouter's alpha Decisions
 API also takes, so either provider's SDK can point at the gateway. Questions and
@@ -151,14 +151,12 @@ class InlineCost(BaseModel):
         exclude_if=_is_none,
         description="What the request cost, as a six-decimal USD string; absent when it was not priced",
     )
-    # A string rather than ``PriceSource``: a hybrid gateway carries the control
-    # plane's own name for the rate, as a completion's usage does.
+    # A string rather than ``PriceSource``, as a completion's usage carries it.
     pricing_source: str | None = Field(
         default=None,
         exclude_if=_is_none,
         description=(
-            "Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone "
-            "gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced"
+            "Which rate priced the request: `organization`, `deployment` or `defaults`; absent when it was not priced"
         ),
     )
 
@@ -240,3 +238,18 @@ class EmbeddingResponse(BaseModel):
     usage: EmbeddingUsage | None = Field(
         default=None, exclude_if=_is_none, description="Absent when the provider reported no usage"
     )
+
+
+class AnthropicError(BaseModel):
+    """What went wrong, in Anthropic's terms."""
+
+    type: str = Field(description="Anthropic's error type, such as `invalid_request_error` or `rate_limit_error`.")
+    message: str
+
+
+class AnthropicErrorResponse(BaseModel):
+    """Anthropic's error envelope, which every error on a Messages route is answered in."""
+
+    type: Literal["error"] = "error"
+    error: AnthropicError
+    code: str | None = Field(default=None, description="The refusal's `Otari-Error-Code`, where it has one.")

@@ -22,7 +22,7 @@ health checks, which nothing recorded. The migration logs those rows so an
 operator can switch on any that were only waiting for a price.
 
 Revision ID: ae8d42792fd8
-Revises: c0e83c6fe801
+Revises: 6664b766de86
 Create Date: 2026-10-19
 """
 
@@ -34,7 +34,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "ae8d42792fd8"
-down_revision: str | Sequence[str] | None = "c0e83c6fe801"
+down_revision: str | Sequence[str] | None = "6664b766de86"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -21,11 +21,11 @@ from gateway.core.config import (
 )
 from gateway.log_config import logger as gateway_logger
 from gateway.services import provider_kwargs
-from gateway.services.bedrock_gateway_auth import BEDROCK_READ_TIMEOUT_SECONDS
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import (
     _KEYLESS_PLACEHOLDER_API_KEY,
     AMBIENT_CREDENTIAL_PROVIDERS,
+    BEDROCK_READ_TIMEOUT_SECONDS,
     get_provider_kwargs,
     keyless_placeholder_api_key,
     missing_declared_credential,
@@ -652,19 +652,15 @@ def test_candidate_model_keys_accepts_string_provider_from_any_llm(monkeypatch: 
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("mode", [None, "hybrid", "hosted"])
-def test_undeclared_provider_on_env_var_is_missing_a_credential(
-    mode: str | None, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_undeclared_provider_on_env_var_is_missing_a_credential(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
-    config = GatewayConfig(mode=mode, providers={}) if mode else GatewayConfig(providers={})
+    config = GatewayConfig(providers={})
     kwargs = get_provider_kwargs(config, LLMProvider.ANTHROPIC)
 
     missing = missing_declared_credential(config, "anthropic", LLMProvider.ANTHROPIC, kwargs)
 
     assert missing is not None
     assert missing.provider == "anthropic"
-    assert "${ANTHROPIC_API_KEY}" in missing.detail
     assert "sk-ant-secret-value" not in missing.detail
     with pytest.raises(MissingApiKeyError):
         require_declared_credential(config, "anthropic", LLMProvider.ANTHROPIC, kwargs)
@@ -697,7 +693,7 @@ def test_declared_entry_naming_no_key_is_refused_although_its_variable_is_set(
 
     missing = missing_declared_credential(config, "anthropic", LLMProvider.ANTHROPIC, kwargs)
     assert missing is not None
-    assert "${ANTHROPIC_API_KEY}" in missing.detail
+    assert missing.provider == "anthropic"
 
 
 def test_organization_key_serves_an_undeclared_provider(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -800,6 +796,24 @@ def test_startup_warns_about_a_variable_a_bare_entry_does_not_read(
     warn_about_ignored_provider_variables(GatewayConfig(providers={"anthropic": {}}))
 
     assert "Ignoring ANTHROPIC_API_KEY" in ignored_variable_warnings.text
+
+
+def test_startup_warns_nothing_about_a_variable_a_tool_reads(
+    monkeypatch: pytest.MonkeyPatch, ignored_variable_warnings: pytest.LogCaptureFixture
+) -> None:
+    """DeepSeek's search and fetch read the DEEPSEEK_API_KEY its models do, with no ``providers:`` entry."""
+    for provider in LLMProvider:
+        monkeypatch.delenv(f"{provider.value.upper()}_API_KEY", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek-test")
+    warn_about_ignored_provider_variables(GatewayConfig())
+    assert "Ignoring DEEPSEEK_API_KEY" in ignored_variable_warnings.text
+    ignored_variable_warnings.clear()
+
+    entry = {"provider": "deepseek", "api_key": "sk-deepseek-test"}
+    warn_about_ignored_provider_variables(GatewayConfig(search_tools={"deepseek": entry}))
+    warn_about_ignored_provider_variables(GatewayConfig(fetch_tools={"deepseek-fetch": entry}))
+
+    assert "Ignoring" not in ignored_variable_warnings.text
 
 
 # ---------------------------------------------------------------------------

@@ -1,11 +1,26 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { API_ROOT } from "@/shared/api/client"
+import type { RequestPolicy } from "@/shared/api/requestPolicy"
 import {
   buildCurlSnippet,
   buildPythonSnippet,
   resolveSnippetBaseUrl,
   SNIPPET_MODEL_PLACEHOLDER,
 } from "@/shared/helpers/requestSnippets"
+
+// Mutable so a case can stand in for a build that reaches several deployments.
+const policy = vi.hoisted(
+  (): RequestPolicy => ({ origin: "", credentials: "same-origin" }),
+)
+vi.mock("@/shared/api/overlayRequestPolicy", () => ({
+  prepareRequests: async () => {},
+  requestPolicy: () => policy,
+}))
+
+afterEach(() => {
+  policy.origin = ""
+  policy.credentials = "same-origin"
+})
 
 const INPUT = {
   baseUrl: "https://otari.example.com",
@@ -65,10 +80,9 @@ describe("buildCurlSnippet", () => {
     })
   })
 
-  it("quotes the base URL, which an operator configures and we do not constrain", () => {
-    // `data_plane_url` is a server-side setting validated only for scheme and
-    // host, so a space in one would otherwise split the URL into two shell
-    // words and a quote would end the argument early (otari#823).
+  it("quotes the base URL as one shell word, whatever it holds", () => {
+    // A space would otherwise split the URL into two shell words and a quote
+    // would end the argument early (otari#823).
     const snippet = buildCurlSnippet({
       ...INPUT,
       baseUrl: "https://gw.example/a b'; echo pwned; '",
@@ -117,8 +131,8 @@ describe("buildPythonSnippet", () => {
   })
 
   it("escapes a base URL that would otherwise break the Python literal", () => {
-    // Same reason as the curl case: the value comes from the deployment's
-    // config rather than from `window.location.origin` (otari#823).
+    // Same reason as the curl case: the builder escapes whatever it is given
+    // (otari#823).
     const snippet = buildPythonSnippet({
       ...INPUT,
       baseUrl: 'https://gw.example/x"',
@@ -131,84 +145,27 @@ describe("buildPythonSnippet", () => {
 describe("resolveSnippetBaseUrl", () => {
   const ORIGIN = "https://dashboard.example.com"
 
-  it("uses the browser's own origin on a standalone gateway", () => {
-    // One process is both the dashboard and the data plane, so whatever address
+  it("uses the browser's own origin", () => {
+    // One process serves the dashboard and the API, so whatever address
     // reached this page reaches /api/v1/chat/completions.
-    expect(
-      resolveSnippetBaseUrl(
-        { deployment_type: "standalone", data_plane_url: null },
-        ORIGIN,
-      ),
-    ).toBe(ORIGIN)
-  })
-
-  it("uses the browser's own origin on a hybrid gateway", () => {
-    // A gateway attached to otari.ai *is* the data plane; only its management
-    // surface lives elsewhere.
-    expect(
-      resolveSnippetBaseUrl(
-        { deployment_type: "hybrid", data_plane_url: null },
-        ORIGIN,
-      ),
-    ).toBe(ORIGIN)
-  })
-
-  it("uses the published data plane on a hosted control plane", () => {
-    expect(
-      resolveSnippetBaseUrl(
-        {
-          deployment_type: "hosted",
-          data_plane_url: "https://gateway.otari.ai",
-        },
-        ORIGIN,
-      ),
-    ).toBe("https://gateway.otari.ai")
-  })
-
-  it("answers undefined on a hosted control plane that published none", () => {
-    // Never the origin, which is the bug this replaces: the control plane is the
-    // one host a request must not be sent to (otari#822).
-    expect(
-      resolveSnippetBaseUrl(
-        { deployment_type: "hosted", data_plane_url: null },
-        ORIGIN,
-      ),
-    ).toBeUndefined()
+    expect(resolveSnippetBaseUrl(ORIGIN)).toBe(ORIGIN)
   })
 
   it("trims a trailing slash, since the caller suffixes the result", () => {
-    expect(
-      resolveSnippetBaseUrl(
-        {
-          deployment_type: "hosted",
-          data_plane_url: "https://gateway.otari.ai/",
-        },
-        ORIGIN,
-      ),
-    ).toBe("https://gateway.otari.ai")
+    expect(resolveSnippetBaseUrl(`${ORIGIN}/`)).toBe(ORIGIN)
   })
 
-  it("treats a blank published value as none at all", () => {
-    expect(
-      resolveSnippetBaseUrl(
-        { deployment_type: "hosted", data_plane_url: "   " },
-        ORIGIN,
-      ),
-    ).toBeUndefined()
+  it("defaults to the page's own origin under the same-origin policy", () => {
+    expect(resolveSnippetBaseUrl()).toBe(window.location.origin)
   })
 
-  it("answers undefined rather than an empty origin off the browser", () => {
-    // The default origin is "" where there is no `window`. Answering it would
-    // let a caller build `curl /api${API_ROOT}/chat/completions`, which reads as a snippet
-    // and is not one; absent is the honest answer.
-    expect(
-      resolveSnippetBaseUrl(
-        {
-          deployment_type: "standalone",
-          data_plane_url: null,
-        },
-        "",
-      ),
-    ).toBeUndefined()
+  it("defaults to the deployment the dashboard's requests reach", () => {
+    // A dashboard that reaches several deployments is served from one host and
+    // sends every request to the one chosen, so the key just issued belongs to
+    // that deployment and a snippet aimed at the page's host would miss it.
+    policy.origin = "https://eu.otari.example"
+    policy.credentials = "include"
+
+    expect(resolveSnippetBaseUrl()).toBe("https://eu.otari.example")
   })
 })

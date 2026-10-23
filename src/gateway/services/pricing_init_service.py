@@ -15,15 +15,13 @@ from gateway.models.pricing import MODEL_KIND, ModelPricing, PricingKind
 from gateway.repositories.pricing import OrganizationModelPricingRepository
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
-    find_model_pricing,
     gateway_tool_pricing_key,
     legacy_tool_price_keys,
     normalize_effective_at,
     resolve_tool_rate,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
-from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
-from gateway.services.tools import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
+from gateway.services.tools import configured_tools_to_price
 from gateway.types.tool_charges import instance_rate_key
 
 
@@ -110,26 +108,18 @@ async def warn_if_search_tools_lack_flat_pricing(config: GatewayConfig, db: Asyn
 async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSession) -> None:
     """Warn at startup when a configured gateway-run tool has no per-request rate.
 
-    A gateway-run tool is priced under ``otari:<tool>``. With
-    ``require_pricing`` on, an unpriced tool is refused
-    at admission, so this warning is what tells the operator *before* the first 402
-    rather than after. With ``require_pricing`` off the tool runs and is recorded at
+    It checks the rows the check at admission looks up for a call with no
+    workspace key: the in-loop search's or the fetch tool's instance row, then
+    ``otari:<tool>``, as settlement prices them. With ``require_pricing`` on, an
+    unpriced tool is refused at admission, so this warning is what tells the
+    operator *before* the first 402 rather than after. With ``require_pricing``
+    off the tool runs, and a call its provider reports no cost for is recorded at
     zero cost, which is worth flagging too: the work is real and the invoice is not.
     """
-    configured: list[str] = []
-    if config.web_fetch_enabled:
-        configured.append(WEB_FETCH_TOOL_NAME)
-    if config.web_search_configured():
-        configured.append(WEB_SEARCH_TOOL_NAME)
-    if config.sandbox_configured():
-        configured.append(CODE_EXECUTION_TOOL_NAME)
-
     unpriced = [
-        tool
-        for tool in configured
-        # use_defaults=False for the reason the settlement path sets it: a tool is
-        # not a model, so the community dataset can only produce a false match.
-        if await find_model_pricing(db, GATEWAY_TOOL_PRICING_PROVIDER, tool, use_defaults=False) is None
+        tool.name
+        for tool in configured_tools_to_price(config)
+        if await resolve_tool_rate(db, tool.rate_keys, label=tool.label) is None
     ]
     if not unpriced:
         return
@@ -147,9 +137,9 @@ async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSes
     else:
         logger.warning(
             "Gateway tool(s) %s are configured but have no pricing (%s). Their calls will be "
-            "recorded at zero cost while still consuming operator resources. Add a "
-            "per-request rate; the convention is USD per million requests, so 10000.0 charges "
-            "$0.01 per call.",
+            "recorded at zero cost, unless their provider reports one, while still consuming operator "
+            "resources. Add a per-request rate; the convention is USD per million requests, so 10000.0 "
+            "charges $0.01 per call.",
             ", ".join(unpriced),
             keys,
         )

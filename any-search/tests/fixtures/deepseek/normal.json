@@ -1,0 +1,31 @@
+{
+  "status": 200,
+  "body": {
+    "results": [
+      {
+        "title": "Python Source Releases for Source release - Notice: This page displays a fallback because interactive scripts did not run",
+        "site_name": "Python.org",
+        "site_icon": "https://cdn.deepseek.com/site-icons/python.org",
+        "authority": 4,
+        "rerank_score": 2.523479461669922,
+        "date": "2026-10-08T16:00:00+00:00",
+        "url": "https://www.python.org/downloads/source/?spm=a2c6h.13046898.publish-article.4.1ded6ffa3uqTlB#1",
+        "summary": "# Python Source Releases\n\n## Stable Releases\n\n- Python 3.15.0 - Oct. 9, 2026",
+        "snippet": "Stable Releases - Python 3.15.0 - Oct. 9, 2026 - Python 3.11.17 - Oct. 1, 2026 - Python 3.10.22 - Oct. 1, 2026",
+        "content": ""
+      },
+      {
+        "title": "Python Releases for Windows - Notice: This page displays a fallback because interactive scripts did not run",
+        "site_name": "Python.org",
+        "site_icon": "https://cdn.deepseek.com/site-icons/python.org",
+        "authority": 4,
+        "rerank_score": 2.367229461669922,
+        "date": null,
+        "url": "https://www.python.org/downloads/windows/?Windows%20embeddable%20package#1",
+        "summary": "# Python Releases for Windows\n\n## Stable Releases\n\n- Python install manager 26.4 - Oct. 9, 2026\n- Download Installer (MSIX)\n- Download MSI package\n\n- Python 3.15.0 - Oct.",
+        "snippet": "Stable Releases - Python install manager 26.4 - Oct. 9, 2026 - Download Installer (MSIX) - Download MSI package - Python 3.15.0 - Oct. 9, 2026 Download using the Python install manager.",
+        "content": ""
+      }
+    ]
+  }
+}

@@ -2,7 +2,7 @@
 
 A client configured with ``ANTHROPIC_BASE_URL=<gateway>/api`` and workload identity posts its identity token here and
 receives a short-lived access token it then presents in place of a key. Unauthenticated, since the identity token is
-the credential, and mounted only where ``federation_issuers`` lists an issuer.
+the credential, and mounted only where ``federation_issuers`` lists an issuer or ``federation_member_rules`` is on.
 """
 
 from fastapi import APIRouter, status
@@ -34,10 +34,11 @@ _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 async def exchange_token(grant: FederationTokenRequest, exchange: FederationTokenExchangeDep) -> JSONResponse:
     """Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).
 
-    The identity token must verify against an issuer on ``federation_issuers`` and match the federation rule
-    ``federation_rule_id`` names. ``organization_id``, ``workspace_id`` and ``service_account_id``, where set, must
-    be the UUIDs of the rule's key's organization and workspace and the key's id. The access token authenticates as
-    that key until ``expires_in`` runs out, the rule is deleted or the key stops passing its checks.
+    The identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:
+    one on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,
+    ``workspace_id`` and ``service_account_id``, where set, must be the UUIDs of the rule's key's organization and
+    workspace and the key's id. The access token authenticates as that key until ``expires_in`` runs out, the rule is
+    deleted or the key stops passing its checks.
 
     Every refusal of the identity token answers 401 ``invalid_grant`` with the same description.
     """
@@ -58,11 +59,11 @@ async def exchange_token(grant: FederationTokenRequest, exchange: FederationToke
     return JSONResponse(response.model_dump(), headers=_NO_STORE)
 
 
-# Switched by ``federation_issuers``, a startup setting: with no issuer trusted, no identity token could be exchanged,
-# so the route is absent rather than refusing.
+# Switched by ``federation_issuers`` and ``federation_member_rules``, startup settings: with no issuer trusted and no
+# member able to name one, no identity token could be exchanged, so the route is absent rather than refusing.
 FEATURE = CoreFeature(
     name="workload_identity_exchange",
     surface=None,
-    enabled=lambda config: bool(config.federation_issuers),
+    enabled=lambda config: config.federation_enabled,
     routers=lambda config: (router,),
 )

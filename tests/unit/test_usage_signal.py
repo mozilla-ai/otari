@@ -248,7 +248,7 @@ async def test_start_and_stop_reach_the_wrapped_writer() -> None:
 
 
 def test_the_null_adapter_is_bound_by_default() -> None:
-    container = build_container(workspace_listener=None)
+    container = build_container()
 
     assert isinstance(container.resolve(UsageSignalPort, NO_SESSION), NullUsageSignalAdapter)
     assert "UsageSignalPort" in container.summary
@@ -286,7 +286,7 @@ def register(container):
 """,
     )
 
-    container = build_container("usage_signal_bootstrap:register", workspace_listener=None)
+    container = build_container("usage_signal_bootstrap:register")
 
     assert type(container.resolve(UsageSignalPort, NO_SESSION)).__name__ == "ProbeUsageSignal"
     assert container.summary == "usage_signal_bootstrap:register rebound UsageSignalPort"
@@ -310,4 +310,4 @@ def register(container):
     )
 
     with pytest.raises(PortShapeError, match="StaleUsageSignal, bound to UsageSignalPort, lacks usage_recorded"):
-        build_container("stale_usage_signal_bootstrap:register", workspace_listener=None)
+        build_container("stale_usage_signal_bootstrap:register")

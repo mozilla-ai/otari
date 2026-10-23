@@ -19,11 +19,7 @@ from gateway.models.api_keys import APIKey
 
 
 def mock_response_allowed(api_key: APIKey | None) -> bool:
-    """Whether a request may carry ``mock_response``: only on an API key an operator turned it on for.
-
-    A dashboard session and a hybrid gateway's platform keys have no such key, so
-    they never may.
-    """
+    """Whether a request may carry ``mock_response``: only on an API key an operator turned it on for."""
     return api_key is not None and api_key.allow_mock_response
 
 

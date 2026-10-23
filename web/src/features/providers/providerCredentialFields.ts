@@ -27,8 +27,7 @@
 // `provider_kwargs.get_provider_kwargs`, which spreads it into `AnyLLM.create`.
 // `providerCredentialFields.test.ts` pins them against a silent edit here, not
 // against an upstream rename, which still surfaces as a provider error at
-// request time. `services/bedrock_gateway_auth.py` builds the same names on the
-// hybrid path, out of the platform's `extra_params` rather than out of these.
+// request time.
 
 import { REDACTED_SECRET } from "@/shared/helpers/redaction"
 

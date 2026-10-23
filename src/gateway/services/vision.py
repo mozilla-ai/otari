@@ -13,6 +13,7 @@ from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.services.inference import chat_user_fields
 from gateway.services.provider_kwargs import require_declared_credential, resolve_provider_selector
 from gateway.services.providers import acompletion
 
@@ -25,8 +26,13 @@ _DESCRIBE_PROMPT = (
 )
 
 
-async def describe_image(config: GatewayConfig, image_data_url: str) -> tuple[str | None, CompletionUsage | None]:
+async def describe_image(
+    config: GatewayConfig, image_data_url: str, *, upstream_user: str | None
+) -> tuple[str | None, CompletionUsage | None]:
     """Caption an image, returning ``(description, usage)``.
+
+    ``upstream_user`` is the end-user identifier of the request the image came
+    from, which the call carries in the field the vision model's provider reads.
 
     ``description`` is ``None`` (no configured model, or a failed side-call) to
     signal the caller to fall back to its configured strategy (OCR or
@@ -42,6 +48,7 @@ async def describe_image(config: GatewayConfig, image_data_url: str) -> tuple[st
     resolved = resolve_provider_selector(config, model)
     provider, model_name = resolved.provider, resolved.model
     provider_kwargs = resolved.kwargs
+    user_fields = chat_user_fields(provider, upstream_user) if upstream_user is not None else {}
 
     try:
         require_declared_credential(config, resolved.instance, provider, provider_kwargs)
@@ -59,6 +66,7 @@ async def describe_image(config: GatewayConfig, image_data_url: str) -> tuple[st
             ],
             max_tokens=config.vision_describe_max_tokens,
             **provider_kwargs,
+            **user_fields,
         )
     except Exception as exc:  # noqa: BLE001 — captioning is best-effort
         logger.warning("vision describe via %s failed: %s", model, exc)

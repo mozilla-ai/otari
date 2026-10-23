@@ -296,7 +296,7 @@ async def run_tool_loop(
     returns successfully. Callers use it to lock in the chosen provider: once
     the model has produced any assistant output, the conversation state is
     provider-specific and subsequent failures must not silently swap
-    providers. See the hybrid-mode attempt loops in the route modules.
+    providers.
     ``check_first_response`` runs before it and may raise to refuse that
     response as a provider failure, which leaves the attempt free to fall over.
     """

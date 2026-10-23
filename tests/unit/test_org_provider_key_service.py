@@ -172,7 +172,7 @@ def test_row_to_entry_raises_when_key_cannot_be_decrypted(monkeypatch: pytest.Mo
 def test_from_row_redacts_credential_shaped_client_arg_keys() -> None:
     """Bedrock's classic IAM shape genuinely needs `aws_access_key_id` /
     `aws_secret_access_key` inside `client_args` (see
-    `services/bedrock_gateway_auth.py`), so the field cannot be rejected
+    any-llm never forwards `api_key` into its boto3 client), so the field cannot be rejected
     outright; it still must never come back over the API, the same treatment
     `encrypted_api_key` itself already gets. A non-matching field (`region_name`)
     passes through unchanged."""

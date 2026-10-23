@@ -25,7 +25,7 @@ from any_llm.types.completion import (
 from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock, ToolUseBlock
 from fastapi.testclient import TestClient
 
-from gateway.api.deps import get_web_search_policy_port
+from gateway.api.deps import get_workspace_web_search_policies
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool, WebToolCredentialSource
 from gateway.services.tools import OTARI_TOOL_CALLS_FIELD, WEB_SEARCH_HEADER
@@ -252,8 +252,8 @@ def test_a_request_option_the_provider_does_not_take_is_refused_before_the_model
 class _PolicyWithKey:
     """A workspace policy that hands the search a key its provider's client cannot use."""
 
-    async def resolve(self, scope: Any, requested_tools: Any) -> ResolvedWebSearchConfig:
-        del scope, requested_tools
+    async def resolve(self, workspace_id: Any, requested_tools: Any) -> ResolvedWebSearchConfig:
+        del workspace_id, requested_tools
         credential = WebSearchCredential(
             provider="tavily",
             source=WebToolCredentialSource.ORG,
@@ -275,12 +275,12 @@ class _PolicyWithKey:
 def test_a_key_the_resolver_refuses_is_refused_at_admission_before_the_model_is_called(
     client: TestClient, api_key_header: dict[str, str], instance: dict[str, Any]
 ) -> None:
-    client.app.dependency_overrides[get_web_search_policy_port] = _PolicyWithKey  # type: ignore[attr-defined]
+    client.app.dependency_overrides[get_workspace_web_search_policies] = _PolicyWithKey  # type: ignore[attr-defined]
     try:
         with _scripted("gateway.services.mcp_loop.acompletion", [_completion(0)]) as sent:
             response = _chat(client, api_key_header)
     finally:
-        client.app.dependency_overrides.pop(get_web_search_policy_port, None)  # type: ignore[attr-defined]
+        client.app.dependency_overrides.pop(get_workspace_web_search_policies, None)  # type: ignore[attr-defined]
 
     assert response.status_code == 502, response.text
     assert sent == [], "the request was refused before any model call"

@@ -3,22 +3,19 @@ import { Fragment } from "react"
 import { navContextForPath, pageLabelForPath } from "@/app/nav/registry"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 
 /**
  * Where you are, at the head of the content pane: scope first, then the page.
  *
- * The organization is left out of a standalone deployment's trail. One is
- * provisioned at first boot and most deployments keep exactly that, so naming it
- * on every page is a segment that never disambiguates anything; where a caller
- * does belong to a second, the scope switcher above the rail names the active
- * one. A hosted deployment can hold several, so there it leads.
+ * The organization does not lead the trail. One is provisioned at first boot and
+ * most deployments keep exactly that, so naming it on every page is a segment
+ * that never disambiguates anything; where a caller does belong to a second,
+ * the scope switcher above the rail names the active one.
  *
  * The three contexts have different scopes to show: the workspace rail is inside
  * one workspace, and the organization rail is not inside any.
  */
 export function Breadcrumbs({ pathname }: { pathname: string }) {
-  const { deployment_type } = useDeployment()
   const organization = useOrganizationContext()
   const { selected } = useSelectedWorkspace()
 
@@ -36,9 +33,6 @@ export function Breadcrumbs({ pathname }: { pathname: string }) {
   const context = navContextForPath(pathname)
 
   const trail = [
-    deployment_type === "standalone" || context === "deployment"
-      ? undefined
-      : organizationName,
     // The deployment has no name to show. The other two scopes are data (a
     // workspace's name, an organization's), and the process is the one every
     // tenant shares, so the word is the scope: "Deployment / Settings".
@@ -50,8 +44,7 @@ export function Breadcrumbs({ pathname }: { pathname: string }) {
     page,
   ].filter((one): one is string => Boolean(one))
 
-  // Deduped because the two rules above can name the organization twice on a
-  // hosted deployment's organization rail.
+  // Deduped so a page labeled like its scope is not named twice.
   const segments = trail.filter((one, index) => trail.indexOf(one) === index)
   if (segments.length === 0) return null
 

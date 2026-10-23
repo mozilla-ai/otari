@@ -58,7 +58,7 @@ import {
   formatUsd,
 } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 
 const DAY_MS = 86_400_000
 const PERIOD_DAYS = 30
@@ -649,7 +649,7 @@ function OrganizationOverview() {
 // operator-gated, so this only runs once the gate above has answered.
 function OperatorOverviewIndex() {
   const providers = useProviders()
-  const hosted = useHostedProviders(useSurfaces()("hosted_providers"))
+  const hosted = useHostedProviders()
   if (providers.isLoading || hosted.isLoading) {
     // A visible wait beats a blank screen while the master-key-gated providers
     // query resolves on first paint.
@@ -926,20 +926,6 @@ function OverviewHeader({
   )
 }
 
-// Where "add a provider credential" lives on this deployment. Only an operator
-// reaches this button (`OverviewIndex` hands anyone else to
-// `OrganizationOverview`, which links to the organization's provider-key page),
-// so it prefers the deployment's own keys, Hosted providers, and falls back to
-// the organization page where this deployment publishes no such surface.
-function useAddProviderRoute():
-  | "/admin/hosted-providers"
-  | "/organization/provider-keys" {
-  const serves = useSurfaces()
-  return serves("hosted_providers")
-    ? "/admin/hosted-providers"
-    : "/organization/provider-keys"
-}
-
 function GetStartedStrip({
   description = "Add a provider to begin serving models. Once it is configured, this page will show your gateway\u2019s traffic, spend, and health.",
   action = "provider",
@@ -949,7 +935,6 @@ function GetStartedStrip({
   action?: "provider" | "organization-provider-key" | null
 }) {
   const navigate = useNavigate()
-  const addProviderRoute = useAddProviderRoute()
 
   return (
     <Section
@@ -973,8 +958,11 @@ function GetStartedStrip({
           onPress={() =>
             navigate({
               to:
+                // Only an operator is offered "provider" (`OverviewIndex` hands
+                // anyone else to `OrganizationOverview`), so it goes to the
+                // deployment's own keys.
                 action === "provider"
-                  ? addProviderRoute
+                  ? "/admin/hosted-providers"
                   : "/organization/provider-keys",
             })
           }
@@ -1023,10 +1011,6 @@ function AttentionStrip({
   isReady: boolean
   hasFailed: boolean
 }) {
-  // Provider health is shown on Hosted providers. Where this deployment
-  // publishes no such page the entries state the problem without a link, since
-  // the organization page does not list these instances.
-  const providerProblemsAreReachable = useSurfaces()("hosted_providers")
   // A failed source deserves a visible status message; while loading, wait for
   // actionable information instead of reserving space for a transient banner.
   if (hasFailed) {
@@ -1038,9 +1022,7 @@ function AttentionStrip({
 
   const problems: {
     text: string
-    // Absent where this deployment hosts no page for the problem; the entry
-    // renders as plain text rather than as a link nobody can follow.
-    to?: LinkProps["to"]
+    to: LinkProps["to"]
     search?: LinkProps["search"]
   }[] = []
   if ((providerHealth === "warn" || providerHealth === "alert") && total > 0) {
@@ -1050,17 +1032,13 @@ function AttentionStrip({
     if (down > 0) {
       problems.push({
         text: `${down} provider${down === 1 ? "" : "s"} unreachable`,
-        to: providerProblemsAreReachable
-          ? "/admin/hosted-providers"
-          : undefined,
+        to: "/admin/hosted-providers",
       })
     }
     if (degraded > 0) {
       problems.push({
         text: `${degraded} provider${degraded === 1 ? "" : "s"} without model discovery`,
-        to: providerProblemsAreReachable
-          ? "/admin/hosted-providers"
-          : undefined,
+        to: "/admin/hosted-providers",
       })
     }
   }
@@ -1113,19 +1091,15 @@ function AttentionStrip({
               ·
             </span>
           ) : null}
-          {p.to ? (
-            <Link
-              to={p.to}
-              search={p.search}
-              // Thicken the underline on hover rather than lightening the text:
-              // the color here is already the one tuned to clear AA.
-              className="underline underline-offset-2 hover:decoration-2"
-            >
-              {p.text}
-            </Link>
-          ) : (
-            <span>{p.text}</span>
-          )}
+          <Link
+            to={p.to}
+            search={p.search}
+            // Thicken the underline on hover rather than lightening the text:
+            // the color here is already the one tuned to clear AA.
+            className="underline underline-offset-2 hover:decoration-2"
+          >
+            {p.text}
+          </Link>
         </span>
       ))}
     </Section>

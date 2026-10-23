@@ -1,9 +1,8 @@
-"""Unit tests for ``_classify_upstream_error``, the function that decides
+"""Unit tests for ``classify_local_attempt_error``, the function that decides
 whether an upstream failure falls through to the next routing-policy attempt.
 """
 
 import asyncio
-from typing import Any
 
 import httpx
 import pytest
@@ -16,7 +15,6 @@ from openai import APIStatusError as OpenAIAPIStatusError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._attempts import classify_local_attempt_error
-from gateway.api.routes._platform import _classify_upstream_error
 from gateway.services.inference import EmptyCompletionError
 
 
@@ -34,14 +32,14 @@ def _http_error(status: int) -> httpx.HTTPStatusError:
     [401, 403, 404, 405, 408, 409, 410, 429, 500, 502, 503, 504],
 )
 def test_retryable_status_codes_fall_through(status: int) -> None:
-    retryable, error_class = _classify_upstream_error(_http_error(status))
+    retryable, error_class = classify_local_attempt_error(_http_error(status))
     assert retryable is True
     assert error_class == f"http_{status}"
 
 
 @pytest.mark.parametrize("status", [400, 413, 414, 422, 431])
 def test_provider_status_codes_fall_through(status: int) -> None:
-    retryable, error_class = _classify_upstream_error(_http_error(status))
+    retryable, error_class = classify_local_attempt_error(_http_error(status))
     assert retryable is True
     assert error_class == f"http_{status}"
 
@@ -55,18 +53,17 @@ def test_provider_status_codes_fall_through(status: int) -> None:
     ],
 )
 def test_network_and_timeout_errors_are_retryable(exc: BaseException, expected_class: str) -> None:
-    retryable, error_class = _classify_upstream_error(exc)
+    retryable, error_class = classify_local_attempt_error(exc)
     assert retryable is True
     assert error_class == expected_class
 
 
-@pytest.mark.parametrize("classify", [_classify_upstream_error, classify_local_attempt_error])
-def test_an_empty_completion_falls_through_under_its_own_class(classify: Any) -> None:
-    assert classify(EmptyCompletionError()) == (True, "empty_completion")
+def test_an_empty_completion_falls_through_under_its_own_class() -> None:
+    assert classify_local_attempt_error(EmptyCompletionError()) == (True, "empty_completion")
 
 
 def test_error_without_status_is_unknown_and_falls_through() -> None:
-    retryable, error_class = _classify_upstream_error(ValueError("no status here"))
+    retryable, error_class = classify_local_attempt_error(ValueError("no status here"))
     assert retryable is True
     assert error_class == "unknown"
 
@@ -93,7 +90,7 @@ def test_sdk_wrapped_timeout_and_connection_errors_are_retryable(sdk_error: type
     exc = sdk_error(request=request)
     assert not hasattr(exc, "status_code")
 
-    retryable, error_class = _classify_upstream_error(exc)
+    retryable, error_class = classify_local_attempt_error(exc)
     assert retryable is True
     assert error_class == expected_class
 
@@ -114,7 +111,7 @@ def test_duck_typed_fallback_for_unenumerated_sdks(class_name: str, expected_cla
     never shadowed).
     """
     exc_type = type(class_name, (Exception,), {})
-    retryable, error_class = _classify_upstream_error(exc_type("boom"))
+    retryable, error_class = classify_local_attempt_error(exc_type("boom"))
     assert retryable is True
     assert error_class == expected_class
 
@@ -151,7 +148,7 @@ def test_unwraps_original_exception_for_unified_any_llm_errors(sdk_error: type, 
     request = httpx.Request("POST", "http://upstream")
     wrapped = _WrappedByAnyLLM(sdk_error(request=request))
 
-    retryable, error_class = _classify_upstream_error(wrapped)
+    retryable, error_class = classify_local_attempt_error(wrapped)
     assert retryable is True
     assert error_class == expected_class
 
@@ -165,7 +162,7 @@ def test_unwrap_terminates_on_self_referential_original_exception() -> None:
     exc = _WrappedByAnyLLM(ValueError("placeholder"))
     exc.original_exception = exc  # self-reference, must not loop
 
-    retryable, error_class = _classify_upstream_error(exc)
+    retryable, error_class = classify_local_attempt_error(exc)
     assert retryable is True
     assert error_class == "unknown"
 
@@ -184,7 +181,7 @@ def test_classifies_provider_sdk_status_errors(sdk_error: type, status: int) -> 
     exc = sdk_error(str(status), response=httpx.Response(status, request=request), body=None)
     assert getattr(exc, "status_code", None) == status  # guards the production exception shape
 
-    classified_retryable, error_class = _classify_upstream_error(exc)
+    classified_retryable, error_class = classify_local_attempt_error(exc)
     assert classified_retryable is True
     assert error_class == f"http_{status}"
 
@@ -219,7 +216,7 @@ def test_billing_exhaustion_falls_through_to_the_next_attempt(status: int, messa
     request, so the route's next attempt is worth making. Reported by clawbolt:
     an Anthropic account ran dry, the 400 was treated as terminal, and traffic
     never failed over to the other providers configured on the same alias."""
-    retryable, error_class = _classify_upstream_error(_MessageStatusError(status, message))
+    retryable, error_class = classify_local_attempt_error(_MessageStatusError(status, message))
     assert retryable is True
     assert error_class == f"http_{status}_billing"
 
@@ -229,7 +226,7 @@ def test_billing_exhaustion_detected_through_original_exception() -> None:
     any-llm unified-exception shape)."""
     wrapped = _WrappedByAnyLLM(_MessageStatusError(400, _ANTHROPIC_BILLING_MSG))
     wrapped.status_code = 400  # type: ignore[attr-defined]
-    retryable, error_class = _classify_upstream_error(wrapped)
+    retryable, error_class = classify_local_attempt_error(wrapped)
     assert retryable is True
     assert error_class == "http_400_billing"
 
@@ -237,15 +234,15 @@ def test_billing_exhaustion_detected_through_original_exception() -> None:
 def test_unrecognized_400_falls_through_without_billing_classification() -> None:
     """An unrecognized 400 remains an ordinary HTTP error, not a billing error."""
     exc = _MessageStatusError(400, "messages.3: tool_use ids were found without tool_result blocks")
-    assert _classify_upstream_error(exc) == (True, "http_400")
+    assert classify_local_attempt_error(exc) == (True, "http_400")
 
 
 def test_billing_probe_does_not_reinterpret_other_statuses() -> None:
     """A billing phrase on a status outside the candidate set keeps its normal
     classification and error_class, so the probe can only ever rescue a 400/402/422
     dead end."""
-    assert _classify_upstream_error(_MessageStatusError(503, _ANTHROPIC_BILLING_MSG)) == (True, "http_503")
-    assert _classify_upstream_error(_MessageStatusError(429, "insufficient_quota")) == (True, "http_429")
+    assert classify_local_attempt_error(_MessageStatusError(503, _ANTHROPIC_BILLING_MSG)) == (True, "http_503")
+    assert classify_local_attempt_error(_MessageStatusError(429, "insufficient_quota")) == (True, "http_429")
 
 
 def test_bare_402_is_billing_even_when_the_provider_message_is_lost() -> None:
@@ -254,10 +251,10 @@ def test_bare_402_is_billing_even_when_the_provider_message_is_lost() -> None:
     HTTP 402 still means payment required, so a fallback must not depend on a
     provider-specific phrase surviving that conversion.
     """
-    assert _classify_upstream_error(_MessageStatusError(402, "provider error")) == (True, "http_402_billing")
+    assert classify_local_attempt_error(_MessageStatusError(402, "provider error")) == (True, "http_402_billing")
 
     echoed = _MessageStatusError(400, "Invalid value: 'payment required'. Supported values are: 'none', 'auto'.")
-    assert _classify_upstream_error(echoed) == (True, "http_400")
+    assert classify_local_attempt_error(echoed) == (True, "http_400")
 
 
 def test_bedrock_client_error_reports_its_http_status() -> None:
@@ -266,4 +263,4 @@ def test_bedrock_client_error_reports_its_http_status() -> None:
         "Converse",
     )
 
-    assert _classify_upstream_error(exc) == (True, "http_400")
+    assert classify_local_attempt_error(exc) == (True, "http_400")

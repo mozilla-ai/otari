@@ -1,13 +1,11 @@
 """Workspace-scoped MCP server configuration: CRUD, and the request-path resolve.
 
-Ported from otari-ai's `MCPServerService` (otari#658). The platform stores an
-MCP server per workspace, encrypts its bearer token on save, decrypts it when
-the gateway asks for it by id, and never returns it in a public response. This
-module is the same thing against the local database, for a standalone
-deployment that has no platform to ask.
+Ported from otari-ai's `MCPServerService` (otari#658). An MCP server is stored
+per workspace, its bearer token encrypted on save and decrypted when a request
+names the server by id, and never returned in a public response.
 
 **Where it plugs in.** A request names stored servers with `mcp_server_ids`.
-A deployment that holds the rows resolves them here, through
+They are resolved here, through
 :func:`resolve_workspace_mcp_servers`, called at admission where the request's session is live and
 `RequestContext.workspace_id` already names the workspace its key belongs to.
 That is the seam otari#655 settled and otari#678 wrote down; MCP is the
@@ -15,8 +13,7 @@ exception that decision names, because there is no deployment-wide server list
 for a workspace row to narrow, so a row here is the only source of the
 configuration rather than a narrowing of one.
 
-**Deliberate divergences from the platform's version**, all of them because a
-standalone deployment is not a hosted multi-tenant one:
+**Deliberate divergences from otari-ai's version:**
 
 - Authorization is this repository's own workspace check
   (`services.tenancy.authorization`), so a workspace owner/admin qualifies and
@@ -75,7 +72,6 @@ from gateway.services.secret_box import (
 )
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.url_safety import UnsafeURLError, redact_url_secrets, validate_mcp_url
 
 # What a workspace may configure. A resolved request opens a session to every
@@ -446,14 +442,30 @@ async def resolve_workspace_mcp_server(
     )
 
 
+class WorkspaceMcpServers:
+    """The MCP servers a workspace may reach, as a request reads them.
+
+    A caller connects to a returned server directly; nothing here proxies MCP traffic.
+    """
+
+    def __init__(self, db: AsyncSession) -> None:
+        self._db = db
+
+    async def resolve_many(self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+        """See :func:`resolve_workspace_mcp_servers`."""
+        return await resolve_workspace_mcp_servers(self._db, workspace_id=workspace_id, server_ids=server_ids)
+
+    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+        """See :func:`resolve_workspace_mcp_server`."""
+        return await resolve_workspace_mcp_server(self._db, workspace_id=workspace_id, server_id=server_id)
+
+
 class WorkspaceMcpServerService:
     """CRUD for a workspace's MCP servers. Writes are management-gated; the list is not."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.organizations = OrganizationService(
-            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-        )
+        self.organizations = OrganizationService(db, membership_listener=None)
 
     async def _require_management(self, user: User, workspace_id: uuid.UUID) -> uuid.UUID:
         """Resolve the workspace and confirm the caller may manage it.
@@ -733,6 +745,7 @@ __all__ = [
     "WorkspaceMcpServerPublic",
     "WorkspaceMcpServerService",
     "WorkspaceMcpServerUpdate",
+    "WorkspaceMcpServers",
     "WorkspaceMcpServersPublic",
     "resolve_workspace_mcp_server",
     "resolve_workspace_mcp_servers",

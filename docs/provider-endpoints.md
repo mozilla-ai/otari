@@ -6,9 +6,7 @@ endpoint is how such an app registers one with Otari, so the user's traffic goes
 through the gateway like everything else, with usage recorded and without
 touching anyone's budget.
 
-Provider endpoints are a standalone-mode feature: a hybrid gateway resolves
-models through its control plane, and a hosted one serves no inference. They are
-off until an operator turns them on:
+Provider endpoints are off until an operator turns them on:
 
 ```yaml
 provider_endpoints_enabled: true

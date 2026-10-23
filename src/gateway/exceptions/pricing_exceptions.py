@@ -45,9 +45,8 @@ class OrganizationPricingManagedModelError(TenancyForbiddenError):
     what a budget counts down.
 
     Withheld from an organization manager, not from everyone: a deployment
-    operator is the party that pays, so the standalone deployment whose one
-    administrator is also its only tenant keeps setting its own rates exactly as
-    before (otari-ai#2095).
+    operator is the party that pays, so a deployment whose one administrator is
+    also its only tenant keeps setting its own rates (otari-ai#2095).
     """
 
     def __init__(self, model_key: str):

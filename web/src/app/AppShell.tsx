@@ -466,12 +466,12 @@ function NavGroup({
  * because everything that reads the axis is inside the shell and because the
  * resolver a superset build swaps in issues a query: it belongs behind the auth
  * gate `App.tsx` puts the router behind, not in front of it. So the surfaces
- * that render instead of the shell (the sign-in screen, the public auth pages,
- * the hybrid landing) are deliberately outside it: none of them gates on a
+ * that render instead of the shell (the sign-in screen, the public auth pages)
+ * are deliberately outside it: none of them gates on a
  * capability, and a visitor without a session has nothing to resolve one from.
  *
  * `PostSignInGate` is the seam for anything that has to be shown once, in front
- * of the whole app, after a session exists (otari#789): a hosted signup's
+ * of the whole app, after a session exists (otari#789): otari.ai's signup
  * profile questions, in the build that has a signup. It is mounted here rather
  * than anywhere else because its position *is* its contract, all three
  * boundaries of it, and the module docstring is where that lives. The base
@@ -548,11 +548,9 @@ function AppShellChrome() {
   const inDeployment = navContext === "deployment"
   const organization = useOrganizationContext()
   const { selected: selectedWorkspace } = useSelectedWorkspace()
-  // Always true in a standalone deployment, where the one session is the local
-  // operator and it owns the organization the gateway provisioned for itself.
-  // Written anyway because it becomes load-bearing the moment per-user sign-in
-  // lands (otari-ai#1716), and because an overlay build can already be reached
-  // by someone who is not an admin.
+  // True for the local operator, who owns the organization the gateway
+  // provisioned for itself, and load-bearing for every account that signs in
+  // without managing it (otari-ai#1716).
   // Fails open when the context errors rather than resolving false: Users,
   // budgets and settings are reachable only through this entry, the routes still
   // work by URL, and the server authorizes every request behind it regardless.
@@ -1220,7 +1218,7 @@ function AppShellChrome() {
             // which computes to `hidden` beside `overflow-y: auto` anyway.
             className="flex-1 overflow-x-hidden overflow-y-auto focus:outline-none"
           >
-            <div className="mx-auto flex max-w-[112.5rem] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
+            <div className="mx-auto flex max-w-[112.5rem] flex-col gap-6 px-4 pt-5 pb-[calc(1.25rem+var(--shell-corner-clearance))] md:px-6 md:pt-6 md:pb-[calc(1.5rem+var(--shell-corner-clearance))]">
               {answerIsStillComing ? (
                 <PendingPage />
               ) : routeIsGatedOff ? (

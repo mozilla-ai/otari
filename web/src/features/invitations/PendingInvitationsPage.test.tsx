@@ -283,9 +283,8 @@ describe("the invitee's membership inbox", () => {
 
   it("reports a failed read rather than claiming nothing is waiting", async () => {
     // 404 rather than 500 because that is the case with a cause: a gateway
-    // older than this bundle does not serve the route, and a hybrid one
-    // answers 404 for every /api/v1/organizations path by design. It is also the
-    // one the hook refuses to retry, so the banner is the first answer rather
+    // older than this bundle does not serve the route. It is also the one the
+    // hook refuses to retry, so the banner is the first answer rather
     // than the fourth.
     mockApi({ listError: 404 })
     renderPage()

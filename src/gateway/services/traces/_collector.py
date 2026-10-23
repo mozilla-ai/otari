@@ -10,6 +10,7 @@ because its trace could not be recorded.
 
 import functools
 import hashlib
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -54,6 +55,24 @@ class LlmCall:
 def identifier_or_none(value: object) -> str | None:
     """A client-supplied value as it may be stored, or None when it is not an identifier-shaped string."""
     return value if isinstance(value, str) and is_identifier(value) else None
+
+
+# Longer than any call id a provider issues; past it the value is not one.
+_MAX_CALL_ID_LENGTH = 512
+CALL_ID_DIGEST = re.compile(r"tc-[0-9a-f]{32}")
+
+
+def call_id_digest(workspace_id: uuid.UUID, value: object) -> str | None:
+    """A tool call's id as it is stored: a digest of what the client sent, never the id itself.
+
+    A call id is whatever the client chose, so it may be anything, a credential
+    included. Every span that names one call (the tool, and each gate a hook checked
+    it with) carries the same digest, so they still match; with the workspace in it,
+    two tenants' ids never do.
+    """
+    if not isinstance(value, str) or not value or len(value) > _MAX_CALL_ID_LENGTH:
+        return None
+    return "tc-" + hashlib.sha256(f"{workspace_id}\x00{value}".encode()).hexdigest()[:32]
 
 
 def client_tool_span_id(call_id: str, position: int) -> str:
@@ -328,7 +347,7 @@ class RequestTrace:
                     end_time=self.started_at,
                     tool_name=name,
                     tool_type="client",
-                    tool_call_id=identifier_or_none(call.call_id),
+                    tool_call_id=call_id_digest(self.workspace_id, call.call_id),
                     request_id=self.request_id,
                 )
             )

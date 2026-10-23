@@ -6,14 +6,16 @@ Runs one fetch against the live API, with the key from the environment
 variable the provider's metadata names, and writes the last HTTP response to
 ``tests/fixtures/<provider>/<case>.json`` as ``{"status": ..., "body": ...}``.
 A provider's unit tests replay it through ``httpx.MockTransport``. Every
-occurrence of the key is replaced before anything is written. To record an
-error case, set that variable to a key the provider will refuse.
+occurrence of the key is replaced before anything is written, and so is the
+masked form an error may quote, asterisks and the key's last four characters.
+To record an error case, set that variable to a key the provider will refuse.
 """
 
 import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -34,6 +36,13 @@ class _Recorder:
 
     async def __call__(self, response: httpx.Response) -> None:
         self.last = (response.status_code, await response.aread())
+
+
+def _redact(text: str, api_key: str) -> str:
+    text = text.replace(api_key, REDACTED)
+    if len(api_key) > 4:
+        text = re.sub(r"\*+" + re.escape(api_key[-4:]), REDACTED, text)
+    return text
 
 
 def _option(text: str) -> tuple[str, Any]:
@@ -60,7 +69,7 @@ async def _record(args: argparse.Namespace) -> Path:
     status, raw_body = recorder.last
     text = raw_body.decode("utf-8", errors="replace")
     if api_key:
-        text = text.replace(api_key, REDACTED)
+        text = _redact(text, api_key)
     try:
         body: Any = json.loads(text)
     except json.JSONDecodeError:

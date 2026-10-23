@@ -428,44 +428,18 @@ describe("SetupGuide", () => {
     expect(snippet("typescript")).toHaveTextContent("openai:gpt-4o-mini")
   })
 
-  it("sends the example at the data plane a hosted deployment published", async () => {
-    // The control plane serves this guide and is deliberately not where
-    // inference belongs (otari#822), so the origin is the one address the
-    // example must not name.
+  it("sends the example at the address that served the guide", async () => {
     mockApi()
     const person = userEvent.setup()
-    await renderGuide(
-      true,
-      bootstrap({
-        deployment_type: "hosted",
-        data_plane_url: "https://gateway.otari.ai",
-      }),
-    )
+    await renderGuide()
 
     await person.click(await screen.findByRole("button", { name: "cURL" }))
     const curl = snippet("curl")
     expect(curl).toHaveTextContent(
-      `https://gateway.otari.ai${API_ROOT}/chat/completions`,
+      `${window.location.origin}${API_ROOT}/chat/completions`,
     )
-    expect(curl).not.toHaveTextContent(window.location.origin)
     // Concealed, so the address it names is readable while the key is not.
     expect(curl).not.toHaveTextContent(KEY)
-  })
-
-  it("offers the key but no example when a hosted deployment published no data plane", async () => {
-    // Withheld rather than aimed at this host: a placeholder would be a URL
-    // nobody reading it could replace, and the origin would be the bug itself.
-    mockApi()
-    await renderGuide(
-      true,
-      bootstrap({ deployment_type: "hosted", data_plane_url: null }),
-    )
-
-    expect(await screen.findByLabelText("Your API key")).toBeInTheDocument()
-    expect(screen.queryByRole("region", { name: /code$/ })).toBeNull()
-    expect(
-      screen.getByText(/has not published the gateway address/),
-    ).toBeInTheDocument()
   })
 
   it("names the placeholder, and where to fix it, when no model is being served", async () => {
