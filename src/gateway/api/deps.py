@@ -1,7 +1,7 @@
 import secrets
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated
@@ -21,7 +21,7 @@ from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnava
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
-from gateway.models.tenancy import MANAGEMENT_ROLES
+from gateway.models.tenancy import MANAGEMENT_ROLES, WorkspaceMember
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
@@ -142,7 +142,7 @@ from gateway.services.tools import (
     WorkspaceSearchKeys,
     web_search_configured,
 )
-from gateway.services.traces import SpanContent, TraceService
+from gateway.services.traces import SpanContent, TraceMembershipListener, TraceService
 from gateway.services.usage_admin_service import usage_in
 from gateway.services.usage_and_telemetry import UsageService
 from gateway.services.workspace_scope import default_workspace_id
@@ -980,12 +980,33 @@ def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork
 UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 
 
+class _MembershipListeners:
+    """Every domain's :class:`MembershipListener`, told of each change in turn."""
+
+    def __init__(self, *listeners: MembershipListener) -> None:
+        self._listeners = listeners
+
+    async def member_joined(self, member: WorkspaceMember) -> None:
+        for listener in self._listeners:
+            await listener.member_joined(member)
+
+    async def member_removed(self, member: WorkspaceMember) -> None:
+        for listener in self._listeners:
+            await listener.member_removed(member)
+
+    async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
+        for listener in self._listeners:
+            await listener.workspace_deleted(workspace_id, member_ids)
+
+
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
-    """Return the listener that keeps members' budget ceilings in step with their memberships.
+    """Return the listener that keeps members' budget ceilings and session shares in step with their memberships.
 
     It writes through the request's Unit of Work, so a service that changes membership must be built on the same one.
     """
-    return BudgetMembershipListener(BudgetRepositories.on(uow))
+    return _MembershipListeners(
+        BudgetMembershipListener(BudgetRepositories.on(uow)), TraceMembershipListener(TracesRepositories.on(uow))
+    )
 
 
 MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_listener)]

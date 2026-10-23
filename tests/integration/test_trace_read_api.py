@@ -868,3 +868,31 @@ def test_a_share_records_a_polling_reader_once_and_pages_a_long_history(
     assert (len(first["items"]), first["has_more"]) == (20, True)
     assert (len(rest["items"]), rest["has_more"]) == (11, False)
     assert _as(client, world["admin"], "GET", f"{path}/{share['id']}/reads").status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_removing_a_member_from_the_workspace_ends_their_shares_at_once(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    share = _as(
+        client,
+        world["member"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "organization_admins"},
+    ).json()
+    workspace_id = _workspace_id(db_session_factory, "One")
+    with db_session_factory() as session:
+        member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+
+    removed = _as(client, world["admin"], "DELETE", f"/workspaces/{workspace_id}/members/{member.id}")
+    assert removed.status_code == status.HTTP_200_OK, removed.text
+
+    with db_session_factory() as session:
+        stored = session.get(TraceContentShare, uuid.UUID(share["id"]))
+        assert stored is not None and stored.revoked_at is not None
