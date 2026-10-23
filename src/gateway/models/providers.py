@@ -223,6 +223,9 @@ class HostedProvider(Base):
     restricted_to_organization_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("organization.id", ondelete="RESTRICT"), index=True, default=None
     )
+    # The ISO country codes whose requests this provider serves, or None for
+    # every country. Checked as well as ``provider_supported_countries``.
+    supported_countries: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
