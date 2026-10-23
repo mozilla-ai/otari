@@ -90,6 +90,9 @@ class BudgetMembershipListener:
         """Delete the ceilings that would outlive the workspace."""
         await self._repositories.ceilings.delete_for_workspace(workspace_id, member_ids)
 
+    async def member_left_organization(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
+        """Nothing: a suspended member's ceilings stay with their workspace memberships, which stay too."""
+
 
 class _MemberPolicies:
     """A workspace's member budget policy use cases, each run inside the caller's Unit of Work block.

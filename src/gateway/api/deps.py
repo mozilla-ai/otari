@@ -1018,6 +1018,10 @@ class _MembershipListeners:
         for listener in self._listeners:
             await listener.workspace_deleted(workspace_id, member_ids)
 
+    async def member_left_organization(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
+        for listener in self._listeners:
+            await listener.member_left_organization(user_id, workspace_ids)
+
 
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
     """Return the listener that keeps members' budget ceilings and session shares in step with their memberships.
