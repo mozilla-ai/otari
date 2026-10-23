@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the metadata)
+from gateway.api.deps import NoSessionOwners
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import Trace
 from gateway.repositories.traces import TracesRepositories
@@ -45,9 +46,9 @@ async def _series(*traces: Trace, filters: TraceFilter, bucket: TraceBucketGrain
             session.add_all(traces)
             await session.commit()
             uow = UnitOfWork(session)
-            series = await TraceService(uow, TracesRepositories.on(uow), SpanContent.disabled()).series(
-                TraceScope.deployment(), filters, bucket=bucket
-            )
+            series = await TraceService(
+                uow, TracesRepositories.on(uow), SpanContent.disabled(), NoSessionOwners()
+            ).series(TraceScope.deployment(), filters, bucket=bucket)
     finally:
         await engine.dispose()
     return [(point.bucket, point.succeeded, point.failed) for point in series]

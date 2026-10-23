@@ -34,6 +34,7 @@ from gateway.types.traces import (
     ContentReader,
     ContentShare,
     GuardrailDefinition,
+    SessionOwners,
     ShareAudience,
     SpanRecord,
     TraceBucket,
@@ -72,9 +73,12 @@ class TraceService:
     settles in a block of its own on the Unit of Work it was built with.
     """
 
-    def __init__(self, uow: UnitOfWork, repositories: TracesRepositories, content: SpanContent) -> None:
+    def __init__(
+        self, uow: UnitOfWork, repositories: TracesRepositories, content: SpanContent, owners: SessionOwners
+    ) -> None:
         self._uow = uow
         self._content = content
+        self._owners = owners
         self._traces = repositories.traces
         self._spans = repositories.spans
         self._definitions = repositories.definitions
@@ -216,6 +220,11 @@ class TraceService:
             share = None
             if access == "none" and sealed and scope.reader is not None and scope.reader.audience is not None:
                 share = await self._shares.active(row.workspace_id, row.trace_id, scope.reader.audience, now)
+                # A share lasts only while its owner belongs: one who left can no longer manage it,
+                # so nobody reads through it, and it is ended for good rather than revived on a return.
+                if share is not None and not await self._owners.is_member(row.workspace_id, row.user_id):
+                    await self._shares.revoke(share, now)
+                    share = None
                 if share is not None:
                     access = "share"
                     # Once an hour per reader, so a page polling an active session is one read, not one a poll.
