@@ -7575,6 +7575,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
                   "description": "Agent harnesses.",
                   "disabled": true,
                   "key": "harness",
@@ -7599,7 +7605,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/traces?skip=&limit=&sort=&order=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces?skip=&limit=&sort=&order=&workspace_id=&start=&end=&user_id=&api_key_id=&model=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -7690,6 +7696,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
                   "description": "Agent harnesses.",
                   "disabled": true,
                   "key": "harness",
@@ -7714,7 +7726,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/count?workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/count?workspace_id=&start=&end=&user_id=&api_key_id=&model=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -7804,6 +7816,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
                   "description": "Agent harnesses.",
                   "disabled": true,
                   "key": "harness",
@@ -7828,7 +7846,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/series?bucket=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/series?bucket=&workspace_id=&start=&end=&user_id=&api_key_id=&model=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -11460,6 +11478,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
                   "description": "Agent harnesses.",
                   "disabled": true,
                   "key": "harness",
@@ -11484,7 +11508,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/traces?skip=&limit=&sort=&order=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/traces?skip=&limit=&sort=&order=&workspace_id=&start=&end=&user_id=&api_key_id=&model=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -11571,6 +11595,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
                   "description": "Agent harnesses.",
                   "disabled": true,
                   "key": "harness",
@@ -11595,7 +11625,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/traces/count?workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/traces/count?workspace_id=&start=&end=&user_id=&api_key_id=&model=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -11681,6 +11711,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
                   "description": "Agent harnesses.",
                   "disabled": true,
                   "key": "harness",
@@ -11705,7 +11741,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/traces/series?bucket=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/traces/series?bucket=&workspace_id=&start=&end=&user_id=&api_key_id=&model=&harness=&session_source=&has_error=&q="
             }
           }
         },

@@ -26277,6 +26277,8 @@ export interface operations {
                 user_id?: string[] | null;
                 /** @description API keys. */
                 api_key_id?: string[] | null;
+                /** @description Sessions with an LLM call recorded under any of these model ids (exact match). */
+                model?: string[] | null;
                 /** @description Agent harnesses. */
                 harness?: string[] | null;
                 /** @description What grouped the session. */
@@ -26357,6 +26359,8 @@ export interface operations {
                 user_id?: string[] | null;
                 /** @description API keys. */
                 api_key_id?: string[] | null;
+                /** @description Sessions with an LLM call recorded under any of these model ids (exact match). */
+                model?: string[] | null;
                 /** @description Agent harnesses. */
                 harness?: string[] | null;
                 /** @description What grouped the session. */
@@ -26437,6 +26441,8 @@ export interface operations {
                 user_id?: string[] | null;
                 /** @description API keys. */
                 api_key_id?: string[] | null;
+                /** @description Sessions with an LLM call recorded under any of these model ids (exact match). */
+                model?: string[] | null;
                 /** @description Agent harnesses. */
                 harness?: string[] | null;
                 /** @description What grouped the session. */
@@ -29748,6 +29754,8 @@ export interface operations {
                 user_id?: string[] | null;
                 /** @description API keys. */
                 api_key_id?: string[] | null;
+                /** @description Sessions with an LLM call recorded under any of these model ids (exact match). */
+                model?: string[] | null;
                 /** @description Agent harnesses. */
                 harness?: string[] | null;
                 /** @description What grouped the session. */
@@ -29828,6 +29836,8 @@ export interface operations {
                 user_id?: string[] | null;
                 /** @description API keys. */
                 api_key_id?: string[] | null;
+                /** @description Sessions with an LLM call recorded under any of these model ids (exact match). */
+                model?: string[] | null;
                 /** @description Agent harnesses. */
                 harness?: string[] | null;
                 /** @description What grouped the session. */
@@ -29908,6 +29918,8 @@ export interface operations {
                 user_id?: string[] | null;
                 /** @description API keys. */
                 api_key_id?: string[] | null;
+                /** @description Sessions with an LLM call recorded under any of these model ids (exact match). */
+                model?: string[] | null;
                 /** @description Agent harnesses. */
                 harness?: string[] | null;
                 /** @description What grouped the session. */

@@ -11,7 +11,7 @@ not exist.
 import asyncio
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
@@ -26,6 +26,7 @@ from sqlmodel import col
 
 from gateway.adapters.content_key_adapter import SECRET_KEY_WRAPPER, ContentKeyring, SecretKeyContentKeys
 from gateway.api.deps import is_workspace_member, workspace_members
+from gateway.api.routes.traces import _MAX_FILTER_VALUES
 from gateway.core.config import API_ROOT
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.traces import (
@@ -175,7 +176,9 @@ def world(
         }
 
 
-def _operator_get(client: TestClient, world: dict[str, str], path: str, params: dict[str, str] | None = None) -> Any:
+def _operator_get(
+    client: TestClient, world: dict[str, str], path: str, params: Mapping[str, str | list[str]] | None = None
+) -> Any:
     client.cookies.set(SESSION_COOKIE_NAME, world["operator"])
     try:
         return client.get(f"{API_ROOT}{path}", params=params)
@@ -1555,3 +1558,75 @@ def test_the_batched_membership_check_agrees_with_asking_one_pair_at_a_time(
             (theirs, ids["o@b.test"]),
         }
     )
+
+
+def test_a_model_filter_keeps_the_sessions_with_a_call_on_any_of_the_models(
+    client: TestClient, world: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    models = {"s-one": "model-a", "s-two": "model-b", "s-theirs": "model-a"}
+    with db_session_factory() as session:
+        sibling = session.scalars(select(Workspace).where(col(Workspace.name) == "Two")).one()
+        # A sibling workspace's session reuses the id "s-one" on a model of its own.
+        _trace(session, sibling.id, "s-one")
+        for span in session.scalars(select(TraceSpan).where(col(TraceSpan.kind) == "llm")):
+            span.model = (
+                "model-x" if span.workspace_id == sibling.id and span.trace_id == "s-one" else models[span.trace_id]
+            )
+        session.commit()
+        sibling_id = str(sibling.id)
+
+    def operator(path: str, *values: str) -> Any:
+        response = _operator_get(client, world, path, {"model": list(values)})
+        assert response.status_code == status.HTTP_200_OK, response.text
+        return response.json()
+
+    assert [item["trace_id"] for item in operator("/traces", "model-a")["items"]] == ["s-one"]
+    assert operator("/traces/count", "model-b")["count"] == 1
+    assert operator("/traces/series", "model-b")["points"] == [
+        {"bucket": "2026-10-07T12:00:00Z", "succeeded": 0, "failed": 1}
+    ]
+    assert operator("/traces/count", "model-none")["count"] == 0
+    assert operator("/traces/series", "model-none")["points"] == []
+    assert sorted(item["trace_id"] for item in operator("/traces", "model-a", "model-b")["items"]) == [
+        "s-one",
+        "s-two",
+    ]
+    assert operator("/traces/count", "model-a", "model-b")["count"] == 2
+    # The probe is keyed on the workspace too: a shared trace id never lends its spans across workspaces.
+    shared = operator("/traces", "model-x")["items"]
+    assert [(item["trace_id"], item["workspace_id"]) for item in shared] == [("s-one", sibling_id)]
+    assert operator("/traces/count", "model-x")["count"] == 1
+    assert [item["workspace_id"] for item in operator("/traces", "model-a")["items"]] != [sibling_id]
+    too_many = [f"model-{index}" for index in range(_MAX_FILTER_VALUES + 1)]
+    response = _operator_get(client, world, "/traces", {"model": too_many})
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+    def organization(cookie: str, path: str = "") -> Any:
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        try:
+            response = client.get(f"{API_ROOT}/organizations/me/traces{path}", params={"model": ["model-a"]})
+        finally:
+            client.cookies.clear()
+        assert response.status_code == status.HTTP_200_OK, response.text
+        return response.json()
+
+    # The filter narrows inside the scope: model-a is also on another organization's session.
+    assert [item["trace_id"] for item in organization(world["admin"])["items"]] == ["s-one"]
+    assert organization(world["admin"], "/count")["count"] == 1
+    assert organization(world["member"], "/count")["count"] == 1
+    assert organization(world["outsider"], "/count")["count"] == 1
+    assert [item["trace_id"] for item in organization(world["outsider"])["items"]] == ["s-theirs"]
+    assert len(organization(world["admin"], "/series")["points"]) == 1
+
+    def shared_in_organization(cookie: str) -> list[str]:
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        try:
+            response = client.get(f"{API_ROOT}/organizations/me/traces", params={"model": ["model-x"]})
+        finally:
+            client.cookies.clear()
+        assert response.status_code == status.HTTP_200_OK, response.text
+        return [item["workspace_id"] for item in response.json()["items"]]
+
+    assert shared_in_organization(world["admin"]) == [sibling_id]
+    assert shared_in_organization(world["member"]) == []
+    assert shared_in_organization(world["outsider"]) == []
