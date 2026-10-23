@@ -132,7 +132,9 @@ class TraceService:
             )
             new_traces: dict[TraceKey, dict[str, Any]] = {}
             for trace in traces:
-                new_traces.setdefault(_key(trace), _new_trace(trace, written_at))
+                # An erased user's write creates nothing, not even the session it names.
+                if not _erased_since(trace, erased):
+                    new_traces.setdefault(_key(trace), _new_trace(trace, written_at))
             await self._traces.create_absent(list(new_traces.values()))
             # Read after creating, so a trace a concurrent writer created first is
             # judged by the owner it actually has.
@@ -388,6 +390,12 @@ class TraceService:
         reader = _owner(scope)
         async with self._uow:
             row = await self._owned(scope, trace_id, workspace_id)
+            # Under the lock that ending the owner's membership takes too, and checked
+            # again here, so a share is never made by someone whose membership has
+            # just ended, however long ago this request resolved their scope.
+            await self._erasures.lock([str(reader.user_id)])
+            if not await self._owners.is_member(row.workspace_id, row.user_id):
+                raise TraceContentShareForbiddenError
             share = await self._shares.add(
                 workspace_id=row.workspace_id,
                 trace_id=row.trace_id,

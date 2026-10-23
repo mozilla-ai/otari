@@ -24,6 +24,8 @@ class TraceMembershipListener:
 
     async def member_removed(self, member: WorkspaceMember) -> None:
         """End every share the member made of a session in the workspace."""
+        # The lock a share's making takes, so one being made now waits for this, then refuses.
+        await self._repositories.erasures.lock([str(member.user_id)])
         await self._repositories.shares.revoke_by(member.workspace_id, member.user_id, datetime.now(UTC))
 
     async def member_role_changed(self, member: WorkspaceMember) -> None:
@@ -39,6 +41,7 @@ class TraceMembershipListener:
 
     async def member_left_organization(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
         """End every share the person made in any of the organization's workspaces, so a return revives none."""
+        await self._repositories.erasures.lock([str(user_id)])
         now = datetime.now(UTC)
         for workspace_id in workspace_ids:
             await self._repositories.shares.revoke_by(workspace_id, user_id, now)
