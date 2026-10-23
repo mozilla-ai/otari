@@ -325,7 +325,11 @@ class TraceService:
         _owner(scope)
         async with self._uow:
             row = await self._owned(scope, trace_id, workspace_id)
-            shares = list(await self._shares.for_trace(row.workspace_id, row.trace_id, limit=limit + 1, offset=offset))
+            shares = list(
+                await self._shares.for_trace(
+                    row.workspace_id, row.trace_id, now=datetime.now(UTC), limit=limit + 1, offset=offset
+                )
+            )
             ids = [share.id for share in shares[:limit]]
             reads = await self._shares.latest_reads(ids, per_share=SHARE_LATEST_READS)
             counts = await self._shares.read_counts(ids)

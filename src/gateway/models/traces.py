@@ -214,6 +214,10 @@ class TraceContentRead(Base):
     """One read of a session's content through a share, which the session's owner can see."""
 
     __tablename__ = "trace_content_reads"
+    __table_args__ = (
+        # The newest reads of a share, and whether a reader has one this hour.
+        Index("ix_trace_content_reads_share_read_at", "share_id", "read_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     share_id: Mapped[uuid.UUID] = mapped_column(
