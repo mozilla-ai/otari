@@ -1085,6 +1085,8 @@ def test_removing_a_member_from_the_organization_ends_their_shares_so_a_return_r
         stored = session.get(TraceContentShare, uuid.UUID(share["id"]))
         assert stored is not None and stored.revoked_at is not None
         # Back in the organization, the share stays ended.
-        session.get(OrganizationMember, membership_id).status = "active"
+        returned = session.get(OrganizationMember, membership_id)
+        assert returned is not None
+        returned.status = "active"
         session.commit()
     assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
