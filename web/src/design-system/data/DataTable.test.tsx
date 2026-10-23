@@ -708,6 +708,28 @@ describe('DataTable on a phone with mobileLayout="cards"', () => {
     },
   ]
 
+  it("brings a scrolled-past card list back into view when its page changes, not on mount", () => {
+    stubPhone(true)
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    // The list's top has scrolled above the viewport.
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+      top: -200,
+    } as DOMRect)
+    const view = (page: number) => (
+      <DataTable
+        {...base({ columns, mobileLayout: "cards", scrollResetKey: page })}
+      />
+    )
+    const { rerender } = render(view(0))
+    rerender(view(0))
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    rerender(view(1))
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" })
+    vi.restoreAllMocks()
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+  })
+
   it("renders each row as a card with its title, fields and actions", () => {
     stubPhone(true)
     render(<DataTable {...base({ columns, mobileLayout: "cards" })} />)
@@ -1042,5 +1064,23 @@ describe("DataTable inner scroll", () => {
     detailBottom = 640
     fireResize()
     expect(scroller(container).scrollTop).toBe(200)
+  })
+  it("returns to its first row when scrollResetKey changes", async () => {
+    const view = (page: number) => (
+      <DataTable
+        ariaLabel="Rows"
+        columns={COLUMNS}
+        rows={many(20)}
+        getRowKey={getRowKey}
+        scrollResetKey={page}
+      />
+    )
+    const { container, rerender } = render(view(0))
+    await screen.findByText("Row 20")
+    scroller(container).scrollTop = 200
+    rerender(view(0))
+    expect(scroller(container).scrollTop).toBe(200)
+    rerender(view(1))
+    expect(scroller(container).scrollTop).toBe(0)
   })
 })

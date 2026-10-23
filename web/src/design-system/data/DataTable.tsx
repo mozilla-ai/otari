@@ -120,6 +120,13 @@ export interface DataTableProps<Row> {
    * for a table too wide to read without a sideways scroll.
    */
   mobileLayout?: "table" | "cards"
+  /**
+   * Returns the table's own scroll to the top when it changes. Pass the page
+   * number of a paginated table, so a new page opens at its first row rather
+   * than wherever the last one was left. Not tied to `rows`: a background
+   * refetch replaces the array, and the table would jump on every refresh.
+   */
+  scrollResetKey?: string | number
 }
 
 // HeroUI's two containers; `isResizable` picks the second.
@@ -215,6 +222,7 @@ function DataCardList<Row extends object>({
   rowClassName,
   detailKey,
   renderDetail,
+  scrollResetKey,
 }: {
   ariaLabel: string
   columns: DataTableColumn<Row>[]
@@ -230,7 +238,24 @@ function DataCardList<Row extends object>({
   rowClassName?: (row: Row) => string | undefined
   detailKey: string | null
   renderDetail?: (row: Row) => ReactNode
+  scrollResetKey?: string | number
 }) {
+  // The page scrolls a card list, not the list itself, so a new page brings
+  // the list's top back into view when it has scrolled above it. Not on the
+  // first render, which is where the reader already is.
+  const listRef = useRef<HTMLElement>(null)
+  const mounted = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scrollResetKey is the trigger, not a value read here
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true
+      return
+    }
+    const list = listRef.current
+    if (list && list.getBoundingClientRect().top < 0) {
+      list.scrollIntoView?.({ block: "start" })
+    }
+  }, [scrollResetKey])
   const title = columns.find((col) => col.isRowHeader) ?? columns[0]
   const actions = columns.find((col) => col.id === "actions")
   const fields = columns.filter((col) => col !== title && col !== actions)
@@ -266,7 +291,7 @@ function DataCardList<Row extends object>({
   }
 
   return (
-    <section aria-label={ariaLabel}>
+    <section ref={listRef} aria-label={ariaLabel}>
       {showSelection ? (
         <div className="flex min-h-11 items-center border-b border-border-subtle">
           <Checkbox
@@ -403,6 +428,7 @@ export function DataTable<Row extends object>(props: DataTableProps<Row>) {
         rowClassName={props.rowClassName}
         detailKey={props.detailKey ?? null}
         renderDetail={props.renderDetail}
+        scrollResetKey={props.scrollResetKey}
       />
     )
   }
@@ -427,6 +453,7 @@ function DataTableGrid<Row extends object>({
   isResizable = false,
   detailKey = null,
   renderDetail,
+  scrollResetKey,
 }: DataTableProps<Row>) {
   const showSelection = selectionMode === "multiple"
   const Container = isResizable
@@ -476,6 +503,12 @@ function DataTableGrid<Row extends object>({
     measure()
     return () => observer.disconnect()
   }, [])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scrollResetKey is the trigger, not a value read here
+  useLayoutEffect(() => {
+    const scroller = rootRef.current?.querySelector<HTMLElement>(SCROLLER)
+    if (scroller) scroller.scrollTop = 0
+  }, [scrollResetKey])
 
   const [detailHost, setDetailHost] = useState<HTMLTableCellElement | null>(
     null,

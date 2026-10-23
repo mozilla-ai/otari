@@ -1046,6 +1046,7 @@ export function ActivityPage() {
       <div className="flex flex-col gap-3">
         <TableScrollFrame className="otari-activity-table">
           <DataTable
+            scrollResetKey={page}
             mobileLayout="cards"
             ariaLabel="Activity log"
             columns={columns}

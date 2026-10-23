@@ -208,6 +208,7 @@ export function SpendCeilingsCard({
       <Card>
         <Card.Content className="p-0">
           <DataTable
+            scrollResetKey={page}
             ariaLabel="Organization spend ceilings"
             columns={columns}
             rows={rows}
