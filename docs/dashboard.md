@@ -126,7 +126,11 @@ gateway process rather than to any organization on it:
   priced models nothing on the deployment serves, along with the model lists of
   providers nothing configures any more, listing them before anything is
   removed. A provider kept to one organization shows which; that restriction
-  is set through `/api/v1/hosted-providers`. A provider defined in the
+  is set through `/api/v1/hosted-providers`. The Countries column shows the
+  countries a provider serves, set in the add and edit dialogs as two-letter
+  codes, typed or loaded from a JSON file holding a list of them (or one under
+  `supported_countries`), blank for every country (see
+  [Supported countries](configuration.md#supported-countries)). A provider defined in the
   `hosted_providers:` block of `config.yml` carries a `config.yml` badge and
   cannot be edited, switched or removed here, while its models can; adding a
   provider of the same name overrides it, which the form warns about.

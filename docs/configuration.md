@@ -673,6 +673,7 @@ served side by side. A name may not contain `:` or `/`, may not be `otari` or
 | `enabled` | `false` keeps the entry without serving it. Defaults to `true`. |
 | `restricted_to_organization_id` | Serve one organization only, by its id. Checked at boot rather than at load, because the organizations are in the database: an id that names none is logged, and the provider then serves no organization. |
 | `models` | Model ids a refresh offers when the provider cannot list its own. |
+| `supported_countries` | The two-letter country codes whose requests it serves. Unset serves every country. See [Supported countries](#supported-countries). |
 
 A key may be left out for the self-hosted backends `vllm`, `ollama`,
 `llamacpp`, `llamafile`, `lmstudio`, `cascadia` and `otari`, for `vertexai` and
@@ -878,6 +879,19 @@ organization's own key for it. An instance declared `openai-compatible` is a
 server that speaks OpenAI's protocol, such as vLLM or Ollama, so the `openai`
 list does not apply to it.
 
+A hosted provider can also have a list of its own: its `supported_countries`,
+set in the dashboard's Add and Edit dialogs, through `/api/v1/hosted-providers`,
+or in its `hosted_providers:` entry. It is checked when a request would be
+served on that provider's credential, so it never blocks an organization's own
+key for the same provider. Both lists apply: with `openai: [US, DE]` above and
+`supported_countries: [DE]` on a hosted `openai`, only Germany is served on that
+hosted provider. A routing policy or a catalog id skips a hosted candidate its
+list leaves out, and a plain model, a pass-through call or a batch call is
+refused with a `403` and the `country_not_supported` code. Through the API,
+null serves every country and an empty list none; in the dashboard a blank
+field serves every country. A hosted provider's list needs one of the sources below too: without
+one, every request served on it is from an unknown country and is refused.
+
 The country comes from two sources. With both set, the header is read first and
 the file only when the header is absent.
 
@@ -901,7 +915,8 @@ the file only when the header is absent.
   (`pip install gateway[geoip]`), which the Docker image installs. Otari
   refuses to start on a file it cannot read.
 
-Otari refuses to start with a list and neither source. A private address, or
+Otari refuses to start with a `provider_supported_countries` list and neither
+source. A private address, or
 one the file does not hold, has no country, and a listed provider refuses it.
 
 A VPN changes the country a request appears to come from, so this check does
