@@ -224,7 +224,22 @@ environments = [
 # this tree does not have, and the advisory is in a transitive dependency whose
 # own maintainer sets the real floor. Revisit if Otari is ever published as a
 # wheel people pip-install directly.
-constraint-dependencies = ["authlib>=1.7.2"]
+constraint-dependencies = [
+    "authlib>=1.7.2",
+    # virtualenv clears its last advisory at 21.14.9. The override below lifts
+    # the cap that blocked that upgrade. It does not hold this floor, because an
+    # older virtualenv resolves against packaging 26.3 as well.
+    "virtualenv>=21.14.9",
+]
+# Every virtualenv from 21.14.6 on needs packaging>=26.3, and xai-sdk declares
+# packaging<26. xai-sdk arrives with any-llm-sdk[all], so that cap holds the
+# whole tree on an unpatched virtualenv. A constraint cannot loosen a declared
+# cap, so lifting it takes an override. xai-sdk reads packaging in one line, to
+# compare the major version of protobuf, so its cap guards a major rather than a
+# real incompatibility. An override replaces a declared specifier instead of
+# narrowing it, so the ceiling is named here. An open floor would strip a future
+# cap that does mean something. Remove this once xai-sdk allows packaging 26.
+override-dependencies = ["packaging>=26.3,<27"]
 
 [tool.uv.workspace]
 members = ["cli", "any-search", "any-fetch"]
