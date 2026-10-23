@@ -54,7 +54,7 @@ dependencies = [
     # a claimed domain whose nameservers are gone takes the full timeout, and the
     # blocking resolver would hold the event loop for it.
     "dnspython>=2.9.0",
-    "fastapi>=0.152.0",
+    "fastapi>=0.153.0",
     # Direct dependency for gateway-managed HTTP clients and the public
     # transport API used by pinned web retrieval.
     "httpx>=0.28.1",
@@ -133,8 +133,8 @@ fsspec = [
 # is the line it was written against rather than the first release to carry the
 # names.
 e2b = [
-    "e2b>=2.56.0",
-    "e2b-code-interpreter>=2.11.0",
+    "e2b>=2.57.0",
+    "e2b-code-interpreter>=2.11.1",
 ]
 # A rate-limit store every gateway process shares (`rate_limit_store: redis`),
 # so a limit holds across replicas rather than per process. The adapter imports
