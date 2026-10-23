@@ -32,7 +32,8 @@ class RateLimitRuleUpdate(BaseModel):
         default=None, description="The instance:model names a per: model rule limits; null for any other rule."
     )
     budgets: list[str] | None = Field(
-        default=None, description="The budgets a per: budget rule counts; null for every budget, and on any other rule."
+        default=None,
+        description="The budget IDs a per: budget rule counts; null for every budget, and on any other rule.",
     )
     mode: Literal["enforce", "report"] | None = Field(
         default=None, description="'enforce' refuses a request over the rule; 'report' serves it and names the rule."

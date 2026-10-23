@@ -15327,7 +15327,7 @@ export interface components {
         RateLimitRuleCreate: {
             /**
              * Budgets
-             * @description The budgets a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.
+             * @description The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.
              */
             budgets?: string[] | null;
             /**
@@ -15389,7 +15389,7 @@ export interface components {
         RateLimitRulePublic: {
             /**
              * Budgets
-             * @description The budgets a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.
+             * @description The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.
              */
             budgets?: string[] | null;
             /**
@@ -15467,7 +15467,7 @@ export interface components {
         RateLimitRuleUpdate: {
             /**
              * Budgets
-             * @description The budgets a per: budget rule counts; null for every budget, and on any other rule.
+             * @description The budget IDs a per: budget rule counts; null for every budget, and on any other rule.
              */
             budgets?: string[] | null;
             /**

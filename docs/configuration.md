@@ -190,7 +190,7 @@ rate_limits:
     rpm: 100
   - name: feature       # every user on one budget together, each budget listed on its own
     per: budget
-    budgets: [end-user-budget-ai, end-user-budget-memories]
+    budgets: ["<budget_id>", "<budget_id>"]
     rpm: 600
     mode: report        # served anyway, and named in Otari-Rate-Limit-Exceeded
 ```
@@ -236,8 +236,10 @@ A search tool is limited the same way, named as `provider:tool` (`exa:exa-search
 `per: budget` keeps one count for every user on the same budget, such as all of
 a service key's end users on one feature's budget, so it limits a feature as a
 whole where `per: user` limits each user in it. `budgets` narrows it to the
-budgets listed, each still counted on its own; unset, it counts every budget. A
-user on no budget is not counted by it. Like `per: deployment`, it is counted
+budgets listed by `budget_id` (as `GET /api/v1/budgets` returns it), each still
+counted on its own; unset, it counts every budget. A user on no budget is not
+counted by it, and neither is a request from a key with `exclude_from_budget`
+or any request while `budget_strategy` is `disabled`. Like `per: deployment`, it is counted
 after the rules that count the caller alone, so a request over its own limit
 takes no place in a count other users share.
 

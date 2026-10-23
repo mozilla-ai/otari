@@ -385,7 +385,7 @@ class RateLimitRule(BaseModel):
     budgets: list[str] | None = Field(
         default=None,
         description=(
-            "The budgets a `per: budget` rule counts, each on its own; unset counts every budget. "
+            "The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. "
             "Refused on any other rule."
         ),
     )
