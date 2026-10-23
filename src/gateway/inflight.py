@@ -202,6 +202,7 @@ class InFlightMiddleware:
         self.registry = registry
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Run the ASGI response and release HTTP tracking and cleanup callbacks on every exit."""
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return

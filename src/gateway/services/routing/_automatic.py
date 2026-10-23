@@ -44,6 +44,7 @@ _ACCOUNT_FIELDS = frozenset(
 
 
 def _credential_value(value: object) -> object:
+    """Normalize known credential identities; isolate unsupported objects with a nonce."""
     if isinstance(value, Credentials):
         return (
             value.service_account_email,
@@ -107,15 +108,18 @@ class AutomaticSelection:
         self.forget_key(self.router.candidate_key(attempt))
 
     def forget_key(self, key: str) -> None:
+        """Remove the session binding only if it still points to this credential fingerprint."""
         previous = self.router.affinities.get(self.affinity) if self.affinity else None
         if self.affinity and previous and previous[0] == key:
             del self.router.affinities[self.affinity]
 
     def close(self) -> None:
+        """Release every outstanding observation without recording success or failure."""
         for observation in self.observations:
             observation.finish()
 
     def start(self, attempt: Attempt) -> AutomaticObservation:
+        """Track active load for the credential actually dispatched and return its observer."""
         selector = f"{attempt.instance}:{attempt.model}"
         key = self.router.candidate_key(attempt)
         health = self.router._health(key)
@@ -139,10 +143,12 @@ class AutomaticObservation:
     finished: bool = False
 
     def first_response(self) -> None:
+        """Record the first output time once for streaming latency feedback."""
         if self.first_at is None:
             self.first_at = self.selection.router.clock()
 
     def finish(self, *, success: bool = False, unhealthy: bool = False) -> None:
+        """Release load once, then update health and session affinity for the reported outcome."""
         if self.finished:
             return
         self.finished = True
@@ -176,12 +182,14 @@ class AutomaticRouter:
     """
 
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        """Initialize private feedback state with an injectable monotonic clock."""
         self.clock = clock
         self._salt = secrets.token_bytes(32)
         self.health: OrderedDict[str, _Health] = OrderedDict()
         self.affinities: OrderedDict[str, tuple[str, float]] = OrderedDict()
 
     def _digest(self, value: object) -> str:
+        """Create a private process-local fingerprint without retaining its input."""
         payload = json.dumps(value, sort_keys=True).encode()
         # Keyed, process-local fingerprints are never persisted as password verifiers.
         # codeql[py/weak-sensitive-data-hashing]
@@ -194,6 +202,7 @@ class AutomaticRouter:
         )
 
     def _health(self, key: str) -> _Health | None:
+        """Get tracked health, evicting an idle entry when full; never evict active calls."""
         if key in self.health:
             self.health.move_to_end(key)
             return self.health[key]
@@ -227,6 +236,7 @@ class AutomaticRouter:
         mode: str,
         limit: int = 5,
     ) -> CompiledPlan:
+        """Order by price availability, health, region and cost/load/latency, preserving eligible affinity."""
         from gateway.services.routing.compiler import DroppedCandidate
 
         now = self.clock()
@@ -243,6 +253,7 @@ class AutomaticRouter:
         neutral = median(latencies.values()) if latencies else 1.0
 
         def group(attempt: Attempt) -> tuple[bool, bool, int]:
+            """Partition candidates by missing price, cooldown and region mismatch."""
             selector = f"{attempt.instance}:{attempt.model}"
             hint = settings.offerings.get(selector, settings.offerings.get(attempt.instance, AutomaticOffering()))
             health = self.health.get(keys[selector])
@@ -257,6 +268,7 @@ class AutomaticRouter:
                 floors[bucket] = min(floors.get(bucket, cost), cost)
 
         def score(attempt: Attempt) -> tuple[bool, bool, int, float, int]:
+            """Score cost and load within a health/region group, breaking ties by catalog order."""
             selector = f"{attempt.instance}:{attempt.model}"
             hint = settings.offerings.get(selector, settings.offerings.get(attempt.instance, AutomaticOffering()))
             health = self.health.get(keys[selector])

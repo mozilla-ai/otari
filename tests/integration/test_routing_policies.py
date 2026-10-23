@@ -2304,6 +2304,7 @@ def test_a_streamed_fallback_is_skipped_when_its_providers_cap_is_full(client: T
 
 
 def test_automatic_routing_prices_output_before_reserving(catalog_client: TestClient) -> None:
+    """Selection includes output cost and records usage against the chosen offering."""
     _create_user(catalog_client)
     for key, input_rate, output_rate in [("openai:m1-a", 1, 20), ("anthropic:m1-b", 3, 1)]:
         response = catalog_client.post(
@@ -2326,6 +2327,7 @@ def test_automatic_routing_prices_output_before_reserving(catalog_client: TestCl
 
 @pytest.mark.parametrize("country,expected", [("US", "openai:m1-a"), ("PT", "anthropic:m1-b")])
 def test_automatic_routing_prefers_the_users_region(catalog_client: TestClient, country: str, expected: str) -> None:
+    """A configured trusted country header selects the corresponding regional offering."""
     from gateway.core.settings.routing import AutomaticRouting
 
     _create_user(catalog_client)
@@ -2348,6 +2350,7 @@ def test_automatic_routing_prefers_the_users_region(catalog_client: TestClient, 
 
 @pytest.mark.parametrize("stream", [False, True])
 def test_automatic_routing_learns_from_failover_and_releases_load(catalog_client: TestClient, stream: bool) -> None:
+    """A successful fallback keeps the session after recovery and releases load in both response modes."""
     from gateway.services.routing import AutomaticRouter
 
     _create_user(catalog_client)
@@ -2356,6 +2359,7 @@ def test_automatic_routing_learns_from_failover_and_releases_load(catalog_client
     calls: list[str] = []
 
     async def dispatch(**kwargs: Any) -> Any:
+        """Fail the first offering and complete the fallback in the requested response mode."""
         calls.append(kwargs["model"])
         if kwargs["model"] == "openai:m1-a":
             raise _http_error(429)
@@ -2363,6 +2367,7 @@ def test_automatic_routing_learns_from_failover_and_releases_load(catalog_client
             return _completion("m1-b")
 
         async def chunks() -> Any:
+            """Yield a completed provider stream with usage for settlement assertions."""
             from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
 
             yield ChatCompletionChunk(
@@ -2388,6 +2393,7 @@ def test_automatic_routing_learns_from_failover_and_releases_load(catalog_client
 
 
 def test_automatic_routing_can_be_disabled(catalog_client: TestClient) -> None:
+    """Disabling automatic routing preserves catalog order without creating feedback state."""
     _create_user(catalog_client)
     cast(FastAPI, catalog_client.app).state.config.automatic_routing.enabled = False
     mock = AsyncMock(return_value=_completion("m1-a"))
@@ -2401,6 +2407,7 @@ def test_automatic_routing_can_be_disabled(catalog_client: TestClient) -> None:
 def _session_chat(
     client: TestClient, *, session: str = "conversation", region: str | None = None, stream: bool = False
 ) -> Any:
+    """Send a catalog chat with an explicit conversation ID and optional region preference."""
     headers = {**HEADERS, "Otari-Conversation-Id": session}
     if region:
         headers["Otari-Region"] = region
@@ -2417,6 +2424,7 @@ def _session_chat(
 
 
 def _price_catalog(client: TestClient, *, openai: float, anthropic: float) -> None:
+    """Set both token rates for each catalog offering through the pricing API."""
     for model, price in [("openai:m1-a", openai), ("anthropic:m1-b", anthropic)]:
         response = client.post(
             f"{API_ROOT}/pricing",
@@ -2427,6 +2435,7 @@ def _price_catalog(client: TestClient, *, openai: float, anthropic: float) -> No
 
 
 def test_sticky_session_survives_price_change_but_new_sessions_reconsider(catalog_client: TestClient) -> None:
+    """Existing sessions keep an eligible provider while new or unbound calls reconsider price."""
     _create_user(catalog_client)
     _price_catalog(catalog_client, openai=1, anthropic=2)
     mock = AsyncMock(return_value=_completion("m1"))
@@ -2445,6 +2454,7 @@ def test_sticky_session_survives_price_change_but_new_sessions_reconsider(catalo
 
 
 def test_sticky_session_changes_region(catalog_client: TestClient) -> None:
+    """An explicit region change moves the conversation to the matching offering."""
     from gateway.core.settings.routing import AutomaticRouting
 
     _create_user(catalog_client)
@@ -2462,6 +2472,7 @@ def test_sticky_session_changes_region(catalog_client: TestClient) -> None:
 def test_sticky_session_switches_when_its_budget_no_longer_fits(
     catalog_client: TestClient, provider_only: bool
 ) -> None:
+    """Budget refusal moves affinity to an affordable fallback without leaving reserved spend."""
     _create_user(catalog_client)
     _price_catalog(catalog_client, openai=1, anthropic=2)
     mock = AsyncMock(return_value=_completion("m1"))
@@ -2486,6 +2497,7 @@ def test_sticky_session_switches_when_its_budget_no_longer_fits(
 
 
 def test_sticky_session_skips_rate_limited_provider(catalog_client: TestClient) -> None:
+    """A model rate limit moves the conversation to its fallback for subsequent calls."""
     _create_user(catalog_client)
     response = catalog_client.post(
         f"{API_ROOT}/rate-limits",
@@ -2502,6 +2514,7 @@ def test_sticky_session_skips_rate_limited_provider(catalog_client: TestClient) 
 
 
 def test_sticky_session_falls_back_while_provider_concurrency_is_full(catalog_client: TestClient) -> None:
+    """A full concurrency slot permits fallback without leaking load or disabling explicit pins."""
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
 
@@ -2516,6 +2529,7 @@ def test_sticky_session_falls_back_while_provider_concurrency_is_full(catalog_cl
     entered, release = Event(), Event()
 
     async def dispatch(**kwargs: Any) -> ChatCompletion:
+        """Hold the second upstream call until released to exercise concurrent admission."""
         calls.append(kwargs["model"])
         if len(calls) == 2:
             entered.set()
@@ -2538,6 +2552,7 @@ def test_sticky_session_falls_back_while_provider_concurrency_is_full(catalog_cl
 
 
 def test_sticky_session_cannot_escape_a_full_shared_budget(catalog_client: TestClient) -> None:
+    """Switching providers cannot bypass an exhausted shared budget or dispatch an unreserved call."""
     _create_user(catalog_client)
     _price_catalog(catalog_client, openai=1, anthropic=2)
     mock = AsyncMock(return_value=_completion("m1"))

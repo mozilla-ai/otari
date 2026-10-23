@@ -634,6 +634,7 @@ def test_feedback_rejects_invalid_env(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_automatic_routing_loads_yaml_and_structured_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Structured environment settings override YAML while defaults fill omitted routing options."""
     config_file = tmp_path / "gateway.yml"
     config_file.write_text(
         "automatic_routing:\n  country_header: Trusted-Country\n  offerings:\n    european: {region: eu, capacity: 4}\n"

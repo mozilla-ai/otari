@@ -178,6 +178,7 @@ class TestMiddleware:
 
 @pytest.mark.asyncio
 async def test_request_cleanup_runs_when_stream_never_starts() -> None:
+    """ASGI cancellation runs registered cleanup even before the stream starts."""
     import asyncio
     from unittest.mock import AsyncMock
 
@@ -186,6 +187,7 @@ async def test_request_cleanup_runs_when_stream_never_starts() -> None:
     released: list[bool] = []
 
     async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        """Register request cleanup, then cancel before response streaming can begin."""
         on_request_finished(Request(scope), lambda: released.append(True))
         raise asyncio.CancelledError
 

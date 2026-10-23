@@ -864,6 +864,7 @@ class RequestPrices:
     """
 
     def __init__(self, organization_id: uuid.UUID | None, repository: OrganizationModelPricingRepository) -> None:
+        """Bind the request pricing cache to its organization and injected repository."""
         self.organization_id = organization_id
         self._repository = repository
         self._resolved: dict[tuple[str | None, str, bool], ResolvedPricing | None] = {}

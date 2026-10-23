@@ -2670,6 +2670,7 @@ async def test_a_completions_row_says_whether_the_deployment_paid(
 async def test_automatic_load_is_released_by_every_stream_terminal_callback(
     monkeypatch: pytest.MonkeyPatch, adapter: Any, outcome: str
 ) -> None:
+    """Every terminal stream callback releases load, but only successful completion establishes affinity."""
     from gateway.core.settings.routing import AutomaticRouting
     from gateway.services.routing import AutomaticRouter, CompiledPlan
     from gateway.types.attempt import Attempt
@@ -2690,10 +2691,12 @@ async def test_automatic_load_is_released_by_every_stream_terminal_callback(
     captured: dict[str, Any] = {}
 
     async def empty() -> AsyncIterator[Any]:
+        """Provide an exhausted stream so terminal callbacks can be exercised independently."""
         return
         yield
 
     def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        """Capture streaming callbacks for direct settlement and load-release assertions."""
         captured.update(kwargs)
         return empty()
 

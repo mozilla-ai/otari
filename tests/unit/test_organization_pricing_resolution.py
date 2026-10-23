@@ -1369,10 +1369,12 @@ def test_a_provider_the_port_does_not_serve_is_asked_once_for_all_its_models() -
 
 
 def test_batched_request_prices_match_single_lookup_and_keep_payer_isolation() -> None:
+    """Batch pricing preserves lookup precedence and payer isolation with two reusable queries."""
     from gateway.repositories.pricing import OrganizationModelPricingRepository
     from gateway.services.pricing_service import RequestPrices, resolve_model_pricing
 
     async def scenario(session: AsyncSession) -> None:
+        """Compare batched and individual pricing across overrides, tenants and deployment payment."""
         organization_id = await _organization(session)
         await _deployment_price(session)
         await _override(session, organization_id, rate=0, origin=API_ORIGIN)

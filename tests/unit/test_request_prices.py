@@ -14,6 +14,7 @@ from gateway.services.pricing_service import RequestPrices
 
 @pytest.mark.asyncio
 async def test_a_model_is_resolved_once_per_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Repeated pricing of the same provider/model reuses one organization-scoped lookup."""
     resolved: Any = SimpleNamespace(pricing=object())
     lookup = AsyncMock(return_value=resolved)
     monkeypatch.setattr(pricing_service, "resolve_model_pricing", lookup)
@@ -29,6 +30,7 @@ async def test_a_model_is_resolved_once_per_request(monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.asyncio
 async def test_each_model_is_resolved_on_its_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Distinct provider/model pairs retain separate cached pricing results."""
     by_model: dict[tuple[str, str], Any] = {
         ("openai", "gpt-5"): SimpleNamespace(pricing=object()),
         ("together", "llama"): SimpleNamespace(pricing=object()),
@@ -44,6 +46,7 @@ async def test_each_model_is_resolved_on_its_own(monkeypatch: pytest.MonkeyPatch
 
 @pytest.mark.asyncio
 async def test_an_unpriced_model_is_remembered_as_unpriced(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing price is cached so later phases do not repeat the lookup."""
     lookup = AsyncMock(return_value=None)
     monkeypatch.setattr(pricing_service, "resolve_model_pricing", lookup)
     prices = RequestPrices(None, Mock(spec=OrganizationModelPricingRepository))
