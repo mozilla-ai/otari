@@ -1932,12 +1932,11 @@ main {
    which sizes happen to be in use today. Icon-only is excluded: it has no
    label to inset and HeroUI zeroes its padding to keep it square.
 
-   The rail is excluded too: its band controls set their own lane (`px-6`) so
-   their mark and label line up with the nav rows' icons, and an unlayered rule
-   beats `@layer utilities`, so the utility could not win here. `:where` keeps
-   the exclusion from raising the rules' specificity. Not `revert-layer` in a
-   rail rule of its own: Safari resolved that to no padding at all, and the
-   band's mark and the account badge sat against the window's edge. */
+   The rail is excluded too: its band controls set their own lane (`px-6`),
+   which this unlayered rule would outrank. `:where` keeps the specificity
+   unchanged. Do not hand the lane back with `revert-layer` instead: Safari 26
+   resolves a reverted `var()` logical shorthand to no padding (WebKit bug
+   310435). */
 .button--ghost.button--sm:not(.button--icon-only):where(:not(.otari-rail *)),
 .button--danger.button--sm:not(.button--icon-only) {
   padding-inline: 0.6875rem;

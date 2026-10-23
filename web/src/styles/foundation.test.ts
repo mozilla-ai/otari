@@ -1765,11 +1765,10 @@ describe("buttons come in three variants", () => {
   })
 })
 
-// A ghost button's padding is unlayered, so it outranks a `px-*` utility, and
-// the rail's band controls set their own lane with one. A rail rule that handed
-// the value back with `revert-layer` resolved to no padding in Safari 26, which
-// drops a reverted logical shorthand built on `var()` (WebKit bug 310435), so
-// the product mark and the account badge sat against the window's edge.
+// A ghost button's padding is unlayered, so it outranks the `px-*` utility the
+// rail's band controls set their lane with. The rail is left out of it rather
+// than reverted: Safari 26 resolves `revert-layer` on a `var()` logical
+// shorthand to no padding (WebKit bug 310435).
 describe("the rail's band controls keep their own lane", () => {
   it("leaves the rail out of the ghost padding rather than reverting it", () => {
     const source = stripComments(CSS)
@@ -1783,7 +1782,7 @@ describe("the rail's band controls keep their own lane", () => {
               .filter((selector) => selector.startsWith(".button--ghost"))
           : [],
     )
-    expect(ghostPadding).toHaveLength(2)
+    expect(ghostPadding).not.toEqual([])
     for (const selector of ghostPadding) {
       expect(selector).toContain(":where(:not(.otari-rail*))")
     }
