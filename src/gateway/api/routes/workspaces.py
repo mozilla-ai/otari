@@ -77,6 +77,7 @@ async def get_workspace(
 @router.patch("/{workspace_id}")
 async def update_workspace(
     service: WorkspaceServiceDep,
+    traces: TraceServiceDep,
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
     body: WorkspaceUpdate,
@@ -86,11 +87,16 @@ async def update_workspace(
     Turning content off keeps nothing new from the next export on; what is already
     stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
     """
-    return await service.update_workspace(
+    updated = await service.update_workspace(
         user=current_identity,
         workspace_id=workspace_id,
         workspace_update=body,
     )
+    # After the switch is off, so an export that read it on before carries the
+    # generation this ends, and its queued content is never stored.
+    if body.trace_content_enabled is False:
+        await traces.stop_content(workspace_id)
+    return updated
 
 
 @router.delete("/{workspace_id}/trace-content")
