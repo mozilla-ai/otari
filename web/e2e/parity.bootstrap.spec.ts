@@ -75,6 +75,14 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // anyway: signup sends a verification link, so a deployment that cannot
     // send one registers nobody.
     open_signup: false,
+    // Session content is off, the default, so no workspace is offered the
+    // switch; see docs/traces.md#keeping-what-a-span-was-about.
+    trace_content_available: false,
+    // Off by default: the operator opens no organization's content.
+    trace_platform_break_glass: false,
+    // The default retention, which the content switch states.
+    trace_retention_days: 30,
+    trace_session_max_age_days: 90,
   })
 })
 
