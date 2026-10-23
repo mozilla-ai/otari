@@ -62,5 +62,7 @@ export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {
     // a visitor, and guessing open would render pages that then 401.
     public_catalog: wire.public_catalog ?? false,
     open_signup: wire.open_signup ?? false,
+    // Off: a gateway old enough to omit this kept no workspace's content.
+    trace_content_available: wire.trace_content_available ?? false,
   }
 }
