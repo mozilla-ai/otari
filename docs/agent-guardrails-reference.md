@@ -357,6 +357,9 @@ alone, since it joins a descriptor to a target rather than ending a command.
 
 A comment is stripped before any of that, at the same word boundaries Bash
 uses, so `ls;# npm install` is a comment in full and matches nothing.
+The `)` that closes a command or process substitution does not end its word,
+so in `echo $(ls)#; npm install` the `#` is ordinary text and `npm install`
+is still checked, as Bash runs it.
 
 A heredoc body is stripped too, with its terminator line, because it is data the command reads and not a command. A commit message passed as `git commit -F - <<'MSG'` can therefore name a forbidden phrase, the same as a quoted `-m` argument can. A `<<` whose terminator line never appears does not open a body here, so the lines after it are still checked. Neither does an unquoted heredoc with a body line that ends in a backslash, because Bash joins that line to the next and its terminator is not certain. A `<<` inside arithmetic (`$((1<<2))`), a parameter expansion, a subscript or a compound array assignment is a shift, as Bash reads it, and opens no body.
 
