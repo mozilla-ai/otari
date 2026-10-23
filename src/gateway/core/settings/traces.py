@@ -13,7 +13,7 @@ class TraceSettings(BaseModel):
         description=(
             "Record an agent trace for every completion request: the request, each LLM call with its cost, "
             "routing attempts, guardrail checks, MCP connections and gateway-run tool calls. No prompt, output "
-            "or tool content is stored. Requires restart."
+            "or tool content is stored unless trace_content_enabled is on and a workspace keeps it. Requires restart."
         ),
     )
     trace_retention_days: Annotated[int, Shown(SettingsGroup.METERING)] = Field(
