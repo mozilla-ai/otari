@@ -25,9 +25,9 @@ updates:
   # bumps arrived for years while a stale-but-unvulnerable package like
   # a floored dependency sat six releases behind.
   #
-  # What version updates do for a lockfile entry whose declared floor already
-  # permits the newer version is not documented for uv, so
-  # otari-lock-refresh.yml is the path that does not depend on the answer.
+  # A direct dependency moves by raising its floor. An indirect one with no
+  # advisory stays where it is locked until someone runs `uv lock --upgrade`
+  # (CONTRIBUTING.md).
   - package-ecosystem: "uv"
     directory: "/"
     schedule:
