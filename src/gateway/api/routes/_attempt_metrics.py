@@ -67,16 +67,23 @@ def record_attempt(
 ) -> None:
     """Record how one upstream attempt ended.
 
-    ``status_code`` is the HTTP status that classified a failure, ``none`` when it
-    had none (a timeout, a lost connection), and ``200`` for a success, so the
-    label stays within the HTTP statuses. ``fallback`` is whether the attempt was
-    a candidate after a routing plan's first.
+    ``status_code`` is the HTTP status that classified a failure (a timeout is a
+    504, an unclassified connection failure a 502), ``none`` when the failure
+    carried none (a stream that ended without its usage), and ``200`` for a
+    success. ``fallback`` is whether the attempt was a candidate after a routing
+    plan's first.
+
+    The timings are measured from the start of the request, so they are observed
+    only for a plan's first candidate, where that is also the attempt's start: a
+    fallback's would include the time its predecessors took.
     """
     outcome = "error" if failed else "success"
     status = "200" if not failed else str(status_code) if status_code is not None else "none"
     UPSTREAM_ATTEMPTS.labels(
         provider=provider, model=model, outcome=outcome, status_code=status, fallback=str(fallback).lower()
     ).inc()
+    if fallback:
+        return
     if latency_ms is not None:
         ATTEMPT_DURATION_SECONDS.labels(provider=provider, model=model, outcome=outcome).observe(latency_ms / 1000)
     if ttft_ms is not None:

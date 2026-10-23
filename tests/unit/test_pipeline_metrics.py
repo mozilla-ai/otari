@@ -91,3 +91,12 @@ def test_record_attempt_counts_a_failure_by_status(status_code: int | None, labe
     )
 
     assert _sample("gateway_upstream_attempts_total", labels) - before == 1.0
+
+
+def test_record_attempt_skips_timings_for_a_fallback() -> None:
+    duration = {"provider": "fb-prov", "model": "fb-model", "outcome": "success"}
+    before = _sample("gateway_attempt_duration_seconds_count", duration)
+
+    record_attempt("fb-prov", "fb-model", failed=False, status_code=None, fallback=True, latency_ms=900, ttft_ms=200)
+
+    assert _sample("gateway_attempt_duration_seconds_count", duration) - before == 0.0

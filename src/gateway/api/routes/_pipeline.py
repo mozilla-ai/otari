@@ -4395,6 +4395,7 @@ async def record_usage(
     deployment_paid: bool = False,
     source_label: str | None = None,
     safety_identifier: str | None = None,
+    upstream_attempt: bool = True,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
@@ -4593,15 +4594,17 @@ async def record_usage(
         # The metrics registry speaks float; the row keeps the exact amount.
         record_cost(str(provider or ""), model, float(usage_log.cost))
 
-    record_attempt(
-        str(provider or ""),
-        model,
-        failed=error is not None,
-        status_code=status_code,
-        fallback=attribution is not None and attribution.position > 1,
-        latency_ms=latency_ms,
-        ttft_ms=ttft_ms,
-    )
+    # A gateway refusal writes a row too, but no provider was called for it.
+    if upstream_attempt:
+        record_attempt(
+            str(provider or ""),
+            model,
+            failed=error is not None,
+            status_code=status_code,
+            fallback=attribution is not None and attribution.position > 1,
+            latency_ms=latency_ms,
+            ttft_ms=ttft_ms,
+        )
 
     await log_writer.put(usage_log)
     return LoggedUsage(usage_log.cost, pricing_source)
@@ -4918,6 +4921,7 @@ async def log_gateway_rejection(
             request_id=request_id,
             tags=tags,
             safety_identifier=safety_identifier,
+            upstream_attempt=False,
         )
     except Exception:
         # Deliberately broad, and deliberately not re-raised: see the docstring.

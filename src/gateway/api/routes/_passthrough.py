@@ -711,9 +711,12 @@ async def run_passthrough(
         api_key_id=api_key_id,
     )
 
+    # Set once the provider has answered, so a later settlement failure is not counted as a failed attempt.
+    served = False
     try:
         require_declared_credential(config, resolved.instance, resolved.provider, resolved.kwargs)
         result = await call_provider(resolved)
+        served = True
 
         reported = billing.report(result)
         usage_log = _usage_row(
@@ -776,15 +779,16 @@ async def run_passthrough(
             error_message=_stored_error_message(str(e)),
             status_code=failure_status_code(e, request_params=caller_params),
         )
-        record_attempt(
-            resolved.instance,
-            resolved.model,
-            failed=True,
-            status_code=failed_row.status_code,
-            fallback=False,
-            latency_ms=failed_row.latency_ms,
-            ttft_ms=None,
-        )
+        if not served:
+            record_attempt(
+                resolved.instance,
+                resolved.model,
+                failed=True,
+                status_code=failed_row.status_code,
+                fallback=False,
+                latency_ms=failed_row.latency_ms,
+                ttft_ms=None,
+            )
         await log_writer.put(failed_row)
         await refund_reservation(db, reservation)
 
