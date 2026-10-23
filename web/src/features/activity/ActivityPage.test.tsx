@@ -526,27 +526,27 @@ describe("ActivityPage", () => {
     // re-anchor the rolling window a few milliseconds later, which changed the
     // filter set and reset the page: every shared `?page=3` link opened on page 1.
     const { calls } = mockApi({
-      rows: Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })),
+      rows: Array.from({ length: 45 }, (_, i) => entry({ id: `r${i}` })),
       total: 500,
     })
     renderPage(<ActivityPage />, "/activity?page=2")
 
     await screen.findAllByText("gpt-4o")
-    expect(await screen.findByText("101–150 of 500")).toBeInTheDocument()
-    expect(listCalls(calls).every((url) => url.includes("skip=100"))).toBe(true)
+    expect(await screen.findByText("91–135 of 500")).toBeInTheDocument()
+    expect(listCalls(calls).every((url) => url.includes("skip=90"))).toBe(true)
   })
 
   it("keeps the current page when refreshing", async () => {
     // Refresh used to re-anchor the rolling window, which changed the filter set,
     // which reset the page: pressing it on page 3 dropped you back to page 1.
     const { calls } = mockApi({
-      rows: Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })),
+      rows: Array.from({ length: 45 }, (_, i) => entry({ id: `r${i}` })),
       total: 500,
     })
     const user = userEvent.setup()
     renderPage(<ActivityPage />, "/activity?page=2")
     await screen.findAllByText("gpt-4o")
-    expect(await screen.findByText("101–150 of 500")).toBeInTheDocument()
+    expect(await screen.findByText("91–135 of 500")).toBeInTheDocument()
 
     const before = listCalls(calls).length
     const entitySummaryBefore = calls.filter(
@@ -569,8 +569,8 @@ describe("ActivityPage", () => {
         ).length,
       ).toBeGreaterThan(entitySummaryBefore),
     )
-    expect(listCalls(calls).every((url) => url.includes("skip=100"))).toBe(true)
-    expect(screen.getByText("101–150 of 500")).toBeInTheDocument()
+    expect(listCalls(calls).every((url) => url.includes("skip=90"))).toBe(true)
+    expect(screen.getByText("91–135 of 500")).toBeInTheDocument()
   })
 
   it("re-anchors a rolling window when its preset is re-picked", async () => {
@@ -639,7 +639,7 @@ describe("ActivityPage", () => {
       }
       if (url.includes(`${API_ROOT}/usage`)) {
         return jsonResponse(
-          Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })),
+          Array.from({ length: 45 }, (_, i) => entry({ id: `r${i}` })),
         )
       }
       return jsonResponse([])
@@ -648,7 +648,7 @@ describe("ActivityPage", () => {
 
     await screen.findAllByText("gpt-4o")
     expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled()
-    expect(screen.getByText("1–50")).toBeInTheDocument()
+    expect(screen.getByText("1–45")).toBeInTheDocument()
     expect(screen.queryByText("0 of 0")).not.toBeInTheDocument()
   })
 
@@ -736,24 +736,24 @@ describe("ActivityPage", () => {
     renderPage(<ActivityPage />, "/activity?size=500")
 
     await screen.findByText("gpt-4o")
-    expect(listCalls(calls).at(-1)).toContain("limit=100")
+    expect(listCalls(calls).at(-1)).toContain("limit=60")
 
     const { calls: negativeCalls } = mockApi({ rows: [entry()] })
     renderPage(<ActivityPage />, "/activity?size=-5")
     await waitFor(() =>
       expect(listCalls(negativeCalls).length).toBeGreaterThan(0),
     )
-    expect(listCalls(negativeCalls).at(-1)).toContain("limit=25")
+    expect(listCalls(negativeCalls).at(-1)).toContain("limit=15")
   })
 
   it("shows the paginator range and total", async () => {
     mockApi({
-      rows: Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })),
+      rows: Array.from({ length: 45 }, (_, i) => entry({ id: `r${i}` })),
       total: 120,
     })
     renderPage(<ActivityPage />)
 
-    expect(await screen.findByText("1–50 of 120")).toBeInTheDocument()
+    expect(await screen.findByText("1–45 of 120")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled()
   })

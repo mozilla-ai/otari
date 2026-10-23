@@ -1058,7 +1058,7 @@ describe("OrganizationProvidersPage", () => {
     await screen.findByRole("grid", { name: "Models on Production" })
 
     const read = requests.find((request) => request.url.includes("/models?"))
-    expect(read?.url).toContain("skip=50")
-    expect(read?.url).toContain("limit=25")
+    expect(read?.url).toContain("skip=30")
+    expect(read?.url).toContain("limit=15")
   })
 })

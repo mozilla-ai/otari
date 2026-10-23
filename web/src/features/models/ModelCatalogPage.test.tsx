@@ -480,7 +480,7 @@ describe("ModelCatalogPage", () => {
     const listCall = fetchMock.mock.calls
       .map(([input]) => String(input))
       .find((url) => url.includes(`${API_ROOT}/catalog/models?`))
-    expect(listCall).toContain("limit=25")
+    expect(listCall).toContain("limit=30")
     expect(listCall).toContain("skip=0")
     expect(listCall).toContain("include_facets=true")
     expect(listCall).toContain("sort=released")
@@ -511,9 +511,9 @@ describe("ModelCatalogPage", () => {
     const fetchMock = mockApi({
       list: (params) => ({
         ...CATALOG,
-        count: 26,
-        facets: { ...CATALOG.facets!, total_count: 26 },
-        models: params.get("skip") === "25" ? [KIMI] : [GLM],
+        count: 31,
+        facets: { ...CATALOG.facets!, total_count: 31 },
+        models: params.get("skip") === "30" ? [KIMI] : [GLM],
       }),
     })
     renderPage(<ModelCatalogPage />)
@@ -523,25 +523,25 @@ describe("ModelCatalogPage", () => {
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(([input]) =>
-          String(input).includes("skip=25"),
+          String(input).includes("skip=30"),
         ),
       ).toBe(true),
     )
     const list = screen.getByRole("list", { name: "Models" })
     expect(await within(list).findByText(/Kimi K2.6/)).toBeInTheDocument()
     expect(within(list).queryByText(/GLM-5.3/)).toBeNull()
-    expect(screen.getByText(/26 models/)).toBeInTheDocument()
+    expect(screen.getByText(/31 models/)).toBeInTheDocument()
   })
 
   it("keeps the current rows visible until the next page arrives", async () => {
     let complete!: (response: CatalogResponse) => void
     mockApi({
       list: (params) =>
-        params.get("skip") === "25"
+        params.get("skip") === "30"
           ? new Promise<CatalogResponse>((resolve) => {
               complete = resolve
             })
-          : { ...CATALOG, count: 26, models: [GLM] },
+          : { ...CATALOG, count: 31, models: [GLM] },
     })
     renderPage(<ModelCatalogPage />)
     const user = userEvent.setup()
@@ -555,7 +555,7 @@ describe("ModelCatalogPage", () => {
       within(screen.getByRole("list", { name: "Models" })).getByText(/GLM-5.3/),
     ).toBeInTheDocument()
     await act(async () => {
-      complete({ ...CATALOG, count: 26, models: [KIMI] })
+      complete({ ...CATALOG, count: 31, models: [KIMI] })
     })
     expect(
       await within(screen.getByRole("list", { name: "Models" })).findByText(

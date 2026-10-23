@@ -45,7 +45,7 @@ import {
   traceKind,
 } from "./traceModel"
 
-const DEFAULT_PAGE_SIZE = 50
+const DEFAULT_PAGE_SIZE = 45
 
 // The list's filters, window and page live in the URL beside the open session
 // and its picked span, so a shared link or Back returns to the list the panel

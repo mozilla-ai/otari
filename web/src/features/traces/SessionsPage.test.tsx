@@ -506,7 +506,7 @@ describe("SessionsPage", () => {
     const { calls } = mockApi({ traces: [traceSummary()] })
 
     renderPage(<SessionsPage />, "/sessions?page=2")
-    await vi.waitFor(() => expect(listReads(calls)[0]?.get("skip")).toBe("100"))
+    await vi.waitFor(() => expect(listReads(calls)[0]?.get("skip")).toBe("90"))
     await user.type(
       await screen.findByRole("searchbox", { name: "Search sessions" }),
       "codex",
@@ -567,12 +567,12 @@ describe("SessionsPage", () => {
   it("asks for the next page of sessions", async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({
-      traces: Array.from({ length: 26 }, (_, index) =>
+      traces: Array.from({ length: 31 }, (_, index) =>
         traceSummary({ trace_id: `s-${index}` }),
       ),
     })
 
-    renderPage(<SessionsPage />, "/sessions?size=25")
+    renderPage(<SessionsPage />, "/sessions?size=30")
     const next = await screen.findByRole("button", {
       name: "Next page, Sessions",
     })
@@ -584,7 +584,7 @@ describe("SessionsPage", () => {
       expect(
         listReads(calls).some(
           (params) =>
-            params.get("skip") === "25" && params.get("limit") === "25",
+            params.get("skip") === "30" && params.get("limit") === "30",
         ),
       ).toBe(true),
     )

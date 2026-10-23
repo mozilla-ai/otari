@@ -376,7 +376,7 @@ describe("DeploymentAccountsPage", () => {
 
     expect(
       requests.some((request) =>
-        request.url.includes("/admin/users?skip=25&limit=25"),
+        request.url.includes("/admin/users?skip=15&limit=15"),
       ),
     ).toBe(true)
   })
@@ -395,7 +395,7 @@ describe("DeploymentAccountsPage", () => {
     )
     expect(listed.length).toBeGreaterThan(0)
     for (const request of listed) {
-      expect(request.url).toContain("skip=0&limit=25")
+      expect(request.url).toContain("skip=0&limit=15")
     }
   })
 
