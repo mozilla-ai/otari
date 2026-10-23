@@ -5,7 +5,7 @@ agent sessions were about only once its managers turn it on, and only where
 the deployment's ``trace_content_enabled`` allows it.
 
 Revision ID: d9f1a3c5e7b2
-Revises: c8e0f2a4b6d3
+Revises: bea0cc9abb34
 Create Date: 2026-10-23
 """
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "d9f1a3c5e7b2"
-down_revision: str | Sequence[str] | None = "c8e0f2a4b6d3"
+down_revision: str | Sequence[str] | None = "bea0cc9abb34"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
