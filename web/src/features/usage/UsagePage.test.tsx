@@ -454,6 +454,73 @@ describe("UsagePage", () => {
     expect(screen.getByText(/2\.1% errors/)).toBeInTheDocument()
   })
 
+  it("pages a breakdown longer than the smallest page size", async () => {
+    // 32 models at 15 a page is three pages, the last holding two.
+    const models = Array.from({ length: 32 }, (_, i) => ({
+      key: `model-${String(i + 1).padStart(2, "0")}`,
+      cost: 100 - i,
+      tokens: 1_000,
+      requests: 10,
+      is_other: false,
+    }))
+    mockApi(summary({ by_model: models }))
+    const user = userEvent.setup()
+    renderPage(<UsagePage />)
+
+    const table = await screen.findByRole("grid", { name: "Spend by model" })
+    await within(table).findByText("model-01")
+    expect(within(table).getAllByRole("row").slice(1)).toHaveLength(15)
+    expect(screen.getByText("1–15 of 32")).toBeInTheDocument()
+
+    await user.click(
+      screen.getByRole("button", { name: "Last page, spend by model" }),
+    )
+    const last = screen.getByRole("grid", { name: "Spend by model" })
+    expect(within(last).getAllByRole("row").slice(1)).toHaveLength(2)
+    expect(within(last).getByText("model-32")).toBeInTheDocument()
+    expect(screen.getByText("31–32 of 32")).toBeInTheDocument()
+    // The session breakdown fits one page, so it has no pager at all.
+    expect(
+      screen.queryByRole("button", { name: "Next page, spend by session" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("lands a new window's breakdown on its first page even when paged during the load", async () => {
+    const models = Array.from({ length: 32 }, (_, i) => ({
+      key: `model-${String(i + 1).padStart(2, "0")}`,
+      cost: 100 - i,
+      tokens: 1_000,
+      requests: 10,
+      is_other: false,
+    }))
+    const fetchMock = mockApi(summary({ by_model: models }))
+    const answer = fetchMock.getMockImplementation()
+    const user = userEvent.setup()
+    renderPage(<UsagePage />)
+    await screen.findByText("model-01")
+
+    // The next window's breakdown is held back, so the old rows stay on screen.
+    let land!: () => void
+    const held = new Promise<void>((resolve) => {
+      land = resolve
+    })
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.includes("/usage/summary") && url.includes("source_label")) {
+        await held
+      }
+      return answer?.(input, init) as Promise<Response>
+    })
+    await user.click(screen.getByRole("button", { name: "7d" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Next page, spend by model" }),
+    )
+    land()
+
+    expect(await screen.findByText("1–15 of 32")).toBeInTheDocument()
+    expect(screen.getByText("model-01")).toBeInTheDocument()
+  })
+
   it("filters usage by API key", async () => {
     const user = userEvent.setup()
     const fetchMock = mockApi(summary())
