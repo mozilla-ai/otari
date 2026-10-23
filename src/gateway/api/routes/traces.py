@@ -265,5 +265,14 @@ FEATURE = CoreFeature(
     surface=Surface("traces"),
     enabled=lambda config: config.trace_capture_enabled,
     routers=lambda config: (router, organization_router),
+)
+
+# Apart from capture, so a deployment that stops recording still deletes what
+# it recorded, with its content, shares and reads, on the documented schedule.
+RETENTION_FEATURE = CoreFeature(
+    name="trace_retention",
+    surface=None,
+    enabled=lambda config: True,
+    routers=lambda config: (),
     worker=_retention,
 )
