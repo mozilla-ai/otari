@@ -29,6 +29,7 @@ from gateway.models.traces import TraceSpan
 from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
 from gateway.repositories.traces import TracesRepositories
+from gateway.repositories.traces.barrier_repository import ContentBarrierRepository
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.traces import SpanContent, TraceService
 from gateway.services.traces import _service as trace_service_module
@@ -86,6 +87,7 @@ def _write(
     session_source: str = "harness",
     name: str | None = None,
     harness: str = "claude-code",
+    content_generation: int | None = 0,
 ) -> TraceWrite:
     return TraceWrite(
         workspace_id=workspace_id,
@@ -96,6 +98,7 @@ def _write(
         harness=harness,
         name=name,
         spans=spans,
+        content_generation=content_generation,
     )
 
 
@@ -655,3 +658,124 @@ async def test_two_users_spans_sharing_an_id_in_one_batch_keep_their_own_content
     assert alice is not None and bob is not None
     assert dict(alice.spans[0].content) == {"prompt": "alice's secret"}
     assert dict(bob.spans[0].content) == {"prompt": "bob's own"}
+
+
+def _store_on(config: GatewayConfig, uow: Any) -> TraceService:
+    return TraceService(uow, TracesRepositories.on(uow), SpanContent(build_content_key_port(config)))
+
+
+async def _sealed_of(async_db: AsyncSession, trace_id: str) -> str | None:
+    async_db.expire_all()
+    return (
+        await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.trace_id) == trace_id))
+    ).scalar_one()
+
+
+@pytest.mark.parametrize("stop", ["forget_content", "stop_content"])
+async def test_content_queued_before_a_workspace_stops_or_deletes_it_is_never_stored(
+    store: TraceService,
+    tenants: tuple[uuid.UUID, uuid.UUID],
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    stop: str,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    generation = await store.content_generation(workspace)
+    queued = _write(
+        workspace, "s-queued", _span("tool-1", kind="tool", content={"prompt": "x"}), content_generation=generation
+    )
+
+    await getattr(store, stop)(workspace)
+    result = await store.write((queued,))
+
+    assert result.accepted == 1
+    assert await _sealed_of(async_db, "s-queued") is None
+    after = await store.content_generation(workspace)
+    await store.write(
+        (_write(workspace, "s-after", _span("tool-1", kind="tool", content={"prompt": "y"}), content_generation=after),)
+    )
+    assert await _sealed_of(async_db, "s-after") is not None
+
+
+async def test_content_deleted_while_its_batch_waits_on_the_key_source_is_never_stored(
+    test_config: GatewayConfig,
+    store: TraceService,
+    tenants: tuple[uuid.UUID, uuid.UUID],
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    generation = await store.content_generation(workspace)
+    real_seal = SpanContent.seal
+
+    async def seal_then_delete(self: SpanContent, *args: Any, **kwargs: Any) -> str | None:
+        value = await real_seal(self, *args, **kwargs)
+        async with create_unit_of_work() as other:
+            await _store_on(test_config, other).forget_content(workspace)
+        return value
+
+    monkeypatch.setattr(SpanContent, "seal", seal_then_delete)
+    await store.write(
+        (
+            _write(
+                workspace, "s-1", _span("tool-1", kind="tool", content={"prompt": "x"}), content_generation=generation
+            ),
+        )
+    )
+
+    assert await _sealed_of(async_db, "s-1") is None
+
+
+async def test_a_delete_waits_for_a_write_already_holding_the_workspace_and_then_clears_it(
+    test_config: GatewayConfig,
+    tenants: tuple[uuid.UUID, uuid.UUID],
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    clean_database: None,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    init_db(test_config)
+    try:
+        workspace, _ = tenants
+        locked, release = asyncio.Event(), asyncio.Event()
+        real_lock = ContentBarrierRepository.lock
+
+        async def lock_and_hold(self: ContentBarrierRepository, workspace_ids: Any) -> dict[uuid.UUID, int]:
+            held = await real_lock(self, workspace_ids)
+            if workspace_ids and not locked.is_set():
+                locked.set()
+                await release.wait()
+            return held
+
+        monkeypatch.setattr(ContentBarrierRepository, "lock", lock_and_hold)
+
+        async def write() -> None:
+            async with create_unit_of_work() as uow:
+                await _store_on(test_config, uow).write(
+                    (
+                        _write(
+                            workspace,
+                            "s-1",
+                            _span("tool-1", kind="tool", content={"prompt": "x"}),
+                            content_generation=0,
+                        ),
+                    )
+                )
+
+        async def forget() -> None:
+            async with create_unit_of_work() as uow:
+                await _store_on(test_config, uow).forget_content(workspace)
+
+        writing = asyncio.create_task(write())
+        await asyncio.wait_for(locked.wait(), timeout=5)
+        forgetting = asyncio.create_task(forget())
+        await asyncio.sleep(0.3)
+        assert not forgetting.done(), "the delete went ahead while a write held the workspace"
+        release.set()
+        await asyncio.wait_for(asyncio.gather(writing, forgetting), timeout=10)
+
+        assert await _sealed_of(async_db, "s-1") is None
+    finally:
+        await dispose_db()

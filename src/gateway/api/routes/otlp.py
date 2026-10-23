@@ -40,6 +40,7 @@ import base64
 import hashlib
 import json
 import re
+import uuid
 import zlib
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -65,6 +66,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     TelemetryStoragePortDep,
+    TraceServiceDep,
     get_config,
     get_db,
     verify_api_key_or_master_key,
@@ -72,7 +74,7 @@ from gateway.api.deps import (
 )
 from gateway.api.routes._helpers import retryable_on_database_outage
 from gateway.core.config import GatewayConfig
-from gateway.core.database import release_session
+from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.ports.telemetry_storage_port import TelemetryRecord
@@ -100,6 +102,7 @@ from gateway.services.traces import (
     HOOK_USAGE_SOURCE,
     OtlpSpan,
     PricedRequest,
+    TraceService,
     TraceWriter,
     gate_usage_event_id,
     record_otlp_export,
@@ -484,6 +487,16 @@ async def _release_after_auth(db: AsyncSession) -> None:
     await release_session(db)
 
 
+async def _content_generation(traces: TraceService, config: GatewayConfig, workspace_id: uuid.UUID) -> int | None:
+    """The workspace's content generation, or None where content is off or it cannot be read."""
+    if not config.trace_content_enabled:
+        return None
+    try:
+        return await traces.content_generation(workspace_id)
+    except DATABASE_ERRORS:
+        return None
+
+
 def _record_priced(request: Request, priced: list[PricedEvent], *, api_key: APIKey, config: GatewayConfig) -> None:
     """Hand each priced event's cost to the session it names: the session's cost is the ledger's."""
     writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
@@ -551,6 +564,7 @@ async def receive_traces(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    traces: TraceServiceDep,
 ) -> Response:
     """Ingest LLM usage from OTLP spans (GenAI semantic conventions)."""
     api_key = _require_import_key(auth_result[0])
@@ -618,7 +632,10 @@ async def receive_traces(
     # request path; the writer is absent where nothing records traces.
     writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
     if writer is not None and received:
-        keeps_content = await workspace_keeps_trace_content(db, config, api_key.workspace_id)
+        # The generation first and the switch after: content captured while the
+        # switch is turned off then carries the generation the turning off ends.
+        generation = await _content_generation(traces, config, api_key.workspace_id)
+        keeps_content = generation is not None and await workspace_keeps_trace_content(db, config, api_key.workspace_id)
         record_otlp_export(
             writer,
             (_otlp_span(span, scope) for scope, span in received),
@@ -629,6 +646,7 @@ async def receive_traces(
             api_key_id=api_key.id,
             retention=timedelta(days=config.trace_retention_days),
             content_enabled=keeps_content,
+            content_generation=generation,
         )
     _record_priced(request, priced, api_key=api_key, config=config)
     return _otlp_response(content_type, response)
