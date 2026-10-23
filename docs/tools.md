@@ -193,11 +193,22 @@ since the deployment cannot price the organization's own account. A search also
 adds what its enrichment fetches reported. The line's `unit_rate` is its cost
 over its calls.
 
-An organization's pricing override applies to its calls as to its models, with
-one limit: a call the deployment pays for, which an instance or the built-in
-fetcher served, takes only an override the deployment operator set, as a
-request on a hosted provider does. A call labeled `otari:<tool>` takes any
-override.
+Whose account runs a call decides whose prices count, as it does for a model
+call. A call on the deployment's account takes only the deployment's price, or
+an override the deployment operator set: code execution, a search or fetch on an
+instance or the built-in fetcher, and a search on the legacy settings. A call on
+an [organization search or fetch key](#organization-search-keys) is priced at the
+deployment's price by default, and the organization's own override replaces it.
+
+Where the deployment charges organizations for what its account runs (see
+[Deployment-paid credentials](hosted-providers.md#deployment-paid-credentials)),
+those tool calls are charged to the organization's funds whoever pays for the
+model call: a request on the organization's own model key that searches on the
+deployment's search tool is charged for the searches, and one on a hosted model
+that searches on the organization's own key is charged for the model alone. A
+request that may run a tool on the deployment's account is refused with `402`
+(`insufficient_funds`) before the model is called when the organization has no
+funds paid in, and so is a direct search on one of the deployment's tools.
 
 Every fetch is labeled by the instance that served it, `builtin:builtin_fetch`
 when `web_fetch_default_tool` names none, and so is every in-loop search on a
@@ -281,6 +292,14 @@ search pricing page sets a tool's rate too, except one written from
 `require_pricing: false` serves unpriced searches again, and unpriced models with
 them. And whether `require_pricing` is on or not, an organization's own pricing
 override no longer prices a search on one of the deployment's tools.
+
+**Upgrading from 0.31.** An organization's own override of `otari:code_execution`
+or `otari:web_search` no longer prices code execution or a search on the legacy
+settings, since both run on the deployment's account: set the price the
+deployment charges with the master key. Where an overlay charges organizations,
+those calls are now charged to the organization's funds even when the model call
+was on the organization's own key, so such a request with no funds paid in is
+refused with `402`.
 
 ## What clients receive
 

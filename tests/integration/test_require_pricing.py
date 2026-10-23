@@ -445,15 +445,15 @@ def test_only_the_operators_override_prices_an_in_loop_search_on_an_instance(
     assert (resp.status_code != 402) is served, resp.text
 
 
-def test_an_organizations_override_still_prices_a_search_on_the_legacy_settings(
-    strict_pricing_client: TestClient, test_db: Session
+@pytest.mark.parametrize(("origin", "served"), [(API_ORIGIN, False), (OPERATOR_ORIGIN, True)])
+def test_only_the_operators_override_prices_a_search_on_the_legacy_settings(
+    strict_pricing_client: TestClient, test_db: Session, origin: str, served: bool
 ) -> None:
-    """The old backend records its calls with no label, so any organization override prices them."""
-    _override(strict_pricing_client, test_db, "otari:web_search", origin=API_ORIGIN)
+    """The deployment's own search backend runs on its account, so an organization's own rate does not price it."""
+    _override(strict_pricing_client, test_db, "otari:web_search", origin=origin)
     provider = AsyncMock(side_effect=RuntimeError("provider down"))
 
     with patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}):
         resp = _in_loop(strict_pricing_client, "otari_web_search", provider)
 
-    assert resp.status_code != 402, resp.text
-    provider.assert_awaited()
+    assert (resp.status_code != 402) is served, resp.text

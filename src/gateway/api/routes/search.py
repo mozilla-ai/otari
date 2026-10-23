@@ -59,6 +59,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    BillingPortDep,
     WebProviderClientDep,
     WorkspaceWebSearchPoliciesDep,
     get_api_key_service,
@@ -74,6 +75,7 @@ from gateway.api.routes._passthrough import (
     resolve_passthrough_user_id,
 )
 from gateway.api.routes._pipeline import (
+    FUNDS_CHECK_UNAVAILABLE_DETAIL,
     _elapsed_ms,
     _names_end_user,
     failure_status_code,
@@ -82,7 +84,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.core.config import END_USER_BUDGET_HEADER, GatewayConfig
 from gateway.core.database import release_session
-from gateway.core.error_codes import error_headers
+from gateway.core.error_codes import INSUFFICIENT_FUNDS, error_headers
 from gateway.core.metered_pricing import quantize_cost
 from gateway.exceptions.tools_exceptions import (
     DirectSearchFailedError,
@@ -101,6 +103,7 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.tools import WebTool
 from gateway.models.usage import UsageLog
+from gateway.ports.billing_port import BillingPort, InsufficientFundsError
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit
 from gateway.schemas.tools import SearchRequest, SearchResponse
 from gateway.services.api_keys import ApiKeyService
@@ -111,6 +114,7 @@ from gateway.services.budgets import (
     refund_reservation,
     reserve_budget,
 )
+from gateway.services.inference import DeploymentCharge, admit_deployment_paid, describe_port_error
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import resolve_tool_rate
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
@@ -145,6 +149,7 @@ async def create_search(
     api_keys: Annotated[ApiKeyService, Depends(get_api_key_service)],
     web_search_policy: WorkspaceWebSearchPoliciesDep,
     web_provider_client: WebProviderClientDep,
+    billing: BillingPortDep,
 ) -> SearchResponse:
     """Run a search against a configured search tool.
 
@@ -178,6 +183,7 @@ async def create_search(
         api_keys=api_keys,
         web_search_policy=web_search_policy,
         web_provider_client=web_provider_client,
+        billing=billing,
     )
 
 
@@ -195,6 +201,7 @@ async def create_search_for_tool(
     api_keys: Annotated[ApiKeyService, Depends(get_api_key_service)],
     web_search_policy: WorkspaceWebSearchPoliciesDep,
     web_provider_client: WebProviderClientDep,
+    billing: BillingPortDep,
 ) -> SearchResponse:
     """Run a search against the search tool named in the path.
 
@@ -227,6 +234,7 @@ async def create_search_for_tool(
         api_keys=api_keys,
         web_search_policy=web_search_policy,
         web_provider_client=web_provider_client,
+        billing=billing,
     )
 
 
@@ -244,6 +252,7 @@ async def _dispatch_search(
     api_keys: ApiKeyService,
     web_search_policy: WorkspaceWebSearchPolicies,
     web_provider_client: httpx.AsyncClient,
+    billing: BillingPort,
 ) -> SearchResponse:
     """Run the search request scaffold: reserve, call, log, settle.
 
@@ -381,12 +390,16 @@ async def _dispatch_search(
 
     # The rate the reservation holds and the settlement falls back to: the
     # instance's own row, under its new key or its old one, or ``otari:web_search``
-    # for an organization key (design L). The call's label decides whose overrides count.
+    # for an organization key (design L). Whose account runs the search decides
+    # whose overrides count, and whether the organization's funds pay for it.
+    deployment_paid = not search.resolved.on_credential
+    organization_id = await organization_for_key_id(db, api_key_id)
     rate = await resolve_tool_rate(
         db,
         search.resolved.rate_keys,
         label=search.resolved.label,
-        organization_id=await organization_for_key_id(db, api_key_id),
+        deployment_paid=deployment_paid,
+        organization_id=organization_id,
     )
     unit_rate = rate.unit_rate if rate is not None else Decimal(0)
     # After the gates above, so a search they refuse is counted by no rule, and
@@ -432,6 +445,48 @@ async def _dispatch_search(
         raise HTTPException(
             status_code=exc.status_code, detail=exc.message, headers=error_headers(exc.error_code)
         ) from exc
+    # Last, so a refusal above answers before the organization's funds are read.
+    funding: DeploymentCharge | None = None
+    if deployment_paid:
+        try:
+            funding = await admit_deployment_paid(
+                billing,
+                deployment_paid=True,
+                organization_id=organization_id,
+                api_key_id=api_key_id,
+                user_id=user_id,
+                request_id=request_id,
+            )
+        except InsufficientFundsError as exc:
+            await refund_reservation(db, reservation)
+            await log_rejection(
+                exc.public_message,
+                row_model=tool.name,
+                row_provider=tool.provider,
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=exc.public_message,
+                headers=error_headers(INSUFFICIENT_FUNDS),
+            ) from exc
+        except Exception as exc:
+            logger.error(
+                "BillingPort failed to admit a deployment-paid search: organization=%s request_id=%s: %s",
+                organization_id,
+                request_id,
+                describe_port_error(exc),
+            )
+            await refund_reservation(db, reservation)
+            await log_rejection(
+                FUNDS_CHECK_UNAVAILABLE_DETAIL,
+                row_model=tool.name,
+                row_provider=tool.provider,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=FUNDS_CHECK_UNAVAILABLE_DETAIL
+            ) from exc
 
     def usage_row(**overrides: Any) -> UsageLog:
         """Build the row for a search that reached the provider.
@@ -509,6 +564,14 @@ async def _dispatch_search(
             cost=cost,
         )
     )
+    if funding is not None:
+        await funding.settle(
+            cost,
+            model=tool.name,
+            description=f"{tool.provider}:{tool.name}",
+            expects_cost=False,
+            savepoint=db.begin_nested,
+        )
     await reconcile_reservation(db, reservation, cost)
 
     if rate_limit_info:

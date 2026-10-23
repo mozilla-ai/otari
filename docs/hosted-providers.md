@@ -70,7 +70,10 @@ with `402` (`insufficient_funds`) when it has no funds paid in. When the
 request settles, its cost, including the cost an abandoned or failed request
 still owes, is charged to the organization. No funds are held while the
 request runs, so concurrent requests can take an organization below zero. A
-request on any other credential never reaches either port. The core's billing
+request on any other credential never reaches either port, unless it may run a
+gateway tool on the deployment's account: that tool's calls are gated and
+charged the same way, and the model call is not
+([Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool)). The core's billing
 adapter does nothing, so with no overlay a hosted-provider request is served
 and recorded as deployment-paid on its usage row, and no organization is
 charged.

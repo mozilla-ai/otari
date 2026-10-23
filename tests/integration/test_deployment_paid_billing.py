@@ -28,12 +28,14 @@ from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
     ChatCompletionMessage,
+    ChatCompletionMessageFunctionToolCall,
     Choice,
     ChoiceDelta,
     ChunkChoice,
     CompletionUsage,
     CreateEmbeddingResponse,
     Embedding,
+    Function,
     Usage,
 )
 from fastapi import status
@@ -157,6 +159,22 @@ def _session_ledger(probe: ModuleType) -> Iterator[None]:
 def billed(
     postgres_url: str, clean_database: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Generator[tuple[TestClient, ModuleType]]:
+    yield from _billed(postgres_url, tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def billed_search(
+    postgres_url: str, clean_database: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[tuple[TestClient, ModuleType]]:
+    """``billed``, with a search tool on the deployment's account that reports what each search cost it."""
+    options = {"hits": [{"url": "https://otari.example"}], "cost": 0.007}
+    tools = {"fake-search": {"provider": "fake", "options": options}}
+    yield from _billed(postgres_url, tmp_path, monkeypatch, search_tools=tools)
+
+
+def _billed(
+    postgres_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **settings: Any
+) -> Generator[tuple[TestClient, ModuleType]]:
     name = next(_NAMES)
     (tmp_path / f"{name}.py").write_text(PROBE_BOOTSTRAP)
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -186,6 +204,7 @@ def billed(
             }
         ),
         bootstrap=f"{name}:register",
+        **settings,
     )
     try:
         for client in build_test_client(config):
@@ -549,3 +568,147 @@ def test_a_batch_on_a_deployment_paid_credential_is_refused_without_funds(
     assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
     assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
     create.assert_not_called()
+
+
+# A gateway-run tool is charged by whose account ran it, whoever paid for the model call.
+# $1,000 per million requests: one search costs $0.001.
+SEARCH_COST = Decimal("0.001")
+
+
+def _search_round(model: str) -> ChatCompletion:
+    """A model turn that asks the gateway to search."""
+    call = ChatCompletionMessageFunctionToolCall(
+        id="call_1", type="function", function=Function(name="web_search", arguments='{"query": "otari"}')
+    )
+    message = ChatCompletionMessage(role="assistant", content=None, tool_calls=[call])
+    return ChatCompletion(
+        id="chatcmpl-search",
+        object="chat.completion",
+        created=0,
+        model=model,
+        choices=[Choice(index=0, message=message, finish_reason="tool_calls")],
+        # A copy: the tool loop adds each round's usage onto the first round's in place.
+        usage=USAGE.model_copy(),
+    )
+
+
+def _chat_with_search(client: TestClient, key: dict[str, Any], model: str) -> tuple[Any, AsyncMock]:
+    """A completion whose model searches once on the deployment's backend, then answers."""
+    bare = model.split(":", 1)[1]
+    answer = _completion(bare)
+    answer.usage = USAGE.model_copy()
+    provider = AsyncMock(side_effect=[_search_round(bare), answer])
+    with (
+        patch("gateway.services.mcp_loop.acompletion", new=provider),
+        patch(
+            "gateway.services.web_retrieval_backend.WebSearchBackend._search_tool",
+            new=AsyncMock(return_value="search results for otari"),
+        ),
+        patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
+    ):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": "what is otari"}],
+                "tools": [{"type": "otari_web_search"}],
+            },
+            headers=_auth(key),
+        )
+    return response, provider
+
+
+def test_a_search_on_the_deployments_account_is_charged_beside_a_model_on_another_key(
+    billed: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
+) -> None:
+    client, probe = billed
+    _price(client, "anthropic:claude-opus-4")
+    _price(client, "otari:web_search")
+    key = _key(client)
+
+    response, provider = _chat_with_search(client, key, "anthropic:claude-opus-4")
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert {call.kwargs["api_key"] for call in provider.call_args_list} == {"sk-ant"}
+    assert [gate for gate, _ in probe.GATES] == ["apply_due_credit", "require_funds_on_deposit"]
+    # The search alone: the model ran on the gateway's own key, which the organization's funds do not pay for.
+    assert [(entry[0], entry[2]) for entry in probe.LEDGER] == [("charge", SEARCH_COST)]
+    user = _user(client)
+    assert user["spend"] == pytest.approx(float(2 * COST + SEARCH_COST))
+    assert user["reserved"] == pytest.approx(0.0)
+    assert _deployment_paid_flags(db_session_factory) == [False]
+
+
+def test_a_search_on_the_deployments_account_is_refused_without_funds_before_the_model_is_called(
+    billed: tuple[TestClient, ModuleType],
+) -> None:
+    client, probe = billed
+    _price(client, "anthropic:claude-opus-4")
+    _price(client, "otari:web_search")
+    key = _key(client)
+    probe.FUNDS["available"] = Decimal("0")
+
+    response, provider = _chat_with_search(client, key, "anthropic:claude-opus-4")
+
+    assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
+    assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    provider.assert_not_called()
+    assert probe.LEDGER == []
+    assert _user(client)["reserved"] == pytest.approx(0.0)
+    rows = client.get(f"{API_ROOT}/usage", params={"user_id": "billed"}, headers=MASTER).json()
+    assert [(row["status"], row["status_code"], row["model"]) for row in rows] == [("error", 402, "otari:web_search")]
+
+
+def test_a_deployment_paid_model_and_its_search_are_charged_once_together(
+    billed: tuple[TestClient, ModuleType],
+) -> None:
+    client, probe = billed
+    _price(client, "openai:gpt-4o")
+    _price(client, "otari:web_search")
+    key = _key(client)
+
+    response, provider = _chat_with_search(client, key, "openai:gpt-4o")
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert {call.kwargs["api_key"] for call in provider.call_args_list} == {"fleet-key"}
+    assert [(entry[0], entry[2], entry[3]) for entry in probe.LEDGER] == [
+        ("charge", 2 * COST + SEARCH_COST, "openai:gpt-4o")
+    ]
+    assert _user(client)["reserved"] == pytest.approx(0.0)
+
+
+def _search(client: TestClient, key: dict[str, Any]) -> Any:
+    return client.post(f"{API_ROOT}/search/fake-search", json={"query": "otari"}, headers=_auth(key))
+
+
+def test_a_direct_search_on_the_deployments_account_is_gated_then_charged_what_it_cost(
+    billed_search: tuple[TestClient, ModuleType],
+) -> None:
+    client, probe = billed_search
+    key = _key(client)
+
+    response = _search(client, key)
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert [gate for gate, _ in probe.GATES] == ["apply_due_credit", "require_funds_on_deposit"]
+    assert [(entry[0], entry[2], entry[3]) for entry in probe.LEDGER] == [
+        ("charge", Decimal("0.007"), "fake:fake-search")
+    ]
+    user = _user(client)
+    assert user["spend"] == pytest.approx(0.007)
+    assert user["reserved"] == pytest.approx(0.0)
+
+
+def test_a_direct_search_on_the_deployments_account_is_refused_without_funds(
+    billed_search: tuple[TestClient, ModuleType],
+) -> None:
+    client, probe = billed_search
+    key = _key(client)
+    probe.FUNDS["available"] = Decimal("0")
+
+    response = _search(client, key)
+
+    assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
+    assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    assert probe.LEDGER == []
+    assert _user(client)["reserved"] == pytest.approx(0.0)

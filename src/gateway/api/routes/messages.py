@@ -1059,6 +1059,7 @@ async def create_message(
                 workspace_id=ctx.workspace_id,
                 inputs=sandbox_inputs,
             ),
+            billing=billing,
         ),
     )
 

@@ -119,7 +119,7 @@ async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSes
     unpriced = [
         tool.name
         for tool in configured_tools_to_price(config)
-        if await resolve_tool_rate(db, tool.rate_keys, label=tool.label) is None
+        if await resolve_tool_rate(db, tool.rate_keys, label=tool.label, deployment_paid=tool.deployment_paid) is None
     ]
     if not unpriced:
         return

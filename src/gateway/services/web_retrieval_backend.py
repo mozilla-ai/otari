@@ -126,6 +126,7 @@ class WebRetrievalBackend:
         base_url: str | None = None,
         provider: str | None = None,
         provider_api_key: str | None = None,
+        on_credential: bool = False,
         engines: tuple[str, ...] = _DEFAULT_ENGINES,
         max_results: int = DEFAULT_MAX_RESULTS,
         allowed_domains: tuple[str, ...] = (),
@@ -160,6 +161,8 @@ class WebRetrievalBackend:
         # configured one and holds its key.
         self._provider = provider
         self._provider_api_key = provider_api_key
+        # A workspace's own key serves the searches, so its organization's account pays for them.
+        self._on_credential = on_credential
         # Per-request accounting, owned by the route and passed in. None when the
         # backend runs outside a billed request (tests, direct use).
         self._tally = tally
@@ -324,7 +327,7 @@ class WebRetrievalBackend:
             self._record_span(WEB_SEARCH_TOOL_NAME, "otari_web_search", started, ok=False)
             raise
         if self._tally is not None:
-            self._tally.record_result(WEB_SEARCH_TOOL_NAME, result)
+            self._tally.record_result(WEB_SEARCH_TOOL_NAME, result, deployment_paid=not self._on_credential)
         self._record_span(WEB_SEARCH_TOOL_NAME, "otari_web_search", started, ok=not is_tool_error(result))
         return result
 

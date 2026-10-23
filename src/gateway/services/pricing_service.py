@@ -906,16 +906,18 @@ async def resolve_tool_rate(
     rate_keys: Sequence[RateKey],
     *,
     label: str | None = None,
+    deployment_paid: bool | None = None,
     as_of: datetime | None = None,
     organization_id: uuid.UUID | None = None,
 ) -> ToolRate | None:
     """The rate one call's rate keys resolve to, or ``None`` when none has a pricing row.
 
     The lookup :func:`price_tool_calls` prices each label with, for a caller that
-    holds one resolved call, such as a pricing gate. ``label`` decides whose
-    overrides count, as it does at settlement.
+    holds one resolved call, such as a pricing gate. ``deployment_paid`` decides
+    whose overrides count, as it does at settlement; ``None`` reads it off ``label``.
     """
-    lookup = ToolRateLookup(tuple(rate_keys), paid_by_the_deployment(label))
+    paid = deployment_paid if deployment_paid is not None else paid_by_the_deployment(label)
+    lookup = ToolRateLookup(tuple(rate_keys), paid)
     return (await _tool_rates(db, {lookup}, as_of=as_of, organization_id=organization_id))[lookup]
 
 

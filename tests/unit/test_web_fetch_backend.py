@@ -317,6 +317,7 @@ async def test_a_fetch_is_recorded_under_its_instances_label_rate_keys_and_repor
             unreported_calls=0,
             reported_cost=Decimal("0.004"),
             enrichment_cost=Decimal(0),
+            deployment_paid=True,
         )
     ], "a reported zero is a free call, and a failed call is never billed"
     assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": 2, "errors": 1}}
@@ -336,6 +337,7 @@ async def test_a_built_in_fetch_is_recorded_under_builtin_fetch_for_its_rate(fet
             unreported_calls=1,
             reported_cost=Decimal(0),
             enrichment_cost=Decimal(0),
+            deployment_paid=True,
         )
     ]
 

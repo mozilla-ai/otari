@@ -101,6 +101,7 @@ class ToolUsageTally:
         rate_keys: tuple[RateKey, ...] | None = None,
         cost: Decimal | None = None,
         enrichment_cost: Decimal | None = None,
+        deployment_paid: bool | None = None,
     ) -> None:
         """Record a call that returned, classifying it on the sentinel.
 
@@ -110,13 +111,15 @@ class ToolUsageTally:
         prices the call. A failed call's costs are dropped, since it is never
         billed. A cost that is negative, not finite, or more than a cost column
         holds is unusable: the call reads as unreported, and an enrichment cost
-        as none.
+        as none. ``deployment_paid`` says whose account ran the call, which
+        decides whose prices count and whether the organization's funds pay for
+        it; ``None`` reads it off the label.
         """
         failed = is_tool_error(text)
         key = self._record(tool, failed=failed)
         if failed:
             return
-        totals = self._labels.setdefault((key, label, rate_keys, None), _LabelTotals())
+        totals = self._labels.setdefault((key, label, rate_keys, deployment_paid), _LabelTotals())
         totals.calls += 1
         reported = _usable_cost(cost)
         if reported is None:
