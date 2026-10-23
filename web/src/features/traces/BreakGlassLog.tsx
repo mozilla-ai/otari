@@ -1,3 +1,4 @@
+import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { useBreakGlassLog } from "@/shared/api/traces"
@@ -11,7 +12,14 @@ import { formatDateTime } from "@/shared/helpers/format"
  */
 export function BreakGlassLog() {
   const log = useBreakGlassLog(true)
-  const items = log.data?.items ?? []
+  // Offset pages over a log that grows at its head, so an opening can appear on two; each is listed once.
+  const items = [
+    ...new Map(
+      (log.data?.pages ?? [])
+        .flatMap((page) => page.items ?? [])
+        .map((read) => [read.id, read]),
+    ).values(),
+  ]
 
   return (
     <SettingsGroup title="Break-glass openings">
@@ -35,9 +43,15 @@ export function BreakGlassLog() {
                 <span className="text-caption">“{read.reason}”</span>
               </li>
             ))}
-            {log.data?.has_more ? (
-              <li className="text-caption">
-                Showing the newest {items.length}.
+            {log.hasNextPage ? (
+              <li>
+                <Button
+                  variant="ghost"
+                  onPress={() => void log.fetchNextPage()}
+                  isDisabled={log.isFetchingNextPage}
+                >
+                  Show older openings
+                </Button>
               </li>
             ) : null}
           </ul>
