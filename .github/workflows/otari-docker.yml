@@ -39,6 +39,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      # The signed provenance attestation.
+      attestations: write
 
     steps:
       - name: Checkout repository
@@ -90,6 +92,7 @@ jobs:
         run: ./scripts/docker_liveness_check.sh otari-test:${{ github.sha }}
 
       - name: Build and push Docker image
+        id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -105,3 +108,16 @@ jobs:
           cache-from: type=gha
           provenance: mode=max
           sbom: true
+
+      # Signed with this workflow's identity through Sigstore, unlike the
+      # BuildKit provenance above, so `gh attestation verify` can tie an image
+      # to this repository and workflow. Stored next to the image on Docker Hub.
+      - name: Attest the image's build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          # A storage record needs the artifact-metadata permission and adds no
+          # verification, so this job does without it.
+          create-storage-record: false

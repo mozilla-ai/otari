@@ -15,7 +15,7 @@ A durable deployment should:
 - terminate TLS in front of the gateway
 - restrict database and management access
 - monitor `/api/v1/health/readiness` and, when enabled, `/metrics`
-- pin an image version and test migrations before upgrading
+- pin an image version, [verify it](#verify-the-image), and test migrations before upgrading
 
 The default SQLite database is intended for evaluation and single-node local use.
 
@@ -60,6 +60,19 @@ that value.
 Alert on checked-out connections approaching capacity for a sustained period.
 These metrics do not appear on SQLite, which opens a connection per use and
 keeps no pool.
+
+### Verify the image
+
+Each published image carries a signed build provenance attestation, which ties it
+to the `mozilla-ai/otari` repository and the workflow that built it. Check it with
+the GitHub CLI before you deploy a tag:
+
+```sh
+gh attestation verify oci://docker.io/mzdotai/otari:<tag> --repo mozilla-ai/otari
+```
+
+The command fails for an image that this repository's publishing workflow did not
+build, such as one pushed to Docker Hub with stolen credentials.
 
 ## Docker Compose
 
