@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { startTransition, useState } from "react"
 import { describe, expect, it } from "vitest"
@@ -55,7 +55,8 @@ describe("SearchField", () => {
     await user.click(screen.getByRole("button", { name: "Close" }))
 
     expect(screen.getByRole("searchbox", { name: "Search" })).toHaveValue("")
-    await act(async () => {})
-    expect(screen.getByLabelText("Committed")).toHaveTextContent("")
+    await waitFor(() =>
+      expect(screen.getByLabelText("Committed")).toBeEmptyDOMElement(),
+    )
   })
 })
