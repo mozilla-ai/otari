@@ -9,6 +9,7 @@ import {
   TablePagination,
 } from "@/design-system/data/TablePagination"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { useIsMobile } from "@/design-system/hooks/useIsMobile"
 import { Chip } from "@/design-system/indicators/Chip"
@@ -23,6 +24,7 @@ import {
   useTraceSeries,
   useTraces,
 } from "@/shared/api/traces"
+import { useWorkspaces } from "@/shared/api/workspaces"
 import { formatCost, formatNumber } from "@/shared/helpers/format"
 import {
   ACTIVITY_DEFAULT_KEY,
@@ -34,9 +36,11 @@ import {
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDebounced } from "@/shared/hooks/useDebounced"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { formatDuration, formatTraceTimestamp } from "./format"
 import { toTrace } from "./fromApi"
+import { SessionContent } from "./SessionContent"
 import { TracePeek } from "./TracePeek"
 import {
   sessionDurationMs,
@@ -198,6 +202,16 @@ const iso = (ms: number) => new Date(ms).toISOString()
 export function SessionsPage() {
   const url = useUrlState(URL_DEFAULTS, { untracked: UNTRACKED })
   const { selected: workspace } = useSelectedWorkspace()
+  // Said on the page as well as in the workspace's settings, because a manager
+  // turns it on and a member may never have opted in themselves.
+  const workspaces = useWorkspaces()
+  const keepsContent =
+    useDeployment().trace_content_available &&
+    (workspaces.data ?? []).some(
+      (candidate) =>
+        candidate.trace_content_enabled &&
+        (workspace ? candidate.id === workspace.workspace_id : true),
+    )
   const isMobile = useIsMobile()
   const [now, setNow] = useState(() => Date.now())
 
@@ -345,8 +359,15 @@ export function SessionsPage() {
       <div className="flex flex-col" inert={open !== null && isMobile}>
         <PageIntro title="Sessions">
           Every agent session the gateway recorded: the turns, LLM calls and
-          tools behind each one. No request or response content is stored.
+          tools behind each one. No model response or tool output is stored.
         </PageIntro>
+        {keepsContent ? (
+          <InfoBanner>
+            This workspace keeps what your sessions were about: the prompts,
+            commands and file paths your agents send. Only you can read yours,
+            unless you share a session.
+          </InfoBanner>
+        ) : null}
 
         <div className="flex flex-col gap-3">
           {traces.isError && !traces.data ? (
@@ -442,6 +463,7 @@ export function SessionsPage() {
           onClose={() => url.patch({ peek: "", peek_workspace: "", span: "" })}
           onPrevious={previous ? () => openPeek(previous) : undefined}
           onNext={next ? () => openPeek(next) : undefined}
+          notice={detail.data ? <SessionContent detail={detail.data} /> : null}
         />
       ) : null}
     </div>

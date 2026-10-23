@@ -1,9 +1,13 @@
 import {
   keepPreviousData,
+  useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
 import type {
+  TraceContentShare,
+  TraceContentShareCreate,
+  TraceContentShareList,
   TraceCount,
   TraceDetail,
   TraceList,
@@ -158,5 +162,81 @@ export function useRequestTrace(requestId: string, enabled = true) {
     enabled: enabled && scope.isReady && requestId !== "",
     staleTime: 60_000,
     retry: retryUnlessNotFound(useQueryClient()),
+  })
+}
+
+// Sharing one of your own sessions' content. Always on the organization route,
+// whichever route reads the session: only its own user shares it, as a member.
+const SHARE_BASE = "/organizations/me/traces"
+
+function sharesPath(
+  traceId: string,
+  workspaceId: string,
+  shareId = "",
+): string {
+  const query = workspaceId
+    ? `?${new URLSearchParams({ workspace_id: workspaceId }).toString()}`
+    : ""
+  const tail = shareId ? `/${encodeURIComponent(shareId)}` : ""
+  return `${SHARE_BASE}/${encodeURIComponent(traceId)}/shares${tail}${query}`
+}
+
+// Every share the session has had, with the reads made through each. Only the
+// session's own user may ask, so it is asked only for them.
+export function useTraceShares(
+  traceId: string,
+  workspaceId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: [TRACES, "shares", traceId, workspaceId],
+    meta: workspaceMeta(workspaceId),
+    queryFn: () =>
+      apiFetch<TraceContentShareList>(sharesPath(traceId, workspaceId)),
+    enabled: enabled && traceId !== "",
+    staleTime: 10_000,
+  })
+}
+
+export function useShareTrace() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      traceId,
+      workspaceId,
+      body,
+    }: {
+      traceId: string
+      workspaceId: string
+      body: TraceContentShareCreate
+    }) =>
+      apiFetch<TraceContentShare>(sharesPath(traceId, workspaceId), {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [TRACES, "shares"] })
+    },
+  })
+}
+
+export function useEndTraceShare() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      traceId,
+      workspaceId,
+      shareId,
+    }: {
+      traceId: string
+      workspaceId: string
+      shareId: string
+    }) =>
+      apiFetch<void>(sharesPath(traceId, workspaceId, shareId), {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [TRACES, "shares"] })
+    },
   })
 }
