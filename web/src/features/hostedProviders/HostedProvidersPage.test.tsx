@@ -25,6 +25,15 @@ interface Request {
   body: unknown
 }
 
+/** The hidden input behind "Load from JSON file", which a test uploads into directly. */
+function countriesFileInput(): HTMLInputElement {
+  const input = document.querySelector<HTMLInputElement>(
+    'input[type="file"][accept*="json"]',
+  )
+  if (!input) throw new Error("no countries file input")
+  return input
+}
+
 function hostedProvider(
   overrides: Partial<HostedProvider> = {},
 ): HostedProvider {
@@ -568,6 +577,65 @@ describe("HostedProvidersPage", () => {
     expect(hostedRequests(requests, "POST")[0].body).toMatchObject({
       supported_countries: ["US", "DE"],
     })
+  })
+
+  it("loads the countries from a JSON file", async () => {
+    const requests = mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(within(dialog).getByLabelText("API key"), "sk-ant-secret")
+    await user.upload(
+      countriesFileInput(),
+      new File(['["US", "DE", "GB"]'], "countries.json", {
+        type: "application/json",
+      }),
+    )
+
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("textbox", { name: "Supported countries" }),
+      ).toHaveValue("US, DE, GB"),
+    )
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add provider" }),
+    )
+    await waitFor(() =>
+      expect(hostedRequests(requests, "POST")).toHaveLength(1),
+    )
+    expect(hostedRequests(requests, "POST")[0].body).toMatchObject({
+      supported_countries: ["US", "DE", "GB"],
+    })
+  })
+
+  it("says so when the countries file is not a JSON list", async () => {
+    mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.upload(
+      countriesFileInput(),
+      new File(["US, DE"], "countries.json", { type: "application/json" }),
+    )
+
+    expect(
+      await within(dialog).findByText(
+        'The file is not a JSON list of country codes, such as ["US", "DE"].',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole("textbox", { name: "Supported countries" }),
+    ).toHaveValue("")
   })
 
   it("holds back a country that is not a two-letter code", async () => {

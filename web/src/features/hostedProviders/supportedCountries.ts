@@ -19,3 +19,33 @@ export function formatCountries(
 ): string {
   return countries?.join(", ") ?? ""
 }
+
+const NOT_A_LIST =
+  'The file is not a JSON list of country codes, such as ["US", "DE"].'
+
+/**
+ * The codes in an uploaded file: a JSON list, or one under
+ * `supported_countries` as the API and config.yml spell it. The codes are
+ * checked once they are in the field, as typed ones are.
+ */
+export function countriesFromJson(
+  text: string,
+): { ok: true; value: string[] } | { ok: false; error: string } {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return { ok: false, error: NOT_A_LIST }
+  }
+  const list =
+    parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>).supported_countries
+      : parsed
+  if (
+    !Array.isArray(list) ||
+    !list.every((item): item is string => typeof item === "string")
+  ) {
+    return { ok: false, error: NOT_A_LIST }
+  }
+  return { ok: true, value: list }
+}
