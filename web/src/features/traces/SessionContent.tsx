@@ -81,19 +81,32 @@ export function SessionContent({ detail }: { detail: TraceDetail }) {
       </InfoBanner>
     )
   }
-  if (owned && holdsContent) {
-    return <OwnerSharing detail={detail} />
+  // On ownership alone, not on the content having opened: during a key-source
+  // outage the content reads back empty, and the owner must still be able to
+  // stop a share and see who read it.
+  if (owned) {
+    return <OwnerSharing detail={detail} canShare={holdsContent} />
   }
   return null
 }
 
-function OwnerSharing({ detail }: { detail: TraceDetail }) {
+function OwnerSharing({
+  detail,
+  canShare,
+}: {
+  detail: TraceDetail
+  /** Whether there is content to share; nothing new is offered without it. */
+  canShare: boolean
+}) {
   const traceId = detail.summary.trace_id
   const workspaceId = detail.summary.workspace_id
   const shares = useTraceShares(traceId, workspaceId, true)
   const endShare = useEndTraceShare()
   const [isSharing, setIsSharing] = useState(false)
-  const active = (shares.data?.items ?? []).filter((share) => share.active)
+  const items = shares.data?.items ?? []
+
+  // A session that never kept content and was never shared has nothing to say.
+  if (!canShare && items.length === 0 && !shares.error) return null
 
   return (
     <div className="flex flex-col gap-3">
@@ -102,14 +115,17 @@ function OwnerSharing({ detail }: { detail: TraceDetail }) {
         file paths. Share it when you want someone to look into it.
       </InfoBanner>
       <ErrorBanner error={shares.error ?? endShare.error} />
-      <div className="flex flex-wrap items-center gap-2">
-        <Button variant="primary" onPress={() => setIsSharing(true)}>
-          Share this session
-        </Button>
-      </div>
-      {active.length > 0 ? (
+      {canShare ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="primary" onPress={() => setIsSharing(true)}>
+            Share this session
+          </Button>
+        </div>
+      ) : null}
+      {items.length > 0 ? (
+        // Ended and expired shares stay listed, with who read them.
         <ul className="flex flex-col gap-2" aria-label="Shares of this session">
-          {active.map((share) => (
+          {items.map((share) => (
             <ShareRow
               key={share.id}
               share={share}
@@ -132,6 +148,12 @@ function OwnerSharing({ detail }: { detail: TraceDetail }) {
   )
 }
 
+function shareState(share: TraceContentShare): string {
+  if (share.active) return `until ${formatDate(share.expires_at)}`
+  if (share.revoked_at) return `ended ${formatDate(share.revoked_at)}`
+  return `expired ${formatDate(share.expires_at)}`
+}
+
 function ShareRow({
   share,
   isEnding,
@@ -142,28 +164,36 @@ function ShareRow({
   onEnd: () => void
 }) {
   const reads = share.reads ?? []
+  const readCount = share.read_count ?? reads.length
   return (
     <li className="flex flex-col gap-1 border border-border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-body">
-          {AUDIENCE_LABELS[share.audience]}, until{" "}
-          {formatDate(share.expires_at)}
+          {AUDIENCE_LABELS[share.audience]}, {shareState(share)}
         </span>
-        <Button variant="ghost" onPress={onEnd} isDisabled={isEnding}>
-          Stop sharing
-        </Button>
+        {share.active ? (
+          <Button variant="ghost" onPress={onEnd} isDisabled={isEnding}>
+            Stop sharing
+          </Button>
+        ) : null}
       </div>
       {share.note ? <span className="text-caption">“{share.note}”</span> : null}
-      <span className="text-caption">
-        {reads.length === 0
-          ? "Nobody has read it yet."
-          : reads
-              .map(
-                (read) =>
-                  `Read by ${read.reader_email} on ${formatDateTime(read.read_at)}`,
-              )
-              .join(". ")}
-      </span>
+      {reads.length === 0 ? (
+        <span className="text-caption">Nobody has read it.</span>
+      ) : (
+        <ul className="flex flex-col text-caption" aria-label="Who read it">
+          {reads.map((read) => (
+            <li key={`${read.reader_email}-${read.read_at}`}>
+              Read by {read.reader_email} on {formatDateTime(read.read_at)}
+            </li>
+          ))}
+          {readCount > reads.length ? (
+            <li>
+              The newest {reads.length} of {readCount} reads.
+            </li>
+          ) : null}
+        </ul>
+      )}
     </li>
   )
 }
