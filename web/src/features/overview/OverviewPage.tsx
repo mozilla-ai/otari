@@ -27,8 +27,8 @@ import {
   type ObserveView,
   viewForPath,
 } from "@/features/observe/observeSearch"
-import { useObserveScope } from "@/features/observe/useObserveScope"
 import { SetupGuide } from "@/features/onboarding/SetupGuide"
+import { useCurrentOwner } from "@/features/organization/attribution"
 import { CreateOrganizationForm } from "@/features/organization/CreateOrganizationForm"
 import { canManage } from "@/features/organization/roles"
 import {
@@ -97,21 +97,22 @@ function useLocalMidnight(): string {
  * opens the request log on.
  *
  * The strip is about what the caller is responsible for: a manager answers for
- * the organization (or deployment), so it reads everyone's requests even while
- * the page below sits on Mine; a member answers for their own, so it follows
- * the scope switch, and nothing is asked until that has resolved.
+ * the organization (or deployment), so it reads everyone's requests; a member
+ * answers for their own. Neither follows the Mine | Everyone switch, and a
+ * member whose usage identity is unknown is asked nothing rather than judged
+ * on the workspace.
  */
 function useTodayErrors(managesSpend: boolean) {
   const since = useLocalMidnight()
   const { selected: workspace } = useSelectedWorkspace()
-  const { userIds, isResolved, scopeSearch } = useObserveScope()
+  const owner = useCurrentOwner(!managesSpend)
   const filters = useMemo(
     () => ({
       workspace_id: workspace?.workspace_id,
       start_date: since,
-      user_id: !managesSpend && userIds.length > 0 ? userIds : undefined,
+      user_id: managesSpend ? undefined : [owner.ownerId],
     }),
-    [workspace, since, managesSpend, userIds],
+    [workspace, since, managesSpend, owner.ownerId],
   )
   // The strip reads only `totals`, so the window opts out of every breakdown
   // rather than making the server run a GROUP BY per dimension.
@@ -119,12 +120,12 @@ function useTodayErrors(managesSpend: boolean) {
     filters,
     "hour",
     NO_BREAKDOWNS,
-    managesSpend || isResolved,
+    managesSpend || owner.ownerId !== "",
   )
   const search: DashboardSearch = {
     status: "error",
     start_date: since,
-    ...(managesSpend ? { scope: "everyone" } : scopeSearch),
+    scope: managesSpend ? "everyone" : "mine",
   }
   return { query, search }
 }

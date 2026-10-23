@@ -13,6 +13,7 @@ import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,
   organizationContext,
+  organizationMember,
   pendingOrganizationInvitation,
   SURFACES,
   usageTotals,
@@ -725,6 +726,11 @@ function mockScopedApi(b: Bodies): string[] {
       return jsonResponse(
         organizationContext({ deployment_operator: false, ...b.context }),
       )
+    }
+    // The caller's usage identity, which a member's attention strip is judged on.
+    if (url.includes(`${API_ROOT}/organizations/me/members`)) {
+      const member = organizationMember({ attribution_user_id: "me-id" })
+      return jsonResponse({ data: [member], total: 1 })
     }
     if (url.includes(`${API_ROOT}/organizations/me/usage/summary`)) {
       return jsonResponse(summary(b.today ?? {}, b.series))

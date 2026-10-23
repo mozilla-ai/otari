@@ -298,6 +298,8 @@ export function TrendChart({
       role={isSelectable ? "group" : "img"}
       aria-label={ariaLabel}
       className={`w-full touch-pan-y select-none ${isSelectable ? "cursor-crosshair" : ""}`}
+      // A touch the browser takes back for a scroll selects nothing.
+      onTouchCancel={() => setDragBoth(undefined)}
     >
       <ResponsiveContainer width="100%" height={height}>
         <BarChart
