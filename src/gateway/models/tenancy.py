@@ -972,8 +972,28 @@ class Workspace(WorkspaceBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
 
 
 class WorkspaceMemberBase(SQLModel):
-    workspace_id: uuid.UUID = Field(foreign_key="workspace.id", ondelete="CASCADE", index=True)
-    user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE", index=True)
+    # Declared as explicit columns because ``Field(foreign_key=...)`` cannot name
+    # a constraint, and ``WorkspaceMemberRepository.add`` matches the workspace
+    # foreign key's name to tell a vanished workspace from a duplicate
+    # membership. Naming it here keeps the schema the single source of the name.
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            "workspace_id",
+            Uuid(),
+            ForeignKey("workspace.id", name="fk_workspace_member_workspace_id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    user_id: uuid.UUID = Field(
+        sa_column=Column(
+            "user_id",
+            Uuid(),
+            ForeignKey("user.id", name="fk_workspace_member_user_id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
     role: str = Field(default="member", max_length=32)
     status: str = Field(default="active", max_length=32)
 
