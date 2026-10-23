@@ -24,7 +24,14 @@ from gateway.models.usage import UsageLog
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
 
-from .conftest import build_test_client
+from .conftest import build_test_client, shared_test_config
+
+
+@pytest.fixture(scope="module")
+def test_config(postgres_url: str) -> GatewayConfig:
+    """The shared configuration declaring no provider, so nothing configured shadows a hosted one."""
+    return shared_test_config(postgres_url, {})
+
 
 KEY = "sk-live-hosted-1234"
 
@@ -149,17 +156,16 @@ def test_a_request_a_hosted_provider_served_is_recorded_as_deployment_paid(
     assert flags == [True]
 
 
-def test_with_no_hosted_provider_the_candidate_goes_out_uncredentialed(
+def test_with_no_hosted_provider_an_undeclared_candidate_is_refused(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """The acceptance case for a deployment that configured nothing: nothing changed."""
+    """A deployment that configured nothing serves nothing, rather than sending the call out uncredentialed."""
     _create_user(client, master_key_header)
 
-    captured, _ = _post_chat_capture(client, master_key_header, "openai:gpt-4o")
+    captured, status_code = _post_chat_capture(client, master_key_header, "openai:gpt-4o")
 
-    assert captured, "the provider call was never made"
-    assert "api_key" not in captured
-    assert captured["model"] == "openai:gpt-4o"
+    assert status_code == 424
+    assert not captured, "an undeclared provider must never be called"
 
 
 def test_neither_a_model_switched_off_nor_one_the_roster_never_listed_is_served(
@@ -254,6 +260,7 @@ def test_a_model_not_switched_on_is_refused_as_not_offered_rather_than_unconfigu
 def configured_openai_client(postgres_url: str) -> Iterator[TestClient]:
     """A deployment whose ``config.yml`` defines an ``openai`` instance, beside a hosted openai."""
     config = GatewayConfig(
+        import_configured_providers=False,
         database_url=postgres_url,
         master_key="test-master-key",
         auto_migrate=False,

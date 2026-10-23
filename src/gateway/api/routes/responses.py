@@ -6,7 +6,7 @@ from any_llm import LLMProvider
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.responses import Response as ResponsesResponse
 from any_llm.types.responses import ResponsesParams, ResponseStreamEvent
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi import Response as FastAPIResponse
 from openai.types.responses import ResponseUsage
 from openresponses_types.types import Usage as OpenResponsesUsage
@@ -21,44 +21,30 @@ from gateway.api.deps import (
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
-    get_db_if_needed,
+    get_db,
     get_log_writer,
-    get_unit_of_work_if_needed,
+    get_unit_of_work,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content
+from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
-    NO_RESOLVABLE_PROVIDER_DETAIL,
     DeclaredTools,
     ErrorKind,
     ToolBackends,
     ToolContext,
-    _flush_pending_usage_reports,
-    _PendingUsageReport,
     classify_provider_error,
     prepare_gateway_tools,
     provider_error_headers,
     provider_failure_detail,
-    raise_all_streaming_attempts_failed,
     release_reservation,
     resolve_dispatch_provider,
     resolve_request_context,
-    run_platform_non_stream,
+    run_non_stream,
     run_single_attempt_stream,
-    run_standalone_non_stream,
-    run_streaming_with_fallback,
     scope_prompt_cache_key,
     stream_error_code,
     stream_error_message,
-)
-from gateway.api.routes._platform import (
-    ResolvedAttempt,
-    SettledCost,
-    UnsupportedAttemptProviderError,
-    attempt_provider,
-    build_attempt_client_args,
-    with_retry_hint,
 )
 from gateway.api.routes._request_tags import RequestMetadata, RequestTagsHeader, forwarded_metadata, resolved_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
@@ -68,10 +54,12 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.schemas.inference import SettledCost
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
     bind_upstream_user,
     call_responses,
+    provider_failure,
     responses_user_fields,
     serves_responses,
     strip_gateway_minted_items,
@@ -95,7 +83,7 @@ from gateway.services.tools import (
     ToolUseBudget,
 )
 from gateway.services.traces import read_turn
-from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat, openai_error_event
+from gateway.streaming import RESPONSES_STREAM_FORMAT, RESPONSES_TERMINAL_EVENTS, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 
@@ -252,6 +240,16 @@ def _usage_to_completion_usage(
     )
 
 
+def _ends_a_response(chunk: Any) -> bool:
+    """Whether ``chunk`` is an event that ends a response.
+
+    A stream is complete when its last chunk is one: a provider sends nothing after
+    it, and the gateway's tool loop forwards only its final round's, after
+    everything else.
+    """
+    return getattr(chunk, "type", None) in RESPONSES_TERMINAL_EVENTS
+
+
 def _ensure_provider_supports_responses(provider: LLMProvider) -> None:
     if not serves_responses(provider):
         raise HTTPException(
@@ -297,12 +295,18 @@ class _ResponsesAdapter:
         )
 
     def stream_completion(self) -> Callable[[Any], bool] | None:
-        # Not checked yet: the chat-completions bridge synthesizes the terminal
-        # event whatever the upstream sent, so it cannot tell a cut stream here.
-        return None
+        # The chat-completions bridge emits a terminal event whatever its upstream
+        # sent, so this catches a cut native stream and not a cut bridged one.
+        return _ends_a_response
 
-    def stream_error_payload(self, exc: BaseException) -> str:
-        return openai_error_event(self.stream_format, stream_error_code(exc), stream_error_message(exc))
+    def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
+        failure = provider_failure(exc, provider)
+        return openai_error_event(
+            self.stream_format,
+            stream_error_code(exc),
+            stream_error_message(exc),
+            failure.as_dict() if failure is not None else None,
+        )
 
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
         return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
@@ -348,13 +352,7 @@ class _ResponsesAdapter:
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ResponseStreamEvent]:
         return await call_responses(aresponses, _with_upstream_user(kwargs))  # type: ignore[no-any-return]
 
-    def prepare_stream_kwargs(
-        self,
-        kwargs: dict[str, Any],
-        *,
-        require_usage: bool = False,
-    ) -> dict[str, Any]:
-        del require_usage
+    def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         kwargs["stream"] = True
         return kwargs
 
@@ -368,8 +366,7 @@ class _ResponsesAdapter:
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
     ) -> ResponsesResponse:
-        # Standalone dispatch has no lock-in callback; only pass the kwarg on
-        # the platform-attempt path so test fakes can mirror each call shape.
+        # Only pass the lock-in callback when given, so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
@@ -414,41 +411,11 @@ class _ResponsesAdapter:
     ) -> dict[str, Any]:
         return inject_purpose_hints_responses({**kwargs}, hints, header=header)
 
-    def attempt_kwargs(
-        self,
-        attempt: ResolvedAttempt,
-        base_request_fields: dict[str, Any],
-    ) -> dict[str, Any]:
-        # base_request_fields carries input_data (plus provider in standalone
-        # mode, stripped here); per attempt we set provider and model from the
-        # resolved attempt in the keyword shape ``aresponses`` expects.
-        kwargs: dict[str, Any] = {"api_key": attempt.api_key}
-        if attempt.api_base:
-            kwargs["api_base"] = attempt.api_base
-        request_fields = _with_codex_extra_body(base_request_fields, attempt_provider(attempt))
-        merged = {
-            **kwargs,
-            **{k: v for k, v in request_fields.items() if k != "provider"},
-            "model": attempt.model,
-            "provider": attempt_provider(attempt),
-        }
-        # client_args (built from extra_params, e.g. Bedrock's region_name) is
-        # platform-trusted, so it's merged in last: it can never be shadowed
-        # by a same-named field in the caller's own request body. It must be
-        # nested under client_args, not merged flat, or any-llm forwards it
-        # to the completion call instead of the provider's client
-        # constructor, mirroring default_attempt_kwargs.
-        client_args = build_attempt_client_args(attempt)
-        if client_args is not None:
-            merged["client_args"] = client_args
-        return merged
-
     def local_attempt_kwargs(
         self,
         attempt: Attempt,
         base_request_fields: dict[str, Any],
     ) -> dict[str, Any]:
-        # Same keyword shape as `attempt_kwargs`, for a locally resolved attempt:
         # `aresponses` wants `provider` and `model` separately, and the Codex
         # extra-body has to be rebuilt for *this* candidate's provider.
         request_fields = _with_codex_extra_body(base_request_fields, attempt.provider)
@@ -458,16 +425,6 @@ class _ResponsesAdapter:
             "model": attempt.model,
             "provider": attempt.provider,
         }
-
-    def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        # run_platform_attempts hands us ``"model"`` as ``"provider:model"``;
-        # split it back out for the aresponses signature.
-        merged_model = kwargs.pop("model")
-        provider_str, model_str = merged_model.split(":", 1)
-        kwargs["model"] = model_str
-        provider = LLMProvider(provider_str)
-        kwargs["provider"] = provider
-        return _with_codex_extra_body(kwargs, provider)
 
 
 def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -482,10 +439,9 @@ _ADAPTER = _ResponsesAdapter()
 async def create_response(
     raw_request: Request,
     response: FastAPIResponse,
-    background_tasks: BackgroundTasks,
     request_body: ResponsesRequest,
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
-    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     files: OptionalFileServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
@@ -498,10 +454,7 @@ async def create_response(
     """OpenAI-compatible Responses endpoint.
 
     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
-    web_search in both standalone mode and hybrid mode. Hybrid-mode requests
-    resolve credentials via the platform service and get multi-attempt
-    fallback across the resolved route, tool-loop requests included (fallback
-    applies up to the pre-lock-in point, same as chat).
+    web_search.
     """
     # max_output_tokens comes from an extra="allow" body, so it may be absent,
     # non-int, or negative — only trust a non-negative int for the estimate.
@@ -514,8 +467,8 @@ async def create_response(
 
     async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Responses input payload
-        # before the cost estimate. Standalone only; no-op when the files
-        # feature is off or the request has no attachments.
+        # before the cost estimate. A no-op when the files feature is off or the
+        # request has no attachments.
         request_body.input, stats = await normalize_request_messages(
             request_body.input,
             fmt="responses",
@@ -526,6 +479,7 @@ async def create_response(
             user_id=target.user_id,
             instance=target.instance,
             workspace_id=target.file_workspace_id,
+            upstream_user=target.upstream_user,
             sandbox_requested=sandbox_requested(
                 request_body.tools,
                 config=config,
@@ -550,6 +504,7 @@ async def create_response(
             log_writer=log_writer,
             model=request_body.model,
             user_id_from_request=request_body.user,
+            safety_identifier=request_body.safety_identifier,
             estimate_prompt_chars=len(str(request_body.input))
             + len(str(getattr(request_body, "instructions", "") or "")),
             estimate_max_output_tokens=max_output_tokens,
@@ -571,57 +526,22 @@ async def create_response(
         return replay.response()
 
     # Provider-support guard: an unsupported provider would just fail
-    # downstream, so surface a clearer 400 upfront. In hybrid mode validate
-    # *every* resolved attempt so a fallback that lands on an unsupported
-    # provider (e.g. primary OpenAI, fallback Anthropic) fails fast here
-    # instead of crashing mid-fallback when the runner calls ``aresponses``
-    # on a provider that doesn't speak the Responses API.
-    if ctx.hybrid_mode:
-        route = ctx.route
-        assert route is not None  # guaranteed by the hybrid-mode preamble
-        try:
-            for attempt in route.attempts:
-                try:
-                    provider = attempt_provider(attempt)
-                except UnsupportedAttemptProviderError as exc:
-                    raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from None
-                _ensure_provider_supports_responses(provider)
-        except HTTPException:
-            if route.attempts:
-                # No provider call ran, so attach the preflight rejection to
-                # the first attempt and mark it final so later entries are unused.
-                first_attempt = route.attempts[0]
-                await _flush_pending_usage_reports(
-                    config,
-                    [
-                        _PendingUsageReport(
-                            attempt_id=first_attempt.attempt_id,
-                            outcome="error",
-                            usage=None,
-                            error_class=None,
-                            is_final_attempt=True,
-                        )
-                    ],
-                    route.request_id,
-                    request_body.session_label,
-                )
-            raise
-    else:
-        resolved = await resolve_dispatch_provider(
-            ctx, config, request_body.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
-        )
-        # ``provider`` is the underlying implementation handed to any-llm;
-        # ``billing_instance`` is the otari routing key pricing/usage key on.
-        provider, model = resolved.provider, resolved.model
-        provider_kwargs = resolved.kwargs
-        billing_instance = resolved.instance
-        try:
-            _ensure_provider_supports_responses(provider)
-        except HTTPException:
-            # The preamble already pre-debited the estimate; release it before
-            # rejecting so the held amount does not shrink the budget.
-            await release_reservation(ctx)
-            raise
+    # downstream, so surface a clearer 400 upfront.
+    resolved = await resolve_dispatch_provider(
+        ctx, config, request_body.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
+    )
+    # ``provider`` is the underlying implementation handed to any-llm;
+    # ``billing_instance`` is the otari routing key pricing/usage key on.
+    provider, model = resolved.provider, resolved.model
+    provider_kwargs = resolved.kwargs
+    billing_instance = resolved.instance
+    try:
+        _ensure_provider_supports_responses(provider)
+    except HTTPException:
+        # The preamble already pre-debited the estimate; release it before
+        # rejecting so the held amount does not shrink the budget.
+        await release_reservation(ctx)
+        raise
 
     tool_ctx = await prepare_gateway_tools(
         adapter=_ADAPTER,
@@ -643,7 +563,7 @@ async def create_response(
             ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
                 config=config,
-                uow=ctx.uow,
+                uow=uow,
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 port=tool_ports.code_execution,
@@ -651,7 +571,7 @@ async def create_response(
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,
                 config=config,
-                uow=ctx.uow,
+                uow=uow,
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 inputs=sandbox_inputs,
@@ -681,14 +601,12 @@ async def create_response(
         input_payload, codex_extra_body = _codex_extra_body(request_fields.pop("input"), client_metadata)
         request_fields.pop("stream", None)
         request_fields.pop("model", None)
-        request_fields.pop("safety_identifier", None)
         bind_upstream_user(request_fields, ctx.upstream_user)
 
         # What gets merged with per-attempt creds; it includes ``provider`` and
         # ``input_data`` so each attempt has the full call shape.
         base_request_fields = {**request_fields}
-        if not ctx.hybrid_mode:
-            base_request_fields["provider"] = provider
+        base_request_fields["provider"] = provider
         base_request_fields["input_data"] = input_payload
         if codex_extra_body is not None:
             base_request_fields[_CODEX_EXTRA_BODY_FIELD] = codex_extra_body
@@ -701,32 +619,6 @@ async def create_response(
     # Streaming path
     # ------------------------------------------------------------------
     if stream:
-        if ctx.hybrid_mode:
-            route = ctx.route
-            assert route is not None  # guaranteed by the hybrid-mode preamble
-            if not route.attempts:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=NO_RESOLVABLE_PROVIDER_DETAIL,
-                )
-            try:
-                return await run_streaming_with_fallback(
-                    adapter=_ADAPTER,
-                    route=route,
-                    base_request_fields=base_request_fields,
-                    config=config,
-                    background_tasks=background_tasks,
-                    rate_limit_info=ctx.rate_limit_info,
-                    tool_ctx=tool_ctx,
-                    session_label=request_body.session_label,
-                    started_at=ctx.started_at,
-                )
-            except HTTPException:
-                raise
-            except Exception as exc:
-                raise_all_streaming_attempts_failed(_ADAPTER, exc, route)
-
-        # Standalone: single attempt streaming.
         call_kwargs = apply_endpoint_defaults(
             {**provider_kwargs, **_with_codex_extra_body(base_request_fields, provider), "model": model}, resolved
         )
@@ -737,7 +629,6 @@ async def create_response(
             call_kwargs=call_kwargs,
             provider=billing_instance,
             model=model,
-            session_label=request_body.session_label,
             display_model=resolved.alias,
             base_request_fields=base_request_fields,
         )
@@ -745,27 +636,10 @@ async def create_response(
     # ------------------------------------------------------------------
     # Non-streaming path
     # ------------------------------------------------------------------
-    if ctx.hybrid_mode:
-        route = ctx.route
-        assert route is not None  # guaranteed by the hybrid-mode preamble
-        result = await run_platform_non_stream(
-            adapter=_ADAPTER,
-            route=route,
-            base_request_fields=base_request_fields,
-            tool_ctx=tool_ctx,
-            response=response,
-            background_tasks=background_tasks,
-            config=config,
-            rate_limit_info=ctx.rate_limit_info,
-            session_label=request_body.session_label,
-        )
-        return result.model_dump(exclude_none=True)
-
-    # Standalone non-stream path
     call_kwargs = apply_endpoint_defaults(
         {**provider_kwargs, **_with_codex_extra_body(base_request_fields, provider), "model": model}, resolved
     )
-    result = await run_standalone_non_stream(
+    result = await run_non_stream(
         adapter=_ADAPTER,
         ctx=ctx,
         tool_ctx=tool_ctx,

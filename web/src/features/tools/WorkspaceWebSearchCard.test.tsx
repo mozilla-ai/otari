@@ -327,7 +327,12 @@ describe("WorkspaceWebSearchCard", () => {
   })
 
   it("switches off and explains when neither tool can run here", async () => {
-    mockApi()
+    mockApi({
+      config: workspaceWebSearchConfig({
+        workspace_id: ALPHA,
+        web_search_configured: false,
+      }),
+    })
     renderCard({ isAvailable: false })
 
     expect(
@@ -336,6 +341,24 @@ describe("WorkspaceWebSearchCard", () => {
     const toggle = screen.getByRole("switch", { name: SWITCH })
     expect(toggle).not.toBeChecked()
     expect(toggle).toBeDisabled()
+  })
+
+  it("stays usable where only the workspace's organization key can search", async () => {
+    // The server's answer for this workspace counts its organization's search key.
+    mockApi({
+      config: workspaceWebSearchConfig({
+        workspace_id: ALPHA,
+        web_search_configured: true,
+      }),
+    })
+    renderCard({ isAvailable: false })
+
+    const toggle = await screen.findByRole("switch", { name: SWITCH })
+    await waitFor(() => expect(toggle).toBeEnabled())
+    expect(toggle).toBeChecked()
+    expect(
+      screen.queryByText(/Neither tool can run on this deployment/),
+    ).toBeNull()
   })
 
   describe("where a workspace with no row is off", () => {

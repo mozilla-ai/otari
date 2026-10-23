@@ -51,7 +51,6 @@ def _test_config(tmp_path: Path, **overrides: Any) -> GatewayConfig:
         _env_file=None,  # type: ignore[call-arg]  # BaseSettings accepts this; pyright infers __init__ from fields only.
         database_url=f"sqlite:///{tmp_path / 'trace-test.db'}",
         master_key="sk-test-master",
-        mode="standalone",
         require_pricing=False,
         # Provider copies need OTARI_PROVIDER_ACCOUNT_PEPPER, which the fixture above strips.
         files_provider_upload_enabled=False,

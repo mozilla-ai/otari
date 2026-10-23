@@ -1,7 +1,7 @@
 """The open-source API key format.
 
 Satisfies :class:`gateway.ports.api_key_format_port.ApiKeyFormatPort` with the
-format a standalone gateway has always minted: a short prefix and 64 URL-safe
+format Otari has always minted: a short prefix and 64 URL-safe
 random characters. Every presented key routes ``Local``, so verification runs
 the same hash lookup for a key of any shape, which is what keeps a key minted
 before this adapter existed working.

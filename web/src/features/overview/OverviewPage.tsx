@@ -18,6 +18,15 @@ import { KpiCell } from "@/design-system/metrics/KpiCell"
 import { KpiStrip } from "@/design-system/metrics/KpiStrip"
 import { SpendMeter } from "@/design-system/metrics/SpendMeter"
 import { TrendChip } from "@/design-system/metrics/TrendChip"
+import {
+  API_KEY_COLUMN,
+  COST_COLUMN,
+  INPUT_TOKENS_COLUMN,
+  MODEL_COLUMN,
+  OUTPUT_TOKENS_COLUMN,
+  STATUS_COLUMN,
+  TIME_COLUMN,
+} from "@/features/activity/requestColumns"
 import { scopeLabel } from "@/features/budgets/organizationBudget"
 import { SetupGuide } from "@/features/onboarding/SetupGuide"
 import { CreateOrganizationForm } from "@/features/organization/CreateOrganizationForm"
@@ -28,6 +37,7 @@ import {
   errorRateHealth,
   providerHealthStatus,
 } from "@/features/overview/overview"
+import { useHostedProviders } from "@/shared/api/hostedProviders"
 import { useModels } from "@/shared/api/models"
 import {
   useDeploymentOperator,
@@ -45,11 +55,10 @@ import {
   deltaFraction,
   formatNumber,
   formatPct,
-  formatRelative,
   formatUsd,
 } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 
 const DAY_MS = 86_400_000
 const PERIOD_DAYS = 30
@@ -460,7 +469,7 @@ function OrganizationOverview() {
   // member is not asked here (the matrix has Spend & budgets Hidden for them).
   const managesSpend = canManage(context.data)
   // What this caller could route a request to, which is the setup guide's gate
-  // here: `/providers`, the operator page's answer to the same question,
+  // here: Hosted providers, the operator page's answer to the same question,
   // refuses this caller. The catalog is not operator-gated and is filtered to
   // the selectors this caller may name, the deployment's configured instances
   // plus their organization's own keys, so an empty one means there is nothing
@@ -634,12 +643,14 @@ function OrganizationOverview() {
   )
 }
 
-// The operator index uses the provider list to make the empty gateway a
-// useful getting-started page. The providers query is operator-gated, so this
-// only runs once the gate above has answered.
+// The operator index uses the provider lists to make the empty gateway a
+// useful getting-started page: the `config.yml` instances and the deployment's
+// hosted providers, either of which serves a request. Both queries are
+// operator-gated, so this only runs once the gate above has answered.
 function OperatorOverviewIndex() {
   const providers = useProviders()
-  if (providers.isLoading) {
+  const hosted = useHostedProviders()
+  if (providers.isLoading || hosted.isLoading) {
     // A visible wait beats a blank screen while the master-key-gated providers
     // query resolves on first paint.
     return <PageLoading />
@@ -649,10 +660,15 @@ function OperatorOverviewIndex() {
   // Its refetch goes down with it: the query is cached for minutes and does not
   // refetch on focus, so without this the page's Refresh could not clear the
   // banner and a recovered backend would need a full reload to be noticed.
+  // A failed hosted read counts none rather than blocking the page; the
+  // configured list is the one whose failure is reported.
+  const providerCount = providers.isSuccess
+    ? providers.data.providers.length + (hosted.data?.data?.length ?? 0)
+    : 0
   return (
     <OverviewPage
-      needsSetup={providers.isSuccess && providers.data.providers.length === 0}
-      hasProviders={providers.isSuccess && providers.data.providers.length > 0}
+      needsSetup={providers.isSuccess && providerCount === 0}
+      hasProviders={providerCount > 0}
       setupError={providers.error}
       refreshSetup={providers.refetch}
       setupFetching={providers.isFetching}
@@ -910,28 +926,6 @@ function OverviewHeader({
   )
 }
 
-// Where "add a provider credential" lives on this deployment. Standalone serves
-// both provider pages and this prefers the deployment's own, which is not the
-// obvious answer once there are two. It is the right one because of who reaches
-// this button: `OverviewIndex` hands a caller who does not operate the
-// deployment to `OrganizationOverview`, which links to the organization's
-// provider-key page, so the only person who can press this is the operator, and
-// `/providers` is where a fresh gateway is set up and carries the first-run
-// panel that continues the flow. Gating on the caller here too would restate a
-// rule already guaranteed one level up. Hosted and a control plane report no
-// `providers` surface, so naming it unconditionally would point an operator at
-// the shell's "not available here" panel.
-//
-// Only correct for *adding* one, which is why provider health does not use it:
-// `/providers/health` reports on `config.providers`, the process-global
-// table, so on a hosted deployment an unreachable instance is not a row the
-// organization page could show. `AttentionStrip` drops the link there rather
-// than sending somebody to a page the instance is not on.
-function useAddProviderRoute(): "/providers" | "/organization/provider-keys" {
-  const serves = useSurfaces()
-  return serves("providers") ? "/providers" : "/organization/provider-keys"
-}
-
 function GetStartedStrip({
   description = "Add a provider to begin serving models. Once it is configured, this page will show your gateway\u2019s traffic, spend, and health.",
   action = "provider",
@@ -941,7 +935,6 @@ function GetStartedStrip({
   action?: "provider" | "organization-provider-key" | null
 }) {
   const navigate = useNavigate()
-  const addProviderRoute = useAddProviderRoute()
 
   return (
     <Section
@@ -965,8 +958,11 @@ function GetStartedStrip({
           onPress={() =>
             navigate({
               to:
+                // Only an operator is offered "provider" (`OverviewIndex` hands
+                // anyone else to `OrganizationOverview`), so it goes to the
+                // deployment's own keys.
                 action === "provider"
-                  ? addProviderRoute
+                  ? "/admin/hosted-providers"
                   : "/organization/provider-keys",
             })
           }
@@ -1015,12 +1011,6 @@ function AttentionStrip({
   isReady: boolean
   hasFailed: boolean
 }) {
-  // Provider health is about `config.providers`, which a hosted deployment
-  // serves no page for, so those two entries state the problem without offering
-  // a destination there. Naming one would be worse than naming none: both
-  // candidates are wrong, `/providers` because the shell answers it with "not
-  // available here" and the organization page because the instance is not on it.
-  const providerProblemsAreReachable = useSurfaces()("providers")
   // A failed source deserves a visible status message; while loading, wait for
   // actionable information instead of reserving space for a transient banner.
   if (hasFailed) {
@@ -1032,9 +1022,7 @@ function AttentionStrip({
 
   const problems: {
     text: string
-    // Absent where this deployment hosts no page for the problem; the entry
-    // renders as plain text rather than as a link nobody can follow.
-    to?: LinkProps["to"]
+    to: LinkProps["to"]
     search?: LinkProps["search"]
   }[] = []
   if ((providerHealth === "warn" || providerHealth === "alert") && total > 0) {
@@ -1044,13 +1032,13 @@ function AttentionStrip({
     if (down > 0) {
       problems.push({
         text: `${down} provider${down === 1 ? "" : "s"} unreachable`,
-        to: providerProblemsAreReachable ? "/providers" : undefined,
+        to: "/admin/hosted-providers",
       })
     }
     if (degraded > 0) {
       problems.push({
         text: `${degraded} provider${degraded === 1 ? "" : "s"} without model discovery`,
-        to: providerProblemsAreReachable ? "/providers" : undefined,
+        to: "/admin/hosted-providers",
       })
     }
   }
@@ -1103,19 +1091,15 @@ function AttentionStrip({
               ·
             </span>
           ) : null}
-          {p.to ? (
-            <Link
-              to={p.to}
-              search={p.search}
-              // Thicken the underline on hover rather than lightening the text:
-              // the color here is already the one tuned to clear AA.
-              className="underline underline-offset-2 hover:decoration-2"
-            >
-              {p.text}
-            </Link>
-          ) : (
-            <span>{p.text}</span>
-          )}
+          <Link
+            to={p.to}
+            search={p.search}
+            // Thicken the underline on hover rather than lightening the text:
+            // the color here is already the one tuned to clear AA.
+            className="underline underline-offset-2 hover:decoration-2"
+          >
+            {p.text}
+          </Link>
         </span>
       ))}
     </Section>
@@ -1216,16 +1200,27 @@ function SpendChart({
           </div>
           {/* Every fourth day, which lands nine labels across a thirty-day
               window: enough to date a bar, few enough not to become a second
-              row of text under a chart that is not the headline. */}
-          <div className="mt-1.5 flex text-mono-micro text-subtle">
-            {series.map((point, i) => (
-              <span
-                key={point.bucket_start}
-                className="min-w-px flex-1 text-center whitespace-nowrap"
-              >
-                {i % 4 === 0 ? shortDate(point.bucket_start) : "\u00a0"}
-              </span>
-            ))}
+              row of text under a chart that is not the headline.
+
+              Placed the way the hover card is: a label at a fraction `f` of
+              the plot shifts left by `f` of its own width, so it sits on its
+              bar yet can never overhang either edge, which on a phone would
+              pan the page. The non-breaking space gives the row its height. */}
+          <div className="relative mt-1.5 text-mono-micro text-subtle">
+            {"\u00a0"}
+            {series.map((point, i) => {
+              if (i % 4 !== 0) return null
+              const at = ((i + 0.5) / series.length) * 100
+              return (
+                <span
+                  key={point.bucket_start}
+                  className="absolute top-0 whitespace-nowrap"
+                  style={{ left: `${at}%`, transform: `translateX(-${at}%)` }}
+                >
+                  {shortDate(point.bucket_start)}
+                </span>
+              )
+            })}
           </div>
         </div>
       </div>
@@ -1315,41 +1310,20 @@ function shortDate(bucket: string | undefined): string {
     : d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
 
-// "absorbed" is kept verbatim rather than folded into "ok": it is an attempt a
-// routing policy recovered from, so calling it "ok" would present a failed attempt
-// as a served request, and this preview is unfiltered so those rows do appear here.
-// It is still not an error, which is why it does not read as one.
-function statusWord(status: string): string {
-  if (status === "error") return "error"
-  return status === "absorbed" ? "absorbed" : "ok"
-}
-
-/**
- * Status as a family on a square dot plus a severity in text, never as a fill.
- * The dot says which family (served, failed, recovered) and the word says what
- * happened, so neither hue alone nor shape alone has to carry it.
- */
-function StatusMark({ status }: { status: string }) {
-  const word = statusWord(status)
-  const dot =
-    word === "error"
-      ? "bg-danger"
-      : word === "absorbed"
-        ? "bg-text-subtle"
-        : "bg-success"
-  const text = word === "error" ? "text-danger" : "text-muted"
-  return (
-    <span className={`flex items-center gap-2 text-mono-caption ${text}`}>
-      <Dot className={dot} />
-      {word.toUpperCase()}
-    </span>
-  )
-}
+// The Activity log's own columns, so the preview reads as that log a few rows
+// long.
+const RECENT_COLUMNS: DataTableColumn<UsageEntry>[] = [
+  TIME_COLUMN,
+  MODEL_COLUMN,
+  API_KEY_COLUMN,
+  INPUT_TOKENS_COLUMN,
+  OUTPUT_TOKENS_COLUMN,
+  COST_COLUMN,
+  STATUS_COLUMN,
+]
 
 // Newest few requests, as an at-a-glance preview. Rows are read-only; a single
-// "View all" link opens the full Activity log. Cost and tokens are nullable per
-// row, and a failed request has neither, which reads as an em dash rather than
-// as a zero it did not spend.
+// "View all" link opens the full Activity log.
 function RecentActivity({
   entries,
   loading,
@@ -1359,63 +1333,6 @@ function RecentActivity({
   loading: boolean
   error: unknown
 }) {
-  const columns: DataTableColumn<UsageEntry>[] = [
-    {
-      id: "time",
-      header: "Time",
-      cell: (entry) => (
-        <span
-          className="text-mono-caption text-muted"
-          title={new Date(entry.timestamp).toLocaleString()}
-        >
-          {formatRelative(entry.timestamp)}
-        </span>
-      ),
-    },
-    {
-      id: "model",
-      header: "Model",
-      isRowHeader: true,
-      cell: (entry) => (
-        <span className="text-mono-caption text-foreground">{entry.model}</span>
-      ),
-    },
-    {
-      id: "key",
-      header: "Key",
-      cell: (entry) => (
-        <span className="text-mono-caption text-muted">
-          {entry.api_key_name ?? "—"}
-        </span>
-      ),
-    },
-    {
-      id: "tokens",
-      header: "Tokens",
-      align: "end",
-      cell: (entry) => (
-        <span className="text-mono-caption tabular-nums">
-          {entry.total_tokens === null ? "—" : formatNumber(entry.total_tokens)}
-        </span>
-      ),
-    },
-    {
-      id: "cost",
-      header: "Cost",
-      align: "end",
-      cell: (entry) => (
-        <span className="text-mono-caption tabular-nums">
-          {entry.cost === null ? "—" : formatUsd(entry.cost)}
-        </span>
-      ),
-    },
-    {
-      id: "status",
-      header: "Status",
-      cell: (entry) => <StatusMark status={entry.status} />,
-    },
-  ]
-
   return (
     <section className="flex flex-col pt-6 lg:pr-6">
       <div className="flex items-baseline justify-between pb-3">
@@ -1428,13 +1345,12 @@ function RecentActivity({
         </Link>
       </div>
       <ErrorBanner error={error} />
-      {/* The lane widths and the row pitch are in globals.css, keyed on the
-          column ids below: they have to reach `.table__column`, which is
-          HeroUI's DOM and not addressable from here. */}
+      {/* The lane widths and the row pitch are in globals.css, shared with
+          the Activity log and keyed on the column ids. */}
       <div className="otari-overview-activity">
         <DataTable
           ariaLabel="Recent activity"
-          columns={columns}
+          columns={RECENT_COLUMNS}
           rows={entries}
           getRowKey={(entry) => entry.id}
           isLoading={loading}

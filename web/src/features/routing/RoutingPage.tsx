@@ -9,7 +9,6 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { DocsLink } from "@/design-system/navigation/DocsLink"
@@ -23,7 +22,6 @@ import {
 } from "@/shared/api/routing"
 import { docsSourceHref } from "@/shared/helpers/docs"
 import { useUrlValue } from "@/shared/helpers/urlState"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { AutomaticFallbacks } from "./AutomaticFallbacks"
 import { CreatePolicyDialog } from "./CreatePolicyDialog"
@@ -50,11 +48,6 @@ export function RoutingPage() {
     canEdit,
     writeWorkspaceId,
   } = useRoutingRows()
-  // Only a gateway that serves requests itself compiles a policy. A hybrid one
-  // takes its attempt plan from its control plane, and a hosted control plane
-  // serves no requests, so a policy stored there is not consulted.
-  const { deployment_type } = useDeployment()
-  const isStandalone = deployment_type === "standalone"
   const deletePolicy = useDeleteRoutingPolicy()
   const deleteAlias = useDeleteAlias()
   const deleteOrgPolicy = useDeleteOrganizationRoutingPolicy()
@@ -262,14 +255,6 @@ export function RoutingPage() {
           confirm dialog, which is where the operator is looking. */}
       <ErrorBanner error={error} />
 
-      {isStandalone ? null : (
-        <InfoBanner>
-          Policies are a standalone feature: they apply only on a gateway that
-          serves requests itself. A hybrid gateway receives its attempt plan
-          from the connected control plane.
-        </InfoBanner>
-      )}
-
       {/* Mounted while closed so the frame plays its exit with the content
           intact, and keyed on the open counter so the draft is fresh on the way
           in rather than cleared on the way out. See feedback.md. */}
@@ -297,23 +282,18 @@ export function RoutingPage() {
             secondaryActionLabel="Other policy types"
             onSecondaryAction={() => openCreate()}
           >
-            {/* Catalog-ID fallback is compiled by a standalone gateway only. */}
-            {isStandalone ? (
-              <p className="max-w-prose text-caption">
-                Tip: the same model on several providers already falls back
-                automatically when callers send its catalog ID.{" "}
-                <Link to="/models" className="text-link hover:underline">
-                  Browse models
-                </Link>{" "}
-                or{" "}
-                <DocsLink
-                  href={docsSourceHref("models.md", "catalog-spellings")}
-                >
-                  read how
-                </DocsLink>
-                .
-              </p>
-            ) : null}
+            <p className="max-w-prose text-caption">
+              Tip: the same model on several providers already falls back
+              automatically when callers send its catalog ID.{" "}
+              <Link to="/models" className="text-link hover:underline">
+                Browse models
+              </Link>{" "}
+              or{" "}
+              <DocsLink href={docsSourceHref("models.md", "catalog-spellings")}>
+                read how
+              </DocsLink>
+              .
+            </p>
           </EmptyState>
         ) : (
           <EmptyState title="No routing policies yet">
@@ -338,7 +318,7 @@ export function RoutingPage() {
         </TableScrollFrame>
       )}
 
-      {isStandalone ? <AutomaticFallbacksSection /> : null}
+      <AutomaticFallbacksSection />
 
       <ConfirmDialog
         isOpen={pendingDelete !== undefined}

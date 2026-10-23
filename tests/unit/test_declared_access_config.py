@@ -137,13 +137,6 @@ def test_a_secret_may_not_be_the_master_key() -> None:
         _check_secrets(config)
 
 
-def test_a_hybrid_gateway_refuses_declarations() -> None:
-    with pytest.raises(ValueError, match="hybrid gateway holds neither"):
-        _config(mode="hybrid", budgets={"b": {"max_budget": 1}}).validate_declared_access()
-    with pytest.raises(ValueError, match="hybrid gateway holds neither"):
-        _config(mode="hybrid", api_keys={"mlpa": _key()}).validate_declared_access()
-
-
 @pytest.mark.parametrize(
     "api_keys",
     [

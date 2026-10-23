@@ -259,9 +259,9 @@ async def _run_owned_calls(
         try:
             text = await owner.call_tool(name, args)
         except MaxToolIterationsExceeded:
-            # The request's shared search and fetch limit refused the call inside the
+            # The old backend's shared search and fetch limit refused the call inside the
             # backend, after its started entry went out, so the entry ends before the
-            # request fails.
+            # request fails. On the libraries, a call past the limit returns a tool error.
             if rendering is not None:
                 yield True, rendering.refused(call)
             raise
@@ -824,8 +824,7 @@ async def mcp_tool_loop(
     ``native_tools``, across every round.
 
     ``on_first_response`` follows the provider lock-in contract documented on
-    :func:`gateway.services._tool_loop.run_tool_loop`; the hybrid-mode attempt
-    loop in :mod:`gateway.api.routes.chat` is the consumer.
+    :func:`gateway.services._tool_loop.run_tool_loop`.
 
     A first response with no choices is a provider failure, as on a call without
     tools. A later one is returned as the answer, so the rounds before it are billed.

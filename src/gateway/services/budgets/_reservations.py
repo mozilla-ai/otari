@@ -412,9 +412,10 @@ def estimate_cost(
     Output tokens default to the
     request's declared max, falling back to ``default_output_tokens`` when the
     caller leaves the output unbounded. When Anthropic cache creation is
-    requested, the input is conservatively reserved at the cache-write rate,
-    since any prompt token could become a cache write. The estimate is
-    reconciled to actual usage on completion.
+    requested, the input is conservatively reserved at the rate a write on the
+    requested TTL bills at (a ``1h`` request also covers its 5m writes), since
+    any prompt token could become a cache write. The estimate is reconciled to
+    actual usage on completion.
     """
     if pricing is None:
         return ZERO
@@ -464,7 +465,7 @@ def rerank_estimate(pricing: ModelPricing | None, *, query_chars: int, document_
 def count_estimate(pricing: ModelPricing | None, *, meter: str, count: int) -> Decimal:
     """What a request billed by ``count`` under ``meter`` holds: exactly what that count settles at."""
     clamped = min(max(count, 0), MAX_REPORTED_UNITS)
-    charge = price_usage(pricing, tokens=None, units={meter: clamped}, legacy_unit_reading=True)
+    charge = price_usage(pricing, tokens=None, units={meter: clamped})
     return charge.cost if charge is not None else ZERO
 
 

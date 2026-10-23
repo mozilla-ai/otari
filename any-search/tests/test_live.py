@@ -40,6 +40,8 @@ class Expected:
 
 
 EXPECTED: dict[str, Expected] = {
+    # DeepSeek returns page text only on request, so the snippet is what a hit says by default.
+    "deepseek": Expected(reports_cost=False, dated={}, snippets=True),
     "exa": Expected(reports_cost=True, dated={"category": "news"}),
     # Mojeek returns no page text, so the snippet is all a hit says; it dates hits by default (date=1).
     "mojeek": Expected(reports_cost=False, dated={}, snippets=True),

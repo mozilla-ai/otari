@@ -58,6 +58,7 @@ from gateway.services.tools import (
     native_rendering,
     owning_backend,
 )
+from gateway.streaming import RESPONSES_TERMINAL_EVENTS
 
 if TYPE_CHECKING:
     from any_llm.types.responses import Response, ResponseStreamEvent
@@ -180,18 +181,15 @@ def _fold_usage(result: Response, input_total: int, output_total: int, total_tot
     result.usage.total_tokens = total_total
 
 
-def _maybe_fold_response_completed_usage(event: Any, acc_output_tokens: int) -> Any:
-    """Return a ``response.completed`` event with cumulative output_tokens folded in.
+def _with_earlier_output_tokens(event: Any, acc_output_tokens: int) -> Any:
+    """Return a terminal event with the earlier rounds' output_tokens folded in.
 
-    Pass-through for any other event type or when ``acc_output_tokens`` is
-    zero. The Responses streaming usage report is read off
-    ``event.response.usage``; we ``model_copy`` the Response with an updated
-    Usage so consumers (``streaming_generator``) see the full tool-loop
-    output count instead of only the final iteration's.
+    Pass-through when ``acc_output_tokens`` is zero. The Responses streaming
+    usage report is read off ``event.response.usage``; we ``model_copy`` the
+    Response with an updated Usage so consumers (``streaming_generator``) see
+    the full tool-loop output count instead of only the final iteration's.
     """
     if acc_output_tokens <= 0:
-        return event
-    if getattr(event, "type", None) != "response.completed":
         return event
     response_obj = getattr(event, "response", None)
     usage = getattr(response_obj, "usage", None) if response_obj is not None else None
@@ -245,12 +243,16 @@ def _compaction_items(output: list[Any]) -> list[Any]:
 
 
 def _replay_items(output: list[Any], owned: list[Any]) -> list[Any]:
-    """Keep compaction and owned function calls in provider output order."""
+    """Keep compaction, reasoning and owned function calls in provider output order.
+
+    A reasoning model's function call is replayed with its id, and OpenAI refuses
+    that id without the reasoning item the call came from.
+    """
     owned_call_ids = {getattr(item, "call_id", None) for item in owned}
     return [
         item
         for item in output
-        if getattr(item, "type", None) == "compaction"
+        if getattr(item, "type", None) in ("compaction", "reasoning")
         or (getattr(item, "type", None) == "function_call" and getattr(item, "call_id", None) in owned_call_ids)
     ]
 
@@ -331,7 +333,7 @@ def _with_output_as_shown(event: Any, state: "_ResponsesStreamState", shown: dic
     try:
         return event.model_copy(update={"response": response_obj.model_copy(update={"output": output})})
     except (AttributeError, TypeError):
-        logger.warning("Could not set the shown Responses output items on response.completed")
+        logger.warning("Could not set the shown Responses output items on the terminal event")
         return event
 
 
@@ -342,7 +344,7 @@ class _ResponsesStreamState:
         # output_index -> {"call_id", "name", "arguments"}
         self.function_calls: dict[int, dict[str, Any]] = {}
         self.compaction_items: dict[int, Any] = {}
-        self.deferred_completed: ResponseStreamEvent | None = None
+        self.deferred_terminal: ResponseStreamEvent | None = None
         self.owned_specs: list[dict[str, Any]] = []
         # Native items for this iteration's gateway-run calls, minted right after
         # each call ran and drained by ``synthetic_events``.
@@ -462,8 +464,8 @@ class _ResponsesToolLoopStrategy:
         pool: ToolBackend,
         acc: dict[str, Any] | None = None,
     ) -> None:
-        # All-owned: continue. Replay compaction items and the assistant's
-        # function calls in their original output order, then append matching
+        # All-owned: continue. Replay compaction and reasoning items and the
+        # assistant's function calls in their original output order, then append matching
         # function_call_output items. Stateless compaction requires the opaque
         # compaction item on every continuation.
         output = list(result.output or [])
@@ -489,12 +491,12 @@ class _ResponsesToolLoopStrategy:
         return _ResponsesStreamState()
 
     def new_stream_accumulator(self) -> dict[str, Any]:
-        # Each iteration's ``response.completed`` carries that iteration's
-        # usage on ``event.response.usage``. When the loop continues, that
-        # event is dropped and its usage would be lost from streaming token
-        # reporting. Accumulate the per-iteration ``output_tokens`` and fold
-        # the running total into the final forwarded ``response.completed``
-        # so downstream usage logging sees the full tool-loop output count.
+        # Each iteration's terminal event carries that iteration's usage on
+        # ``event.response.usage``. When the loop continues, that event is
+        # dropped and its usage would be lost from streaming token reporting.
+        # Accumulate the per-iteration ``output_tokens`` and fold the running
+        # total into the final round's terminal event so downstream usage
+        # logging sees the full tool-loop output count.
         #
         # started / next_sequence: the client is shown ONE response even when the
         # loop consumed several upstream ones, so only the first
@@ -508,9 +510,9 @@ class _ResponsesToolLoopStrategy:
             "next_sequence": 0,
             "next_output_index": 0,
             # Every item the client was shown, by the output index it was shown at,
-            # and whether the loop changed the stream at all. The terminal
-            # ``response.completed`` lists the shown items in that order, so it agrees
-            # with the item events the client already accumulated.
+            # and whether the loop changed the stream at all. The terminal event
+            # lists the shown items in that order, so it agrees with the item events
+            # the client already accumulated.
             "shown_items": {},
             "rewritten": False,
         }
@@ -573,10 +575,12 @@ class _ResponsesToolLoopStrategy:
                 if final_name:
                     state.function_calls[idx]["name"] = final_name
 
-        elif etype == "response.completed":
+        elif etype in RESPONSES_TERMINAL_EVENTS:
             # Defer: whether it is forwarded or dropped depends on the
-            # tool-call accounting in ``stream_exiting``.
-            state.deferred_completed = event
+            # tool-call accounting in ``stream_exiting``, and a forwarded one
+            # goes after the gateway's own announcements so it is the last
+            # thing the client is sent.
+            state.deferred_terminal = event
             return StreamAction.BREAK, event
 
         raw_index = getattr(event, "output_index", None)
@@ -616,6 +620,10 @@ class _ResponsesToolLoopStrategy:
     def stream_exiting(self, state: _ResponsesStreamState, pool: ToolBackend) -> bool:
         if not state.function_calls:
             return True
+        if getattr(state.deferred_terminal, "type", None) != "response.completed":
+            # The round stopped short (incomplete, failed, or cut), so a call's
+            # arguments may be cut too: run none of them and end the stream here.
+            return True
         owned_specs: list[dict[str, Any]] = []
         has_foreign = False
         for idx in sorted(state.function_calls):
@@ -647,7 +655,7 @@ class _ResponsesToolLoopStrategy:
                 yield event
 
     def terminal_events(self, state: _ResponsesStreamState, acc: dict[str, Any]) -> list[ResponseStreamEvent]:
-        if state.deferred_completed is None:
+        if state.deferred_terminal is None:
             return []
         # The terminal event carries the whole response, whose ``output`` still lists
         # the gateway's own function_call items even though their item events were
@@ -656,20 +664,20 @@ class _ResponsesToolLoopStrategy:
         if acc["rewritten"] or state.hidden_output_indices:
             # Earlier rounds' items and the native items were shown at the indices the
             # client holds them under, which the final upstream response knows nothing of.
-            folded = _with_output_as_shown(state.deferred_completed, state, acc["shown_items"])
+            folded = _with_output_as_shown(state.deferred_terminal, state, acc["shown_items"])
         else:
-            folded = state.deferred_completed
-        folded = _maybe_fold_response_completed_usage(folded, acc["output_tokens"])
+            folded = state.deferred_terminal
+        folded = _with_earlier_output_tokens(folded, acc["output_tokens"])
         # The terminal event is the last thing the client sees, so it continues the
         # same sequence as the events forwarded before it.
         return [self._resequenced(folded, acc)]
 
     def accumulate_stream_usage(self, acc: dict[str, Any], state: _ResponsesStreamState) -> None:
         # All-owned continuation: fold this iteration's output_tokens from the
-        # dropped ``response.completed`` event into the running total.
+        # dropped terminal event into the running total.
         acc["rewritten"] = True
-        if state.deferred_completed is not None:
-            iter_response = getattr(state.deferred_completed, "response", None)
+        if state.deferred_terminal is not None:
+            iter_response = getattr(state.deferred_terminal, "response", None)
             iter_usage = getattr(iter_response, "usage", None) if iter_response is not None else None
             if iter_usage is not None:
                 acc["output_tokens"] += getattr(iter_usage, "output_tokens", 0) or 0
@@ -804,12 +812,15 @@ async def responses_tool_loop_stream(
     ``output_index``. ``response.function_call_arguments.done``, if present,
     overrides the running buffer with the terminal argument string.
 
-    Loop continuation is decided on ``response.completed``: if any buffered
-    function_call items exist AND all are owned by the pool, execute them,
-    append the originals plus the ``function_call_output`` items to
-    ``input_data``, drop the terminal ``response.completed`` event, and start
-    the next round. If any foreign function_call is present (or none at all),
-    forward ``response.completed`` and exit.
+    Loop continuation is decided on the round's terminal event. A round that
+    ended in ``response.completed`` with buffered function_call items all owned
+    by the pool has them executed, the originals plus the
+    ``function_call_output`` items appended to ``input_data``, its terminal
+    event dropped, and the next round started. Every other round ends the
+    stream, with its terminal event, if it had one, forwarded last: one with a
+    foreign function_call (or none at all), and one that ended in
+    ``response.incomplete`` or ``response.failed`` or without a terminal event,
+    whose calls may be cut short and are not run.
     """
     # aclosing makes downstream closes (client disconnect) propagate to the
     # engine generator, and through it to the upstream provider stream,

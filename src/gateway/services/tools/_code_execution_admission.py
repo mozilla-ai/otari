@@ -225,21 +225,19 @@ class DeclaredCodeExecution:
         # One claim on a held sandbox per request, however many of its candidates run the code there.
         self._leases: dict[str, ContainerLease | TenancyError] = {}
 
-    def provider_declaration(self, *, follow_head: bool = False) -> ProviderToolDeclaration | None:
+    def provider_declaration(self) -> ProviderToolDeclaration | None:
         """The provider's keyword this request declared, to decide for each candidate; ``None`` where it made none.
 
         Beside the explicit type, which always runs on the sandbox, every candidate is decided alike.
         """
         if self.keyword_entry is None:
             return None
-        uniform = self.sandbox_tool_entry is not None
         return ProviderToolDeclaration(
             tool=_code_execution_tool.TOOL,
             entry=self.keyword_entry,
             preference=self.preference,
             backend_configured=self.sandbox_available,
-            uniform=uniform,
-            follow_head=follow_head and not uniform,
+            uniform=self.sandbox_tool_entry is not None,
         )
 
     async def admit(self, *, claimed: bool, beside_sandbox: bool) -> AdmittedCodeExecution:

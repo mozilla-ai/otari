@@ -25,7 +25,7 @@ from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, UsageLog
 from gateway.ports.usage_signal_port import RecordedUsage
 
-from .conftest import MODEL_NAME, build_test_client
+from .conftest import MODEL_NAME, build_test_client, declared_test_providers
 from .test_playground import _build_world, _mock_completion
 from .test_playground import _chat as _playground_chat
 
@@ -57,6 +57,7 @@ def signaled_client(
     monkeypatch.syspath_prepend(str(tmp_path))
     sys.modules.pop(MODULE, None)
     config = GatewayConfig(
+        providers=declared_test_providers(),
         database_url=postgres_url,
         master_key="test-master-key",
         host="127.0.0.1",

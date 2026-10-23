@@ -1,12 +1,19 @@
 """Unit tests for the shared streaming_generator utility."""
 
 import asyncio
-from collections.abc import AsyncIterator
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 
+import anyio
+import anyio.lowlevel
 import pytest
 from any_llm.types.completion import CompletionUsage
+from sqlalchemy.exc import OperationalError
 
+from gateway.core.database import describe_database_error
+from gateway.log_config import logger as gateway_logger
 from gateway.streaming import (
+    _MAX_TERMINAL_BUFFER_CHUNKS,
     ANTHROPIC_STREAM_FORMAT,
     OPENAI_STREAM_FORMAT,
     RESPONSES_STREAM_FORMAT,
@@ -679,10 +686,9 @@ async def test_on_first_chunk_does_not_fire_when_extract_usage_raises_on_first_c
 
 @pytest.mark.asyncio
 async def test_on_first_chunk_fires_on_flush_not_on_buffering() -> None:
-    """A chunk held in the terminal buffer (cost-carrier detection under
-    ``settle_before_done``) has not reached the client yet: on_first_chunk
-    must fire when it is actually flushed and yielded, not when it is merely
-    pulled off the upstream and buffered."""
+    """A chunk held in the terminal buffer (a cost carrier) has not reached the
+    client yet: on_first_chunk must fire when it is actually flushed and
+    yielded, not when it is merely pulled off the upstream and buffered."""
     release = asyncio.Event()
     calls = 0
 
@@ -708,13 +714,12 @@ async def test_on_first_chunk_fires_on_flush_not_on_buffering() -> None:
         on_no_usage=_noop_no_usage,
         label="test:model",
         keepalive_interval_seconds=_KEEPALIVE_INTERVAL,
-        settle_before_done=True,
         is_cost_carrier=_is_carrier,
         on_first_chunk=on_first_chunk,
     )
 
     # "carrier" is pulled off the upstream immediately and buffered (it is a
-    # cost carrier under settle_before_done), so nothing has actually reached
+    # cost carrier), so nothing has actually reached
     # the client yet: on_first_chunk must not have fired even though a real
     # chunk was already read.
     assert await gen.__anext__() == ": keepalive\n\n"
@@ -731,14 +736,106 @@ async def test_on_first_chunk_fires_on_flush_not_on_buffering() -> None:
     assert await gen.__anext__() == "data: [DONE]\n\n"
 
 
+@pytest.mark.asyncio
+async def test_usage_settles_before_the_last_cost_carrier_is_sent_and_is_attached_to_it() -> None:
+    """An earlier carrier is flushed when a later one arrives; the last one waits for the settlement."""
+    log: list[str] = []
+
+    def format_chunk(chunk: str) -> str:
+        log.append(f"sent {chunk}")
+        return _format_chunk(chunk)
+
+    def extract_usage(chunk: str) -> CompletionUsage | None:
+        return _extract_usage("usage") if chunk == "carrier-2" else None
+
+    async def on_complete(usage: CompletionUsage) -> str:
+        log.append("settled")
+        return "cost"
+
+    def attach_settlement(carrier: str, settlement: str) -> bool:
+        log.append(f"attached {settlement} to {carrier}")
+        return True
+
+    events = [
+        event
+        async for event in streaming_generator(
+            stream=_items("a", "carrier-1", "b", "carrier-2", "tail"),
+            format_chunk=format_chunk,
+            extract_usage=extract_usage,
+            fmt=OPENAI_STREAM_FORMAT,
+            on_complete=on_complete,
+            on_error=_fail_on_error,
+            label="test:model",
+            is_cost_carrier=lambda chunk: chunk.startswith("carrier"),
+            attach_settlement=attach_settlement,
+        )
+    ]
+
+    assert events == [_format_chunk(chunk) for chunk in ("a", "carrier-1", "b", "carrier-2", "tail")] + [
+        OPENAI_STREAM_FORMAT.done_marker
+    ]
+    assert log == [
+        "sent a",
+        "sent carrier-1",
+        "sent b",
+        "settled",
+        "attached cost to carrier-2",
+        "sent carrier-2",
+        "sent tail",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_carrier_followed_by_more_than_a_terminal_suffix_is_not_held() -> None:
+    """Past the buffer's bound the carrier was not terminal, so the stream resumes before it ends."""
+    release = asyncio.Event()
+    fillers = [f"filler-{i}" for i in range(_MAX_TERMINAL_BUFFER_CHUNKS + 1)]
+    attached: list[object] = []
+
+    async def _carrier_then_more() -> AsyncIterator[str]:
+        yield "carrier"
+        for filler in fillers:
+            yield filler
+        await release.wait()
+        yield "usage"
+
+    async def on_complete(usage: CompletionUsage) -> str:
+        return "cost"
+
+    def attach_settlement(carrier: object, settlement: str) -> bool:
+        attached.append(carrier)
+        return False
+
+    gen = streaming_generator(
+        stream=_carrier_then_more(),
+        format_chunk=_format_chunk,
+        extract_usage=_extract_usage,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=on_complete,
+        on_error=_fail_on_error,
+        label="test:model",
+        is_cost_carrier=lambda chunk: chunk == "carrier",
+        attach_settlement=attach_settlement,
+    )
+
+    held = [await gen.__anext__() for _ in range(len(fillers) + 1)]
+    assert held == [_format_chunk(chunk) for chunk in ("carrier", *fillers)]
+    release.set()
+    assert [event async for event in gen] == [_format_chunk("usage"), OPENAI_STREAM_FORMAT.done_marker]
+    assert attached == [None], "a released carrier is not the one the settlement is attached to"
+
+
 def _is_stop(chunk: str) -> bool:
     return chunk == "stop"
 
 
 async def _run_with_completion_check(
-    *chunks: str, settle_before_done: bool = False
+    *chunks: str, carries_cost: bool = False
 ) -> tuple[list[str], list[BaseException], list[str]]:
-    """Run ``chunks`` through the generator with ``"stop"`` as the completing chunk."""
+    """Run ``chunks`` through the generator with ``"stop"`` as the completing chunk.
+
+    ``carries_cost`` makes ``"usage"`` a cost carrier, which the generator holds until the stream settles.
+    """
     errors: list[BaseException] = []
     settled: list[str] = []
 
@@ -766,8 +863,7 @@ async def _run_with_completion_check(
             label="test:model",
             on_no_usage=on_no_usage,
             on_incomplete=on_incomplete,
-            settle_before_done=settle_before_done,
-            is_cost_carrier=(lambda chunk: chunk == "usage") if settle_before_done else None,
+            is_cost_carrier=(lambda chunk: chunk == "usage") if carries_cost else None,
             completes_stream=_is_stop,
         )
     ]
@@ -787,11 +883,11 @@ async def test_an_upstream_that_ends_without_any_chunk_fails_the_stream() -> Non
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("settle_before_done", [False, True])
+@pytest.mark.parametrize("carries_cost", [False, True])
 async def test_an_upstream_that_stops_before_its_completing_chunk_fails_after_what_it_sent(
-    settle_before_done: bool,
+    carries_cost: bool,
 ) -> None:
-    events, errors, settled = await _run_with_completion_check("hello", "usage", settle_before_done=settle_before_done)
+    events, errors, settled = await _run_with_completion_check("hello", "usage", carries_cost=carries_cost)
 
     assert events == ["data: hello\n\n", "data: usage\n\n", ANTHROPIC_STREAM_FORMAT.error_payload]
     [error] = errors
@@ -810,7 +906,10 @@ async def test_a_stream_that_reaches_its_completing_chunk_is_unaffected_by_the_c
 
 
 class _ClosableStream:
-    """An endless stream recording whether it was closed."""
+    """An endless stream recording whether it was closed.
+
+    Reading a chunk and closing both suspend, as a provider's network calls do, so a cancellation can land in either.
+    """
 
     def __init__(self) -> None:
         self.closed = False
@@ -819,9 +918,11 @@ class _ClosableStream:
         return self
 
     async def __anext__(self) -> str:
+        await asyncio.sleep(0)
         return "chunk"
 
     async def aclose(self) -> None:
+        await asyncio.sleep(0)
         self.closed = True
 
 
@@ -843,3 +944,345 @@ async def test_a_stream_the_client_abandons_closes_its_source() -> None:
     await gen.aclose()
 
     assert source.closed
+
+
+def _settles_after_one_await(log: list[str], name: str) -> Callable[..., Awaitable[None]]:
+    """A settlement callback that suspends before it finishes, as a database write does."""
+
+    async def settle(*_: object) -> None:
+        log.append(f"{name} started")
+        await asyncio.sleep(0)
+        log.append(f"{name} finished")
+
+    return settle
+
+
+async def _read_until_the_client_leaves(
+    gen: AsyncIterator[str], leaves: Callable[[list[str]], bool]
+) -> list[type[BaseException]]:
+    """Read ``gen`` as Starlette does, canceling its task group once ``leaves`` accepts the events read so far.
+
+    Starlette answers a disconnect that way, and the cancellation is redelivered at every await until the task leaves
+    the group. ``aclose()`` throws one ``GeneratorExit`` instead, so it cannot show whether settling survives that.
+    Returns what the reading task raised.
+    """
+    observed: list[type[BaseException]] = []
+
+    async def stream_response(scope: anyio.CancelScope) -> None:
+        received: list[str] = []
+        try:
+            async for event in gen:
+                received.append(event)
+                if leaves(received):
+                    scope.cancel()
+            # Starlette's closing send, where a cancellation the generator did not raise surfaces.
+            await anyio.lowlevel.checkpoint()
+        except BaseException as exc:
+            observed.append(type(exc))
+            raise
+
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(stream_response, task_group.cancel_scope)
+    return observed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("keepalive_interval", [0.0, _KEEPALIVE_INTERVAL], ids=["direct", "keepalive"])
+async def test_a_stream_canceled_by_a_client_disconnect_settles_once_and_closes_its_source(
+    keepalive_interval: float,
+) -> None:
+    source = _ClosableStream()
+    settlement: list[str] = []
+    gen = streaming_generator(
+        stream=source,
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=_fail_on_error,
+        label="test:model",
+        on_incomplete=_settles_after_one_await(settlement, "incomplete"),
+        keepalive_interval_seconds=keepalive_interval,
+    )
+
+    observed = await _read_until_the_client_leaves(gen, lambda received: len(received) == 5)
+
+    assert settlement == ["incomplete started", "incomplete finished"]
+    assert source.closed
+    assert observed == [asyncio.CancelledError]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("chunks", "last_event_read", "callback"),
+    [
+        (("hello", "usage"), "data: usage\n\n", "complete"),
+        (("hello",), "data: hello\n\n", "no_usage"),
+    ],
+    ids=["with-usage", "without-usage"],
+)
+async def test_a_completed_stream_whose_client_leaves_while_it_settles_still_settles(
+    chunks: tuple[str, ...], last_event_read: str, callback: str
+) -> None:
+    settlement: list[str] = []
+    gen = streaming_generator(
+        stream=_items(*chunks),
+        format_chunk=_format_chunk,
+        extract_usage=_extract_usage,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=_settles_after_one_await(settlement, "complete"),
+        on_error=_fail_on_error,
+        label="test:model",
+        on_no_usage=_settles_after_one_await(settlement, "no_usage"),
+        on_incomplete=_settles_after_one_await(settlement, "incomplete"),
+    )
+
+    observed = await _read_until_the_client_leaves(gen, lambda received: received[-1] == last_event_read)
+
+    assert settlement == [f"{callback} started", f"{callback} finished"]
+    assert observed == [asyncio.CancelledError]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_stream_whose_client_leaves_while_it_settles_still_settles() -> None:
+    async def fails_after_one_chunk() -> AsyncIterator[str]:
+        yield "hello"
+        raise _StatusCodeError(503)
+
+    settlement: list[str] = []
+    gen = streaming_generator(
+        stream=fails_after_one_chunk(),
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=ANTHROPIC_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=_settles_after_one_await(settlement, "error"),
+        label="test:model",
+        on_incomplete=_settles_after_one_await(settlement, "incomplete"),
+    )
+
+    observed = await _read_until_the_client_leaves(
+        gen, lambda received: received[-1] == ANTHROPIC_STREAM_FORMAT.error_payload
+    )
+
+    assert settlement == ["error started", "error finished"]
+    assert observed == [asyncio.CancelledError]
+
+
+@pytest.mark.asyncio
+async def test_an_inline_settlement_the_client_leaves_during_still_finishes() -> None:
+    """The client leaves on a keepalive sent while the settlement is pending."""
+    settlement: list[str] = []
+
+    async def on_complete(usage: CompletionUsage) -> None:
+        settlement.append("complete started")
+        await asyncio.sleep(_KEEPALIVE_INTERVAL * 5)
+        settlement.append("complete finished")
+
+    gen = streaming_generator(
+        stream=_items("hello", "usage"),
+        format_chunk=_format_chunk,
+        extract_usage=_extract_usage,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=on_complete,
+        on_error=_fail_on_error,
+        label="test:model",
+        on_incomplete=_settles_after_one_await(settlement, "incomplete"),
+        keepalive_interval_seconds=_KEEPALIVE_INTERVAL,
+    )
+
+    observed = await _read_until_the_client_leaves(gen, lambda received: received[-1] == OPENAI_STREAM_FORMAT.keepalive)
+
+    assert settlement == ["complete started", "complete finished"]
+    assert observed == [asyncio.CancelledError]
+
+
+# ---------------------------------------------------------------------------
+# Settlement failures in the log
+# ---------------------------------------------------------------------------
+
+_ROW_DATA = "sk-live-do-not-log"
+_DATABASE_FAILURE = OperationalError("UPDATE usage_logs", {}, Exception(f"DETAIL: Failing row contains ({_ROW_DATA})"))
+
+
+@pytest.fixture
+def gateway_logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """The gateway logger does not propagate, so caplog sees it only with its handler attached."""
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.ERROR, logger="gateway")
+    try:
+        yield caplog
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
+def _fails_with(exc: Exception, after_seconds: float = 0.0) -> Callable[..., Awaitable[None]]:
+    async def fail(*_: object) -> None:
+        await asyncio.sleep(after_seconds)
+        raise exc
+
+    return fail
+
+
+async def _settle_inline(fail: Callable[..., Awaitable[None]]) -> None:
+    async for _event in streaming_generator(
+        stream=_items("hello", "usage"),
+        format_chunk=_format_chunk,
+        extract_usage=_extract_usage,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=fail,
+        on_error=_fail_on_error,
+        label="test:model",
+    ):
+        pass
+
+
+async def _settle_inline_after_the_client_left(fail: Callable[..., Awaitable[None]]) -> None:
+    gen = streaming_generator(
+        stream=_items("hello", "usage"),
+        format_chunk=_format_chunk,
+        extract_usage=_extract_usage,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=fail,
+        on_error=_fail_on_error,
+        label="test:model",
+        keepalive_interval_seconds=_KEEPALIVE_INTERVAL,
+    )
+    await _read_until_the_client_leaves(gen, lambda received: received[-1] == OPENAI_STREAM_FORMAT.keepalive)
+
+
+async def _settle_an_upstream_error(fail: Callable[..., Awaitable[None]]) -> None:
+    async def fails_after_one_chunk() -> AsyncIterator[str]:
+        yield "hello"
+        raise _StatusCodeError(503)
+
+    async for _event in streaming_generator(
+        stream=fails_after_one_chunk(),
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=fail,
+        label="test:model",
+    ):
+        pass
+
+
+async def _settle_an_abandoned_stream(fail: Callable[..., Awaitable[None]]) -> None:
+    gen = streaming_generator(
+        stream=_ClosableStream(),
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=_fail_on_error,
+        label="test:model",
+        on_incomplete=fail,
+    )
+    await gen.__anext__()
+    await gen.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("settle", "settles_after_seconds"),
+    [
+        (_settle_inline, 0.0),
+        (_settle_inline_after_the_client_left, _KEEPALIVE_INTERVAL * 5),
+        (_settle_an_upstream_error, 0.0),
+        (_settle_an_abandoned_stream, 0.0),
+    ],
+    ids=["inline", "inline-after-the-client-left", "upstream-error", "abandoned"],
+)
+@pytest.mark.parametrize(
+    ("failure", "logged_as"),
+    [
+        (_DATABASE_FAILURE, describe_database_error(_DATABASE_FAILURE)),
+        (RuntimeError(f"could not write the row for {_ROW_DATA}"), "RuntimeError"),
+    ],
+    ids=["database-error", "other-error"],
+)
+async def test_a_settlement_failure_is_logged_without_its_message(
+    gateway_logs: pytest.LogCaptureFixture,
+    settle: Callable[[Callable[..., Awaitable[None]]], Awaitable[None]],
+    settles_after_seconds: float,
+    failure: Exception,
+    logged_as: str,
+) -> None:
+    """A database error's message carries its bound parameters and the row it touched."""
+    await settle(_fails_with(failure, after_seconds=settles_after_seconds))
+
+    [record] = [r for r in gateway_logs.records if r.getMessage().startswith("Failed to")]
+    assert record.getMessage().endswith(f": {logged_as}")
+    assert _ROW_DATA not in gateway_logs.text
+
+
+async def _consume_hanging_up_after(gen: AsyncIterator[str], hang_up: str) -> None:
+    """Read ``gen`` as Starlette does, ending the task scope once ``hang_up`` is read.
+
+    A disconnect cancels the scope the response is streamed in, and anyio then cancels
+    every await left inside it, including whatever the generator still has to do.
+    """
+
+    async def _send() -> None:
+        async for event in gen:
+            if event == hang_up:
+                tg.cancel_scope.cancel()
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_send)
+
+
+async def _database_write(settled: list[str], name: str) -> None:
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    settled.append(name)
+
+
+async def _then_raises(*values: str) -> AsyncIterator[str]:
+    for value in values:
+        yield value
+    raise RuntimeError(_PROVIDER_CRASHED)
+
+
+@pytest.mark.asyncio
+async def test_a_client_that_hangs_up_mid_stream_is_still_billed() -> None:
+    settled: list[str] = []
+
+    async def _waits_on_the_provider() -> AsyncIterator[str]:
+        yield "chunk"
+        await asyncio.Event().wait()
+        yield "never"
+
+    gen = streaming_generator(
+        stream=_waits_on_the_provider(),
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=_fail_on_error,
+        label="test:model",
+        on_incomplete=lambda: _database_write(settled, "incomplete"),
+    )
+    await _consume_hanging_up_after(gen, "data: chunk\n\n")
+
+    assert settled == ["incomplete"]
+
+
+@pytest.mark.asyncio
+async def test_a_client_that_hangs_up_on_the_error_event_is_still_billed() -> None:
+    """Claude Code's ``WebSearch`` hangs up on the error that ends a tool loop at its cap."""
+    settled: list[str] = []
+
+    gen = streaming_generator(
+        stream=_then_raises("chunk"),
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=ANTHROPIC_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=lambda _exc: _database_write(settled, "error"),
+        label="test:model",
+    )
+    await _consume_hanging_up_after(gen, ANTHROPIC_STREAM_FORMAT.error_payload)
+
+    assert settled == ["error"]

@@ -84,7 +84,7 @@ describe("TopBarActions", () => {
     // none, so the seam is mounted and empty. Asserting the cluster's whole
     // membership rather than the absence of one chip is what would catch a
     // placeholder growing here later.
-    expect((await settledCluster())?.children).toHaveLength(2)
+    expect((await settledCluster())?.children).toHaveLength(3)
   })
 
   it("renders the slot module's own empty default", () => {
@@ -95,30 +95,28 @@ describe("TopBarActions", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it("adds nothing to the cluster on a gateway attached to otari.ai", async () => {
-    await renderActions({ management_url: "https://otari.ai/" })
-
-    // A management URL does not retarget the local Playground.
-    expect((await settledCluster())?.children).toHaveLength(2)
-  })
-
-  it("points Documentation at the bundled guide when no docs site is configured", async () => {
+  it("points Community at the Discord server in a new tab", async () => {
     await renderActions()
 
-    // The hash route, because the guide ships with this gateway: a router Link
-    // renders the router's own href rather than an absolute URL.
+    const link = await screen.findByRole("link", { name: "Community" })
+    expect(link).toHaveAttribute("href", "https://discord.gg/TqvzGH9mwz")
+    expect(link).toHaveAttribute("target", "_blank")
+  })
+
+  it("points Documentation at docs.otari.ai when no docs site is configured", async () => {
+    await renderActions()
+
     const link = await screen.findByRole("link", { name: "Documentation" })
-    expect(link).toHaveAttribute("href", "/docs")
-    expect(link).not.toHaveAttribute("target")
+    expect(link).toHaveAttribute("href", "https://docs.otari.ai/")
+    expect(link).toHaveAttribute("target", "_blank")
   })
 
   it("retargets Documentation at the deployment's own docs site", async () => {
-    await renderActions({ docs_url: "https://docs.otari.ai/en/" })
+    await renderActions({ docs_url: "https://docs.example.com/" })
 
     const link = await screen.findByRole("link", { name: "Documentation" })
-    expect(link).toHaveAttribute("href", "https://docs.otari.ai/en/")
-    // A new tab, like every other link out of the dashboard: this one leaves the
-    // app, where the bundled guide is a page inside it.
+    expect(link).toHaveAttribute("href", "https://docs.example.com/")
+    // A new tab, like every other link out of the dashboard.
     expect(link).toHaveAttribute("target", "_blank")
     expect(link).toHaveAttribute("rel", "noopener noreferrer")
   })

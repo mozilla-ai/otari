@@ -27,7 +27,7 @@ import {
   useDeploymentOperator,
   useOrganizationContext,
 } from "@/shared/api/organizations"
-import { useProviders } from "@/shared/api/providers"
+import { useDeploymentProviderNames } from "@/shared/api/providers"
 import {
   useAllWorkspaceBudgetDefaults,
   useAllWorkspaceProviderKeys,
@@ -539,7 +539,7 @@ function EditWorkspaceForm({
   const narrowed = (defaults.data ?? []).filter(
     (row) => row.provider_key_id !== null,
   )
-  const providers = useProviders(isOperator)
+  const providers = useDeploymentProviderNames(isOperator)
   const [name, setName] = useState(workspace.name)
   const [description, setDescription] = useState(workspace.description ?? "")
   const [budgetId, setBudgetId] = useState<string>()
@@ -664,9 +664,7 @@ function EditWorkspaceForm({
             workspaceId={workspace.id}
             budgets={budgets.data ?? []}
             narrowed={narrowed}
-            providers={(providers.data?.providers ?? []).map(
-              (provider) => provider.instance,
-            )}
+            providers={providers}
           />
         </>
       ) : null}
@@ -758,12 +756,10 @@ export function WorkspacesPage() {
       : [],
   )
   // And dropped again where no workspace has a key to depart from, which is
-  // every standalone deployment: organization-owned provider keys are a hosted
-  // surface (`organization_providers`), so the column would otherwise be a
-  // header over blank cells on the single-tenant product. Read from the answer
-  // rather than from the surface, because the routes behind those keys are
-  // mounted on standalone too and an upgraded deployment can hold rows the
-  // dashboard never offered a page for.
+  // the usual state of a deployment whose organization holds no provider keys
+  // of its own, so the column would otherwise be a header over blank cells.
+  // Read from the answer rather than from the surface, because the surface is
+  // published whether or not any key exists.
   const holdsProviderKeys = [...providerKeys.data.values()].some(
     (rows) => rows.length > 0,
   )

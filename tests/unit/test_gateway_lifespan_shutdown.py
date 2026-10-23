@@ -101,7 +101,7 @@ async def test_stop_refreshers_bounds_multiple_stuck_tasks_together() -> None:
 
 @pytest.mark.asyncio
 async def test_stop_refreshers_allows_no_tasks() -> None:
-    """Hybrid mode has no local refreshers to stop."""
+    """A gateway with no refreshers running has nothing to stop."""
     await _stop_refreshers([])
 
 
@@ -164,7 +164,7 @@ async def test_lifespan_shutdown_completes_despite_a_stuck_refresher(
     # create_app would have put the container here. It is built with the config
     # because the file store binding reads it, and the first-run key is minted
     # through its bound key format.
-    app.state.container = build_container(config=config, workspace_listener=None)
+    app.state.container = build_container(config=config)
 
     # No asyncio.timeout wrapper: if shutdown regresses this hangs, and the
     # suite-wide pytest timeout reports it. A short bound here would be
@@ -201,7 +201,7 @@ async def _started_worker_names(config: GatewayConfig, monkeypatch: pytest.Monke
         if attribute.startswith("run_"):
             monkeypatch.setattr(gateway_main, attribute, _recording_refresher(attribute, called))
 
-    workers = _start_lifespan_workers(config, build_container(config=config, workspace_listener=None))
+    workers = _start_lifespan_workers(config, build_container(config=config))
     for task, _worker in workers:
         task.cancel()
     await asyncio.gather(*(task for task, _worker in workers), return_exceptions=True)

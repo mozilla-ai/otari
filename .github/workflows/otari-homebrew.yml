@@ -55,7 +55,7 @@ jobs:
           # the tags rather than the single commit a shallow checkout fetches.
           fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.14"
 
@@ -132,6 +132,7 @@ jobs:
     needs: [build, test-formula]
     if: github.event.inputs.skip_publish != 'true'
     runs-on: ubuntu-latest
+    environment: homebrew-tap
     permissions: {}
     concurrency:
       group: otari-homebrew-tap
@@ -143,20 +144,30 @@ jobs:
           TAG: ${{ needs.build.outputs.tag }}
         run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern otari.rb --dir dist
 
-      # Same mechanics as cq's release-cli.yaml. HOMEBREW_TAP_GITHUB_TOKEN is
-      # the org secret mcpd and cq push with; RELEASE.md lists it.
+      # otari-bot is installed on the tap as well as this repository; the token
+      # is narrowed to the tap and to contents, and expires within the hour.
+      - name: Generate App token
+        id: tap-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: mozilla-ai
+          repositories: homebrew-tap
+          permission-contents: write
+
       # The concurrency group only serializes runs, not release order, so the
       # tap's current version is compared first: an older release never
       # replaces a newer formula.
       - name: Commit the formula to the tap
         env:
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
           TAG: ${{ needs.build.outputs.tag }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           FORMULA="$PWD/dist/otari.rb"
           cd "$(mktemp -d)"
-          git clone --depth 1 "https://x-access-token:${HOMEBREW_TAP_GITHUB_TOKEN}@github.com/mozilla-ai/homebrew-tap.git" .
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/mozilla-ai/homebrew-tap.git" .
           CURRENT=$(sed -nE 's|.*/releases/download/v([^/]+)/.*|\1|p' Formula/otari.rb 2>/dev/null | head -n 1)
           if [ -n "$CURRENT" ] && ! python3 - "$CURRENT" "$VERSION" <<'EOF'
           import sys

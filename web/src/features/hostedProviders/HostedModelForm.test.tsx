@@ -8,7 +8,11 @@ import { HostedModelForm } from "@/features/hostedProviders/HostedModelForm"
 import { API_ROOT } from "@/shared/api/client"
 import { renderWithRouter } from "@/tests/router"
 
-const provider = { id: "p1", provider: "fireworks" } as HostedProvider
+const provider = {
+  id: "p1",
+  name: "fireworks",
+  provider: "fireworks",
+} as HostedProvider
 
 function model(overrides: Partial<HostedModel> = {}): HostedModel {
   return {

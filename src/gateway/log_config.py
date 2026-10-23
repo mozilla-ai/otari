@@ -4,7 +4,40 @@ from typing import Any
 from rich.console import Console
 from rich.logging import RichHandler
 
+from gateway.secret_shapes import mask_credentials
+
 logger = logging.getLogger("gateway")
+
+# Not ``[redacted]``: the handler renders Rich markup, which would read that as
+# a style tag and print nothing.
+_LOG_PLACEHOLDER = "<redacted>"
+
+# Pass as ``extra`` on a record that prints a credential on purpose (the console
+# mail transport's links), which the filter then leaves alone.
+CARRIES_CREDENTIAL: dict[str, object] = {"carries_credential": True}
+
+
+class CredentialMaskingFilter(logging.Filter):
+    """Mask credentials in a record's message and traceback before any handler prints them.
+
+    A provider's error can echo the request back, credentials included, and the
+    gateway logs provider errors verbatim. A traceback keeps its rich rendering
+    unless masking changed its text.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if getattr(record, "carries_credential", False):
+            return True
+        message = record.getMessage()
+        masked = mask_credentials(message, _LOG_PLACEHOLDER)
+        if masked != message:
+            record.msg, record.args = masked, None
+        if record.exc_info and record.exc_info[1] is not None:
+            text = logging.Formatter().formatException(record.exc_info)
+            masked_text = mask_credentials(text, _LOG_PLACEHOLDER)
+            if masked_text != text:
+                record.exc_info, record.exc_text = None, masked_text
+        return True
 
 
 def _log_console() -> Console:
@@ -54,6 +87,7 @@ def setup_logger(
         logger.removeHandler(handler)
 
     handler = RichHandler(rich_tracebacks=rich_tracebacks, markup=True, **kwargs)
+    handler.addFilter(CredentialMaskingFilter())
 
     if log_format:
         formatter = logging.Formatter(log_format)

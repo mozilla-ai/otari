@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 from collections.abc import Callable, Mapping
+from datetime import datetime
 
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.settings.api_keys import ApiKeyConfig
@@ -119,7 +120,10 @@ class BudgetService:
     ) -> None:
         """Write the budgets and API keys config.yml declares over what is stored, in one transaction.
 
-        Each budget is created or replaced under its id. Each key is created or
+        Only an entry config.yml changed since a start last wrote it is written
+        (each row keeps the digest of the entry last written over it), so a change
+        made through the API, such as lowering a budget or deactivating a key, lasts
+        until config.yml changes that entry. Each budget is created or replaced under its id. Each key is created or
         updated under its config name, with its secret, its end-user budgets and,
         when it names one, the ceiling that caps it. Nothing config.yml no longer
         declares is deleted; it only stops being marked as declared. Replicas that
@@ -133,11 +137,19 @@ class BudgetService:
         """
         declared_keys = list(api_keys)
         async with self._uow:
+            stored = await self._budgets.get_many(list(budgets))
             for budget_id, budget in budgets.items():
+                digest = budget.declaration_digest()
+                current = stored.get(budget_id)
+                if current is not None and current.declared_digest == digest:
+                    # Written by an earlier start and unchanged in config.yml since:
+                    # what the API did to it since stands.
+                    continue
                 try:
                     await self._deployment.put_budget(budget_id, CreateBudgetRequest(**budget.model_dump()))
                 except TenancyError as exc:
                     raise DeclaredAccessError(f"budgets.{budget_id}", exc.message) from exc
+                await self._budgets.set_declared_digest(budget_id, digest)
             await self._budgets.mark_declared(list(budgets))
             for name, key in api_keys.items():
                 if workspace_id is None:
@@ -147,7 +159,7 @@ class BudgetService:
                         key.end_user_budget_ids, key.end_user_budget_id, check_default=True, check_list=True
                     )
                     await self._end_users.require_assignable_budgets(to_check)
-                    key_id = await self._api_keys.apply_declared_key(
+                    key_id, written = await self._api_keys.apply_declared_key(
                         name,
                         key,
                         owner=await self._organizations.billing_user_id(key.user_id),
@@ -156,7 +168,9 @@ class BudgetService:
                         workspace_id=workspace_id,
                         fingerprint=fingerprint,
                     )
-                    if key.ceiling is not None:
+                    # An unchanged entry leaves the ceiling too, so one repointed or
+                    # removed through the API stays that way.
+                    if written and key.ceiling is not None:
                         await attach_key_ceiling(self._repositories, key_id, key.ceiling)
                 except TenancyError as exc:
                     raise DeclaredAccessError(f"api_keys.{name}", exc.message) from exc
@@ -350,12 +364,24 @@ class BudgetService:
         blocked: bool | None,
         skip: int,
         limit: int,
+        created_before: datetime | None = None,
     ) -> list[EndUserPublic]:
         """Return a page of the key owner's end users, oldest first; ``external_id`` narrows it to that one."""
         async with self._uow:
             return await self._end_users.page(
-                api_key, external_id=external_id, budget_id=budget_id, blocked=blocked, skip=skip, limit=limit
+                api_key,
+                external_id=external_id,
+                budget_id=budget_id,
+                blocked=blocked,
+                skip=skip,
+                limit=limit,
+                created_before=created_before,
             )
+
+    async def delete_end_users(self, *, api_key: APIKey, user_ids: list[str]) -> int:
+        """Soft-delete these end users of the key's owner; returns how many were live and are now deleted."""
+        async with self._uow:
+            return await self._end_users.delete(api_key, user_ids)
 
     async def count_end_users(
         self, *, api_key: APIKey, external_id: str | None, budget_id: str | None, blocked: bool | None

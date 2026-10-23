@@ -139,7 +139,7 @@ def test_x_api_key_without_bearer_prefix_succeeds() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Whitespace handling (shared by every mode)
+# Whitespace handling
 # ---------------------------------------------------------------------------
 
 

@@ -20,7 +20,5 @@ gates:
       OTARI_BOOTSTRAP, register itself when its module is imported, or take its on or
       off switch from a runtime setting the dashboard can change. Also fail if it mounts
       a router or starts a worker behind a setting of its own, outside CORE_FEATURES in
-      src/gateway/features.py. A check on the deployment mode (standalone, hosted or
-      hybrid) is not a feature switch. This is "The feature registry" in
-      ARCHITECTURE.md. Pass if the diff wires no core feature.
+      src/gateway/features.py. This is "The feature registry" in ARCHITECTURE.md. Pass if the diff wires no core feature.
     accept_warnings: [judge-gate-cap]

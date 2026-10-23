@@ -1,4 +1,4 @@
-"""Workspace-scoped MCP server management (standalone mode only).
+"""Workspace-scoped MCP server management.
 
 Thin composition over
 `gateway.services.tenancy.workspace_mcp_server_service`, following
@@ -6,10 +6,6 @@ Thin composition over
 router, plus the caller's tenancy identity for the per-workspace role check
 the service runs. A request reaches these servers by naming their ids in
 ``mcp_server_ids``; see `docs/mcp.md`.
-
-Hybrid mode does not mount this router. There the same rows live on the
-platform and are managed from otari.ai, which is also what resolves them for a
-request.
 """
 
 import uuid
@@ -21,7 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.services.tenancy.workspace_mcp_server_service import (
+    WorkspaceMcpServerCheckRequest,
     WorkspaceMcpServerCreate,
+    WorkspaceMcpServerHealth,
     WorkspaceMcpServerPublic,
     WorkspaceMcpServerService,
     WorkspaceMcpServersPublic,
@@ -78,6 +76,10 @@ async def create_workspace_mcp_server(
     is checked for SSRF safety here as well as on the request path, and must
     use https when a token is set. A name already used in this workspace is
     refused with a 409.
+
+    Once stored, the server is connected to and its tools listed, and the
+    outcome is returned as `health`. A server that fails this check is still
+    stored, and `health.error` says why.
     """
     return await service.create_server(user=current_identity, workspace_id=workspace_id, request=body)
 
@@ -94,7 +96,8 @@ async def update_workspace_mcp_server(
 
     Only the fields sent are applied. Omit `authorization_token` to leave the
     stored token alone, send an empty string to clear it, or send a value to
-    rotate it.
+    rotate it. A change to the URL, the token or the allow-list checks the
+    server again, as creating it does.
     """
     return await service.update_server(
         user=current_identity,
@@ -102,6 +105,55 @@ async def update_workspace_mcp_server(
         server_id=server_id,
         request=body,
     )
+
+
+@router.post(
+    "/{server_id}/check",
+    responses={
+        status.HTTP_429_TOO_MANY_REQUESTS: {
+            "description": "Every check slot on this gateway was busy; nothing was recorded. Try again shortly."
+        }
+    },
+)
+async def check_workspace_mcp_server(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+) -> WorkspaceMcpServerPublic:
+    """Check a server's connection now. Organization owners/admins or this workspace's owners/admins.
+
+    Opens one session, lists the server's tools, and stores the outcome as
+    `health`. A server that fails is still a 200, with `health.status` set to
+    `failing`. A 429 means every check slot on this gateway was busy and
+    nothing was recorded.
+    """
+    return await service.check_server(user=current_identity, workspace_id=workspace_id, server_id=server_id)
+
+
+@router.post(
+    "/check",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"description": "The URL failed the SSRF or TLS check; nothing was sent to it."},
+        status.HTTP_429_TOO_MANY_REQUESTS: {
+            "description": "Every check slot on this gateway was busy. Try again shortly."
+        },
+    },
+)
+async def check_workspace_mcp_server_connection(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    body: WorkspaceMcpServerCheckRequest,
+) -> WorkspaceMcpServerHealth:
+    """Check connection details without storing them. Organization owners/admins or this workspace's owners/admins.
+
+    What a form's Test button calls before it saves. Answers with what a stored
+    server's `health` would say, and records nothing. Pass `server_id` and omit
+    `authorization_token` to test with that server's stored token. The URL is
+    checked for SSRF safety first, with the same 400 a create gets.
+    """
+    return await service.check_connection(user=current_identity, workspace_id=workspace_id, request=body)
 
 
 @router.delete("/{server_id}")

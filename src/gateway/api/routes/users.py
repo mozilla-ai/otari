@@ -9,6 +9,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    ApiKeyServiceDep,
     CallerOrganization,
     TelemetryStoragePortDep,
     TraceServiceDep,
@@ -16,11 +17,10 @@ from gateway.api.deps import (
     get_db,
     require_deployment_operator,
 )
-from gateway.api.routes._helpers import database_error
+from gateway.api.routes._helpers import database_error, erase_user_records
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
-from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget
 from gateway.models.money import as_float
@@ -28,8 +28,8 @@ from gateway.models.usage import UsageLog
 from gateway.models.users import User
 from gateway.repositories.users_repository import UserFilter, count_users, in_organization, page_users
 from gateway.services.budgets import budget_window
-from gateway.services.model_access import validate_allowed_models
-from gateway.services.traces import TraceWriter
+from gateway.services.model_access import validate_allowed_models, validate_allowed_tools
+from gateway.services.organizations import AccessLists
 
 router = APIRouter(
     prefix="/users",
@@ -51,6 +51,11 @@ class CreateUserRequest(BaseModel):
         default=None,
         description="Default model access-list this user's keys inherit; null = unrestricted, [] = deny all",
     )
+    allowed_tools: list[str] | None = Field(
+        default=None,
+        description="Default search tool access-list this user's keys inherit: null = the tools allowed_models "
+        "grants, [] = no tool, or search tool names ('*' for every search tool).",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
 
@@ -70,6 +75,7 @@ class UserResponse(BaseModel):
     reserved_requests: int
     budget_id: str | None
     allowed_models: list[str] | None
+    allowed_tools: list[str] | None
     budget_started_at: str | None
     next_budget_reset_at: str | None
     blocked: bool
@@ -96,6 +102,7 @@ class UserResponse(BaseModel):
             reserved_requests=user.reserved_requests,
             budget_id=user.budget_id,
             allowed_models=list(user.allowed_models) if user.allowed_models is not None else None,
+            allowed_tools=list(user.allowed_tools) if user.allowed_tools is not None else None,
             budget_started_at=user.budget_started_at.isoformat() if user.budget_started_at else None,
             next_budget_reset_at=user.next_budget_reset_at.isoformat() if user.next_budget_reset_at else None,
             blocked=bool(user.blocked),
@@ -114,6 +121,7 @@ class UpdateUserRequest(BaseModel):
     budget_id: str | None = None
     blocked: bool | None = None
     allowed_models: list[str] | None = None
+    allowed_tools: list[str] | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -207,10 +215,12 @@ async def create_user(
     request: CreateUserRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    api_keys: ApiKeyServiceDep,
 ) -> UserResponse:
     """Create a new user."""
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)
+        allowed_tools = validate_allowed_tools(config, request.allowed_tools)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -228,6 +238,17 @@ async def create_user(
         budget = _require_assignable_budget(budget_result.scalar_one_or_none(), request.budget_id)
 
     if existing_user and existing_user.deleted_at is not None:
+        # The deleted user's keys come back with it, so they are pinned as in
+        # update_user, before anything is staged.
+        try:
+            await api_keys.pin_before_user_grant(
+                config,
+                existing_user.user_id,
+                before=AccessLists(existing_user.allowed_models, existing_user.allowed_tools),
+                user_tools=allowed_tools,
+            )
+        except DATABASE_ERRORS as exc:
+            raise database_error("create user", exc) from None
         user = existing_user
         user.deleted_at = None
         # Every axis, or the recreated user inherits a cap the deleted one had
@@ -239,6 +260,7 @@ async def create_user(
         user.budget_id = request.budget_id
         user.blocked = request.blocked
         user.allowed_models = allowed_models
+        user.allowed_tools = allowed_tools
         user.metadata_ = request.metadata
         user.budget_started_at = None
         user.next_budget_reset_at = None
@@ -249,6 +271,7 @@ async def create_user(
             budget_id=request.budget_id,
             blocked=request.blocked,
             allowed_models=allowed_models,
+            allowed_tools=allowed_tools,
             metadata_=request.metadata,
         )
         db.add(user)
@@ -326,6 +349,7 @@ async def update_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     organization_id: CallerOrganization,
+    api_keys: ApiKeyServiceDep,
 ) -> UserResponse:
     """Update a user in the caller's organization."""
     user = await _load_user_in_organization(db, user_id, organization_id)
@@ -334,12 +358,36 @@ async def update_user(
     # clears to unrestricted, [] denies all, a list restricts. Note this default
     # caps a key only at key-write time; changing it does not retroactively
     # re-validate existing keys (see keys.py, validate-subset-on-write).
-    if "allowed_models" in request.model_fields_set:
-        try:
-            user.allowed_models = validate_allowed_models(config, request.allowed_models)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    fields = request.model_fields_set
+    stored = AccessLists(user.allowed_models, user.allowed_tools)
+    try:
+        access = await api_keys.check_access_lists(
+            config,
+            AccessLists(
+                request.allowed_models if "allowed_models" in fields else stored.models,
+                request.allowed_tools if "allowed_tools" in fields else stored.tools,
+            ),
+            stored=stored,
+            owner_id=None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    budget: Budget | None = None
+    if "budget_id" in fields and request.budget_id is not None:
+        budget_result = await db.execute(select(Budget).where(Budget.budget_id == request.budget_id))
+        budget = _require_assignable_budget(budget_result.scalar_one_or_none(), request.budget_id)
 
+    # Everything that can refuse the request has run, so the user's keys are pinned
+    # now, in a save of their own just before the user's. A pin never widens a key:
+    # should the user's save then fail, the keys stay pinned to what both lists
+    # allow, and sending the request again completes the change.
+    try:
+        await api_keys.pin_before_user_grant(config, user.user_id, before=stored, user_tools=access.tools)
+    except DATABASE_ERRORS as exc:
+        raise database_error("update user", exc) from None
+
+    user.allowed_models = access.models
+    user.allowed_tools = access.tools
     if request.alias is not None:
         user.alias = request.alias
     # Tri-state like ``allowed_models`` above, keyed on ``model_fields_set``
@@ -347,15 +395,12 @@ async def update_user(
     # and an explicit null detaches. Testing ``is not None`` made a budget
     # assignable and never removable, which is the state the budgets page's
     # deselect writes and reported as saved.
-    if "budget_id" in request.model_fields_set:
-        if request.budget_id is None:
+    if "budget_id" in fields:
+        if budget is None:
             user.budget_id = None
             user.budget_started_at = None
             user.next_budget_reset_at = None
         else:
-            budget_result = await db.execute(select(Budget).where(Budget.budget_id == request.budget_id))
-            budget = _require_assignable_budget(budget_result.scalar_one_or_none(), request.budget_id)
-
             user.budget_id = request.budget_id
             now = datetime.now(UTC)
             window = budget_window(now, budget)
@@ -390,43 +435,7 @@ async def delete_user(
     # Explicit erasure, not a database ON DELETE cascade: this endpoint
     # soft-deletes the user (deleted_at), so the users row is never hard-deleted
     # and the telemetry FK's SET NULL never fires here regardless of its setting.
-    #
-    # First, and outside the soft-delete's transaction. Telemetry storage settles
-    # its own writes and a deployment can be storing them out of process, where
-    # no transaction of ours reaches, so the two cannot be made atomic and the
-    # order is a choice about which way to fail. This way a failed erasure
-    # commits nothing else and answers 5xx, leaving the user active and the whole
-    # request retryable. The other order strands it: the repeat request would
-    # meet the 404 above, because the user is no longer active, so nothing would
-    # ever erase what was left behind. The cost is the narrow window where a
-    # later failure leaves an active user whose telemetry is gone, which is
-    # analytics lost rather than an erasure silently not performed, and the
-    # operator asked for that user's deletion either way.
-    #
-    # Broad on purpose: what this raises depends on the store this build bound,
-    # so an out-of-process adapter's transport error must not escape as a 500
-    # with a stack trace.
-    try:
-        await storage.purge_user(user_id=user_id)
-    except Exception:
-        logger.exception("Telemetry erasure failed for user %s; user was not deleted", user_id)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not erase this user's telemetry; the user was not deleted",
-        ) from None
-    # Agent traces follow the same rule, for the same reason. The trace writer
-    # stops writing the user's traces first, or it would write some after the purge.
-    trace_writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
-    if trace_writer is not None:
-        await trace_writer.erase_user(user_id)
-    try:
-        await traces.purge_user(user_id)
-    except Exception:
-        logger.exception("Trace erasure failed for user %s; user was not deleted", user_id)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not erase this user's agent traces; the user was not deleted",
-        ) from None
+    await erase_user_records(request, storage, traces, user_id)
 
     await db.execute(
         update(APIKey)

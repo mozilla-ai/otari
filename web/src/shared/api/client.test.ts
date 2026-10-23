@@ -151,8 +151,8 @@ describe("apiFetch", () => {
   })
 
   it("explains a reply that is not JSON instead of quoting the markup at the operator", async () => {
-    // The edge in front of a hosted deployment serves the dashboard's own page
-    // at 200 for the statuses it remaps, so a refused write arrives here looking
+    // An edge in front of the gateway can serve the dashboard's own page at
+    // 200 for the statuses it remaps, so a refused write arrives here looking
     // like a successful one. `response.json()` then throws a SyntaxError whose
     // message is the markup it choked on, and the banner rendered exactly that
     // (otari-ai#2147).
@@ -193,9 +193,9 @@ describe("apiFetch", () => {
   })
 
   it("does not quote its own 30s deadline at a caller that set a longer one", async () => {
-    // The bulk usage delete and reprice run on longRequestSignal(); telling an
-    // operator who waited five minutes that nothing answered "within 30s" would
-    // point them at the wrong thing.
+    // A refresh on longRequestSignal() can run for minutes; telling an operator
+    // who waited five minutes that nothing answered "within 30s" would point
+    // them at the wrong thing.
     const controller = new AbortController()
     vi.spyOn(globalThis, "fetch").mockRejectedValue(
       new DOMException("timed out", "TimeoutError"),

@@ -28,11 +28,11 @@ Management routes use one of two authorization shapes:
   identity, and authorize it against the organization or workspace in the
   service layer.
 
-Data-plane routes use `verify_api_key_or_master_key`. They never accept a
+Inference routes use `verify_api_key_or_master_key`. They never accept a
 dashboard cookie, including a superuser session. A header master key is billed
 through the deployment's default workspace, but accepting a cookie here would
 let any signed-in organization member spend that default workspace's provider
-credentials and budget without holding a data-plane key.
+credentials and budget without holding an API key.
 Read-only catalog routes use `verify_catalog_reader`.
 The routes a service key manages its own end users with (`api/routes/end_users.py`)
 use `verify_service_key`: no master key, no cookie, and every lookup scoped to the
@@ -81,12 +81,6 @@ counts, or limits can create free usage.
 
 New security-affecting configuration must default to the fail-closed behavior
 and reject unknown values during config loading.
-
-### Respect deployment mode
-
-Standalone serves both planes, hosted serves only the control plane, and hybrid
-serves the data plane without a local management database. Check new behavior in
-all applicable modes and avoid reporting or charging the same usage twice.
 
 Keep the status contract stable: 402 is insufficient funds or missing pricing;
 403 is forbidden, blocked, or over budget; 404 hides absent or foreign
@@ -138,8 +132,8 @@ untrusted pickle data, unsafe YAML, or shell commands built from request input.
 
 Use Critical for authentication bypass, cross-tenant access or charging, remote
 code execution, and exposed credentials. Use High for budget bypass,
-reservation leaks, SSRF, or sensitive payload exposure. Use Medium for mode
-gaps, migration hazards, and weaker abuse controls.
+reservation leaks, SSRF, or sensitive payload exposure. Use Medium for
+migration hazards and weaker abuse controls.
 
 Each finding must name the file and line, show the reachable bad outcome, explain
 impact, and recommend a concrete fix. Require a regression test that fails

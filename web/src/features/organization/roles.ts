@@ -178,7 +178,7 @@ export function memberLabel(member: OrganizationMember): string {
   return (
     member.full_name ??
     member.email ??
-    // A standalone operator identity has neither: it is a label, not a sign-in
+    // A local operator identity has neither: it is a label, not a sign-in
     // address (M4: "local identities have no email").
     (member.user_id
       ? `Identity ${member.user_id.slice(0, 8)}`

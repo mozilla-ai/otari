@@ -11,9 +11,8 @@ Use either or both of:
 - `mcp_server_ids`: ids of MCP servers your workspace has configured
 
 Otari resolves `mcp_server_ids` first and appends the resulting server configs
-to any inline `mcp_servers`. Where it resolves them depends on the mode:
-standalone reads the servers the workspace configured on this gateway, hybrid
-resolves them through otari.ai.
+to any inline `mcp_servers`, reading the servers the workspace configured on
+this gateway.
 
 When the model emits an MCP tool call, Otari:
 
@@ -21,8 +20,12 @@ When the model emits an MCP tool call, Otari:
 - appends the tool result to the conversation
 - calls the model again
 
-The loop stops when the model returns a normal assistant response or hits
-`max_tool_iterations`.
+The loop stops when the model returns a normal assistant response. Its last
+allowed round, the one `max_tool_iterations` names, offers the model none of
+Otari's tools and tells it to answer from the results it already has, so a model
+that would keep calling tools still ends with an answer. Your own tools stay on
+offer in that round. The request fails only if the model calls one of Otari's
+tools anyway.
 
 ## Caller-orchestrated MCP
 
@@ -57,10 +60,10 @@ session, no database session, no worker-local state. That is why your
 application can pause for a person for as long as it needs to.
 
 Both endpoints refer to a server by the id it was registered under. There is no
-inline server field: registering a remote MCP server through the control plane
+inline server field: registering a remote MCP server with Otari
 once, rather than transmitting a URL and a credential per request, is what keeps
 authorization, credential storage, revocation, and allowlist policy on Otari's
-side of the boundary. Local `stdio` servers stay outside this: a hosted Otari
+side of the boundary. Local `stdio` servers stay outside this: a remote Otari
 deployment cannot reach a machine-local process.
 
 ### Discovery
@@ -169,7 +172,7 @@ authorization decision and this request is refused with
 `409 mcp_server_changed` rather than executed against something else. It is not
 an approval credential.
 
-It detects Otari-side and platform-side configuration changes only. A remote
+It detects Otari-side configuration changes only. A remote
 server that changes its own catalog, or a tool's behavior, behind an unchanged
 URL will not move it; catching that would need another live `tools/list` at
 execution time, which this version does not do. The revision binds the request
@@ -227,7 +230,7 @@ Both endpoints share one error body:
 stable enums. `request_id` is an opaque Otari request id, present in every error
 body and returned in `Otari-Request-ID` on success and failure alike, which is
 why a successful body stays the plain MCP result. No error carries a server URL,
-a credential, a header, your arguments, a result, a platform detail, or raw
+a credential, a header, your arguments, a result, or raw
 exception text.
 
 | Condition | Status | Code | Execution state |
@@ -236,13 +239,13 @@ exception text.
 | Authentication failure | 401 | `authentication_failed` | `not_started` |
 | API key belongs to another regional deployment | 421 | `misdirected_request` | `not_started` |
 | Payment required or insufficient funds | 402 | `payment_required` | `not_started` |
-| Platform authorization refused | 403 | `forbidden` | `not_started` |
+| Authorization refused | 403 | `forbidden` | `not_started` |
 | Authenticated request rate exceeded | 429 | `rate_limit_exceeded` | `not_started` |
 | Server inaccessible to caller, or disabled | 404 | `mcp_server_not_found` | `not_started` |
 | Stored server revision changed | 409 | `mcp_server_changed` | `not_started` |
 | Tool absent from stored allowlist | 403 | `mcp_tool_not_allowed` | `not_started` |
 | Unsafe resolved URL | 400 | `unsafe_mcp_url` | `not_started` |
-| Stored-server resolution unavailable | 502 | `mcp_resolution_failed` | `not_started` |
+| Authentication refused for any other reason | 502 | `mcp_resolution_failed` | `not_started` |
 | Stored credential unavailable | 500 | `mcp_credentials_unavailable` | `not_started` |
 | Discovery bound or pagination failure | 502 | `mcp_discovery_limit_exceeded` | `not_started` |
 | Discovery admission deadline exceeded | 503 | `mcp_discovery_capacity_unavailable` | `not_started` |
@@ -292,12 +295,9 @@ sent to the redirect destination.
 
 ### Availability
 
-Both endpoints are data-plane surfaces. Standalone resolves stored servers from
-the authenticated API key's workspace; a master-key request holds no workspace of
-its own and reaches no stored server, so it gets the `404`. Hybrid resolves them
-through otari.ai using the authenticated user token. Hosted mode is a control
-plane and serves neither: both paths return the standard hosted-mode `404`
-naming the configured data-plane URL.
+Both endpoints resolve stored servers from the authenticated API key's
+workspace; a master-key request holds no workspace of its own and reaches no
+stored server, so it gets the `404`.
 
 ## Messages streaming activity
 
@@ -366,7 +366,7 @@ differently, and deliberately: the loop above resolves a list and skips one
 entry, while an endpoint asked about exactly that server answers `404` rather
 than returning nothing.
 
-### Configuring them (standalone)
+### Configuring them
 
 The dashboard manages them under **Tools → MCP servers**, which acts on the
 workspace the switcher has selected. Everything below is the same thing over the
@@ -409,18 +409,45 @@ an owner/admin of that workspace.
   with a `400` naming what was wrong with it.
 - A workspace may configure up to 50 servers.
 
-In hybrid mode these routes are not mounted: the servers live in otari.ai and
-are managed there.
+#### Connection checks
+
+Creating a server connects to it once, lists its tools, and returns the outcome
+as `health`. So does a `PATCH` that changes the URL, the token, or
+`allowed_tools`; other edits leave `health` as it was.
+`POST /{server_id}/check` runs the check again on demand, with the same
+permissions as an update.
+
+A server that fails its check is still stored. `health.status` is `failing` and
+`health.error` names the cause: `unreachable`, `tls_failed`, `timeout`,
+`redirected`, `unauthorized` (401), `forbidden` (403), `not_found` (404 or
+405), `server_error` (5xx), `http_error` (another status), `not_mcp` (the URL
+answered, but not as a streamable HTTP MCP server), `limits_exceeded`,
+`unsafe_url`, `credentials_unavailable` (the stored token will not decrypt), or
+`connection_failed`. `health.http_status` carries the status where the server
+refused with one. A passing check reports `tools`, every tool name the server
+offers whatever the allow-list says (up to 200), `tool_count`, the number of
+those the allow-list admits, and `missing_allowed_tools`, the allow-listed names
+the server does not offer.
+
+`POST /check` (on the collection, with no server id) checks connection details
+without storing anything, which is what the dashboard's **Test connection**
+button calls before a save. It takes `url`, `authorization_token` and
+`allowed_tools`, and answers with what `health` would say. Pass `server_id` and
+omit `authorization_token` to test with that server's stored token; `""` tests
+with none. An unsafe URL is refused with the same `400` a create gets.
+
+`health` is `null` until a check has run. It is also `null` after a connection
+change when every check slot on the gateway was busy; `POST /{server_id}/check`
+answers `429` in that case and records nothing. The value describes the server
+as of `health.checked_at`; a request still checks the URL again, and nothing is
+skipped because a check once passed.
 
 ## Limits and safety
 
 - `mcp_servers` and `mcp_server_ids` may be combined with Otari's built-in tools in one request, as [Combining tools](tools.md#combining-tools) describes. A server tool named like a built-in the request declares (`web_search`, `web_fetch` or `code_execution`) is refused with a `400`
-- `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`
+- `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`. The last round answers rather than calling Otari's tools (see above)
 - `mcp_server_ids` accepts at most 50 ids, which is also the most servers a workspace can have; a repeated id resolves once
 - Server names must be unique across everything one request uses, because Otari routes each tool call to its server by name. Two `mcp_servers` entries sharing a name are refused with a `400` naming it, the way a bad request-body URL is. An `mcp_servers` name colliding with one of your workspace's stored servers is a `400` too, but a fixed one that repeats neither name, since a stored server is not yours to read. Two stored servers sharing a name is a `500` with the names in the log, on the same grounds as a stored URL that fails its safety check
 - MCP URLs are validated to reduce SSRF risk; by default, private and reserved addresses are blocked, loopback is allowed, and `http://` is rejected when `authorization_token` is present
 - The managed MCP loop follows redirects only when the scheme, host, and port stay the same, or when a default-port `http://` URL upgrades to `https://` on the same host. Caller-orchestrated discovery and execution do not follow redirects. Configure the final URL when a managed-loop redirect changes host or port
 - `OTARI_MCP_ALLOW_LOOPBACK=false` disables loopback; `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` relaxes the private-host restriction
-
-For the hybrid platform contract behind `mcp_server_ids`, see
-[Hybrid-mode protocol](hybrid-mode-protocol.md).

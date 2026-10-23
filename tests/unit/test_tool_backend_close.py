@@ -5,14 +5,16 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import AsyncExitStack
-from typing import cast
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 from gateway.api.routes._pipeline import (
     _close_tool_backend,
+    _eager_backend_stream,
     _held_tool_backend,
-    _stream_with_stack_cleanup,
+    _OpenedTools,
     _ToolBackendKind,
 )
 
@@ -127,9 +129,33 @@ async def test_a_held_backend_is_closed_cleanly_after_a_block_that_finished() ->
     assert backend.closed_with is None
 
 
-async def _two_chunks() -> AsyncIterator[str]:
-    yield "first"
-    yield "second"
+class _TwoChunkAdapter:
+    """A format adapter whose tool loop streams two chunks."""
+
+    name = "chat"
+
+    def inject_hints(self, kwargs: dict[str, Any], hints: object, *, header: str | None) -> dict[str, Any]:
+        return kwargs
+
+    async def open_tool_loop_stream(self, *args: object, **kwargs: object) -> AsyncIterator[str]:
+        yield "first"
+        yield "second"
+
+
+def _eager_stream(stack: AsyncExitStack) -> AsyncIterator[str]:
+    """The stream over backends entered on ``stack``, as ``open_stream`` builds it."""
+    tool_ctx = SimpleNamespace(
+        mcp_server_configs=[object()],
+        use_sandbox=False,
+        use_web_search=False,
+        use_web_fetch=False,
+        tools_header=None,
+        max_tool_iterations=10,
+        use_budget=None,
+        native_tools=lambda _name: frozenset(),
+    )
+    opened = _OpenedTools(pool=cast(Any, SimpleNamespace(purpose_hints=lambda: [])), sandbox=None)
+    return _eager_backend_stream(cast(Any, _TwoChunkAdapter()), {}, opened, stack, cast(Any, tool_ctx))
 
 
 @pytest.mark.asyncio
@@ -137,7 +163,7 @@ async def test_a_stream_the_client_left_closes_its_backends_with_that_exit() -> 
     backend = _Backend()
     stack = AsyncExitStack()
     await stack.enter_async_context(backend)
-    stream = cast(AsyncGenerator[str], _stream_with_stack_cleanup(_two_chunks(), stack, _ToolBackendKind.MCP))
+    stream = cast(AsyncGenerator[str], _eager_stream(stack))
 
     assert await anext(stream) == "first"
     await stream.aclose()
@@ -151,9 +177,6 @@ async def test_a_stream_that_finished_closes_its_backends_cleanly() -> None:
     stack = AsyncExitStack()
     await stack.enter_async_context(backend)
 
-    assert [chunk async for chunk in _stream_with_stack_cleanup(_two_chunks(), stack, _ToolBackendKind.MCP)] == [
-        "first",
-        "second",
-    ]
+    assert [chunk async for chunk in _eager_stream(stack)] == ["first", "second"]
     assert backend.closed
     assert backend.closed_with is None

@@ -1,6 +1,8 @@
 // Shapes after Langfuse's trace and observation records (see
 // LANGFUSE-LICENSE.md), filled from the trace API by `fromApi.ts`.
 
+import type { TraceGateSummary } from "@/client"
+
 import type { GatewayEvent } from "./gateway"
 
 // GUARDRAIL and MCP are the gateway's own work, which Langfuse has no type for.
@@ -27,8 +29,12 @@ export interface Observation {
   // GENERATION only, the fields a gateway request carries.
   model?: string
   provider?: string
+  /** The whole prompt, cached tokens included. */
   promptTokens?: number
   completionTokens?: number
+  cachedTokens?: number
+  cacheWriteTokens?: number
+  reasoningTokens?: number
   cost?: number
   input?: unknown
   output?: unknown
@@ -43,6 +49,8 @@ export interface Trace {
   /** Absent until the session's spans have loaded. */
   gateway?: {
     events: GatewayEvent[]
+    /** Each gate a coding agent's hook reported, the ones that did something first. */
+    gates: TraceGateSummary[]
     /** Empty when the session's requests named no key. */
     apiKeyId: string
     cost: number
@@ -53,6 +61,7 @@ export interface TraceTotals {
   latencyMs: number
   promptTokens: number
   completionTokens: number
+  cachedTokens: number
   totalTokens: number
   totalCost: number
   models: string[]
@@ -63,6 +72,7 @@ export function summarizeTrace(trace: Trace): TraceTotals {
   let latencyMs = 0
   let promptTokens = 0
   let completionTokens = 0
+  let cachedTokens = 0
   let totalCost = 0
   let level: ObservationLevel = "DEFAULT"
   const models = new Set<string>()
@@ -72,6 +82,7 @@ export function summarizeTrace(trace: Trace): TraceTotals {
     if (o.type === "GENERATION") {
       promptTokens += o.promptTokens ?? 0
       completionTokens += o.completionTokens ?? 0
+      cachedTokens += o.cachedTokens ?? 0
     }
     totalCost += o.cost ?? 0
     if (o.model) models.add(o.model)
@@ -82,6 +93,7 @@ export function summarizeTrace(trace: Trace): TraceTotals {
     latencyMs,
     promptTokens,
     completionTokens,
+    cachedTokens,
     totalTokens: promptTokens + completionTokens,
     totalCost,
     models: [...models],

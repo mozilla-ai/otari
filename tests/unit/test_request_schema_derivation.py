@@ -29,7 +29,7 @@ from any_llm.types.completion import CompletionParams
 from any_llm.types.image import ImageGenerationParams
 from any_llm.types.messages import MessagesParams
 from any_llm.types.responses import ResponsesParams
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, ValidationError
 
 from gateway.api.routes._schema_derive import (
     PARAM_FIELD_RENAMES,
@@ -129,6 +129,63 @@ def test_messages_request_preserves_a_container_object_for_upstream() -> None:
     assert request.model_dump(exclude_unset=True)["container"] == container
 
 
+@pytest.mark.parametrize(
+    "output_config",
+    [{"effort": "low"}, {"format": {"type": "json_schema", "schema": {"type": "object"}}, "effort": "high"}],
+)
+def test_messages_request_forwards_output_config_as_output_format(output_config: dict[str, object]) -> None:
+    """Anthropic's ``output_config``, which Claude Code sends, reaches any-llm as ``output_format``."""
+    request = MessagesRequest.model_validate(
+        {
+            "model": "deepseek:deepseek-flash",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "max_tokens": 100,
+            "output_config": output_config,
+        }
+    )
+
+    forwarded = request.model_dump(exclude_unset=True)
+    assert forwarded["output_format"] == output_config
+    assert "output_config" not in forwarded
+    assert "output_config" not in request.model_dump()
+
+
+def test_messages_openapi_request_schema_includes_output_config() -> None:
+    """Typed clients generated from the published contract can send Anthropic's wire name."""
+    spec_path = Path(__file__).resolve().parents[2] / "docs/public/openapi.json"
+    spec = json.loads(spec_path.read_text())
+
+    properties = spec["components"]["schemas"]["MessagesRequest"]["properties"]
+    assert "output_config" in properties
+    assert "output_format" in properties
+
+
+def test_messages_request_still_takes_output_format() -> None:
+    request = MessagesRequest.model_validate(
+        {
+            "model": "anthropic:claude-opus-5-5",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "max_tokens": 100,
+            "output_format": {"effort": "low"},
+        }
+    )
+
+    assert request.model_dump(exclude_unset=True)["output_format"] == {"effort": "low"}
+
+
+def test_messages_request_refuses_output_config_with_output_format() -> None:
+    with pytest.raises(ValidationError, match="not both"):
+        MessagesRequest.model_validate(
+            {
+                "model": "anthropic:claude-opus-5-5",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "max_tokens": 100,
+                "output_config": {"effort": "low"},
+                "output_format": {"effort": "high"},
+            }
+        )
+
+
 def test_messages_openapi_request_schema_includes_container() -> None:
     """The published Messages request contract advertises container continuity, as an id or an object."""
     spec_path = Path(__file__).resolve().parents[2] / "docs/public/openapi.json"
@@ -153,14 +210,14 @@ def test_no_derived_schema_exposes_a_sensitive_param() -> None:
 
 def test_sensitive_params_are_dropped_when_deriving() -> None:
     """If a future any-llm ``*Params`` grows a sensitive field, it is not derived onto the schema."""
-    params = create_model(
-        "ParamsWithSecret",
-        model_id=(str, ...),
-        api_key=(str | None, None),
-        base_url=(str | None, None),
-        temperature=(float | None, None),
-    )
-    derived = derive_request_base(params, base_name="DerivedWithSecret")
+
+    class ParamsWithSecret(BaseModel):
+        model_id: str
+        api_key: str | None = None
+        base_url: str | None = None
+        temperature: float | None = None
+
+    derived = derive_request_base(ParamsWithSecret, base_name="DerivedWithSecret")
     fields = set(derived.model_fields)
     assert "api_key" not in fields and "base_url" not in fields
     assert {"model", "temperature"} <= fields
@@ -174,6 +231,7 @@ def test_sensitive_params_are_stripped_before_forwarding() -> None:
             "temperature": 0.5,
             "api_key": "sk-leak",
             "provider": "evil",
+            "client_args": {"base_url": "https://attacker.example"},
             "extra_body": {},
             "extra_headers": {"OpenAI-Project": "proj_other"},
             "extra_query": {"api-version": "preview"},
@@ -184,12 +242,12 @@ def test_sensitive_params_are_stripped_before_forwarding() -> None:
 
 def test_default_factory_is_preserved_when_deriving() -> None:
     """A ``default_factory`` field stays optional with its factory, not forced required."""
-    params = create_model(
-        "ParamsWithFactory",
-        model_id=(str, ...),
-        tags=(list[str], Field(default_factory=list)),
-    )
-    derived = derive_request_base(params, base_name="DerivedWithFactory")
+
+    class ParamsWithFactory(BaseModel):
+        model_id: str
+        tags: list[str] = Field(default_factory=list)
+
+    derived = derive_request_base(ParamsWithFactory, base_name="DerivedWithFactory")
     instance = derived(model="m")
     assert instance.tags == []
     assert not derived.model_fields["tags"].is_required()

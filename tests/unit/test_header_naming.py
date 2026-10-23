@@ -26,6 +26,7 @@ X_LITERAL = re.compile(r"""["']([Xx]-[A-Za-z0-9-]+)["']""")
 # alone. Each reason says what owns the name.
 INHERITED_HEADERS = {
     "x-api-key": "Anthropic's credential header, which its SDKs send.",
+    "x-claude-code-agent-id": "Claude Code's own subagent header, which traces read so a subagent opens no turn.",
     "x-claude-code-session-id": "Claude Code's own session header, which traces read to group its requests.",
     "X-Content-Type-Options": "Browser security header, honored under this name only.",
     "X-Frame-Options": "Browser security header, honored under this name only.",
@@ -34,9 +35,24 @@ INHERITED_HEADERS = {
     "X-RateLimit-Remaining": "Rate-limit convention clients already parse.",
     "X-RateLimit-Reset": "Rate-limit convention clients already parse.",
     "X-Subscription-Token": "The Brave Search API's own header.",
-    "X-Gateway-Token": "Platform wire contract; the platform must accept a new name first.",
-    "X-User-Token": "Platform wire contract; the platform must accept a new name first.",
     "x-should-retry": "The OpenAI and Anthropic SDKs' retry override, read under this name only.",
+    **{
+        f"x-stainless-{suffix}": "Sent by the OpenAI and Anthropic JS SDKs; allowed through CORS for browser apps."
+        for suffix in (
+            "arch",
+            "custom-poll-interval",
+            "helper",
+            "helper-method",
+            "lang",
+            "os",
+            "package-version",
+            "poll-helper",
+            "retry-count",
+            "runtime",
+            "runtime-version",
+            "timeout",
+        )
+    },
 }
 
 # Literals of the same shape that name no header at all.

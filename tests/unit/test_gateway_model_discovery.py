@@ -745,7 +745,9 @@ class TestKeylessProviderConnection:
             patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
             patch("gateway.services.model_discovery_service.alist_models", mock_alist),
         ):
-            result = await run_credentials_test("openai", api_key=None, api_base="http://localhost:8000/v1")
+            result = await run_credentials_test(
+                "openai", api_key=None, api_base="http://localhost:8000/v1", declared=True
+            )
 
         assert result.error is None
         assert [m.id for m in result.models] == ["local-model"]
@@ -760,10 +762,52 @@ class TestKeylessProviderConnection:
             patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
             patch("gateway.services.model_discovery_service.alist_models", mock_alist),
         ):
-            await run_credentials_test("openai", api_key="sk-real", api_base="http://localhost:8000/v1")
+            await run_credentials_test("openai", api_key="sk-real", api_base="http://localhost:8000/v1", declared=True)
 
         assert mock_alist.await_args is not None
         assert mock_alist.await_args.kwargs["api_key"] == "sk-real"
+
+    @pytest.mark.asyncio
+    async def test_a_declared_keyless_provider_dials_without_a_key(self) -> None:
+        # The Providers page saves a declared entry, and a declared ollama needs no key.
+        mock_alist = AsyncMock(return_value=[_make_model("llama3")])
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", mock_alist),
+        ):
+            result = await run_credentials_test("ollama", api_key=None, declared=True)
+
+        assert result.error is None
+        mock_alist.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_a_declared_keyed_provider_never_reads_the_provider_variable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+        mock_alist = AsyncMock(return_value=[])
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", mock_alist),
+        ):
+            result = await run_credentials_test("openai", api_key=None, declared=True)
+
+        assert result.error == "Provider 'openai' needs an API key."
+        mock_alist.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_an_organization_keyless_provider_never_reaches_the_deployments_backend(self) -> None:
+        # An organization key is not the deployment's declaration, so it never
+        # dials the deployment's own local server without an endpoint of its own.
+        mock_alist = AsyncMock(return_value=[])
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", mock_alist),
+        ):
+            result = await run_credentials_test("ollama", api_key=None, declared=False)
+
+        assert result.error == "Provider 'ollama' needs an API key."
+        mock_alist.assert_not_awaited()
 
 
 class TestProviderApiBaseSsrfGate:
@@ -786,7 +830,9 @@ class TestProviderApiBaseSsrfGate:
             patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
             patch("gateway.services.model_discovery_service.alist_models", mock_alist),
         ):
-            result = await run_credentials_test("openai", api_key="sk", api_base="http://127.0.0.1:8000/v1")
+            result = await run_credentials_test(
+                "openai", api_key="sk", api_base="http://127.0.0.1:8000/v1", declared=True
+            )
 
         assert result.error is None
         assert mock_alist.await_count == 1
@@ -799,7 +845,9 @@ class TestProviderApiBaseSsrfGate:
             patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
             patch("gateway.services.model_discovery_service.alist_models", mock_alist),
         ):
-            result = await run_credentials_test("openai", api_key="sk", api_base="http://127.0.0.1:8000/v1")
+            result = await run_credentials_test(
+                "openai", api_key="sk", api_base="http://127.0.0.1:8000/v1", declared=True
+            )
 
         # Blocked before the endpoint is dialed, surfaced as a test failure.
         assert result.error is not None
@@ -1013,7 +1061,9 @@ class TestMissingModelsEndpoint:
             patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
             patch("gateway.services.model_discovery_service.alist_models", side_effect=self._status_error(404)),
         ):
-            result = await run_credentials_test("openai", api_key="sk", api_base="https://api.otari.ai/v1")
+            result = await run_credentials_test(
+                "openai", api_key="sk", api_base="https://api.otari.ai/v1", declared=True
+            )
 
         assert result.error is not None
         assert result.discovery_unsupported is True
@@ -1027,7 +1077,7 @@ class TestMissingModelsEndpoint:
                 side_effect=self._status_error(401, "invalid api key"),
             ),
         ):
-            result = await run_credentials_test("openai", api_key="sk")
+            result = await run_credentials_test("openai", api_key="sk", declared=True)
 
         assert result.error is not None
         assert result.discovery_unsupported is False

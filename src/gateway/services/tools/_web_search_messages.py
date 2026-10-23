@@ -13,7 +13,7 @@ from anthropic.types import (
 )
 
 from gateway.services.tools._native import SERVER_TOOL_USE_ID_PREFIX, NativeCall
-from gateway.services.tools._web_display import hits_to_show, search_query
+from gateway.services.tools._web_display import hits_to_show, search_query, take_last_hits
 from gateway.services.tools._web_names import (
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     WEB_SEARCH_NATIVE_TYPE_PREFIX,
@@ -105,15 +105,15 @@ class MessagesWebSearchRendering:
         """The pair for one completed search, empty for a search that failed.
 
         A failed search has nothing to cite. The hits come from the buffer only the
-        gateway's own retrieval backend keeps, which is what tells a gateway-run
+        gateway's own search backends keep, which is what tells a gateway-run
         search apart from an MCP server's tool of the same name.
         """
-        take_last_results = getattr(pool, "take_last_results", None)
-        if call.failed or take_last_results is None:
+        hits = None if call.failed else take_last_hits(pool)
+        if hits is None:
             return []
         tool_use_id = f"{SERVER_TOOL_USE_ID_PREFIX}{uuid.uuid4().hex}"
         citations: list[WebSearchResultBlock] = []
-        for url, title, page_age in hits_to_show(take_last_results()):
+        for url, title, page_age in hits_to_show(hits):
             _append_bounded_citation(citations, tool_use_id=tool_use_id, url=url, title=title, page_age=page_age)
         return [_server_tool_use(tool_use_id, search_query(call.arguments)), _result_block(tool_use_id, citations)]
 

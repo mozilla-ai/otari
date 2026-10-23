@@ -99,6 +99,188 @@ function ZoomButton({
   )
 }
 
+const NO_LINES: boolean[] = []
+
+// A row of its own, so picking a span re-renders the two rows whose highlight
+// moves rather than every row of a long session.
+function TimelineRow({
+  id,
+  type,
+  name,
+  depth,
+  treeLines,
+  isLast,
+  startMs,
+  endMs,
+  cost,
+  dimmed,
+  selected,
+  isTabStop,
+  onSelect,
+  totalMs,
+  lanePx,
+  gutter,
+  hasNames,
+}: {
+  id: string | null
+  type: TypeKey
+  name: string
+  depth: number
+  treeLines: boolean[]
+  isLast: boolean
+  startMs: number
+  endMs: number
+  cost: number
+  dimmed: boolean
+  selected: boolean
+  isTabStop: boolean
+  onSelect: (observationId: string | null) => void
+  totalMs: number
+  lanePx: number
+  gutter: number
+  hasNames: boolean
+}) {
+  const x = (ms: number) => (ms / totalMs) * lanePx
+  const vocab = OBSERVATION_TYPES[type]
+  const duration = endMs - startMs
+  const left = x(startMs)
+  const width = Math.max(2, x(duration))
+  const durationText = formatLatency(duration)
+  const costText = cost ? formatCost(cost) : ""
+  const labelPx =
+    (durationText.length + costText.length) * MICRO_GLYPH_PX +
+    (costText ? LABEL_ITEM_GAP : 0)
+  const spaceAfter = lanePx - (left + width + LABEL_GAP)
+  const spaceBefore = left - LABEL_GAP
+  const placement: "inside" | "after" | "before" | null =
+    labelPx + LABEL_ITEM_GAP <= width
+      ? "inside"
+      : labelPx <= spaceAfter
+        ? "after"
+        : labelPx <= spaceBefore
+          ? "before"
+          : null
+  const indent = depth * INDENT
+  return (
+    <li>
+      <button
+        type="button"
+        data-trace-row
+        tabIndex={isTabStop ? 0 : -1}
+        aria-current={selected ? "true" : undefined}
+        aria-label={`${vocab.label}, ${name}, ${durationText}`}
+        onClick={() => onSelect(id)}
+        onKeyDown={moveRowFocus}
+        className={`otari-trace-ring group relative flex h-11 w-full cursor-pointer text-left md:h-[1.625rem] ${dimmed ? "opacity-30" : ""}`}
+      >
+        {selected ? (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-0 bg-primary-subtle"
+          />
+        ) : (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-0 hidden group-hover:block group-hover:bg-surface-alt"
+          />
+        )}
+        <span
+          style={{ width: gutter }}
+          className="sticky left-0 z-10 shrink-0 overflow-hidden bg-surface"
+        >
+          {selected ? (
+            <span
+              aria-hidden="true"
+              className="absolute inset-0 bg-primary-subtle"
+            />
+          ) : null}
+          {hasNames ? (
+            <>
+              {treeLines.map((continues, a) =>
+                a >= 1 && continues ? (
+                  <span
+                    key={a}
+                    aria-hidden="true"
+                    style={{
+                      left: (a - 1) * INDENT + CONNECTOR_OFFSET,
+                    }}
+                    className="absolute inset-y-0 w-px bg-border-strong"
+                  />
+                ) : null,
+              )}
+              {depth >= 1 ? (
+                <>
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      left: (depth - 1) * INDENT + CONNECTOR_OFFSET,
+                      width: INDENT - CONNECTOR_OFFSET,
+                    }}
+                    className="absolute top-0 h-1/2 border-b border-l border-border-strong"
+                  />
+                  {!isLast ? (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        left: (depth - 1) * INDENT + CONNECTOR_OFFSET,
+                      }}
+                      className="absolute top-1/2 bottom-0 w-px bg-border-strong"
+                    />
+                  ) : null}
+                </>
+              ) : null}
+              <span
+                style={{ paddingLeft: indent + 2 }}
+                className="relative flex h-full items-center gap-1 pr-1"
+              >
+                <TypeMark type={type} className="size-3 shrink-0" />
+                <span
+                  title={name}
+                  className="truncate text-shell-secondary text-foreground"
+                >
+                  {name}
+                </span>
+              </span>
+            </>
+          ) : (
+            <span className="grid h-full place-items-center">
+              <TypeMark type={type} className="size-3" />
+            </span>
+          )}
+        </span>
+        <span className="relative block" style={{ width: lanePx }}>
+          <span
+            style={{
+              left,
+              width,
+              height: `min(calc(100% - 1px), ${BAR_MAX_HEIGHT}px)`,
+            }}
+            className={`absolute top-1/2 -translate-y-1/2 ${vocab.barClass} ${selected ? "otari-trace-mark--selected" : ""}`}
+          />
+          {placement ? (
+            <span
+              style={
+                placement === "inside"
+                  ? {
+                      left: left + BAR_INSET,
+                      maxWidth: width - BAR_INSET,
+                    }
+                  : placement === "after"
+                    ? { left: left + width + LABEL_GAP }
+                    : { right: lanePx - left + LABEL_GAP }
+              }
+              className={`absolute top-1/2 z-[1] flex -translate-y-1/2 items-center gap-2 overflow-hidden text-mono-micro whitespace-nowrap ${placement === "inside" ? "text-trace-bar-ink" : "text-muted"}`}
+            >
+              <span>{durationText}</span>
+              {costText ? <span>{costText}</span> : null}
+            </span>
+          ) : null}
+        </span>
+      </button>
+    </li>
+  )
+}
+
 export function TraceTimelineView({
   trace,
   selectedId,
@@ -186,170 +368,6 @@ export function TraceTimelineView({
   const tabStop = items.some(({ node }) => node.obs.id === selectedId)
     ? selectedId
     : null
-
-  const row = ({
-    id,
-    type,
-    name,
-    depth,
-    treeLines,
-    isLast,
-    startMs,
-    endMs,
-    cost,
-    dimmed,
-  }: {
-    id: string | null
-    type: TypeKey
-    name: string
-    depth: number
-    treeLines: boolean[]
-    isLast: boolean
-    startMs: number
-    endMs: number
-    cost: number
-    dimmed: boolean
-  }) => {
-    const selected = selectedId === id
-    const vocab = OBSERVATION_TYPES[type]
-    const duration = endMs - startMs
-    const left = x(startMs)
-    const width = Math.max(2, x(duration))
-    const durationText = formatLatency(duration)
-    const costText = cost ? formatCost(cost) : ""
-    const labelPx =
-      (durationText.length + costText.length) * MICRO_GLYPH_PX +
-      (costText ? LABEL_ITEM_GAP : 0)
-    const spaceAfter = lanePx - (left + width + LABEL_GAP)
-    const spaceBefore = left - LABEL_GAP
-    const placement: "inside" | "after" | "before" | null =
-      labelPx + LABEL_ITEM_GAP <= width
-        ? "inside"
-        : labelPx <= spaceAfter
-          ? "after"
-          : labelPx <= spaceBefore
-            ? "before"
-            : null
-    const indent = depth * INDENT
-    return (
-      <li key={id ?? "session"}>
-        <button
-          type="button"
-          data-trace-row
-          tabIndex={tabStop === id ? 0 : -1}
-          aria-current={selected ? "true" : undefined}
-          aria-label={`${vocab.label}, ${name}, ${durationText}`}
-          onClick={() => onSelect(id)}
-          onKeyDown={moveRowFocus}
-          className={`otari-trace-ring group relative flex h-11 w-full cursor-pointer text-left md:h-[1.625rem] ${dimmed ? "opacity-30" : ""}`}
-        >
-          {selected ? (
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0 z-0 bg-primary-subtle"
-            />
-          ) : (
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0 z-0 hidden group-hover:block group-hover:bg-surface-alt"
-            />
-          )}
-          <span
-            style={{ width: gutter }}
-            className="sticky left-0 z-10 shrink-0 overflow-hidden bg-surface"
-          >
-            {selected ? (
-              <span
-                aria-hidden="true"
-                className="absolute inset-0 bg-primary-subtle"
-              />
-            ) : null}
-            {hasNames ? (
-              <>
-                {treeLines.map((continues, a) =>
-                  a >= 1 && continues ? (
-                    <span
-                      key={a}
-                      aria-hidden="true"
-                      style={{
-                        left: (a - 1) * INDENT + CONNECTOR_OFFSET,
-                      }}
-                      className="absolute inset-y-0 w-px bg-border-strong"
-                    />
-                  ) : null,
-                )}
-                {depth >= 1 ? (
-                  <>
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        left: (depth - 1) * INDENT + CONNECTOR_OFFSET,
-                        width: INDENT - CONNECTOR_OFFSET,
-                      }}
-                      className="absolute top-0 h-1/2 border-b border-l border-border-strong"
-                    />
-                    {!isLast ? (
-                      <span
-                        aria-hidden="true"
-                        style={{
-                          left: (depth - 1) * INDENT + CONNECTOR_OFFSET,
-                        }}
-                        className="absolute top-1/2 bottom-0 w-px bg-border-strong"
-                      />
-                    ) : null}
-                  </>
-                ) : null}
-                <span
-                  style={{ paddingLeft: indent + 2 }}
-                  className="relative flex h-full items-center gap-1 pr-1"
-                >
-                  <TypeMark type={type} className="size-3 shrink-0" />
-                  <span
-                    title={name}
-                    className="truncate text-shell-secondary text-foreground"
-                  >
-                    {name}
-                  </span>
-                </span>
-              </>
-            ) : (
-              <span className="grid h-full place-items-center">
-                <TypeMark type={type} className="size-3" />
-              </span>
-            )}
-          </span>
-          <span className="relative block" style={{ width: lanePx }}>
-            <span
-              style={{
-                left,
-                width,
-                height: `min(calc(100% - 1px), ${BAR_MAX_HEIGHT}px)`,
-              }}
-              className={`absolute top-1/2 -translate-y-1/2 ${vocab.barClass} ${selected ? "otari-trace-mark--selected" : ""}`}
-            />
-            {placement ? (
-              <span
-                style={
-                  placement === "inside"
-                    ? {
-                        left: left + BAR_INSET,
-                        maxWidth: width - BAR_INSET,
-                      }
-                    : placement === "after"
-                      ? { left: left + width + LABEL_GAP }
-                      : { right: lanePx - left + LABEL_GAP }
-                }
-                className={`absolute top-1/2 z-[1] flex -translate-y-1/2 items-center gap-2 overflow-hidden text-mono-micro whitespace-nowrap ${placement === "inside" ? "text-trace-bar-ink" : "text-muted"}`}
-              >
-                <span>{durationText}</span>
-                {costText ? <span>{costText}</span> : null}
-              </span>
-            ) : null}
-          </span>
-        </button>
-      </li>
-    )
-  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -447,32 +465,47 @@ export function TraceTimelineView({
             data-trace-rows
             className="relative flex flex-col"
           >
-            {row({
-              id: null,
-              type: "TRACE",
-              name: trace.name,
-              depth: 0,
-              treeLines: [],
-              isLast: true,
-              startMs: 0,
-              endMs: totalMs,
-              cost: totalCost,
-              dimmed: false,
-            })}
-            {items.map(({ node, treeLines, isLast }) =>
-              row({
-                id: node.obs.id,
-                type: node.obs.type,
-                name: node.obs.name,
-                depth: node.depth,
-                treeLines,
-                isLast,
-                startMs: node.obs.startMs,
-                endMs: node.obs.endMs,
-                cost: costs.get(node.obs.id) ?? 0,
-                dimmed: hasQuery && !matchesSearch(node.obs, query),
-              }),
-            )}
+            <TimelineRow
+              id={null}
+              type="TRACE"
+              name={trace.name}
+              depth={0}
+              treeLines={NO_LINES}
+              isLast
+              startMs={0}
+              endMs={totalMs}
+              cost={totalCost}
+              dimmed={false}
+              selected={selectedId === null}
+              isTabStop={tabStop === null}
+              onSelect={onSelect}
+              totalMs={totalMs}
+              lanePx={lanePx}
+              gutter={gutter}
+              hasNames={hasNames}
+            />
+            {items.map(({ node, treeLines, isLast }) => (
+              <TimelineRow
+                key={node.obs.id}
+                id={node.obs.id}
+                type={node.obs.type}
+                name={node.obs.name}
+                depth={node.depth}
+                treeLines={treeLines}
+                isLast={isLast}
+                startMs={node.obs.startMs}
+                endMs={node.obs.endMs}
+                cost={costs.get(node.obs.id) ?? 0}
+                dimmed={hasQuery && !matchesSearch(node.obs, query)}
+                selected={selectedId === node.obs.id}
+                isTabStop={tabStop === node.obs.id}
+                onSelect={onSelect}
+                totalMs={totalMs}
+                lanePx={lanePx}
+                gutter={gutter}
+                hasNames={hasNames}
+              />
+            ))}
           </ul>
         </div>
       </div>

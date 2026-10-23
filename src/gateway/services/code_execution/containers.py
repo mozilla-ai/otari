@@ -25,7 +25,7 @@ What the registry decides:
   a resume while another request is running is refused with
   :class:`ContainerBusyError` rather than admitted.
 
-Standalone only: it keeps its rows in the local database. Reclaiming the
+It keeps its rows in the local database. Reclaiming the
 sandbox itself is the provider's job, told the idle timeout at release; the
 sweep (``container_sweeper``) only drops rows whose clocks ran out.
 """
@@ -33,12 +33,12 @@ sweep (``container_sweeper``) only drops rows whose clocks ran out.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import Any, Protocol
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions.tools_exceptions import ContainerOnManagedCredentialError
 from gateway.repositories.code_execution import (
     SandboxContainerRow,
     claim_container_row,
@@ -109,26 +109,27 @@ def gateway_container_value(raw: object) -> str | None:
     return None
 
 
-def check_container_on_credential(container: object, *, managed_credential: bool) -> None:
-    """Refuse a caller-chosen container id when the upstream account is not the caller's.
+def names_provider_container(call_kwargs: Mapping[str, Any]) -> bool:
+    """Whether a provider call asks the provider to resume a container by id.
 
-    A container id names an execution environment and the files uploaded into it,
-    scoped to the *provider account* that minted it, not to an otari tenant. A
-    managed credential is one the platform owns and many workspaces share, so
-    forwarding an id the caller picked would let anyone holding one resume another
-    tenant's container and read its workspace. A container id is minted by the
-    provider and carries the caller's claim on it, so it cannot be namespaced:
-    forward or refuse are the only answers, and on a shared account the answer is
-    refuse.
-
-    ``auto`` passes: it names no container, only asks this gateway to hold its
-    own sandbox, and never reaches the provider.
-
-    Raises:
-        ContainerOnManagedCredentialError: ``managed_credential`` and ``container`` is not ``auto``.
+    That is Anthropic's top-level ``container``, or the ``container`` of an
+    OpenAI ``code_interpreter`` tool the provider runs. A container id names an
+    execution environment and its files on the *provider account* that minted
+    it, not on an Otari tenant, so where that account is shared the id cannot
+    be honored. ``auto`` names no container, and an id this gateway minted
+    addresses its own sandbox rather than the provider's.
     """
-    if managed_credential and requested_container(container) != CONTAINER_AUTO:
-        raise ContainerOnManagedCredentialError()
+    values = [call_kwargs.get("container")]
+    values.extend(
+        tool.get("container")
+        for tool in call_kwargs.get("tools") or ()
+        if isinstance(tool, dict) and tool.get("type") == "code_interpreter"
+    )
+    for value in values:
+        asked = requested_container(value)
+        if asked is not None and asked != CONTAINER_AUTO and not asked.startswith(CONTAINER_ID_PREFIX):
+            return True
+    return False
 
 
 class ContainerNotFoundError(LookupError):

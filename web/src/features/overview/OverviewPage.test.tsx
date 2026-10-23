@@ -5,12 +5,7 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type {
-  AllocationHealth,
-  DeploymentBootstrap,
-  OverviewSummary,
-  UsageSummary,
-} from "@/client"
+import type { AllocationHealth, OverviewSummary, UsageSummary } from "@/client"
 import {
   localDayKey,
   OverviewIndex,
@@ -21,7 +16,6 @@ import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,
-  HOSTED_SURFACES,
   organizationContext,
   pendingOrganizationInvitation,
   seriesPoint,
@@ -102,6 +96,8 @@ function strip(over: Partial<AllocationHealth> = {}): AllocationHealth {
 }
 
 interface Bodies {
+  /** What GET /hosted-providers lists. */
+  hostedProviders?: unknown[]
   today?: Partial<UsageSummary["totals"]>
   period?: Partial<UsageSummary["totals"]>
   prev?: Partial<UsageSummary["totals"]>
@@ -193,6 +189,10 @@ function mockApi(b: Bodies) {
         b.health ?? { providers: [], healthy: 0, total: 0, checked_at: null },
       )
     }
+    if (url.includes(`${API_ROOT}/hosted-providers`)) {
+      const hosted = b.hostedProviders ?? []
+      return jsonResponse({ data: hosted, count: hosted.length })
+    }
     if (url.includes(`${API_ROOT}/budgets`))
       return jsonResponse(b.budgets ?? [])
     if (url.includes(`${API_ROOT}/keys`)) return jsonResponse(b.keys ?? [])
@@ -212,27 +212,19 @@ function LocationProbe() {
   return <div data-testid="loc">{loc.pathname}</div>
 }
 
-function renderPage(
-  ui: ReactElement,
-  initial = "/overview",
-  deployment: DeploymentBootstrap = bootstrap(),
-) {
+function renderPage(ui: ReactElement, initial = "/overview") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    // The page composes the setup guide, which is gated on the deployment's
-    // surfaces, so the bootstrap has to be in the tree even for the tests that
-    // are about a tile. The guide itself renders nothing here: with no
-    // workspace selected there is nothing for it to be about.
     <QueryClientProvider client={client}>
-      <DeploymentProvider value={deployment}>{ui}</DeploymentProvider>
+      <DeploymentProvider value={bootstrap()}>{ui}</DeploymentProvider>
     </QueryClientProvider>,
     {
       wrapper: withRouter({
         url: initial,
         routes: [
-          { path: "/providers", element: <LocationProbe /> },
+          { path: "/admin/hosted-providers", element: <LocationProbe /> },
           { path: "/organization/provider-keys", element: <LocationProbe /> },
         ],
       }),
@@ -248,18 +240,14 @@ function renderPage(
  * roster is one of those, so a test about it has to seat the provider, which
  * seeds itself from `workspace_memberships` on the organization context.
  */
-function renderPageInWorkspace(
-  ui: ReactElement,
-  selected: string,
-  deployment: DeploymentBootstrap = bootstrap(),
-) {
+function renderPageInWorkspace(ui: ReactElement, selected: string) {
   window.localStorage.setItem("otari.dashboard.selectedWorkspace", selected)
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <DeploymentProvider value={deployment}>
+      <DeploymentProvider value={bootstrap()}>
         <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
       </DeploymentProvider>
     </QueryClientProvider>,
@@ -267,7 +255,7 @@ function renderPageInWorkspace(
       wrapper: withRouter({
         url: "/overview",
         routes: [
-          { path: "/providers", element: <LocationProbe /> },
+          { path: "/admin/hosted-providers", element: <LocationProbe /> },
           { path: "/organization/provider-keys", element: <LocationProbe /> },
         ],
       }),
@@ -675,38 +663,11 @@ describe("OverviewPage", () => {
     // log and still look like it worked.
     expect(
       await screen.findByRole("link", { name: "1 provider unreachable" }),
-    ).toHaveAttribute("href", "/providers")
+    ).toHaveAttribute("href", "/admin/hosted-providers")
     expect(screen.getByRole("link", { name: /^error rate/ })).toHaveAttribute(
       "href",
       "/activity?status=error",
     )
-  })
-
-  it("states an unreachable provider without a link on a hosted deployment", async () => {
-    // Provider health reports on `config.providers`, the process-global table a
-    // hosted deployment serves no page for, so both candidate destinations are
-    // wrong: `/providers` is answered with "not available here", and the
-    // organization page lists a different table the instance is not on.
-    mockApi({
-      health: {
-        providers: [],
-        healthy: 2,
-        total: 3,
-        checked_at: "2026-07-22T00:00:00Z",
-      },
-    })
-    renderPage(
-      <OverviewPage />,
-      "/overview",
-      bootstrap({ deployment_type: "hosted", surfaces: HOSTED_SURFACES }),
-    )
-
-    expect(
-      await screen.findByText("1 provider unreachable"),
-    ).toBeInTheDocument()
-    expect(
-      screen.queryByRole("link", { name: "1 provider unreachable" }),
-    ).toBeNull()
   })
 
   it("hides the status strip when nothing needs attention", async () => {
@@ -814,7 +775,7 @@ describe("OverviewIndex routing", () => {
 
   it("shows a getting-started overview and links to providers on a fresh gateway", async () => {
     // The deployment's own credentials: only a deployment operator is sent to
-    // `/providers`, since `OrganizationOverview` links to the organization's
+    // Hosted providers, since `OrganizationOverview` links to the organization's
     // provider-key page.
     mockApi({ providers: [] })
     const user = userEvent.setup()
@@ -827,32 +788,32 @@ describe("OverviewIndex routing", () => {
     await user.click(
       screen.getByRole("button", { name: "Add your first provider" }),
     )
-    expect(await screen.findByTestId("loc")).toHaveTextContent("/providers")
+    expect(await screen.findByTestId("loc")).toHaveTextContent(
+      "/admin/hosted-providers",
+    )
   })
 
-  it("sends a hosted deployment to the same organization page", async () => {
-    // A hosted deployment does not report the `providers` surface at all, so
-    // the shell answers that route with "not available here". Both topologies
-    // land in the same place now, which is the point: the row that moved is the
-    // fallback, not this answer.
-    mockApi({ providers: [] })
-    const user = userEvent.setup()
-    renderPage(
-      <OverviewIndex />,
-      "/overview",
-      bootstrap({
-        deployment_type: "hosted",
-        surfaces: HOSTED_SURFACES,
-      }),
-    )
+  it("counts a hosted provider as a configured one", async () => {
+    // Hosted providers are not in GET /providers, which lists config.yml
+    // instances only, so a gateway whose one provider is hosted is not empty.
+    const fetchMock = mockApi({
+      providers: [],
+      hostedProviders: [{ name: "openai" }],
+    })
+    renderPage(<OverviewIndex />)
 
-    await screen.findByText("Get started with Otari")
-    await user.click(
-      screen.getByRole("button", { name: "Add your first provider" }),
+    expect(await screen.findByText("Overview")).toBeInTheDocument()
+    // Settled on the empty-state inputs (the provider lists and the recent
+    // log) before asserting what they decided.
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          /\/api\/v1\/usage(\?|$)/.test(String(input)),
+        ),
+      ).toBe(true),
     )
-    expect(await screen.findByTestId("loc")).toHaveTextContent(
-      "/organization/provider-keys",
-    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByText("Get started with Otari")).toBeNull()
   })
 
   it("reports a failed provider query instead of silently rendering a normal overview", async () => {
@@ -1086,7 +1047,17 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     })
     renderPage(<OverviewIndex />)
 
-    expect(await screen.findByText("gpt-5.6")).toBeInTheDocument()
+    const row = (await screen.findByText("gpt-5.6")).closest("tr")!
+    // The Activity log's columns: input and output apart, not one total.
+    expect(
+      screen.getByRole("columnheader", { name: "Input" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("columnheader", { name: "Output" }),
+    ).toBeInTheDocument()
+    expect(within(row).getByText("10")).toBeInTheDocument()
+    expect(within(row).getByText("5")).toBeInTheDocument()
+    expect(within(row).queryByText("15")).not.toBeInTheDocument()
     // Activity serves this caller from the same scoped surface, so the preview
     // may hand them off to it.
     expect(screen.getByRole("link", { name: /view all/i })).toHaveAttribute(
@@ -1740,13 +1711,7 @@ describe("OverviewIndex for an identity with no organization", () => {
   } = {}) {
     return render(
       <QueryClientProvider client={client}>
-        <DeploymentProvider
-          value={bootstrap({
-            deployment_type: "hosted",
-            surfaces: HOSTED_SURFACES,
-            open_signup: openSignup,
-          })}
-        >
+        <DeploymentProvider value={bootstrap({ open_signup: openSignup })}>
           <OverviewIndex />
         </DeploymentProvider>
       </QueryClientProvider>,

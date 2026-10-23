@@ -1,4 +1,4 @@
-"""Signup, email verification, and resending a verification link (standalone mode only).
+"""Signup, email verification, and resending a verification link.
 
 Deliberately public, the same reasoning ``invitations.py`` gives its two
 routes: the person completing signup or opening a verification link holds no

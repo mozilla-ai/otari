@@ -164,7 +164,10 @@ export function WorkspaceWebSearchCard({
   // a workspace that may well have a stored row, and one change issues the
   // write that drops it.
   const isUnreadable = query.isLoading || query.isError || !config
-  const narrowingDisabled = isUnreadable || !isAvailable || !isOn
+  // The workspace's own answer also counts its organization's search key,
+  // which serves its search requests where the deployment has no search.
+  const available = isAvailable || config?.web_search_configured === true
+  const narrowingDisabled = isUnreadable || !available || !isOn
 
   const setAllowed = (allowed: boolean) =>
     save.run(() =>
@@ -194,7 +197,8 @@ export function WorkspaceWebSearchCard({
         }
         error={save.error}
         note={
-          isAvailable ? null : (
+          // Not before the read: the workspace's own answer may still count its key.
+          available || isUnreadable ? null : (
             <p className="text-caption text-subtle">
               Neither tool can run on this deployment, so web access is off
               everywhere.
@@ -204,9 +208,9 @@ export function WorkspaceWebSearchCard({
         control={
           <Toggle
             label="Allow web access"
-            isSelected={isAvailable && isOn}
+            isSelected={available && isOn}
             onChange={(next) => void setAllowed(next)}
-            isDisabled={isUnreadable || !isAvailable || save.isSaving}
+            isDisabled={isUnreadable || !available || save.isSaving}
           />
         }
       />

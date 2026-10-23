@@ -27,7 +27,7 @@ class SessionPrincipal:
       holds no key to narrow the default with, so the default is the effective
       list.
 
-    Standalone only, and only ever built by a route that resolved all three;
+    Only ever built by a route that resolved all three;
     ``services/playground_service.resolve_playground_principal`` is the one that
     does. It lives here rather than beside either of them because the pipeline
     consumes it and a service produces it, and a service may not import the API

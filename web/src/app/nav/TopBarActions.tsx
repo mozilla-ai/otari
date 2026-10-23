@@ -6,10 +6,12 @@ import type { RefObject } from "react"
 import { WalletNavSlot } from "@/app/nav/overlayWalletSlot"
 import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
 import { useNavVisibility } from "@/app/nav/useNavVisibility"
+import { OTARI_COMMUNITY_URL } from "@/shared/helpers/community"
+import { documentationHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // Desktop destinations; the account menu keeps them reachable on mobile.
-// WalletNavSlot is empty in OSS; the hosted overlay supplies its balance control.
+// WalletNavSlot is empty in OSS; otari.ai's overlay supplies its balance control.
 
 const ACTION =
   "flex min-h-[2.125rem] items-center rounded-md px-1 text-shell-label font-medium text-muted transition-colors hover:text-foreground"
@@ -23,7 +25,8 @@ export function TopBarActions({
   /** So the shell can return focus here when the dialog closes. */
   feedbackTriggerRef?: RefObject<HTMLButtonElement | null>
 }) {
-  const { docs_url, feedback_enabled } = useDeployment()
+  const deployment = useDeployment()
+  const { feedback_enabled } = deployment
   const isNavVisible = useNavVisibility()
 
   return (
@@ -37,21 +40,15 @@ export function TopBarActions({
           {PLAYGROUND_NAV_ITEM.label}
         </Link>
       )}
-      {docs_url ? (
-        <a
-          href={docs_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={ACTION}
-        >
-          Documentation
-        </a>
-      ) : (
-        <Link to="/docs" className={ACTION}>
-          Documentation
-        </Link>
-      )}
-      {/* A button beside two links, so it takes their class and the pointer a
+      <a
+        href={documentationHref(deployment)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={ACTION}
+      >
+        Documentation
+      </a>
+      {/* A button beside the links, so it takes their class and the pointer a
           link gets for free. */}
       {feedback_enabled && onOpenFeedback ? (
         <button
@@ -63,6 +60,14 @@ export function TopBarActions({
           Feedback
         </button>
       ) : null}
+      <a
+        href={OTARI_COMMUNITY_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={ACTION}
+      >
+        Community
+      </a>
       <WalletNavSlot />
     </div>
   )

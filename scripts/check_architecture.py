@@ -59,25 +59,20 @@ Enforces:
 21. Service package imports: code outside a domain's service package
     imports only its root, so the root's exports are the domain's whole
     public API.
-22. Mode branches: nothing under services/ reads the deployment's mode,
-    so the behavior for each mode is chosen by a binding, not by a branch in a service.
-    A read is any use of is_hosted_mode, is_hybrid_mode, effective_mode or configured_mode, or a call to deployment_for.
-    The raw mode field and the platform token stay with review, because their names do not say that a mode is read.
-    The modules that still read one are named on a baseline, and the baseline only shrinks.
-23. Model access: each ORM model has one repository module that may construct or query it,
+22. Model access: each ORM model has one repository module that may construct or query it,
     so a table has one writer and its queries stay in one place.
     A model has none until a repository holds its queries.
     The other modules that use a model are named on its baseline, and the baseline only shrinks.
     A class in models/ is an ORM model when it passes table=True or assigns __tablename__ or __table__.
-24. Listener defaults: no parameter or class field typed as a listener has a default,
+23. Listener defaults: no parameter or class field typed as a listener has a default,
     so a caller cannot skip a listener by leaving it out.
     A listener type is one whose name contains Listener.
-    Containing it, rather than ending in it, also catches an alias such as WorkspaceListenerDep.
+    Containing it, rather than ending in it, also catches an alias such as MembershipListenerDep.
     A name in a Callable's parameter list or in Annotated's metadata is not the parameter's type, so it is skipped.
     A FastAPI dependency declares a listener as Annotated[Listener, Depends(...)], since a Depends(...) default counts.
     A field kept out of the constructor, such as field(init=False), is not a parameter, so the rule skips it.
     The parameters and fields that still have one are named on a baseline, and the baseline only shrinks.
-25. Libraries: nothing under any-search/ or any-fetch/, tests and scripts
+24. Libraries: nothing under any-search/ or any-fetch/, tests and scripts
     included, imports the gateway, SQLAlchemy, SQLModel, FastAPI, uvicorn or
     the other library, so each runs on its own with httpx and pydantic. A
     library keeps its tests and scripts inside its directory rather than
@@ -441,13 +436,11 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/model_access.py",
     "gateway/services/oauth_service.py",
     "gateway/services/organization_pricing_service.py",
-    "gateway/services/playground_dispatch.py",
     "gateway/services/playground_service.py",
     "gateway/services/policy_store.py",
     "gateway/services/pricing_init_service.py",
     "gateway/services/pricing_refresh_service.py",
     "gateway/services/pricing_service.py",
-    "gateway/services/provider_store_service.py",
     "gateway/services/routing/knn.py",
     "gateway/services/runtime_settings_service.py",
     "gateway/services/search_tool_store_service.py",
@@ -509,7 +502,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/otlp.py",
     "gateway/api/routes/playground.py",
     "gateway/api/routes/pricing.py",
-    "gateway/api/routes/providers.py",
     "gateway/api/routes/rerank.py",
     "gateway/api/routes/responses.py",
     "gateway/api/routes/routing.py",
@@ -613,7 +605,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/api/routes/organization_keys.py",
     "gateway/api/routes/organization_pricing.py",
     "gateway/api/routes/pricing.py",
-    "gateway/api/routes/providers.py",
     "gateway/api/routes/routing.py",
     "gateway/api/routes/routing_memory.py",
     "gateway/api/routes/scoped_budgets.py",
@@ -632,7 +623,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/services/log_writer.py",
     "gateway/services/master_key_service.py",
     "gateway/services/organization_pricing_service.py",
-    "gateway/services/playground_dispatch.py",
     "gateway/services/playground_service.py",
     "gateway/services/pricing_init_service.py",
     "gateway/services/pricing_refresh_service.py",
@@ -758,55 +748,6 @@ def check_unit_of_work_construction(src_root: Path) -> list[str]:
             "call site, so import it under its own name"
             for line, name in _renamed_unit_of_work_imports(tree, src_root / relative_path, src_root)
         )
-    return violations
-
-
-MODE_READS = ("configured_mode", "effective_mode", "is_hosted_mode", "is_hybrid_mode")
-MODE_FUNCTION = "deployment_for"
-# The services that still read the deployment's mode.
-# An entry that stops reading it fails the check until it is removed, so the list only shrinks.
-SERVICE_MODE_READ_BASELINE = ("gateway/services/provider_kwargs.py",)
-
-
-def _mode_reads(tree: ast.Module) -> list[tuple[int, str]]:
-    """Return the line and name of each read of the deployment's mode in a module, including one through getattr."""
-    found: list[tuple[int, str]] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load) and node.attr in MODE_READS:
-            found.append((node.lineno, node.attr))
-        elif isinstance(node, ast.Call) and _called_name(node.func) == MODE_FUNCTION:
-            found.append((node.lineno, MODE_FUNCTION))
-        elif (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "getattr"
-            and len(node.args) > 1
-        ):
-            name = node.args[1]
-            if isinstance(name, ast.Constant) and isinstance(name.value, str) and name.value in MODE_READS:
-                found.append((node.lineno, name.value))
-    return sorted(found)
-
-
-def check_service_mode_reads(src_root: Path) -> list[str]:
-    """Check that no service off the baseline reads the deployment's mode, and that every baseline entry still does."""
-    violations: list[str] = []
-    reading: set[str] = set()
-    for relative_path, tree in _parsed_modules(src_root, SERVICE_SCOPE):
-        reads = _mode_reads(tree)
-        if not reads:
-            continue
-        reading.add(relative_path)
-        if relative_path not in SERVICE_MODE_READ_BASELINE:
-            violations.extend(
-                f"{relative_path}:{line} reads {name}; a service gets the behavior for each mode from a binding, "
-                "not from a branch on the mode"
-                for line, name in reads
-            )
-    violations.extend(
-        f"{relative_path} is on the mode read baseline but reads no mode; remove it from the baseline"
-        for relative_path in sorted(set(SERVICE_MODE_READ_BASELINE) - reading)
-    )
     return violations
 
 
@@ -1009,7 +950,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/agent_telemetry_service.py",
     "gateway/services/alias_service.py",
     "gateway/services/batch_service.py",
-    "gateway/services/bedrock_gateway_auth.py",
     "gateway/services/bootstrap_service.py",
     "gateway/services/content_normalizer.py",
     "gateway/services/dashboard_session_service.py",
@@ -1034,7 +974,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/oauth_service.py",
     "gateway/services/organization_pricing_service.py",
     "gateway/services/password_service.py",
-    "gateway/services/playground_dispatch.py",
     "gateway/services/playground_service.py",
     "gateway/services/policy_store.py",
     "gateway/services/pricing_init_service.py",
@@ -1043,7 +982,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/provider_health_service.py",
     "gateway/services/provider_kwargs.py",
     "gateway/services/provider_metadata_service.py",
-    "gateway/services/provider_store_service.py",
     "gateway/services/runtime_settings_service.py",
     "gateway/services/sandbox_backend.py",
     "gateway/services/search_backend.py",
@@ -1062,7 +1000,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/web_retrieval_backend.py",
     "gateway/services/web_retrieval_network.py",
     "gateway/services/web_retrieval_policy.py",
-    "gateway/services/web_search_backend.py",
     "gateway/services/web_search_providers.py",
     "gateway/services/workspace_scope.py",
 )
@@ -1107,7 +1044,6 @@ SHARED_HEADING = "Shared"
 # A package's entry names every module it holds, so a new module in it is refused.
 DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
     "gateway/exceptions/budget_exceptions.py": (),
-    "gateway/exceptions/control_plane_exceptions.py": (),
     "gateway/repositories/code_execution/": (
         "__init__.py",
         "sandbox_container_repository.py",
@@ -1127,11 +1063,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
         "__init__.py",
         "container_sweeper.py",
         "containers.py",
-    ),
-    "gateway/services/control_plane/": (
-        "__init__.py",
-        "_resolve.py",
-        "transport.py",
     ),
     "gateway/services/mail/": (
         "__init__.py",
@@ -1163,7 +1094,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
         "verification_email.py",
         "webauthn_service.py",
         "workspace_activation_service.py",
-        "workspace_listener.py",
         "workspace_mcp_server_service.py",
         "workspace_service.py",
         "workspace_web_search_service.py",
@@ -1427,10 +1357,13 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/repositories/overview/overview_repository.py",
             "gateway/repositories/users_repository.py",
             "gateway/services/bootstrap_service.py",
-            "gateway/services/playground_dispatch.py",
             "gateway/services/tenancy/workspace_activation_service.py",
             "gateway/services/workspace_scope.py",
         ),
+    },
+    "gateway.models.api_keys.APIKeyFederationRule": {
+        "repository": "gateway/repositories/api_keys/federation_rule_repository.py",
+        "baseline": (),
     },
     "gateway.models.budgets.Budget": {
         "repository": "gateway/repositories/budgets/budget_repository.py",
@@ -1547,7 +1480,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.pricing.ModelPricing": {
         "repository": "gateway/repositories/pricing/model_pricing_repository.py",
         "baseline": (
-            "gateway/api/routes/models.py",
             "gateway/api/routes/pricing.py",
             "gateway/repositories/pricing/organization_model_pricing_repository.py",
             "gateway/services/external_usage_service.py",
@@ -1592,6 +1524,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/tenancy/org_provider_key_repository.py",
         "baseline": ("gateway/services/tenancy/org_provider_key_service.py",),
     },
+    "gateway.models.providers.ConfiguredProviderImport": {
+        "repository": "gateway/repositories/providers/hosted_provider_repository.py",
+        "baseline": (),
+    },
     "gateway.models.providers.HostedProvider": {
         "repository": "gateway/repositories/providers/hosted_provider_repository.py",
         "baseline": (),
@@ -1609,8 +1545,24 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         ),
     },
     "gateway.models.providers.ProviderCredential": {
-        "repository": None,
-        "baseline": ("gateway/services/provider_store_service.py",),
+        "repository": "gateway/repositories/providers/hosted_provider_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.health_checks.HealthCheckRecovery": {
+        "repository": "gateway/repositories/health_checks/health_check_recovery_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.health_checks.HealthCheckResult": {
+        "repository": "gateway/repositories/health_checks/health_check_result_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.health_checks.HealthCheckRun": {
+        "repository": "gateway/repositories/health_checks/health_check_run_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.health_checks.HealthCheckSettings": {
+        "repository": "gateway/repositories/health_checks/health_check_settings_repository.py",
+        "baseline": (),
     },
     "gateway.models.providers.ProviderEndpoint": {
         "repository": "gateway/repositories/providers/provider_endpoint_repository.py",
@@ -1734,6 +1686,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/code_execution/sandbox_container_repository.py",
         "baseline": (),
     },
+    "gateway.models.tools.SandboxCredential": {
+        "repository": "gateway/repositories/tools/sandbox_credential_repository.py",
+        "baseline": (),
+    },
     "gateway.models.tools.SearchToolCredential": {
         "repository": "gateway/repositories/tools/search_tool_repository.py",
         "baseline": ("gateway/services/search_tool_store_service.py",),
@@ -1766,6 +1722,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.traces.TraceSpan": {
         "repository": "gateway/repositories/traces/span_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceGuardrailDefinition": {
+        "repository": "gateway/repositories/traces/definition_repository.py",
         "baseline": (),
     },
     "gateway.models.usage.AgentTelemetry": {
@@ -2141,7 +2101,6 @@ def main() -> int:
     database_violations = check_database_imports(SRC_ROOT)
     transaction_violations = check_transaction_control(SRC_ROOT)
     unit_of_work_violations = check_unit_of_work_construction(SRC_ROOT)
-    mode_read_violations = check_service_mode_reads(SRC_ROOT)
     listener_default_violations = check_listener_defaults(SRC_ROOT)
     # NOTE: A page with no domains fails here, so a rule that reads them cannot pass by checking nothing.
     domains, domains_page_violations = read_domains_page(REPO_ROOT / DOMAINS_DOC)
@@ -2187,12 +2146,6 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal Unit of Work construction violations: {len(unit_of_work_violations)}")
 
-    if mode_read_violations:
-        print("\n❌ Mode read violations:\n")
-        for violation in mode_read_violations:
-            print(f"  {violation}")
-        print(f"\nTotal mode read violations: {len(mode_read_violations)}")
-
     if listener_default_violations:
         print("\n❌ Listener default violations:\n")
         for violation in listener_default_violations:
@@ -2236,7 +2189,6 @@ def main() -> int:
         or database_violations
         or transaction_violations
         or unit_of_work_violations
-        or mode_read_violations
         or listener_default_violations
         or flat_module_violations
         or domain_name_violations

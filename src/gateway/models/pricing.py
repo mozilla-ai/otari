@@ -1,5 +1,6 @@
 """ORM tables for pricing: the deployment price list, organization overrides, and upstream snapshots."""
 
+import re
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -17,8 +18,7 @@ from gateway.models.money import UsdRate
 PRICING_UNITS: tuple[str, ...] = ("tokens", "requests", "images")
 
 # The counts an attempt reports in a unit other than tokens, keyed by meter. They
-# are the keys of ``billing_meters`` on the row a count settles, and of ``units``
-# in a hybrid gateway's usage report.
+# are the keys of ``billing_meters`` on the row a count settles.
 UNIT_METERS: tuple[str, ...] = ("requests", "search_units", "images")
 
 # The largest count one attempt may report under any meter.
@@ -45,12 +45,28 @@ OPERATOR_ORIGIN = "operator"
 
 # Which rung of the ladder answered for a rate a reader is shown, in the order
 # ``pricing_service.find_model_pricing`` walks. One vocabulary, because the
-# Models page, the offered-models panel and a standalone response's inline
+# Models page, the offered-models panel and a response's inline
 # ``pricing_source`` name the same rungs, and two spellings of one rung read as
 # two different facts. ``defaults`` is plural for the dataset it comes from, and
 # is not the ``default`` that ``ModelObject.pricing_source`` uses internally for
 # the same rung.
 PriceSource = Literal["organization", "deployment", "defaults"]
+
+# What a price row prices: a model, under its ``provider:model`` key (the
+# ``otari:<tool>`` rows of gateway-run tools among them), or a search or fetch
+# instance, under its name alone. Part of each table's key, so a tool's rate and
+# a model's can never be one row, however the two are named.
+PricingKind = Literal["model", "search", "fetch"]
+MODEL_KIND: PricingKind = "model"
+
+# A search or fetch instance's key is its name, which carries neither of a model
+# key's separators (the instance name rule).
+_TOOL_PRICE_KEY = re.compile(r"[^:/]+")
+
+
+def is_tool_price_key(key: str) -> bool:
+    """Whether ``key`` can name a search or fetch instance's price row."""
+    return _TOOL_PRICE_KEY.fullmatch(key) is not None
 
 
 class PricingSnapshot(Base):
@@ -91,6 +107,7 @@ class ModelPricing(Base):
 
     __tablename__ = "model_pricing"
 
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True, default=MODEL_KIND, server_default=MODEL_KIND)
     model_key: Mapped[str] = mapped_column(primary_key=True)
     effective_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -130,6 +147,7 @@ class ModelPricing(Base):
     def to_dict(self) -> dict[str, Any]:
         """Convert model to dictionary."""
         return {
+            "kind": self.kind,
             "model_key": self.model_key,
             "effective_at": self.effective_at.isoformat() if self.effective_at else None,
             "input_price_per_million": self.input_price_per_million,
@@ -203,6 +221,7 @@ class OrganizationModelPricing(Base):
         Index(
             "uq_organization_model_pricing_period_start",
             "organization_id",
+            "kind",
             "model_key",
             "effective_from",
             unique=True,
@@ -245,6 +264,8 @@ class OrganizationModelPricing(Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False
     )
+    # ``ModelPricing.kind``: an override is of the kind of the row it overrides.
+    kind: Mapped[str] = mapped_column(String(16), default=MODEL_KIND, server_default=MODEL_KIND)
     model_key: Mapped[str] = mapped_column()
     input_price_per_million: Mapped[Decimal] = mapped_column(UsdRate())
     output_price_per_million: Mapped[Decimal] = mapped_column(UsdRate())

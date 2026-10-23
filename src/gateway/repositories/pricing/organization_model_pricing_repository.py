@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.pricing import ModelPricing, OrganizationModelPricing
+from gateway.models.pricing import MODEL_KIND, ModelPricing, OrganizationModelPricing, PricingKind
 from gateway.repositories.base_repository import BaseRepository
 
 # The bound `services.pricing_service` chunks its own key lookups at, for the
@@ -63,6 +63,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
                 select(OrganizationModelPricing)
                 .where(
                     col(OrganizationModelPricing.organization_id) == organization_id,
+                    col(OrganizationModelPricing.kind) == MODEL_KIND,
                     col(OrganizationModelPricing.model_key).in_(chunk),
                     col(OrganizationModelPricing.effective_from) <= as_of,
                     # The half-open period, stated in SQL rather than walked in
@@ -106,6 +107,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
                     func.max(col(ModelPricing.effective_at)).label("effective_at"),
                 )
                 .where(
+                    col(ModelPricing.kind) == MODEL_KIND,
                     col(ModelPricing.model_key).in_(chunk),
                     col(ModelPricing.effective_at) <= as_of,
                 )
@@ -116,6 +118,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
                 select(ModelPricing).join(
                     newest,
                     and_(
+                        col(ModelPricing.kind) == MODEL_KIND,
                         col(ModelPricing.model_key) == newest.c.model_key,
                         col(ModelPricing.effective_at) == newest.c.effective_at,
                     ),
@@ -135,6 +138,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
         organization_id: uuid.UUID,
         *,
         model_key: str | None = None,
+        kind: PricingKind | None = None,
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[list[OrganizationModelPricing], int]:
@@ -147,6 +151,8 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
         where = [col(OrganizationModelPricing.organization_id) == organization_id]
         if model_key is not None:
             where.append(col(OrganizationModelPricing.model_key) == model_key)
+        if kind is not None:
+            where.append(col(OrganizationModelPricing.kind) == kind)
         total = (
             await self.db.execute(select(func.count()).select_from(OrganizationModelPricing).where(*where))
         ).scalar_one()
@@ -157,6 +163,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
                     .where(*where)
                     .order_by(
                         col(OrganizationModelPricing.model_key),
+                        col(OrganizationModelPricing.kind),
                         col(OrganizationModelPricing.effective_from).desc(),
                     )
                     .offset(skip)
@@ -182,7 +189,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
                     OrganizationModelPricing.id,
                     OrganizationModelPricing.organization_id,
                     OrganizationModelPricing.model_key,
-                ).where(OrganizationModelPricing.model_key.in_(chunk))
+                ).where(OrganizationModelPricing.kind == MODEL_KIND, OrganizationModelPricing.model_key.in_(chunk))
             )
             found.extend((row_id, organization_id, key) for row_id, organization_id, key in result.all())
         return found

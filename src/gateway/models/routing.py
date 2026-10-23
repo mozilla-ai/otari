@@ -349,11 +349,9 @@ class PolicySpec(BaseModel):
         description="Selectors to try, in order, after a provider failure on the selected candidate.",
     )
     guardrails: list[PolicyGuardrail] = Field(default_factory=list)
-    # No `limits` yet, deliberately. The only per-request deadline that exists is
-    # the streaming first-chunk timeout, and it is applied solely by the hybrid
-    # walker; standalone streaming (where policies apply) has none, so a
-    # per-policy override would validate, store, and do nothing. It belongs here
-    # once standalone streaming grows a deadline of its own.
+    # No `limits` yet, deliberately: streaming has no per-request first-chunk
+    # deadline, so a per-policy override would validate, store, and do nothing.
+    # It belongs here once streaming grows a deadline of its own.
 
     @model_validator(mode="after")
     def _one_default_and_it_comes_last(self) -> PolicySpec:

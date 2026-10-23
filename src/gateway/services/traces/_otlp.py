@@ -5,6 +5,19 @@ spans (``invoke_agent``, ``execute_tool``) are what the gateway cannot see for
 itself. A span's session is the Claude session or the conversation it names
 (``anthropic.session.id``, ``gen_ai.conversation.id``), or its OTel trace when it names none.
 
+Claude Code's own spans follow neither the GenAI conventions nor the Agent SDK's
+names: each says what it is in ``span.type`` and names its session in
+``session.id``. Every interaction is the root of an OTel trace of its own, so
+without that session a conversation would read as one trace per turn.
+
+``otari hook`` reports each gate it checked the same way, on the session the
+harness named, as a guardrail span: required gates block, advisory ones only
+flag. A gate span names the tool call it checked, and a read attaches it there.
+A gate that fired is the guardrail working, so neither it nor the tool call it
+stopped is an error: only a gate that could not decide is. A judge whose calls
+ran on a second model reports that model's tokens on a child usage span, which
+the usage ledger prices and a trace leaves out.
+
 Nothing is passed through verbatim. Each name and value is projected the way the
 gateway's own spans are, so text an agent put in a span name or attribute never
 reaches the store, and the original OTLP body is never kept. Numbers and times
@@ -16,20 +29,47 @@ import hashlib
 import itertools
 import uuid
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from gateway.log_config import logger
-from gateway.services.traces._collector import identifier_or_none
+from gateway.services.traces._collector import call_id_digest, identifier_or_none
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._writer import SPANS_DROPPED, TraceWriter
-from gateway.types.traces import SpanRecord, TraceWrite, is_identifier
+from gateway.types.traces import (
+    LIST_SEPARATOR,
+    SpanRecord,
+    TraceWrite,
+    is_gate_id,
+    is_identifier,
+    is_identifier_list,
+)
 
 # ``gen_ai.operation.name`` values, by the span kind they are.
 _LLM_OPERATIONS = frozenset({"chat", "text_completion", "generate_content", "embeddings"})
 _AGENT_OPERATIONS = frozenset({"invoke_agent", "create_agent", "invoke_workflow", "plan"})
 _TOOL_OPERATIONS = frozenset({"execute_tool"})
+
+_CLAUDE_CODE_SCOPE_PREFIX = "com.anthropic.claude_code"
+_CLAUDE_CODE_HARNESS = "claude-code"
+_CLAUDE_CODE_KINDS = {"interaction": "step", "llm_request": "llm", "tool": "tool"}
+# The child of a tool span that records whether it was allowed to run, and by
+# whom: ``source`` is ``hook`` when a hook refused it.
+_CLAUDE_CODE_DECISION = "tool.blocked_on_user"
+_CLAUDE_CODE_EXECUTION = "tool.execution"
+
+HOOK_SCOPE = "otari.hook"
+_HOOK_USAGE_SPAN = "otari.gate.usage"
+# A gate that could not decide, which reads like a guardrail that could not run.
+_UNDECIDED_GATE = frozenset({"unknown", "error", "not_run"})
+_GATE_ATTRIBUTES = (
+    "otari.gate.type",
+    "otari.gate.origin",
+    "otari.gate.outcome",
+    "otari.gate.moment",
+    "otari.policy.digest",
+)
 
 # Token counts and durations are stored as 32-bit integers.
 _INT32_MAX = 2_147_483_647
@@ -58,6 +98,28 @@ class OtlpSpan:
     end_time: datetime | None
     failed: bool
     attributes: Mapping[str, Any]
+    scope: str = ""
+
+    @property
+    def claude_code_type(self) -> str | None:
+        """The ``span.type`` of a span Claude Code sent, or None for any other exporter's."""
+        if not self.scope.startswith(_CLAUDE_CODE_SCOPE_PREFIX):
+            return None
+        return _str(self.attributes, "span.type")
+
+    @property
+    def names_harness_session(self) -> bool:
+        """Whether ``session.id`` is the harness's session: on Claude Code's spans and ``otari hook``'s."""
+        return self.scope == HOOK_SCOPE or self.claude_code_type is not None
+
+
+@dataclass(frozen=True)
+class _ToolFacts:
+    """What a Claude Code tool span's children say about it: who decided, and whether it ran."""
+
+    decision: str | None = None
+    source: str | None = None
+    failed: bool = False
 
 
 @dataclass(frozen=True)
@@ -106,6 +168,23 @@ def _int(attributes: Mapping[str, Any], key: str) -> int | None:
     return min(value, _INT32_MAX)
 
 
+def _joined(attributes: Mapping[str, Any], key: str) -> str | None:
+    """An array-of-strings attribute joined for storage, or None unless every element is an identifier.
+
+    A bare string is read as an array of one.
+    """
+    value = attributes.get(key)
+    items = (value,) if isinstance(value, str) else value
+    if not isinstance(items, list | tuple) or not items or not all(isinstance(item, str) for item in items):
+        return None
+    stripped = [item.strip() for item in items]
+    # Each element is checked before the join, which would split one that held the separator.
+    if not all(is_identifier(item) for item in stripped):
+        return None
+    joined = LIST_SEPARATOR.join(stripped)
+    return joined if is_identifier_list(joined) else None
+
+
 def _kind(operation: str | None) -> str:
     if operation in _LLM_OPERATIONS:
         return "llm"
@@ -116,12 +195,42 @@ def _kind(operation: str | None) -> str:
     return "other"
 
 
+def _false(attributes: Mapping[str, Any], key: str) -> bool:
+    """Whether a Claude Code ``success`` attribute says the work failed; it sends ``"True"``/``"False"``."""
+    value = attributes.get(key)
+    return value is False or (isinstance(value, str) and value.strip().lower() == "false")
+
+
 def _session(span: OtlpSpan) -> SessionRef:
     # A Claude Managed Agents session names each thread a conversation of its own.
-    key = (
-        _str(span.attributes, "anthropic.session.id", "gen_ai.conversation.id", "otari.session_label") or span.trace_id
-    )
-    return SessionRef(source="otlp", key=key)
+    keys: tuple[str, ...] = ("anthropic.session.id", "gen_ai.conversation.id", "otari.session_label")
+    if span.names_harness_session:
+        keys = ("session.id", *keys)
+    return SessionRef(source="otlp", key=_str(span.attributes, *keys) or span.trace_id)
+
+
+def _tool_facts(spans: Iterable[OtlpSpan]) -> dict[tuple[str, str], _ToolFacts]:
+    """Each Claude Code tool span's decision and execution outcome, keyed by its OTel trace and span id.
+
+    Only children in the same export are seen. One the batch exporter sent apart
+    from its tool is still stored with its own decision; the tool then reads as run.
+    """
+    facts: dict[tuple[str, str], _ToolFacts] = {}
+    for span in spans:
+        kind = span.claude_code_type
+        if kind not in (_CLAUDE_CODE_DECISION, _CLAUDE_CODE_EXECUTION) or not span.parent_span_id:
+            continue
+        key = (span.trace_id, span.parent_span_id)
+        known = facts.get(key, _ToolFacts())
+        if kind == _CLAUDE_CODE_DECISION:
+            facts[key] = replace(
+                known,
+                decision=identifier_or_none(_str(span.attributes, "decision")),
+                source=identifier_or_none(_str(span.attributes, "source")),
+            )
+        else:
+            facts[key] = replace(known, failed=span.failed or _false(span.attributes, "success"))
+    return facts
 
 
 def _span_id(otel_trace_id: str, otel_span_id: str) -> str:
@@ -134,8 +243,24 @@ def _span_id(otel_trace_id: str, otel_span_id: str) -> str:
     return f"otlp-{digest}"
 
 
-def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
+def _first_int(attributes: Mapping[str, Any], *keys: str) -> int | None:
+    """The first of ``keys`` that holds a count, keeping a reported zero."""
+    return next((count for key in keys if (count := _int(attributes, key)) is not None), None)
+
+
+def _record(span: OtlpSpan, window: _Window, workspace_id: uuid.UUID, tool: _ToolFacts | None = None) -> SpanRecord:
+    record = _projected(span, window, tool)
+    call_id = call_id_digest(workspace_id, _str(span.attributes, "gen_ai.tool.call.id", "tool_use_id"))
+    return replace(record, tool_call_id=call_id) if call_id else record
+
+
+def _projected(span: OtlpSpan, window: _Window, tool: _ToolFacts | None) -> SpanRecord:
     attributes = span.attributes
+    if span.scope == HOOK_SCOPE:
+        return _gate_record(span, window)
+    claude_code = span.claude_code_type
+    if claude_code is not None:
+        return _claude_code_record(span, claude_code, window, tool or _ToolFacts())
     operation = identifier_or_none(_str(attributes, "gen_ai.operation.name"))
     tool_name = identifier_or_none(_str(attributes, "gen_ai.tool.name"))
     kind = _kind(operation)
@@ -146,13 +271,27 @@ def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
     else:
         name = operation or "span"
     error_type = identifier_or_none(_str(attributes, "error.type"))
-    start = window.clamp(span.start_time)
-    end = window.clamp(span.end_time)
-    if start is not None and end is not None and end < start:
-        end = start
-    duration = (
-        min(round((end - start).total_seconds() * 1000), _INT32_MAX) if start is not None and end is not None else None
+    start, end, duration = _times(span, window)
+    projected: dict[str, str | int | float | bool] = {}
+    if span.failed and error_type:
+        projected["error.type"] = error_type
+    if (finish_reasons := _joined(attributes, "gen_ai.response.finish_reasons")) is not None:
+        projected["gen_ai.response.finish_reasons"] = finish_reasons
+    if (max_tokens := _int(attributes, "gen_ai.request.max_tokens")) is not None:
+        projected["gen_ai.request.max_tokens"] = max_tokens
+    input_tokens = _int(attributes, "gen_ai.usage.input_tokens")
+    cache_read = _first_int(
+        attributes,
+        "gen_ai.usage.cache_read_tokens",
+        "gen_ai.usage.cache_read.input_tokens",
+        "gen_ai.usage.cached_tokens",
     )
+    cache_write = _first_int(attributes, "gen_ai.usage.cache_creation.input_tokens", "gen_ai.usage.cache_write_tokens")
+    cached = (cache_read or 0) + (cache_write or 0)
+    # The GenAI conventions count cached tokens inside ``input_tokens``, so cached
+    # tokens that outnumber it were reported on top of it instead.
+    if input_tokens is not None and cached > input_tokens:
+        input_tokens = min(input_tokens + cached, _INT32_MAX)
     return SpanRecord(
         span_id=_span_id(span.trace_id, span.span_id),
         parent_span_id=_span_id(span.trace_id, span.parent_span_id) if span.parent_span_id else None,
@@ -167,15 +306,184 @@ def _record(span: OtlpSpan, window: _Window) -> SpanRecord:
         duration_ms=duration,
         model=identifier_or_none(_str(attributes, "gen_ai.response.model", "gen_ai.request.model")),
         provider=identifier_or_none(_str(attributes, "gen_ai.provider.name", "gen_ai.system")),
-        input_tokens=_int(attributes, "gen_ai.usage.input_tokens"),
+        input_tokens=input_tokens,
         output_tokens=_int(attributes, "gen_ai.usage.output_tokens"),
+        cache_read_tokens=cache_read,
+        cache_write_tokens=cache_write,
+        reasoning_tokens=_int(attributes, "gen_ai.usage.reasoning.output_tokens"),
         tool_name=tool_name,
         tool_type=identifier_or_none(_str(attributes, "gen_ai.tool.type")),
-        tool_call_id=identifier_or_none(_str(attributes, "gen_ai.tool.call.id")),
         otel_trace_id=span.trace_id[:64],
         otel_span_id=span.span_id[:64],
-        attributes={"error.type": error_type} if span.failed and error_type else {},
+        attributes=projected,
     )
+
+
+def _times(span: OtlpSpan, window: _Window) -> tuple[datetime | None, datetime | None, int | None]:
+    start = window.clamp(span.start_time)
+    end = window.clamp(span.end_time)
+    if start is not None and end is not None and end < start:
+        end = start
+    duration = (
+        min(round((end - start).total_seconds() * 1000), _INT32_MAX) if start is not None and end is not None else None
+    )
+    return start, end, duration
+
+
+def _claude_code_prompt(attributes: Mapping[str, Any]) -> tuple[int | None, int | None, int | None]:
+    """A Claude Code request's whole prompt and the part of it the cache read and wrote.
+
+    Claude Code counts cache reads and writes outside ``input_tokens``, where a
+    span's input tokens count them in.
+    """
+    fresh = _int(attributes, "input_tokens")
+    cache_read = _int(attributes, "cache_read_tokens")
+    cache_write = _int(attributes, "cache_creation_tokens")
+    if fresh is None:
+        return None, cache_read, cache_write
+    return min(fresh + (cache_read or 0) + (cache_write or 0), _INT32_MAX), cache_read, cache_write
+
+
+def _claude_code_record(span: OtlpSpan, span_type: str, window: _Window, tool: _ToolFacts) -> SpanRecord:
+    """Project one of Claude Code's own spans.
+
+    An interaction is the user's turn, so it opens one as a step, unless it is
+    nested under another span (a subagent's). A tool something refused (a hook,
+    the user, a permission rule) was blocked, not failed: it never ran. A tool
+    that returned an error, such as a command exiting non-zero, ran too: the
+    agent reads the error like any other result, so it is not a session error.
+    The decision and the run under a tool are facts about it, not outcomes of
+    their own.
+    """
+    attributes = span.attributes
+    kind = _CLAUDE_CODE_KINDS.get(span_type, "other")
+    nested = span.parent_span_id is not None
+    if kind == "step" and nested:
+        kind = "agent"
+    rejected = kind == "tool" and tool.decision == "reject"
+    detail_of_tool = span_type in (_CLAUDE_CODE_DECISION, _CLAUDE_CODE_EXECUTION)
+    span_failed = span.failed or _false(attributes, "success")
+    returned_error = kind == "tool" and not rejected and (span_failed or tool.failed)
+    failed = not rejected and not detail_of_tool and kind != "tool" and span_failed
+    error_class = (identifier_or_none(_str(attributes, "error.type", "error")) or "error") if failed else None
+    decided = (
+        tool
+        if kind == "tool"
+        else _ToolFacts(
+            decision=identifier_or_none(_str(attributes, "decision")),
+            source=identifier_or_none(_str(attributes, "source")),
+        )
+    )
+    extra: dict[str, str | bool] = {}
+    if span_type == _CLAUDE_CODE_EXECUTION:
+        extra["otari.tool.succeeded"] = not span_failed
+    elif returned_error:
+        extra["otari.tool.succeeded"] = False
+    if span_type in ("tool", _CLAUDE_CODE_DECISION) and decided.decision:
+        extra["otari.tool.decision"] = decided.decision
+        if decided.source:
+            extra["otari.tool.decision_source"] = decided.source
+    start, end, duration = _times(span, window)
+    llm = kind == "llm"
+    prompt, cache_read, cache_write = _claude_code_prompt(attributes) if llm else (None, None, None)
+    return SpanRecord(
+        span_id=_span_id(span.trace_id, span.span_id),
+        parent_span_id=_span_id(span.trace_id, span.parent_span_id) if span.parent_span_id else None,
+        kind=kind,
+        origin="otlp",
+        name=span.name if is_identifier(span.name) else f"claude_code.{kind}",
+        operation=identifier_or_none(span_type),
+        outcome="blocked" if rejected else "error" if failed else "ok",
+        error_class=error_class,
+        opens_turn=kind == "step",
+        start_time=start,
+        end_time=end,
+        duration_ms=duration,
+        model=identifier_or_none(_str(attributes, "gen_ai.request.model", "model")) if llm else None,
+        provider=identifier_or_none(_str(attributes, "gen_ai.system")) if llm else None,
+        input_tokens=prompt,
+        output_tokens=_int(attributes, "output_tokens") if llm else None,
+        cache_read_tokens=cache_read,
+        cache_write_tokens=cache_write,
+        tool_name=identifier_or_none(_str(attributes, "tool_name")) if kind == "tool" else None,
+        tool_type="client" if kind == "tool" else None,
+        otel_trace_id=span.trace_id[:64],
+        otel_span_id=span.span_id[:64],
+        attributes=extra,
+    )
+
+
+def _judge_prompt(attributes: Mapping[str, Any]) -> tuple[int | None, int | None, int | None]:
+    """A judge's whole prompt and the part of it the cache read and wrote.
+
+    ``otari hook`` reports its judge's tokens the way Claude counts them, the
+    cache outside ``gen_ai.usage.input_tokens``.
+    """
+    fresh = _int(attributes, "gen_ai.usage.input_tokens")
+    cache_read = _int(attributes, "gen_ai.usage.cache_read_tokens")
+    cache_write = _int(attributes, "gen_ai.usage.cache_write_tokens")
+    if fresh is None:
+        return None, cache_read, cache_write
+    return min(fresh + (cache_read or 0) + (cache_write or 0), _INT32_MAX), cache_read, cache_write
+
+
+def _gate_record(span: OtlpSpan, window: _Window) -> SpanRecord:
+    """Project one gate ``otari hook`` checked: a guardrail span, labeled by the gate's id.
+
+    A judge gate also carries the model its calls ran on and the tokens they used.
+    """
+    attributes = span.attributes
+    # Held to the rule a guardrail declares its ids by, so a gate such as
+    # ``api-key-in-diff`` keeps the id its definition and counts are keyed on.
+    sent = _str(attributes, "otari.gate.id")
+    gate_id = sent if is_gate_id(sent) else None
+    undecided = _str(attributes, "otari.gate.outcome") in _UNDECIDED_GATE
+    required = _str(attributes, "otari.gate.enforcement") == "required"
+    extra: dict[str, str | bool] = {
+        key: value for key in _GATE_ATTRIBUTES if (value := identifier_or_none(_str(attributes, key))) is not None
+    }
+    if gate_id:
+        extra["otari.gate.id"] = gate_id
+        if is_identifier(gate_id):
+            extra["otari.guardrail.profile"] = gate_id
+    extra["otari.guardrail.mode"] = "block" if required else "monitor"
+    blocked = attributes.get("otari.gate.blocked") is True
+    extra["otari.gate.blocked"] = blocked
+    model = identifier_or_none(_str(attributes, "gen_ai.request.model"))
+    prompt, cache_read, cache_write = _judge_prompt(attributes) if model else (None, None, None)
+    start, end, duration = _times(span, window)
+    return SpanRecord(
+        span_id=_span_id(span.trace_id, span.span_id),
+        parent_span_id=_span_id(span.trace_id, span.parent_span_id) if span.parent_span_id else None,
+        kind="guardrail",
+        origin="otlp",
+        name=f"gate:{gate_id}" if gate_id and is_identifier(f"gate:{gate_id}") else "otari.gate",
+        operation=identifier_or_none(_str(attributes, "otari.gate.moment")),
+        outcome="error" if undecided else "blocked" if blocked else "ok",
+        error_class="guardrail_unavailable" if undecided else None,
+        start_time=start,
+        end_time=end,
+        duration_ms=duration,
+        model=model,
+        provider=identifier_or_none(_str(attributes, "gen_ai.provider.name")) if model else None,
+        input_tokens=prompt,
+        output_tokens=_int(attributes, "gen_ai.usage.output_tokens") if model else None,
+        cache_read_tokens=cache_read,
+        cache_write_tokens=cache_write,
+        tool_name=identifier_or_none(_str(attributes, "gen_ai.tool.name")),
+        otel_trace_id=span.trace_id[:64],
+        otel_span_id=span.span_id[:64],
+        attributes=extra,
+    )
+
+
+def _harness(span: OtlpSpan) -> str | None:
+    named = identifier_or_none(_str(span.attributes, "otari.client_name"))
+    if named:
+        return named
+    if span.scope == HOOK_SCOPE:
+        return identifier_or_none(_str(span.attributes, "otari.harness"))
+    return _CLAUDE_CODE_HARNESS if span.claude_code_type is not None else None
 
 
 def _project(
@@ -191,22 +499,25 @@ def _project(
     harness: dict[SessionRef, str | None] = {}
     invalid = 0
     over_cap = 0
+    tools = _tool_facts(spans)
     for span in spans:
         if not span.trace_id or not span.span_id:
+            continue
+        if span.scope == HOOK_SCOPE and span.name == _HOOK_USAGE_SPAN:
             continue
         try:
             session = _session(span)
             if session not in by_session and len(by_session) >= max_traces:
                 over_cap += 1
                 continue
-            record = _record(span, window)
+            record = _record(span, window, workspace_id, tools.get((span.trace_id, span.span_id)))
         except Exception as exc:  # noqa: BLE001 - one bad span is dropped, never the export
             # The class only: an exception's message may quote what the exporter sent.
             logger.debug("OTLP span not recorded: %s", type(exc).__name__)
             invalid += 1
             continue
         by_session.setdefault(session, []).append(record)
-        harness.setdefault(session, identifier_or_none(_str(span.attributes, "otari.client_name")))
+        harness.setdefault(session, _harness(span))
     if invalid:
         SPANS_DROPPED.labels(reason="invalid").inc(invalid)
     if over_cap:

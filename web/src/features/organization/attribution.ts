@@ -5,7 +5,6 @@ import {
   useOrganizationContext,
   useOrganizationMembers,
 } from "@/shared/api/organizations"
-import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 import { memberLabel } from "./roles"
 
@@ -34,14 +33,9 @@ export function memberLabelsByAttributionId(
 
 /**
  * Names the people behind the request-plane owner ids that keys and usage carry.
- *
- * Gated on the `organizations` surface: a deployment that does not host the
- * roster has no route to ask, and an owner id then stays the bare string it
- * always was, which is what every page rendered before members existed.
  */
 export function useMemberAttributionLabels(): ReadonlyMap<string, string> {
-  const hasSurface = useSurfaces()
-  const members = useOrganizationMembers(hasSurface("organizations"))
+  const members = useOrganizationMembers()
   return useMemo(
     () => memberLabelsByAttributionId(members.data),
     [members.data],
@@ -63,8 +57,7 @@ function memberEmailsByAttributionId(
 
 /** The addresses behind `useMemberAttributionLabels`, from the same roster read. */
 export function useMemberAttributionEmails(): ReadonlyMap<string, string> {
-  const hasSurface = useSurfaces()
-  const members = useOrganizationMembers(hasSurface("organizations"))
+  const members = useOrganizationMembers()
   return useMemo(
     () => memberEmailsByAttributionId(members.data),
     [members.data],
@@ -76,9 +69,8 @@ export function useMemberAttributionEmails(): ReadonlyMap<string, string> {
  * are pending or failed, and for a member with no attribution row.
  */
 export function useCurrentOwnerId(): string | undefined {
-  const hasSurface = useSurfaces()
   const context = useOrganizationContext()
-  const members = useOrganizationMembers(hasSurface("organizations"))
+  const members = useOrganizationMembers()
   const callerId = context.data?.caller?.user_id
   const memberId = context.data?.organization_member_id
   return useMemo(() => {

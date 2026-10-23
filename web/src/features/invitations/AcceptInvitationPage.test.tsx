@@ -2,7 +2,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { DeploymentType } from "@/client"
 import { AuthProvider } from "@/features/auth/AuthContext"
 import { readSignInAddress } from "@/features/auth/signInAddress"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
@@ -102,7 +101,6 @@ function renderPage(
   {
     mailReady = true,
     oauthProviders = [] as string[],
-    deploymentType = "standalone" as DeploymentType,
     termsUrl = null as string | null,
   } = {},
 ) {
@@ -118,7 +116,6 @@ function renderPage(
           <AuthProvider>
             <DeploymentProvider
               value={bootstrap({
-                deployment_type: deploymentType,
                 mail_ready: mailReady,
                 oauth_providers: oauthProviders,
                 terms_url: termsUrl,

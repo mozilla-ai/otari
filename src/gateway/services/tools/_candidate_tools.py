@@ -31,8 +31,6 @@ class ProviderToolDeclaration:
     ``preference`` is ``None`` where nothing asked, which forwards the declaration to every candidate.
     ``backend_configured`` is whether this deployment can run the tool, without which Otari claims nothing.
     ``uniform`` decides every candidate alike: Otari runs it for all of them where any one needs it.
-    ``follow_head`` decides every candidate as the head is decided: Otari runs it for all of them
-    where the head needs it, and for none otherwise.
     """
 
     tool: BuiltinTool
@@ -40,7 +38,6 @@ class ProviderToolDeclaration:
     preference: CodeExecutor | None
     backend_configured: bool
     uniform: bool = False
-    follow_head: bool = False
 
 
 @dataclass(frozen=True)
@@ -66,13 +63,17 @@ class _Decision(Enum):
     FORWARDED = auto()
 
 
-def _forwarded(declaration: ProviderToolDeclaration, *, provider: str | None, dialect: Dialect) -> _Decision:
-    native = declaration.tool.runs_natively(declaration.entry, provider=provider, dialect=dialect)
+def _forwarded(
+    declaration: ProviderToolDeclaration, *, provider: str | None, model: str | None, dialect: Dialect
+) -> _Decision:
+    native = declaration.tool.runs_natively(declaration.entry, provider=provider, dialect=dialect, model=model)
     return _Decision.NATIVE if native else _Decision.FORWARDED
 
 
-def _decide(declaration: ProviderToolDeclaration, *, provider: str | None, dialect: Dialect) -> _Decision:
-    forwarded = _forwarded(declaration, provider=provider, dialect=dialect)
+def _decide(
+    declaration: ProviderToolDeclaration, *, provider: str | None, model: str | None, dialect: Dialect
+) -> _Decision:
+    forwarded = _forwarded(declaration, provider=provider, model=model, dialect=dialect)
     native = forwarded is _Decision.NATIVE
     match declaration.preference:
         case CodeExecutor.OTARI:
@@ -88,26 +89,26 @@ def decide_candidate_tools(
     *,
     providers: Sequence[str | None],
     dialect: Dialect,
+    models: Sequence[str | None] | None = None,
 ) -> list[CandidateTools]:
     """What each candidate in ``providers`` (head first) is sent for ``declarations``.
+
+    ``models`` holds each candidate's model, beside its provider, where the caller
+    knows them; without it no candidate counts as running a tool that only some of
+    its provider's models run.
 
     The one place a request's built-in tools are decided per candidate, so every
     step that builds an attempt reads the same answer.
     """
+    candidates = list(zip(providers, models if models is not None else [None] * len(providers), strict=True))
     decisions = [
-        [_decide(declaration, provider=provider, dialect=dialect) for declaration in declarations]
-        for provider in providers
+        [_decide(declaration, provider=provider, model=model, dialect=dialect) for declaration in declarations]
+        for provider, model in candidates
     ]
     for index, declaration in enumerate(declarations):
         if declaration.uniform and any(row[index] is _Decision.CLAIMED for row in decisions):
             for row in decisions:
                 row[index] = _Decision.CLAIMED
-        elif declaration.follow_head and decisions:
-            head_claimed = decisions[0][index] is _Decision.CLAIMED
-            for provider, row in zip(providers, decisions, strict=True):
-                row[index] = (
-                    _Decision.CLAIMED if head_claimed else _forwarded(declaration, provider=provider, dialect=dialect)
-                )
     return [
         CandidateTools(
             claimed=frozenset(

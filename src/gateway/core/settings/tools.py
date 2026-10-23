@@ -11,19 +11,20 @@ through ``/api/v1/search-tools``. The legacy in-loop settings, the provider pair
 and ``web_search_url``, describe one more search backend, the synthesized
 instance, which serves the in-loop tool only and is not part of either map.
 
-This module answers settings questions only: which instances exist, which one
-the in-loop tool defaults to, which fetch instance enriches a search, and how
-many calls a request may make.
+This module answers settings questions only: which instances exist, what the
+default settings name, and how many calls a request may make. Which search the
+in-loop tool runs on is the tools services' to decide.
 
 The checks run in two places. :meth:`ToolSettings.validate_search_tools` and
 :meth:`ToolSettings.validate_fetch_tools` refuse at load what no deployment can
-have relied on. :func:`warn_about_tool_instances` runs once stored rows and
-runtime settings have loaded, and warns about what loads anyway: a name or an
-option that breaks the rules, a default or ``fetch_tool`` that names nothing,
-and several search instances with no default between them.
+have relied on. The tools services' ``warn_about_tool_instances`` runs once
+stored rows and runtime settings have loaded, and warns about what loads anyway:
+a name or an option that breaks the rules, a default or ``fetch_tool`` that
+names nothing, and several search instances with no default between them.
 """
 
 import copy
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -38,17 +39,11 @@ from gateway.core.env import otari_env
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 
-# Search providers the standalone POST /api/v1/search endpoint's own clients can
-# dispatch to. Declared here rather than in the adapter module so the config
-# layer never imports the service layer.
-# Which providers a ``search_tools`` entry may name is wider: see
-# :func:`supported_search_providers`.
-SEARCH_PROVIDERS = ("exa", "searxng")
 # Licensed search APIs the in-loop ``otari_web_search`` backend can call
 # directly, as an alternative to pointing ``web_search_url`` at a SearXNG-shaped
-# service. Declared here for the same reason as SEARCH_PROVIDERS above: startup
-# validation rejects an unknown ``web_search_provider`` without the config layer
-# importing `gateway.services.web_search_providers`, which imports this name.
+# service. Declared here so startup validation rejects an unknown
+# ``web_search_provider`` without the config layer importing
+# `gateway.services.web_search_providers`, which imports this name.
 WEB_SEARCH_PROVIDERS = ("tavily", "brave")
 # Providers that authenticate with an API key, for the direct endpoint's own
 # clients and the catalog's entries for providers without an adapter. Validation
@@ -69,12 +64,14 @@ SEARCH_PROVIDERS_WITHOUT_ADAPTER = ("searxng",)
 # ``builtin`` provider, which no declared instance may use.
 BUILTIN_FETCH = "builtin_fetch"
 BUILTIN_FETCH_PROVIDER = "builtin"
-# The value of ``web_search_default_tool`` that turns in-loop search off, in any
+# The value of ``web_search_default_tool`` that turns the deployment's own in-loop search off, in any
 # case: YAML reads ``None`` as a string, and an operator who writes it means this.
 NO_SEARCH_DEFAULT = "none"
+# The ``allowed_tools`` entry that grants every search tool.
+ALL_SEARCH_TOOLS = "*"
 # Names no instance may take, in any case: each already means something to a
-# default setting.
-RESERVED_INSTANCE_NAMES = frozenset({BUILTIN_FETCH, NO_SEARCH_DEFAULT})
+# default setting or an access list.
+RESERVED_INSTANCE_NAMES = frozenset({BUILTIN_FETCH, NO_SEARCH_DEFAULT, ALL_SEARCH_TOOLS})
 
 DEFAULT_WEB_SEARCH_MAX_CALLS = 10
 # The engines the old in-loop backend asks a SearXNG service for when
@@ -107,7 +104,7 @@ def supported_fetch_providers() -> tuple[str, ...]:
     )
 
 
-def _is_test_tier(kind: ToolKind, provider: str) -> bool:
+def is_test_tier(kind: ToolKind, provider: str) -> bool:
     """Whether the provider exists for tests: accepted in configuration, never offered."""
     if kind == "fetch":
         return any_fetch.AnyFetch.get_provider_metadata(provider).tier == "test"
@@ -222,7 +219,7 @@ def _validate_tool_entry(kind: ToolKind, name: str, entry: Any) -> str:
     provider = str(entry.get("provider") or name)
     supported = supported_search_providers() if kind == "search" else supported_fetch_providers()
     if provider not in supported:
-        listed = sorted(candidate for candidate in supported if not _is_test_tier(kind, candidate))
+        listed = sorted(candidate for candidate in supported if not is_test_tier(kind, candidate))
         msg = (
             f"{section}.{name}.provider '{provider}' is not a supported {kind} provider (one of: {', '.join(listed)})."
         )
@@ -246,6 +243,12 @@ def _validate_tool_entry(kind: ToolKind, name: str, entry: Any) -> str:
     if options is not None and not isinstance(options, dict):
         msg = f"{section}.{name}.options must be a mapping."
         raise ValueError(msg)
+    price = entry.get("price_per_call")
+    if price is not None and (
+        isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price < 0
+    ):
+        msg = f"{section}.{name}.price_per_call must be a finite, non-negative number of USD."
+        raise ValueError(msg)
     return provider
 
 
@@ -263,7 +266,7 @@ def validate_search_tool_entry(name: str, entry: Any) -> None:
     segment, so it must not contain a slash.
 
     The rest of the name rules and the option checks are not here: an entry that
-    breaks them still loads, with a warning (:func:`warn_about_tool_instances`).
+    breaks them still loads, with a warning at startup.
     A missing backend URL is deliberately not fatal here either; see
     :meth:`ToolSettings.search_tools_without_backend_url`.
     """
@@ -313,14 +316,19 @@ class ToolInstance:
     fetch_tool: str | None = None
 
 
+# The fetch instance that always exists, on otari's own fetcher.
+BUILTIN_FETCH_INSTANCE = ToolInstance(
+    name=BUILTIN_FETCH, kind="fetch", provider=BUILTIN_FETCH_PROVIDER, library_backed=True
+)
+
+
 @dataclass(frozen=True)
 class SynthesizedSearchInstance:
     """The in-loop search backend the legacy settings describe.
 
     It is not in either map, so it cannot be named by a default or by the direct
     endpoint's path, and it is priced under ``otari:web_search``. Its name is
-    its provider's. Whether a ``searxng`` one at the platform's origin is the
-    hosted hop is the resolver's question, not this one's.
+    its provider's.
     """
 
     provider: str
@@ -349,8 +357,9 @@ class ToolSettings(BaseModel):
             "web_search_default_tool). Each entry may declare a 'provider' (defaults to the name; "
             "GET /api/v1/search-tools/providers lists them), an 'api_key' where the provider needs "
             "one, an 'api_base' (a searxng entry without one inherits web_search_url), a 'timeout' "
-            "in seconds, an 'options' mapping of provider-native defaults, and a 'fetch_tool' naming "
-            "the fetch instance that enriches its results."
+            "in seconds, an 'options' mapping of provider-native defaults, a 'fetch_tool' naming "
+            "the fetch instance that enriches its results, and a 'price_per_call' in USD, the rate a "
+            "search with no reported cost is billed at."
         ),
     )
     fetch_tools: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
@@ -358,9 +367,9 @@ class ToolSettings(BaseModel):
         description=(
             "Named fetch instances, for the otari_web_fetch tool and for enriching search results. "
             "Each entry may declare a 'provider' (defaults to the name), an 'api_key' where the "
-            "provider needs one, an 'api_base', a 'timeout' in seconds and an 'options' mapping. "
-            "'builtin_fetch', the built-in fetcher, always exists and cannot be declared. A name is "
-            "unique across search_tools and fetch_tools."
+            "provider needs one, an 'api_base', a 'timeout' in seconds, an 'options' mapping and a "
+            "'price_per_call' in USD. 'builtin_fetch', the built-in fetcher, always exists and cannot be "
+            "declared. A name is unique across search_tools and fetch_tools."
         ),
     )
     web_fetch_enabled: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
@@ -388,20 +397,7 @@ class ToolSettings(BaseModel):
     )
     web_search_provider_api_key: Annotated[str | None, SECRET] = Field(
         default=None,
-        description=(
-            "Credential for web_search_provider. Held by whichever process runs the search: on a "
-            "hosted deployment that is the control plane, never the data plane."
-        ),
-    )
-    web_search_backend_token: Annotated[str | None, SECRET] = Field(
-        default=None,
-        description=(
-            "Shared secret GET /api/v1/web-search/search requires as X-Gateway-Token. Set on a hosted "
-            "control plane so its data-plane gateway can search through it; without it the route "
-            "is not served, because it spends the deployment's own search quota. The gateway "
-            "presents its platform token (OTARI_AI_TOKEN) and nothing else, so this must be that "
-            "token, and rotating it stops web search for that data plane until both are updated."
-        ),
+        description=("Credential for web_search_provider."),
     )
     web_search_purpose_hint: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
@@ -441,12 +437,12 @@ class ToolSettings(BaseModel):
             "gateway, and every other keyword reaches the provider untouched. Requires a search backend."
         ),
     )
-    web_search_workspace_default: Annotated[bool | None, Shown(SettingsGroup.TOOLS)] = Field(
-        default=None,
+    web_search_workspace_default: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
+        default=True,
         description=(
             "Whether a workspace with no web-access policy of its own may use otari_web_search, "
             "otari_web_fetch and POST /api/v1/search. False makes web access something a workspace "
-            "admin turns on. When unset: on, except on a hosted deployment, where it is off."
+            "admin turns on."
         ),
     )
     web_search_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
@@ -470,10 +466,10 @@ class ToolSettings(BaseModel):
         description=(
             "The search instance the in-loop otari_web_search tool uses when no organization key "
             "applies, and the one an unnamed POST /api/v1/search call uses. One whose provider "
-            "any-search serves, or 'none' to turn in-loop search off. When unset: the instance the "
+            "any-search serves, or 'none' to turn off the deployment's own in-loop search, which an "
+            "organization key still serves. When unset: the instance the "
             "legacy web_search_provider or web_search_url settings describe, else the only search "
-            "instance, if there is exactly one and any-search serves its provider. Not in effect yet for "
-            "the in-loop tool: see docs/configuration.md."
+            "instance, if there is exactly one and any-search serves its provider."
         ),
     )
     web_fetch_default_tool: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -481,7 +477,7 @@ class ToolSettings(BaseModel):
         description=(
             "The fetch instance for the otari_web_fetch tool and for enriching search results, "
             "unless a search instance names its own fetch_tool. When unset: builtin_fetch, the "
-            "built-in fetcher. Not in effect yet: see docs/configuration.md."
+            "built-in fetcher."
         ),
     )
     web_search_max_calls: Annotated[int | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -489,8 +485,8 @@ class ToolSettings(BaseModel):
         ge=1,
         description=(
             "How many search and fetch tool calls one request may make, together. A call past it "
-            "gets a tool error the model can recover from. When unset: 10. Not in effect yet: see "
-            "docs/configuration.md."
+            "gets a tool error the model can recover from. When unset: 10. Requests the old search "
+            "backend serves keep a fixed limit of 10: see docs/configuration.md."
         ),
     )
 
@@ -510,28 +506,37 @@ class ToolSettings(BaseModel):
         """
         return bool(self.web_search_provider) and bool(self.web_search_provider_api_key)
 
-    def web_search_configured(self) -> bool:
-        """Whether this deployment can run ``otari_web_search`` at all.
-
-        The one question the request path, the per-workspace page and the tool
-        catalog all ask, so they cannot disagree about whether a workspace's
-        stored configuration governs anything.
-
-        ``web_search_url`` is read through ``otari_env`` as well as off the
-        field, matching every call site this replaces: the field is env-bridged,
-        so the two agree, and dropping the read here would quietly narrow what
-        counts as configured.
-        """
-        return bool(self.web_search_url or otari_env("WEB_SEARCH_URL")) or self.web_search_provider_configured()
-
     def search_tool_providers(self) -> set[str]:
         """The distinct providers backing the configured search tools.
 
-        These are prefixes of the ``<provider>:<tool>`` keys that search pricing,
-        usage, and per-key access lists are written against, so the allow-list
-        writer has to accept them alongside real provider instances.
+        An ``allowed_models`` entry under one of them that is not also a model
+        provider names no model, so the allow-list writer refuses it unless it is
+        a tool's exact deprecated ``<provider>:<tool>`` grant.
         """
         return {str(entry.get("provider") or name) for name, entry in self.search_tools.items()}
+
+    def legacy_search_tool_keys(self) -> set[str]:
+        """The ``<provider>:<tool>`` keys the search tools were priced and allow-listed under.
+
+        Read only to honor a price row or allow-list entry written before tools
+        had a namespace of their own, and matched whole, never by prefix: a
+        search provider can share its name with a model provider, as DeepSeek
+        does, whose models' keys then carry the same prefix. A name that breaks
+        the name rules, which an entry from before them keeps, has none: named
+        ``*``, it would read as every search tool.
+        """
+        return {
+            f"{entry.get('provider') or name}:{name}"
+            for name, entry in self.search_tools.items()
+            if not instance_name_problems(name)
+        }
+
+    def legacy_fetch_tool_keys(self) -> set[str]:
+        """The ``<provider>:<instance>`` keys the fetch instances were priced under, ``builtin:builtin_fetch`` included.
+
+        Matched whole, for the reason :meth:`legacy_search_tool_keys` gives.
+        """
+        return {f"{instance.provider}:{name}" for name, instance in effective_fetch_instances(self).items()}
 
     def search_tools_without_backend_url(self) -> list[str]:
         """Search tools whose provider needs an ``api_base`` and has none to inherit.
@@ -557,10 +562,6 @@ class ToolSettings(BaseModel):
     def warn_about_half_configured_web_search(self) -> None:
         """Say so when a search provider was named but cannot be used.
 
-        Also when ``web_search_backend_token`` was set without one: the token
-        exists to gate the backend route, and that route is not mounted without
-        a provider to serve it, so the setting silently does nothing.
-
         A warning rather than a refusal, for the reason
         :meth:`GatewayConfig.warn_about_half_configured_oauth` gives: web search
         is one optional tool, and refusing to boot would take a gateway offline
@@ -574,12 +575,6 @@ class ToolSettings(BaseModel):
         it would need no URL answers every ``otari_web_search`` request with the
         not-configured 400 and says nowhere why.
         """
-        if self.web_search_backend_token and not self.web_search_provider_configured():
-            logger.warning(
-                "web_search_backend_token is set but no web-search provider is configured, so "
-                "GET /api/v1/web-search/search is not served. Set web_search_provider and "
-                "web_search_provider_api_key on the process that holds the search key."
-            )
         if bool(self.web_search_provider) == bool(self.web_search_provider_api_key):
             return
         missing, present = (
@@ -614,7 +609,7 @@ class ToolSettings(BaseModel):
         Run at load, before stored search tools are overlaid, so a fetch entry
         named like a configured search entry stops startup here. One named like
         a stored search tool loads, and is left out of the fetch map with an
-        error (:func:`warn_about_tool_instances`).
+        error at startup.
         """
         for name, entry in self.fetch_tools.items():
             validate_fetch_tool_entry(name, entry)
@@ -624,6 +619,12 @@ class ToolSettings(BaseModel):
                     "names are unique across the two maps."
                 )
                 raise ValueError(msg)
+
+    @field_validator("web_search_workspace_default", mode="before")
+    @classmethod
+    def _null_web_search_workspace_default_is_on(cls, value: object) -> object:
+        # An earlier release accepted null here, so a config still carrying it keeps the default.
+        return True if value is None else value
 
     @field_validator("web_search_provider")
     @classmethod
@@ -702,11 +703,7 @@ def effective_fetch_instances(settings: ToolSettings) -> dict[str, ToolInstance]
     So is one that breaks the name rules, which only a stored row can, since a
     configured one stops startup.
     """
-    instances = {
-        BUILTIN_FETCH: ToolInstance(
-            name=BUILTIN_FETCH, kind="fetch", provider=BUILTIN_FETCH_PROVIDER, library_backed=True
-        ),
-    }
+    instances = {BUILTIN_FETCH: BUILTIN_FETCH_INSTANCE}
     for name, entry in settings.fetch_tools.items():
         if isinstance(entry, dict) and name not in settings.search_tools and not instance_name_problems(name):
             instances[name] = _instance("fetch", name, entry, library_backed=True)
@@ -788,68 +785,6 @@ def synthesized_search_instance(settings: ToolSettings) -> SynthesizedSearchInst
     )
 
 
-def in_loop_default(settings: ToolSettings) -> ToolInstance | SynthesizedSearchInstance | None:
-    """The search backend the in-loop tool uses when no credential applies.
-
-    In order: ``web_search_default_tool`` when it names a search instance whose
-    provider any-search serves, or ``none``, which turns in-loop search off;
-    else the synthesized instance while the legacy settings are present; else
-    the one search instance, when there is exactly one and any-search serves its
-    provider; else nothing. A default that names no such instance is treated as
-    unset. The count in the third step includes instances any-search does not
-    serve yet, so an adapter that arrives later never moves the default.
-    """
-    instances = effective_search_instances(settings)
-    named = configured_search_default(settings)
-    if named == NO_SEARCH_DEFAULT:
-        return None
-    if named is not None and (instance := instances.get(named)) is not None and instance.library_backed:
-        return instance
-    if (synthesized := synthesized_search_instance(settings)) is not None:
-        return synthesized
-    if len(instances) == 1:
-        (only,) = instances.values()
-        return only if only.library_backed else None
-    return None
-
-
-def search_default_to_pin(settings: ToolSettings, new_name: str) -> ToolInstance | None:
-    """The search instance to store as ``web_search_default_tool`` before ``new_name`` is added, if any.
-
-    Adding a second search instance would end step 3 of the in-loop default,
-    which needs exactly one, and so turn in-loop search off by accident. So
-    when the one instance there is the in-loop default through that step, the
-    write that adds the second names it first. A ``new_name`` the map already
-    holds replaces an entry rather than adding one.
-    """
-    instances = effective_search_instances(settings)
-    if new_name in instances or len(instances) != 1:
-        return None
-    (only,) = instances.values()
-    default = in_loop_default(settings)
-    from_step_3 = configured_search_default(settings) != only.name
-    return only if from_step_3 and isinstance(default, ToolInstance) and default.name == only.name else None
-
-
-def fetch_default(settings: ToolSettings) -> ToolInstance:
-    """The fetch instance for the fetch tool and for enrichment.
-
-    ``web_fetch_default_tool`` when it names a fetch instance, else ``builtin_fetch``.
-    """
-    instances = effective_fetch_instances(settings)
-    return instances.get(configured_fetch_default(settings)) or instances[BUILTIN_FETCH]
-
-
-def enrichment_fetch_instance(settings: ToolSettings, search: ToolInstance) -> ToolInstance:
-    """The fetch instance that enriches a search instance's results.
-
-    Its ``fetch_tool`` when that names a fetch instance, else the fetch default.
-    """
-    if search.fetch_tool is not None and (instance := effective_fetch_instances(settings).get(search.fetch_tool)):
-        return instance
-    return fetch_default(settings)
-
-
 def _warn_about_entry(section: str, name: str, problems: list[str]) -> None:
     if problems:
         logger.warning(
@@ -863,7 +798,7 @@ def _warn_about_entry(section: str, name: str, problems: list[str]) -> None:
 def warn_about_instances(settings: ToolSettings, search_names: Iterable[str], fetch_names: Iterable[str]) -> None:
     """Log what the instance rules say about these instances: what loads anyway, and what is left out.
 
-    :func:`warn_about_tool_instances` runs it for every instance at startup, and
+    The startup warning runs it for every instance, and
     the stored-row refresh for each row first seen or changed since. A name the
     maps no longer hold is skipped. Names and problems only, never a key, an
     option's value or a URL.
@@ -936,31 +871,6 @@ def dangling_reference_warnings(settings: ToolSettings) -> dict[str, tuple[str, 
             "web_fetch_default_tool names no fetch instance (%s), so builtin_fetch is the fetch default.",
         )
     return warnings
-
-
-def warn_about_tool_instances(settings: ToolSettings) -> None:
-    """Log what the instance rules let load but an operator should fix.
-
-    Run once at startup, after stored search tools and runtime settings have
-    loaded, so a name stored through the dashboard is one the checks can see.
-    Names and problems only, never a key, an option's value or a URL.
-    """
-    search = effective_search_instances(settings)
-    warn_about_instances(settings, search, settings.fetch_tools)
-    for value, message in dangling_reference_warnings(settings).values():
-        logger.warning(message, value)
-    named = configured_search_default(settings)
-    if named != NO_SEARCH_DEFAULT and len(search) > 1 and in_loop_default(settings) is None:
-        usable = sorted(name for name, instance in search.items() if instance.library_backed)
-        logger.warning(
-            "There are %d search instances and no usable web_search_default_tool, so the in-loop "
-            "otari_web_search tool has no default to search with. %s",
-            len(search),
-            f"Set web_search_default_tool to one of {', '.join(usable)}, or to 'none' to keep in-loop search off."
-            if usable
-            else "None of them is on a provider the in-loop tool can use yet; set web_search_default_tool to "
-            "'none' to say in-loop search stays off.",
-        )
 
 
 def validate_default_tool(settings: ToolSettings, key: str, value: object) -> None:

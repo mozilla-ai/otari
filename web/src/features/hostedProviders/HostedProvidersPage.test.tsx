@@ -4,9 +4,13 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
+  DeploymentProviderMigrationRow,
   HostedCatalogRefresh,
   HostedModel,
   HostedProvider,
+  HostedProviderTestResult,
+  ProviderHealth,
+  ProviderInfo,
 } from "@/client"
 import { HostedProvidersPage } from "@/features/hostedProviders/HostedProvidersPage"
 import { API_ROOT } from "@/shared/api/client"
@@ -25,14 +29,19 @@ function hostedProvider(
 ): HostedProvider {
   return {
     id: "11111111-1111-4111-8111-111111111111",
+    // Named after its implementation unless the case names it otherwise.
+    name: overrides.provider ?? "openai",
     provider: "openai",
     source: "database",
     shadows_config: false,
+    has_api_key: true,
+    decryptable: true,
     api_key_last4: "abcd",
     api_base: null,
     client_args: null,
     enabled: true,
     restricted_to_organization_id: null,
+    serves_unlisted_models: false,
     created_at: "2026-10-01T00:00:00Z",
     updated_at: null,
     ...overrides,
@@ -54,6 +63,32 @@ function hostedModel(overrides: Partial<HostedModel> = {}): HostedModel {
     created_at: "2026-10-01T00:00:00Z",
     updated_at: null,
     ...overrides,
+  }
+}
+
+function providerInfo(instance: string): ProviderInfo {
+  return {
+    instance,
+    provider_type: instance,
+    name: instance,
+    doc_url: null,
+    description: null,
+    env_key: null,
+    pricing_urls: [],
+    source: "config",
+    capabilities: {
+      streaming: true,
+      reasoning: false,
+      vision: false,
+      pdf: false,
+      embeddings: false,
+      image_generation: false,
+      audio: false,
+      rerank: false,
+      responses_api: false,
+      moderation: false,
+      list_models: true,
+    },
   }
 }
 
@@ -85,6 +120,18 @@ function mockApi(
     sweep?: HostedCatalogRefresh
     /** Answers each preview read in turn; the sweep's own body otherwise. */
     previews?: (() => Promise<Response>)[]
+    /** The stored providers the move would carry, and what each becomes. */
+    migration?: DeploymentProviderMigrationRow[]
+    /** The `providers:` instances GET /providers lists. */
+    configured?: ProviderInfo[]
+    /** What a connection test answers. */
+    testResult?: HostedProviderTestResult
+    /** The health records GET /providers/health answers. */
+    health?: ProviderHealth[]
+    /** Whether the organization context reports a usable OTARI_SECRET_KEY. */
+    keyEncryption?: boolean
+    /** What GET /settings answers about pricing. */
+    pricing?: { require_pricing: boolean; default_pricing: boolean }
   } = {},
 ) {
   const granted = opts.granted ?? true
@@ -104,8 +151,67 @@ function mockApi(
     if (url.includes(`${API_ROOT}/admin/access`)) {
       return jsonResponse({ granted })
     }
+    if (url.includes(`${API_ROOT}/organizations/me`)) {
+      return jsonResponse({
+        provider_key_encryption_available: opts.keyEncryption ?? true,
+      })
+    }
+    if (url.includes(`${API_ROOT}/settings`)) {
+      return jsonResponse(opts.pricing ?? {})
+    }
+    if (url.includes(`${API_ROOT}/providers/catalog/`)) {
+      const id = url.split("/").pop() ?? ""
+      return jsonResponse({
+        id,
+        name: id,
+        env_key: null,
+        default_api_base: null,
+        requires_api_key: id !== "ollama",
+        env_key_present: false,
+      })
+    }
     if (url.includes(`${API_ROOT}/providers/catalog`)) {
-      return jsonResponse([{ id: "anthropic", name: "Anthropic" }])
+      return jsonResponse([
+        { id: "anthropic", name: "Anthropic" },
+        { id: "openai", name: "OpenAI" },
+      ])
+    }
+    if (url.includes(`${API_ROOT}/providers/health`)) {
+      const health = opts.health ?? []
+      return jsonResponse({
+        providers: health,
+        healthy: health.filter((row) => row.ok).length,
+        degraded: 0,
+        total: health.length,
+        checked_at: null,
+      })
+    }
+    if (url.includes(`${API_ROOT}/providers`)) {
+      return jsonResponse({ providers: opts.configured ?? [] })
+    }
+    if (url.includes(`${hosted}/test`)) {
+      return jsonResponse(
+        opts.testResult ?? {
+          ok: true,
+          model_count: 3,
+          error: null,
+          discovery_unsupported: false,
+        },
+      )
+    }
+    if (url.includes(`${hosted}/migration`)) {
+      const rows = opts.migration ?? []
+      return jsonResponse({
+        rows:
+          method === "POST"
+            ? rows.map((row) => ({
+                ...row,
+                outcome: row.outcome === "migrate" ? "migrated" : row.outcome,
+                models: 1,
+                source_removed: row.outcome === "migrate",
+              }))
+            : rows,
+      })
     }
     if (url.includes(`${hosted}/refresh/preview`)) {
       const next = previews.shift()
@@ -137,12 +243,12 @@ function mockApi(
   return requests
 }
 
-function renderPage(surfaces?: string[]) {
+function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return renderWithRouter(
-    <DeploymentProvider value={bootstrap(surfaces ? { surfaces } : {})}>
+    <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>
         <HostedProvidersPage />
       </QueryClientProvider>
@@ -217,23 +323,196 @@ describe("HostedProvidersPage", () => {
     ).toBeNull()
   })
 
-  it("says the page is not served where the surface is not published, asking nothing", async () => {
-    const requests = mockApi()
-    await renderPage([])
+  it("walks the first provider in when none is configured", async () => {
+    mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
 
+    expect(await screen.findByText("Welcome to Otari")).toBeInTheDocument()
+    // The panel owns the empty state, so no empty table sits under it.
+    expect(screen.queryByRole("grid", { name: "Hosted providers" })).toBeNull()
+    expect(screen.queryByText(/Enable default pricing/)).toBeNull()
+
+    await user.click(
+      screen.getByRole("button", { name: "Add your first provider" }),
+    )
     expect(
-      await screen.findByText("Hosted providers is not available here"),
+      await screen.findByRole("dialog", { name: "Add hosted provider" }),
     ).toBeInTheDocument()
-    expect(requests).toEqual([])
   })
 
-  it("offers to add the first provider when none is configured", async () => {
-    mockApi({ providers: [] })
+  it("offers default pricing on first run while pricing is required and unset", async () => {
+    const requests = mockApi({
+      providers: [],
+      pricing: { require_pricing: true, default_pricing: false },
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Enable default pricing" }),
+    )
+    await waitFor(() =>
+      expect(
+        requests.filter(
+          (request) =>
+            request.url.endsWith("/settings") && request.method === "PATCH",
+        ),
+      ).toEqual([expect.objectContaining({ body: { default_pricing: true } })]),
+    )
+  })
+
+  it("disables adding a provider while OTARI_SECRET_KEY is not set", async () => {
+    mockApi({ providers: [], keyEncryption: false })
     await renderPage()
 
     expect(
-      await screen.findByText("No hosted providers configured"),
+      await screen.findByText(/is not set, so provider keys/),
     ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Add provider" })).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Add your first provider" }),
+    ).toBeDisabled()
+  })
+
+  it("says nothing about OTARI_SECRET_KEY while it is set", async () => {
+    mockApi()
+    await renderPage()
+
+    await screen.findByRole("grid", { name: "Hosted providers" })
+    expect(screen.queryByText(/OTARI_SECRET_KEY/)).toBeNull()
+    expect(screen.getByRole("button", { name: "Add provider" })).toBeEnabled()
+  })
+
+  it("links each provider to the models it serves", async () => {
+    mockApi({
+      providers: [hostedProvider({ name: "openai-eu" })],
+    })
+    await renderPage()
+
+    expect(
+      await screen.findByRole("link", { name: "openai-eu" }),
+    ).toHaveAttribute("href", "/models?provider=openai-eu")
+  })
+
+  it("tests a stored provider from its row, on what it stores", async () => {
+    const requests = mockApi({
+      providers: [hostedProvider({ name: "openai-eu" })],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Test openai-eu" }),
+    )
+
+    expect(
+      await screen.findByText(/Connected\. 3 models available\./),
+    ).toBeInTheDocument()
+    expect(hostedRequests(requests, "POST")).toEqual([
+      expect.objectContaining({
+        url: expect.stringContaining("/hosted-providers/test"),
+        body: { provider: "openai", name: "openai-eu" },
+      }),
+    ])
+  })
+
+  it("offers no row test for a key no secret reads, or for a config.yml provider", async () => {
+    mockApi({
+      providers: [
+        hostedProvider({ decryptable: false }),
+        hostedProvider({ id: "c", provider: "mistral", source: "config" }),
+      ],
+    })
+    await renderPage()
+
+    expect(
+      await screen.findByRole("button", { name: "Test openai" }),
+    ).toBeDisabled()
+    expect(screen.queryByRole("button", { name: "Test mistral" })).toBeNull()
+  })
+
+  it("summarizes reachability and re-checks every provider on demand", async () => {
+    const requests = mockApi({
+      health: [
+        {
+          instance: "openai",
+          ok: true,
+          model_count: 3,
+          error: null,
+          checked_at: "2026-10-19T00:00:00Z",
+          discovery_unsupported: false,
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    expect(
+      await screen.findByText("1 of 1 provider reachable"),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Re-check all" }))
+    await waitFor(() =>
+      expect(
+        requests.some((request) =>
+          request.url.endsWith("/providers/health?refresh=true"),
+        ),
+      ).toBe(true),
+    )
+  })
+
+  it("adds a provider that serves models not on its list", async () => {
+    const requests = mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(within(dialog).getByLabelText("API key"), "sk-ant-secret")
+    await user.click(
+      within(dialog).getByRole("checkbox", {
+        name: "Serve models not on its list",
+      }),
+    )
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add provider" }),
+    )
+
+    await waitFor(() =>
+      expect(hostedRequests(requests, "POST")).toHaveLength(1),
+    )
+    expect(hostedRequests(requests, "POST")[0].body).toMatchObject({
+      serves_unlisted_models: true,
+    })
+  })
+
+  it("switches serving models not on its list from the edit dialog", async () => {
+    const requests = mockApi({
+      providers: [hostedProvider({ serves_unlisted_models: true })],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Edit openai" }))
+    const dialog = await screen.findByRole("dialog")
+    const box = within(dialog).getByRole("checkbox", {
+      name: "Serve models not on its list",
+    })
+    expect(box).toBeChecked()
+    await user.click(box)
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(hostedRequests(requests, "PATCH")).toHaveLength(1),
+    )
+    expect(hostedRequests(requests, "PATCH")[0].body).toEqual({
+      api_base: "",
+      serves_unlisted_models: false,
+    })
   })
 
   it("adds a provider with its key, leaving a blank endpoint out", async () => {
@@ -258,6 +537,7 @@ describe("HostedProvidersPage", () => {
     expect(hostedRequests(requests, "POST")[0].body).toEqual({
       provider: "anthropic",
       api_key: "sk-ant-secret",
+      serves_unlisted_models: false,
     })
   })
 
@@ -610,5 +890,461 @@ describe("HostedProvidersPage", () => {
     expect(confirm).toBeDisabled()
     await user.click(confirm)
     expect(hostedRequests(requests, "POST")).toEqual([])
+  })
+})
+
+describe("HostedProvidersPage, named providers and the move", () => {
+  it("discards a stored provider that cannot move, once confirmed", async () => {
+    const requests = mockApi({
+      migration: [
+        {
+          instance: "groq",
+          provider: "groq",
+          api_base: null,
+          outcome: "conflict",
+          detail: "A hosted provider already has this name.",
+          models: null,
+          source_removed: false,
+          notes: [],
+        },
+        {
+          instance: "openai-eu",
+          provider: "openai",
+          api_base: null,
+          outcome: "migrate",
+          detail: null,
+          models: null,
+          source_removed: false,
+          notes: [],
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    // A row that can still move is moved, not discarded.
+    await screen.findByRole("button", { name: "Discard groq" })
+    expect(
+      screen.queryByRole("button", { name: "Discard openai-eu" }),
+    ).toBeNull()
+
+    await user.click(screen.getByRole("button", { name: "Discard groq" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog).toHaveTextContent("Discard groq?")
+    const previewReads = () =>
+      requests.filter(
+        (request) =>
+          request.method === "GET" &&
+          request.url.endsWith("/hosted-providers/migration"),
+      ).length
+    const readsBefore = previewReads()
+    await user.click(within(dialog).getByRole("button", { name: "Discard" }))
+
+    await waitFor(() =>
+      expect(
+        requests.some(
+          (request) =>
+            request.method === "DELETE" &&
+            request.url.endsWith("/hosted-providers/migration/groq"),
+        ),
+      ).toBe(true),
+    )
+    await waitFor(() => expect(previewReads()).toBeGreaterThan(readsBefore))
+  })
+
+  it("keeps offering the move after one that left a provider behind", async () => {
+    mockApi({
+      migration: [
+        {
+          instance: "groq",
+          provider: "groq",
+          api_base: null,
+          outcome: "failed",
+          detail: "The endpoint was refused.",
+          models: null,
+          source_removed: false,
+          notes: [],
+        },
+        {
+          instance: "openai-eu",
+          provider: "openai",
+          api_base: null,
+          outcome: "migrate",
+          detail: null,
+          models: null,
+          source_removed: false,
+          notes: [],
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Review the move" }),
+    )
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Move 1 provider",
+      }),
+    )
+
+    expect(
+      await screen.findByText(/Moved 1 of 2 stored providers/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Review the move" }),
+    ).toBeInTheDocument()
+  })
+
+  it("reports a row copied but still served from its original entry apart from a completed move", async () => {
+    mockApi({
+      migration: [
+        {
+          instance: "quiet",
+          provider: "openai",
+          api_base: null,
+          outcome: "migrate",
+          detail: null,
+          models: null,
+          source_removed: false,
+          notes: [],
+        },
+      ],
+    })
+    const fetchMock = vi.mocked(globalThis.fetch)
+    const answer = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation(async (input, init) => {
+      if (
+        String(input).includes("/hosted-providers/migration") &&
+        init?.method === "POST"
+      ) {
+        return jsonResponse({
+          rows: [
+            {
+              instance: "quiet",
+              provider: "openai",
+              api_base: null,
+              outcome: "migrated",
+              detail: null,
+              models: 0,
+              source_removed: false,
+              notes: [],
+            },
+          ],
+        })
+      }
+      return answer ? answer(input, init) : jsonResponse({})
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Review the move" }),
+    )
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Move 1 provider",
+      }),
+    )
+
+    expect(
+      await screen.findByText(/Moved 0 of 1 stored providers\. 1 copied/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/^Copied, original entry kept/)).toBeInTheDocument()
+  })
+
+  it("shows inside the dialog why a failed re-read holds the move", async () => {
+    mockApi({
+      migration: [
+        {
+          instance: "openai-eu",
+          provider: "openai",
+          api_base: null,
+          outcome: "migrate",
+          detail: null,
+          models: null,
+          source_removed: false,
+          notes: [],
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByRole("button", { name: "Review the move" })
+    const fetchMock = vi.mocked(globalThis.fetch)
+    const answer = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes("/hosted-providers/migration")) {
+        return jsonResponse({ detail: "Preview went away" }, 400)
+      }
+      return answer ? answer(input, init) : jsonResponse({})
+    })
+
+    await user.click(screen.getByRole("button", { name: "Review the move" }))
+
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      await within(dialog).findByText("Preview went away"),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole("button", { name: "Move 1 provider" }),
+    ).toBeDisabled()
+  })
+
+  it("says the move could not be previewed rather than hiding it", async () => {
+    mockApi()
+    const fetchMock = vi.mocked(globalThis.fetch)
+    const answer = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes("/hosted-providers/migration")) {
+        return jsonResponse({ detail: "Preview unavailable" }, 500)
+      }
+      return answer ? answer(input, init) : jsonResponse({})
+    })
+    await renderPage()
+
+    expect(await screen.findByText("Preview unavailable")).toBeInTheDocument()
+  })
+
+  it("shows no status for a hosted provider a configured instance of its name is dialed under", async () => {
+    const reachable = (instance: string): ProviderHealth => ({
+      instance,
+      ok: true,
+      model_count: 1,
+      error: null,
+      checked_at: "2026-10-19T00:00:00Z",
+      discovery_unsupported: false,
+    })
+    mockApi({
+      providers: [
+        hostedProvider({ name: "openai" }),
+        hostedProvider({ id: "m", name: "mistral", provider: "mistral" }),
+      ],
+      configured: [providerInfo("openai")],
+      health: [reachable("openai"), reachable("mistral")],
+    })
+    await renderPage()
+
+    const table = await screen.findByRole("grid", { name: "Hosted providers" })
+    const rows = (name: string) =>
+      within(table)
+        .getAllByRole("rowheader", { name: new RegExp(`^${name}`) })
+        .map((header) => header.parentElement as HTMLElement)
+    await within(table).findByText("Edit in config.yml")
+    const [configuredOpenai, hostedOpenai] = [...rows("openai")].sort(
+      (a, b) =>
+        Number(within(b).queryByText("Edit in config.yml") !== null) -
+        Number(within(a).queryByText("Edit in config.yml") !== null),
+    )
+    // The configured instance's record is the one dialed under "openai".
+    expect(
+      await within(configuredOpenai).findByText("Reachable"),
+    ).toBeInTheDocument()
+    expect(within(hostedOpenai).queryByText("Reachable")).toBeNull()
+    expect(
+      await within(rows("mistral")[0]).findByText("Reachable"),
+    ).toBeInTheDocument()
+  })
+
+  it("names a provider of its own and tests it before saving", async () => {
+    const requests = mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "OpenAI" }))
+    await user.type(within(dialog).getByLabelText("Name"), "openai-eu")
+    await user.type(
+      within(dialog).getByLabelText("API base URL"),
+      "https://eu.example.com/v1",
+    )
+    // An endpoint of its own may go without a key.
+    expect(
+      within(dialog).getByRole("button", { name: "Add provider" }),
+    ).toBeEnabled()
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Test connection" }),
+    )
+    expect(
+      await within(dialog).findByText(/Connected\. 3 models available\./),
+    ).toBeInTheDocument()
+    const [test] = hostedRequests(requests, "POST").filter((request) =>
+      request.url.endsWith("/hosted-providers/test"),
+    )
+    expect(test.body).toEqual({
+      provider: "openai",
+      name: "openai-eu",
+      api_base: "https://eu.example.com/v1",
+    })
+    expect(hostedRequests(requests, "POST")).toHaveLength(1)
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add provider" }),
+    )
+    await waitFor(() =>
+      expect(
+        hostedRequests(requests, "POST").filter((request) =>
+          request.url.endsWith("/hosted-providers"),
+        ),
+      ).toHaveLength(1),
+    )
+  })
+
+  it("says the client options are encrypted at rest, as the hosted store keeps them", async () => {
+    mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+
+    expect(
+      within(dialog).getByText(/Encrypted at rest, and an option/),
+    ).toBeInTheDocument()
+    expect(within(dialog).queryByText(/nothing here is encrypted/)).toBeNull()
+  })
+
+  it("holds the save until a key is typed for a provider that needs one", async () => {
+    mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "OpenAI" }))
+
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: "Add provider" }),
+      ).toBeDisabled(),
+    )
+  })
+
+  it("tests an edit on the stored key without asking for it", async () => {
+    const requests = mockApi({
+      providers: [
+        hostedProvider({
+          name: "openai-eu",
+          api_base: "https://eu.example.com/v1",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Edit openai-eu" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(
+      within(dialog).getByRole("button", { name: "Test connection" }),
+    )
+
+    await within(dialog).findByText(/Connected\./)
+    const [test] = hostedRequests(requests, "POST")
+    expect(test.url).toContain("/hosted-providers/test")
+    expect(test.body).toEqual({
+      provider: "openai",
+      name: "openai-eu",
+      api_base: "https://eu.example.com/v1",
+    })
+  })
+
+  it("shows a provider's name beside its implementation, and a key no secret reads", async () => {
+    mockApi({
+      providers: [
+        hostedProvider({
+          name: "openai-eu",
+          decryptable: false,
+        }),
+      ],
+    })
+    await renderPage()
+
+    const table = await screen.findByRole("grid", { name: "Hosted providers" })
+    expect(await within(table).findByText("openai-eu")).toBeInTheDocument()
+    expect(within(table).getByText("openai")).toBeInTheDocument()
+    expect(within(table).getByText("Key unreadable")).toBeInTheDocument()
+  })
+
+  it("lists the configured providers read-only in the same table", async () => {
+    mockApi({
+      providers: [hostedProvider({ name: "openai" })],
+      configured: [providerInfo("anthropic")],
+    })
+    await renderPage()
+
+    const table = await screen.findByRole("grid", { name: "Hosted providers" })
+    const header = await within(table).findByRole("rowheader", {
+      name: /^anthropic/,
+    })
+    const row = header.parentElement as HTMLElement
+    expect(within(row).getByText("config.yml")).toBeInTheDocument()
+    expect(within(row).getByText("Edit in config.yml")).toBeInTheDocument()
+    expect(within(row).queryByRole("button")).toBeNull()
+    expect(within(row).queryByRole("switch")).toBeNull()
+    expect(
+      within(table).getByRole("button", { name: "Edit openai" }),
+    ).toBeInTheDocument()
+  })
+
+  it("moves the stored providers once the preview is reviewed", async () => {
+    const requests = mockApi({
+      migration: [
+        {
+          instance: "openai-eu",
+          provider: "openai",
+          api_base: "https://eu.example.com/v1",
+          outcome: "migrate",
+          detail: null,
+          models: null,
+          source_removed: false,
+          notes: [],
+        },
+        {
+          instance: "groq",
+          provider: "groq",
+          api_base: null,
+          outcome: "conflict",
+          detail: "A hosted provider named 'groq' already exists.",
+          models: null,
+          source_removed: false,
+          notes: [],
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Review the move" }),
+    )
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText(/already exists/)).toBeInTheDocument()
+    await user.click(
+      within(dialog).getByRole("button", { name: "Move 1 provider" }),
+    )
+
+    expect(
+      await screen.findByText(/Moved 1 of 2 stored providers/),
+    ).toBeInTheDocument()
+    const moves = hostedRequests(requests, "POST").filter((request) =>
+      request.url.endsWith("/hosted-providers/migration"),
+    )
+    // Only what the preview offered to move, so nothing unreviewed moves.
+    expect(moves.map((request) => request.body)).toEqual([
+      { rows: [{ instance: "openai-eu", updated_at: null }] },
+    ])
   })
 })

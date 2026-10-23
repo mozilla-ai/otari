@@ -6,20 +6,21 @@
  * out of `ActivityPage.tsx` so neither imports the other, and so the
  * derivations can be tested without rendering a page.
  *
- * The four formatters here (`formatUSD`, `formatTokenCount`,
- * `formatLatencyCell`, `formatElapsed`) are relocated unchanged and are
- * deliberately not reconciled with `shared/helpers/format.ts`. That module's
- * `formatUsd`, `formatTokens` and `formatLatency` disagree with these on
- * rounding, grouping and the absent-value spelling, so swapping one for the
- * other is a behavior change rather than a move; otari#1335 tracks it.
+ * The formatters here are deliberately not reconciled with
+ * `shared/helpers/format.ts`, whose `formatUsd`, `formatTokens` and
+ * `formatLatency` disagree with them on rounding, grouping and the
+ * absent-value spelling; otari#1335 tracks it.
  */
 
 import type { ChargeLine, UsageEntry } from "@/client"
 import { isUnitChargeLine } from "@/client"
+import { formatDuration } from "@/features/traces/format"
 import {
   formatCost,
-  formatLatency,
   formatNumber,
+  formatTokensCompact,
+  formatUnitRate,
+  formatUsdCompact,
 } from "@/shared/helpers/format"
 import {
   ACTIVITY_DEFAULT_KEY,
@@ -33,7 +34,29 @@ import {
 // ---------- formatting ----------
 
 export function formatUSD(value: number | null): string {
-  return value === null ? "—" : formatCost(value)
+  if (value === null) return "—"
+  // Below four decimals a real charge would read "$0.00", the same as free.
+  return value !== 0 && Math.abs(value) < 0.0001
+    ? formatUnitRate(value)
+    : formatCost(value)
+}
+
+// The log's number lanes are sized to "999,999" and "$9,999.99". Past those a
+// value goes compact ("1.23B", "$12.3M") rather than spilling into the next
+// lane; the caller puts the exact figure in the title.
+export const isCompactCount = (value: number) => Math.abs(value) >= 1_000_000
+export const isCompactUSD = (value: number) => Math.abs(value) >= 10_000
+
+export function formatTokenLane(value: number | null): string {
+  if (value === null) return "—"
+  return isCompactCount(value)
+    ? formatTokensCompact(value)
+    : formatNumber(value)
+}
+
+export function formatUSDLane(value: number | null): string {
+  if (value === null || !isCompactUSD(value)) return formatUSD(value)
+  return formatUsdCompact(value)
 }
 
 // The full grouped count rather than the compact `formatTokens`: a request log
@@ -58,7 +81,9 @@ export function sortChargeLines(lines: readonly ChargeLine[]): ChargeLine[] {
 // dash so the column stays aligned, which is what the shared helper's
 // `undefined` leaves each surface to decide.
 export function formatLatencyCell(ms: number | null): string {
-  return formatLatency(ms) ?? "—"
+  // Rolled up past a minute ("3h 03m", not "11000.00 s"), and never negative: a
+  // clock step between the start and end stamps is not a time anyone waited.
+  return ms === null ? "—" : formatDuration(Math.max(0, ms))
 }
 
 // Coarser than the settled Total time column: this is a wall-clock wait an
@@ -241,7 +266,7 @@ export function describeSource(source: string): string {
 //
 // One total is the least useful number on the row: on a cached agent workload it
 // is ~98% cache read, so every row shows a large, similar-looking figure. The
-// composition is what varies, so the column renders the split.
+// row shows input and output apart, and Input names its cache share.
 
 export interface TokenComposition {
   // Input tokens billed at the full input rate (the prompt minus whatever was
@@ -292,7 +317,7 @@ export function buildTokenComposition(
 
 // A row's gateway-run tool calls, read out of the reserved `tools` meter namespace.
 // Nested under one key so a caller-named MCP tool can never collide with a token
-// meter (which the billed-token SQL and `TokenBar` both read by name).
+// meter (which the billed-token SQL and `buildTokenComposition` both read by name).
 export type ToolUsage = {
   tool: string
   billed: number
@@ -343,29 +368,6 @@ export function computeToolCost(entry: UsageEntry): number | null {
     0,
   )
 }
-
-// Segment order runs input side first (fresh, then the two cache buckets), then
-// output. Shading is one hue at four lightnesses, assigned for legibility rather
-// than for price: every fill clears the track it sits on, adjacent fills differ
-// enough to show their boundary, and the bucket that is usually the bulk (cache
-// read) takes a mid tone instead of the palest step, so a cache-heavy row reads
-// as a filled bar and a fresh-input row as a dark one. Nothing is encoded by hue,
-// and the tooltip / accessible name carry every number, so the bar adds a shape
-// to scan and removes no information.
-export const TOKEN_SEGMENTS: {
-  key: keyof Omit<TokenComposition, "total">
-  label: string
-  fill: string
-}[] = [
-  { key: "fresh", label: "Fresh input", fill: "var(--color-chart-ramp-1)" },
-  { key: "cacheRead", label: "Cache read", fill: "var(--color-chart-ramp-3)" },
-  {
-    key: "cacheWrite",
-    label: "Cache write",
-    fill: "var(--color-chart-ramp-4)",
-  },
-  { key: "output", label: "Output", fill: "var(--color-chart-ramp-2)" },
-]
 
 // The pricing key a usage row bills against. A row stores the instance and the
 // bare model separately (`log_usage` is called with `provider=resolved.instance,

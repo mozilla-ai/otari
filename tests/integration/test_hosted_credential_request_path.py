@@ -89,14 +89,16 @@ def overlay_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generato
 
 def _config(postgres_url: str, *, bootstrap: str | None = None) -> GatewayConfig:
     return GatewayConfig(
+        import_configured_providers=False,
         database_url=postgres_url,
         master_key="test-master-key",
         auto_migrate=False,
         require_pricing=False,
         model_discovery=False,
         # One provider the gateway credentials itself, so BYO precedence has
-        # something concrete to be checked against.
-        providers={"anthropic": {"api_key": "sk-ant"}},
+        # something concrete to be checked against, and two local backends it
+        # declares with no key.
+        providers={"anthropic": {"api_key": "sk-ant"}, "ollama": {}, "vllm": {}},
         bootstrap=bootstrap,
     )
 
@@ -146,16 +148,14 @@ def test_the_overlay_fleet_serves_a_candidate_the_gateway_cannot(overlay_client:
     assert captured["model"] == "together:gpt-4o"
 
 
-def test_the_plain_build_dispatches_the_same_candidate_uncredentialed(plain_client: TestClient) -> None:
-    """The acceptance case for every deployment with no overlay: nothing changed."""
+def test_the_plain_build_refuses_a_candidate_nothing_declares(plain_client: TestClient) -> None:
+    """With no overlay, nothing serves the candidate, so it is refused rather than sent to any-llm uncredentialed."""
     _create_user(plain_client)
 
-    captured, _ = _post_chat_capture(plain_client, "openai:gpt-4o")
+    captured, status_code = _post_chat_capture(plain_client, "openai:gpt-4o")
 
-    assert captured, "the provider call was never made"
-    assert "api_key" not in captured
-    assert "api_base" not in captured
-    assert captured["model"] == "openai:gpt-4o"
+    assert captured == {}, "the provider was called for a candidate nothing declares"
+    assert status_code == 424
 
 
 def test_a_configured_provider_key_is_not_displaced_by_the_fleet(overlay_client: TestClient) -> None:
@@ -171,8 +171,8 @@ def test_a_configured_provider_key_is_not_displaced_by_the_fleet(overlay_client:
 def test_a_keyless_local_backend_is_not_claimed_by_the_fleet(overlay_client: TestClient) -> None:
     """Self-hosting stays a first-class path upstream of the port, even with an overlay bound.
 
-    ``ollama:llama3`` needs no credential at all, so an empty kwargs is not a
-    missing key and the fleet is never asked. Without this, a self-hoster's local
+    A declared ``ollama:llama3`` needs no credential at all, so an empty kwargs is
+    not a missing key and the fleet is never asked. Without this, a self-hoster's local
     traffic would silently start being served (and metered) from somewhere else.
     """
     _create_user(overlay_client)
@@ -188,9 +188,9 @@ def test_a_self_hosted_backend_declaring_a_key_is_not_claimed_by_the_fleet(overl
     """``vllm`` declares ``VLLM_API_KEY`` but any-llm never insists on it.
 
     The same invariant as the case above, for the half of the keyless set the
-    declaration cannot identify: a bare ``vllm:my-model`` reaches a local vLLM at
-    any-llm's default ``http://localhost:8000/v1`` with nothing configured here,
-    so the fleet must not be asked about it.
+    declaration cannot identify: a declared ``vllm:`` with no key reaches a local
+    vLLM at any-llm's default ``http://localhost:8000/v1``, so the fleet must not
+    be asked about it.
     """
     _create_user(overlay_client)
 

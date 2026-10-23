@@ -33,15 +33,16 @@ test.describe("dashboard core flows", () => {
     await expect(page.getByText("Welcome to Otari")).toBeVisible()
 
     await page.getByRole("button", { name: "Add your first provider" }).click()
-    // Scoped: the heading's trigger and the dialog's submit both say "Add
-    // provider", so an unscoped press is ambiguous.
-    const dialog = page.getByRole("dialog", { name: "New provider" })
-    await dialog.getByRole("button", { name: "Custom endpoint" }).click()
-    await dialog.getByLabel("Name").fill("e2e-llm")
-    await dialog.getByLabel("API base").fill("http://e2e-box:8000/v1")
+    const dialog = page.getByRole("dialog", { name: "Add hosted provider" })
+    await dialog.getByRole("combobox", { name: "Provider" }).fill("OpenAI")
+    await page.getByRole("option", { name: "OpenAI", exact: true }).click()
+    await dialog.getByRole("textbox", { name: "Name" }).fill("e2e-llm")
+    await dialog
+      .getByRole("textbox", { name: "API base URL" })
+      .fill("http://e2e-box:8000/v1")
     await dialog.getByRole("button", { name: "Add provider" }).click()
 
-    await expect(page.getByText("e2e-llm")).toBeVisible()
+    await expect(page.getByText("e2e-llm")).toBeVisible({ timeout: 30_000 })
     // Onboarding clears once a provider exists.
     await expect(page.getByText("Welcome to Otari")).toBeHidden()
   })
@@ -133,11 +134,7 @@ test.describe("dashboard core flows", () => {
 
     await openOrganization(page)
     for (const [link, heading] of [
-      // Two provider rows on this rail, told apart by their labels: the
-      // organization's own credentials and the process-wide ones a deployment
-      // operator manages.
       ["Providers", "Providers"],
-      ["Deployment providers", "Deployment providers"],
       ["Spend & budgets", "Budgets"],
     ]) {
       await nav(page).getByRole("link", { name: link, exact: true }).click()

@@ -491,6 +491,9 @@ class TestFlowSecret:
         assert oauth_service.flow_secret_for("not ours") != "not ours"
         assert oauth_service.flow_secret_for("x" * 43 + "!") != "x" * 43 + "!"
 
+        non_ascii = "é" * 43
+        assert oauth_service.flow_secret_for(non_ascii) != non_ascii
+
     def test_one_of_ours_is_reused_so_a_second_tab_does_not_break_the_first(self) -> None:
         existing = oauth_service.flow_secret_for(None)
 

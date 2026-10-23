@@ -354,6 +354,30 @@ def test_a_member_key_cannot_exceed_their_own_model_default(
     assert code == status.HTTP_200_OK, body
 
 
+def test_a_member_key_cannot_exceed_their_own_tool_default(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """The narrow-only rule binds allowed_tools against the caller's own user row too, on create and update."""
+    session = db_session_factory()
+    try:
+        session.add(BillingUser(user_id=str(world.users["alpha_member"]), allowed_tools=[]))
+        session.commit()
+    finally:
+        session.close()
+
+    code, body = _create(client, world, "alpha_member", {"key_name": "every-tool", "allowed_tools": ["*"]})
+    assert code == status.HTTP_400_BAD_REQUEST, body
+    assert "allowed_tools exceeds" in body["detail"]
+
+    code, created = _create(client, world, "alpha_member", {"key_name": "no-tool", "allowed_tools": []})
+    assert code == status.HTTP_200_OK, created
+    assert created["allowed_tools"] == []
+    code, body = _request(
+        client, world, "alpha_member", "PATCH", f"{_PREFIX}/{created['id']}", json={"allowed_tools": ["*"]}
+    )
+    assert code == status.HTTP_400_BAD_REQUEST, body
+
+
 # =============================================================================
 # Listing: own keys, and nobody else's
 # =============================================================================

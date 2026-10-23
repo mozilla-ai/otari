@@ -7,8 +7,29 @@ import type { ScopedBudget } from "@/client"
 import { SessionsPage } from "@/features/traces/SessionsPage"
 import { jsonResponse, mockApi, renderPage } from "@/tests/activity"
 import { scopedBudget } from "@/tests/fixtures"
-import { pickOption } from "@/tests/select"
-import { traceDetail, traceSummary } from "@/tests/traceFixtures"
+import {
+  gateSummary,
+  traceDetail,
+  traceSpan,
+  traceSummary,
+} from "@/tests/traceFixtures"
+
+// The span a gate's check was recorded as, under the tool call it checked.
+function gateCheck(gateId: string) {
+  return traceSpan({
+    span_id: "gate-1",
+    parent_span_id: "call-toolu_1",
+    kind: "guardrail",
+    origin: "otlp",
+    outcome: "blocked",
+    attributes: {
+      "otari.guardrail.profile": gateId,
+      "otari.gate.id": gateId,
+      "otari.gate.outcome": "fail",
+      "otari.gate.blocked": true,
+    },
+  })
+}
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -203,6 +224,40 @@ describe("SessionsPage", () => {
     )
   })
 
+  it("shows how much of the session's and a call's prompt came from the cache", async () => {
+    const detail = traceDetail()
+    const spans = detail.spans.map((span) =>
+      span.span_id === "llm-1"
+        ? {
+            ...span,
+            input_tokens: 48_210,
+            cache_read_tokens: 41_900,
+            cache_write_tokens: 6_010,
+            reasoning_tokens: 12,
+          }
+        : span,
+    )
+    mockApi({ traces: [traceSummary()], traceDetail: { ...detail, spans } })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    await userEvent.hover(
+      await within(peek).findByRole("button", { name: "48,212 tokens" }),
+    )
+    expect(await screen.findByText("Cached")).toBeInTheDocument()
+    expect(screen.getByText("86.9%")).toBeInTheDocument()
+    await userEvent.click(
+      within(peek).getAllByRole("button", { name: /^Generation, gpt-5/ })[0],
+    )
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: "Attributes" }),
+    )
+    expect(within(peek).getByText("48,210 (41,900 cached)")).toBeInTheDocument()
+    expect(within(peek).getByText("Cache write tokens")).toBeInTheDocument()
+    expect(within(peek).getByText("Reasoning tokens")).toBeInTheDocument()
+  })
+
   it("opens the span a gateway decision is about", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
@@ -220,6 +275,160 @@ describe("SessionsPage", () => {
     expect(
       within(peek).getByText("error, recovered by a fallback"),
     ).toBeInTheDocument()
+  })
+
+  it("lists the gates the agent's hook ran, and opens the check that blocked", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: [...detail.spans, gateCheck("no-changelog")],
+        gates: [
+          gateSummary({
+            gate_id: "no-changelog",
+            message: "CHANGELOG.md is generated.",
+            passed: 12,
+            blocked: 1,
+            flagged: 0,
+            undecided: 0,
+            span_id: "gate-1",
+          }),
+          gateSummary({
+            gate_id: "python-needs-check",
+            passed: 2,
+            blocked: 0,
+            flagged: 0,
+            undecided: 0,
+            span_id: null,
+          }),
+          gateSummary({ gate_id: "no-secret-reads", span_id: null }),
+        ],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    const gatesTab = await within(peek).findByRole("button", {
+      name: "Gates · 1 blocked",
+    })
+    await userEvent.click(gatesTab)
+
+    expect(
+      await within(peek).findByText(
+        "2 gates ran 15 checks, and stopped the agent once.",
+      ),
+    ).toBeInTheDocument()
+    const gate = within(peek).getByRole("button", { name: /^no-changelog/ })
+    expect(gate).toHaveTextContent("1 blocked")
+    expect(gate).toHaveTextContent("12 passed")
+    expect(gate).toHaveTextContent("CHANGELOG.md is generated.")
+    const unlinked = within(peek).getByRole("button", {
+      name: /^python-needs-check/,
+    })
+    expect(unlinked).toHaveTextContent("2 passed")
+    expect(unlinked).toBeDisabled()
+    expect(
+      within(peek).getByText("Did not run in this session"),
+    ).toBeInTheDocument()
+    expect(within(peek).getByText("no-secret-reads")).toBeInTheDocument()
+
+    await userEvent.click(gate)
+
+    await waitFor(() =>
+      expect(
+        within(peek).getByRole("button", { current: true }),
+      ).toHaveAccessibleName(/no-changelog/),
+    )
+    expect(
+      within(peek).getByRole("button", { name: "Attributes" }),
+    ).toBeInTheDocument()
+  })
+
+  it("brings the check a gate blocked into view, inside a collapsed turn", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: [...detail.spans, gateCheck("no-changelog")],
+        gates: [
+          gateSummary({
+            gate_id: "no-changelog",
+            passed: 0,
+            blocked: 1,
+            flagged: 0,
+            undecided: 0,
+            span_id: "gate-1",
+          }),
+        ],
+      },
+    })
+    const scrolled = vi.spyOn(Element.prototype, "scrollIntoView")
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: "Collapse all" }),
+    )
+    expect(
+      within(peek).queryByRole("button", { name: /^Tool, Bash/ }),
+    ).not.toBeInTheDocument()
+    await userEvent.click(within(peek).getByRole("button", { name: /^Gates/ }))
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: /^no-changelog/ }),
+    )
+
+    await waitFor(() =>
+      expect(
+        within(peek).getByRole("button", { current: true }),
+      ).toHaveAccessibleName(/no-changelog/),
+    )
+    const check = within(peek).getByRole("button", { current: true })
+    expect(scrolled.mock.contexts).toContain(check)
+    expect(
+      within(peek).getByRole("button", { name: /^Tool, Bash/ }),
+    ).toBeInTheDocument()
+    scrolled.mockRestore()
+  })
+
+  it("counts a gate that could not decide but held the agent as stopping it", async () => {
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...traceDetail(),
+        gates: [gateSummary({ gate_id: "judge-review", refused: 1 })],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: "Gates · 1 blocked" }),
+    )
+
+    expect(
+      await within(peek).findByText(
+        "1 gate ran 1 check, and stopped the agent once.",
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByText("1 could not decide, held"),
+    ).toBeInTheDocument()
+  })
+
+  it("has no Gates tab for a session no hook reported to", async () => {
+    mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    expect(
+      await within(peek).findByRole("button", { name: "Log View" }),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).queryByRole("button", { name: /^Gates/ }),
+    ).not.toBeInTheDocument()
   })
 
   it("says so when the session list cannot be read", async () => {
@@ -312,22 +521,31 @@ describe("SessionsPage", () => {
     )
   })
 
-  it("narrows the list to sessions with errors from the first page", async () => {
+  it("stops the search at the 128 characters the API accepts", async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions?page=2")
-    await vi.waitFor(() => expect(listReads(calls)[0]?.get("skip")).toBe("100"))
-    await pickOption(user, "Level", "Errors")
+    renderPage(<SessionsPage />, "/sessions")
+    const search = await screen.findByRole("searchbox", {
+      name: "Search sessions",
+    })
+    await user.click(search)
+    await user.paste("x".repeat(150))
 
+    expect(search).toHaveValue("x".repeat(128))
     await vi.waitFor(() =>
-      expect(
-        listReads(calls).some(
-          (params) =>
-            params.get("has_error") === "true" && params.get("skip") === "0",
-        ),
-      ).toBe(true),
+      expect(listReads(calls).at(-1)?.get("q")).toBe("x".repeat(128)),
     )
+  })
+
+  it("names the search when nothing matches it", async () => {
+    mockApi({ traces: [] })
+
+    renderPage(<SessionsPage />, "/sessions?q=codex")
+
+    expect(
+      await screen.findByText("No sessions in this window match “codex”."),
+    ).toBeInTheDocument()
   })
 
   it("reads the window a link names", async () => {
@@ -369,6 +587,55 @@ describe("SessionsPage", () => {
             params.get("skip") === "25" && params.get("limit") === "25",
         ),
       ).toBe(true),
+    )
+  })
+
+  it("sorts by a column from the first page, largest first, and flips on a second press", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?page=2")
+    await vi.waitFor(() =>
+      expect(listReads(calls)[0]?.get("sort")).toBe("last_activity"),
+    )
+    const cost = await screen.findByRole("columnheader", { name: /Total cost/ })
+    await user.click(cost)
+
+    await vi.waitFor(() =>
+      expect(listReads(calls).at(-1)?.toString()).toMatch(
+        /skip=0.*sort=cost&order=desc/,
+      ),
+    )
+    expect(cost).toHaveAttribute("aria-sort", "descending")
+
+    await user.click(cost)
+
+    await vi.waitFor(() =>
+      expect(listReads(calls).at(-1)?.get("order")).toBe("asc"),
+    )
+    expect(cost).toHaveAttribute("aria-sort", "ascending")
+  })
+
+  it("reads the sort a link names", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?sort=errors&order=asc")
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    expect(listReads(calls)[0].toString()).toMatch(/sort=errors&order=asc/)
+    expect(
+      await screen.findByRole("columnheader", { name: /Levels/ }),
+    ).toHaveAttribute("aria-sort", "ascending")
+  })
+
+  it("asks for the default order when a link names a sort it does not offer", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?sort=name&order=sideways")
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    expect(listReads(calls)[0].toString()).toMatch(
+      /sort=last_activity&order=desc/,
     )
   })
 

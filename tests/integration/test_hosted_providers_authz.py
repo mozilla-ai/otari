@@ -28,10 +28,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
-from gateway.api.deps import reset_config
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.database import reset_db
-from gateway.main import create_app
+from gateway.models.providers import ProviderCredential
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.model_discovery_service import ProviderDiscovery
@@ -87,12 +85,10 @@ def _discovery(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _stub)
 
 
-@pytest.fixture(params=["standalone", "hosted"])
-def mode_client(
-    request: pytest.FixtureRequest, test_config: GatewayConfig, clean_database: None
-) -> Generator[TestClient]:
-    """A client on each topology that mounts the surface, so the gate is pinned on both."""
-    yield from build_test_client(test_config.model_copy(update={"mode": request.param}))
+@pytest.fixture
+def mode_client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    """A client on its own config, so the gate is pinned on the app as built."""
+    yield from build_test_client(test_config)
 
 
 @dataclass
@@ -277,8 +273,19 @@ def _state(session_factory: Callable[[], Session]) -> dict[str, list[str]]:
         session.close()
 
 
+# A deployment provider the move cannot take (named after another provider), so
+# the discard route has a target after the move route has run.
+LEFTOVER = "groq"
+
+
+def _seed_leftover(session_factory: Callable[[], Session]) -> None:
+    with session_factory() as db:
+        db.add(ProviderCredential(instance=LEFTOVER, provider_type="openai", client_args={}))
+        db.commit()
+
+
 def _concrete(template: str, model_id: uuid.UUID) -> str:
-    return template.replace("{provider}", PROVIDER).replace("{model_id}", str(model_id))
+    return template.replace("{provider}", PROVIDER).replace("{model_id}", str(model_id)).replace("{instance}", LEFTOVER)
 
 
 def _request(client: TestClient, world: _World, principal: str, method: str, path: str, body: Any) -> Any:
@@ -341,6 +348,7 @@ def test_an_operator_reaches_every_route(
     client = mode_client
     world = _build_world(client, test_config.master_key or "", db_session_factory)
     model_id = _seed(client, world.headers["master_key"])
+    _seed_leftover(db_session_factory)
     routes = sorted(
         _hosted_routes(client),
         key=lambda route: (route[0] == "DELETE", -len(route[1]) if route[0] == "DELETE" else 0),
@@ -352,26 +360,3 @@ def test_an_operator_reaches_every_route(
         )
 
         assert 200 <= response.status_code < 300, (principal, method, template, response.text)
-
-
-def test_hybrid_mode_mounts_none_of_the_surface(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A hybrid gateway has no local control plane, so the routes are absent rather than gated."""
-    routes = _hosted_routes(client)
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    config = GatewayConfig(
-        mode="hybrid", master_key="test-master-key", platform={"base_url": "http://localhost:8100/api/v1"}
-    )
-
-    try:
-        with TestClient(create_app(config)) as hybrid:
-            assert _hosted_routes(hybrid) == []
-            for method, template in routes:
-                path = _concrete(template, uuid.uuid4())
-                for headers in ({}, {"Authorization": "Bearer test-master-key"}):
-                    response = hybrid.request(
-                        method, path, json=_example_body(client, method, template), headers=headers
-                    )
-                    assert response.status_code == 404, (method, template, response.text)
-    finally:
-        reset_config()
-        reset_db()

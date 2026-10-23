@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from fastapi import status
 
+from gateway.core.error_codes import PRICING_REQUIRED
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -53,6 +54,20 @@ class WorkspaceMcpServerLimitReachedError(TenancyValidationError):
 
     def __init__(self, workspace_id: object, limit: int):
         super().__init__(f"Workspace {workspace_id} already has the maximum of {limit} MCP servers")
+
+
+class WorkspaceMcpServerCheckBusyError(TenancyError):
+    """No connection check could start, because every check slot on this process was taken.
+
+    A 429 rather than a 503: it clears on its own within seconds, and a 5xx
+    renders as a generic internal error, hiding the one thing the caller needs
+    to know, which is to try again shortly.
+    """
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+
+    def __init__(self) -> None:
+        super().__init__("Too many MCP server checks are running on this gateway; try again shortly")
 
 
 class ContainerOnManagedCredentialError(TenancyValidationError):
@@ -140,18 +155,6 @@ class WebSearchPolicyResolutionFailure(StrEnum):
 
     message: str
 
-    ANSWER_UNREADABLE = (
-        "the answer could not be read",
-        "Authorization service returned a malformed web-access policy",
-    )
-    NO_CALLER_CREDENTIAL = (
-        "the request carried no caller credential",
-        "Web search configuration could not be resolved for this request",
-    )
-    NO_WORKSPACE = (
-        "the request named no workspace",
-        "Web search configuration could not be resolved for this request",
-    )
     STORED_POLICY_INVALID = (
         "a stored domain rule is invalid",
         "Web search configuration contains an invalid domain rule",
@@ -209,73 +212,8 @@ class SandboxImageNotAllowedError(TenancyValidationError):
     """
 
 
-class CodeExecutionPolicyResolutionFailure(StrEnum):
-    """Why a workspace's code execution policy could not be resolved.
-
-    A member carries the message a caller sees.
-    Its value names the cause, which a caller never sees.
-    """
-
-    def __new__(cls, cause: str, message: str) -> "CodeExecutionPolicyResolutionFailure":
-        member = str.__new__(cls, cause)
-        member._value_ = cause
-        member.message = message
-        return member
-
-    message: str
-
-    ANSWER_UNREADABLE = (
-        "the answer could not be read",
-        "Authorization service returned a malformed code-execution policy",
-    )
-    NO_CALLER_CREDENTIAL = (
-        "the request carried no caller credential",
-        "Code execution policy could not be resolved for this request",
-    )
-    NO_WORKSPACE = (
-        "the request named no workspace",
-        "Code execution policy could not be resolved for this request",
-    )
-
-
-class CodeExecutionPolicyResolutionFailedError(Exception):
-    """A workspace's code execution policy could not be resolved."""
-
-    def __init__(self, reason: CodeExecutionPolicyResolutionFailure) -> None:
-        super().__init__(reason.message)
-        self.message = reason.message
-        self.reason = reason
-
-
-class McpResolutionFailure(StrEnum):
-    """Why an MCP server could not be resolved.
-
-    The message a caller sees is fixed, so a member is the only thing that tells one cause from another.
-    No member names any part of the peer's answer.
-    """
-
-    ANSWER_NOT_AN_OBJECT = "the answer is not an object"
-    ENTRY_UNREADABLE = "an entry could not be read"
-    ID_MISMATCH = "an entry names a different server"
-    NO_CALLER_CREDENTIAL = "the request carried no caller credential"
-    NO_SERVER_LIST = "the answer carries no list of servers"
-    NO_WORKSPACE = "the request named no workspace"
-    SEVERAL_ENTRIES = "several entries answered a request for one"
-
-
-class McpServerResolutionFailedError(TenancyError):
-    """An MCP server could not be resolved.
-
-    The message is fixed because an error boundary may return it.
-    The underlying detail quotes the stored server URL or its credential.
-    The cause travels as ``reason``, which a boundary logs and never returns.
-    """
-
-    status_code = status.HTTP_502_BAD_GATEWAY
-
-    def __init__(self, reason: McpResolutionFailure) -> None:
-        super().__init__("MCP server resolution failed")
-        self.reason = reason
+class SandboxCredentialRefusedError(TenancyValidationError):
+    """A sandbox key write this deployment cannot take: a blank key, or a provider that leases with none."""
 
 
 class McpSessionsInterruptedError(Exception):
@@ -286,17 +224,31 @@ class McpSessionsInterruptedError(Exception):
 
 
 class WebSearchKeyNotFoundError(TenancyNotFoundError):
-    """No web search key with this id in the caller's organization."""
+    """No web search or fetch key with this id in the caller's organization."""
 
     def __init__(self, key_id: object):
         super().__init__(f"Web search key {key_id} not found")
 
 
 class WebSearchKeyUnknownProviderError(TenancyValidationError):
-    """A key named a search provider the managed search tool cannot call."""
+    """A key named a provider its kind's tool cannot call."""
 
-    def __init__(self, provider: str, known: tuple[str, ...]):
-        super().__init__(f"Unknown web search provider '{provider}'. Use one of: {', '.join(known)}")
+    def __init__(self, provider: str, known: tuple[str, ...], *, kind: str = "search"):
+        super().__init__(f"Unknown web {kind} provider '{provider}'. Use one of: {', '.join(known)}")
+
+
+class WebSearchKeyIncompleteError(TenancyValidationError):
+    """A key lacks what its provider needs, which a call would otherwise take from the server's own settings."""
+
+    def __init__(self, provider: str, missing: str):
+        super().__init__(f"A key on {provider} needs {missing}")
+
+
+class WebSearchKeySettingRefusedError(TenancyValidationError):
+    """A key's ``api_base`` or ``options`` its provider, or this deployment, does not take."""
+
+    def __init__(self, field: str, problem: str):
+        super().__init__(f"{field}: {problem}")
 
 
 class WebSearchKeyNameRequiredError(TenancyValidationError):
@@ -310,8 +262,8 @@ class WebSearchKeyMalformedError(TenancyValidationError):
 
 
 class WebSearchKeyAlreadyExistsError(TenancyConflictError):
-    def __init__(self, provider: str, name: str):
-        super().__init__(f"The organization already has a {provider} web search key named '{name}'")
+    def __init__(self, provider: str, name: str, *, kind: str = "search"):
+        super().__init__(f"The organization already has a {provider} web {kind} key named '{name}'")
 
 
 class WebSearchKeyArchivedError(TenancyValidationError):
@@ -329,10 +281,10 @@ class WebSearchKeyNotArchivedError(TenancyValidationError):
 
 
 class WebSearchKeyDefaultConflictError(TenancyConflictError):
-    """Another key became the provider's default at the same time."""
+    """Another key of the same kind became the organization's default at the same time."""
 
-    def __init__(self, provider: str):
-        super().__init__(f"Another {provider} web search key became the default at the same time; retry")
+    def __init__(self, kind: str):
+        super().__init__(f"Another web {kind} key became the default at the same time; retry")
 
 
 class WorkspaceWebSearchKeyOverrideConflictError(TenancyValidationError):
@@ -354,16 +306,6 @@ class SearchToolNotFoundError(TenancyNotFoundError):
 
     def __init__(self, name: str):
         super().__init__(f"No search or fetch instance '{name}'.")
-
-
-class SearchToolUntestableError(TenancyValidationError):
-    """``builtin_fetch`` has no connection test until web fetch runs on the fetch instances."""
-
-    def __init__(self, name: str):
-        super().__init__(
-            f"{name}, the built-in fetcher, has no connection test yet: it arrives when web fetch runs on the "
-            "fetch instances."
-        )
 
 
 class SearchToolMisconfiguredError(TenancyValidationError):
@@ -411,6 +353,27 @@ class DirectSearchFailedError(TenancyError):
         self.upstream_status = upstream_status
 
 
+class DirectSearchPricingRequiredError(TenancyError):
+    """A direct search refused because ``require_pricing`` is on and no pricing row prices it.
+
+    ``message`` names the row to add; the route returns it to the caller and
+    writes it on the usage row.
+    """
+
+    status_code = status.HTTP_402_PAYMENT_REQUIRED
+    error_code: str = PRICING_REQUIRED
+
+
+class GatewayToolPricingRequiredError(TenancyError):
+    """A request refused because ``require_pricing`` is on and no pricing row prices a gateway-run tool it uses.
+
+    ``message`` names the tool and the row to add.
+    """
+
+    status_code = status.HTTP_402_PAYMENT_REQUIRED
+    error_code: str = PRICING_REQUIRED
+
+
 class WebSearchOptionRefusedError(TenancyValidationError):
     """A request's ``provider_options`` key the provider serving it does not take from a request.
 
@@ -430,8 +393,8 @@ class WebSearchCredentialRefusedError(TenancyError):
     old code would fill from the server's own settings, so the deployment's key
     or endpoint would serve the tenant; or one naming a base URL the code that
     serves its provider cannot use, which would send the tenant's key to the
-    provider's public endpoint instead. A 502, the status a malformed
-    credential from the control plane gets (design K).
+    provider's public endpoint instead. A 502: the fault is in a stored
+    credential, not in the request.
     """
 
     status_code = status.HTTP_502_BAD_GATEWAY
@@ -442,20 +405,16 @@ class WebSearchCredentialRefusedError(TenancyError):
 
 
 __all__ = [
-    "CodeExecutionPolicyResolutionFailedError",
-    "CodeExecutionPolicyResolutionFailure",
     "DirectSearchFailedError",
     "DirectSearchFieldRefusedError",
-    "McpResolutionFailure",
-    "McpServerResolutionFailedError",
     "McpSessionsInterruptedError",
+    "SandboxCredentialRefusedError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",
     "SearchToolMisconfiguredError",
     "SearchToolNotFoundError",
     "SearchToolRefusedError",
     "SearchToolSelectionError",
-    "SearchToolUntestableError",
     "WebAccessNotEnabledError",
     "WebAccessRefusedError",
     "WebAccessToolNotAuthorizedError",

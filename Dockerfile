@@ -23,9 +23,6 @@ COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY web ./
-# DocsPage.tsx imports the operator guide with Vite's `?raw`, so the build reads
-# it from outside web/. .dockerignore excludes docs/ but re-includes this file.
-COPY docs/dashboard.md /app/docs/dashboard.md
 
 # web/vite.config.ts writes to ../src/gateway/static/dashboard, so the bundle
 # lands at /app/src/gateway/static/dashboard for the runtime stage to copy.
@@ -52,6 +49,10 @@ RUN UV_COMPILE_BYTECODE=1 uv sync --frozen --no-dev --extra e2b --extra metrics 
 FROM python:3.14-slim AS runtime
 
 WORKDIR /app
+
+# pip before 26.2.2 trusts its vendored certifi, which still carries the
+# distrusted emSign roots, whatever the system trust store says.
+RUN pip install --no-cache-dir --upgrade "pip>=26.2.2"
 
 RUN useradd -m -u 1000 otari && chown otari:otari /app
 

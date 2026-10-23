@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
+import type { SortDescriptor } from "react-aria-components"
 
-import type { TraceSummary } from "@/client"
+import type { TraceSortKey, TraceSummary } from "@/client"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import {
@@ -13,10 +14,9 @@ import { useIsMobile } from "@/design-system/hooks/useIsMobile"
 import { Chip } from "@/design-system/indicators/Chip"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { FilterChips } from "@/design-system/navigation/FilterChips"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { ActivityTimeline } from "@/features/activity/ActivityTimeline"
 import {
+  DEFAULT_TRACE_SORT,
   type TraceFilters,
   useTrace,
   useTraceCount,
@@ -33,6 +33,7 @@ import {
 } from "@/shared/helpers/timeRange"
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useDebounced } from "@/shared/hooks/useDebounced"
 
 import { formatDuration, formatTraceTimestamp } from "./format"
 import { toTrace } from "./fromApi"
@@ -54,17 +55,33 @@ const URL_DEFAULTS = {
   start_date: "",
   end_date: "",
   q: "",
-  level: "",
   page: "0",
   size: String(DEFAULT_PAGE_SIZE),
   peek: "",
   peek_workspace: "",
   span: "",
+  sort: DEFAULT_TRACE_SORT.key,
+  order: DEFAULT_TRACE_SORT.direction,
 } as const
-const LEVEL_OPTIONS = [
-  { value: "", label: "All levels" },
-  { value: "failed", label: "Errors" },
-]
+// The panel holds the picked span itself, so picking one need not re-render
+// the list, its chart and its pager.
+const UNTRACKED = ["span"] as const
+// The columns the server can order by: each sort key and the column it heads.
+const SORT_COLUMNS: Record<TraceSortKey, string> = {
+  last_activity: "last_activity",
+  errors: "levels",
+  latency: "latency",
+  tokens: "tokens",
+  cost: "cost",
+}
+const isSortKey = (value: string): value is TraceSortKey =>
+  Object.hasOwn(SORT_COLUMNS, value)
+const sortKeyOf = (column: string) =>
+  (Object.keys(SORT_COLUMNS) as TraceSortKey[]).find(
+    (key) => SORT_COLUMNS[key] === column,
+  )
+// The API refuses a longer `q`; a pasted id past it would leave the list loading.
+const SEARCH_MAX_LENGTH = 128
 const MINUTE_MS = 60_000
 // Where "All" starts its chart when nothing has been recorded yet.
 const ALL_FALLBACK_MS = 30 * 24 * 3_600_000
@@ -77,6 +94,7 @@ function columns(peekId: string): DataTableColumn<TraceSummary>[] {
   return [
     {
       id: "last_activity",
+      allowsSorting: true,
       header: "Last activity",
       cell: (session) => (
         <span className="text-mono-caption whitespace-nowrap text-muted">
@@ -114,6 +132,7 @@ function columns(peekId: string): DataTableColumn<TraceSummary>[] {
     },
     {
       id: "levels",
+      allowsSorting: true,
       header: "Levels",
       cell: (session) =>
         session.error_count ? (
@@ -124,6 +143,7 @@ function columns(peekId: string): DataTableColumn<TraceSummary>[] {
     },
     {
       id: "latency",
+      allowsSorting: true,
       header: "Latency",
       align: "end",
       cell: (session) => (
@@ -134,6 +154,7 @@ function columns(peekId: string): DataTableColumn<TraceSummary>[] {
     },
     {
       id: "tokens",
+      allowsSorting: true,
       header: "Tokens",
       align: "end",
       cell: (session) =>
@@ -149,6 +170,7 @@ function columns(peekId: string): DataTableColumn<TraceSummary>[] {
     },
     {
       id: "cost",
+      allowsSorting: true,
       header: "Total cost",
       align: "end",
       cell: (session) =>
@@ -174,13 +196,12 @@ interface TimeWindow {
 const iso = (ms: number) => new Date(ms).toISOString()
 
 export function SessionsPage() {
-  const url = useUrlState(URL_DEFAULTS)
+  const url = useUrlState(URL_DEFAULTS, { untracked: UNTRACKED })
   const { selected: workspace } = useSelectedWorkspace()
   const isMobile = useIsMobile()
   const [now, setNow] = useState(() => Date.now())
 
   const query = url.get("q")
-  const level = url.get("level")
   const page = Math.max(0, url.getNumber("page"))
   // Snapped to an offered size, as Activity does, so a hand-edited URL cannot
   // reach the API as a limit it refuses.
@@ -208,11 +229,10 @@ export function SessionsPage() {
       ? null
       : Math.floor((now - extentSeconds * 1000) / MINUTE_MS) * MINUTE_MS
 
+  const search = useDebounced(query.trim().slice(0, SEARCH_MAX_LENGTH))
   const base = {
     workspaceId: workspace?.workspace_id ?? "",
-    q: query.trim(),
-    failedOnly: level === "failed",
-    harness: [],
+    q: search,
   }
   // The chart covers the whole extent; a range picked on it narrows the list.
   const seriesFilters: TraceFilters = {
@@ -223,7 +243,35 @@ export function SessionsPage() {
     ? { ...base, start: iso(custom.start), end: iso(custom.end) }
     : seriesFilters
 
-  const traces = useTraces(filters, page, pageSize)
+  // A hand-edited URL naming a column the server cannot sort falls back to
+  // the default rather than reaching the API as a value it refuses.
+  const sortParam = url.get("sort")
+  const sortKey = isSortKey(sortParam) ? sortParam : DEFAULT_TRACE_SORT.key
+  const sortDirection = url.get("order") === "asc" ? "asc" : "desc"
+  const sort = useMemo(
+    () => ({ key: sortKey, direction: sortDirection }) as const,
+    [sortKey, sortDirection],
+  )
+  const sortDescriptor: SortDescriptor = {
+    column: SORT_COLUMNS[sortKey],
+    direction: sortDirection === "asc" ? "ascending" : "descending",
+  }
+  // Every sortable column is a time or an amount, so a column's first press
+  // puts the largest first; pressing it again flips it.
+  const onSortChange = (descriptor: SortDescriptor) => {
+    const key = sortKeyOf(String(descriptor.column))
+    if (!key) return
+    url.patch({
+      sort: key,
+      order:
+        key === sortKey && descriptor.direction === "ascending"
+          ? "asc"
+          : "desc",
+      page: 0,
+    })
+  }
+
+  const traces = useTraces(filters, page, pageSize, sort)
   const count = useTraceCount(filters)
   const seriesQuery = useTraceSeries(seriesFilters, bucket)
   const peekId = url.get("peek")
@@ -335,27 +383,19 @@ export function SessionsPage() {
             ariaLabel="Session volume over the selected window"
             unitLabel="Sessions"
           />
-          <FilterChips
-            chips={[]}
-            start={
-              <SearchField
-                label="Search sessions"
-                placeholder="Search by session ID"
-                value={query}
-                onChange={(value) => url.patch({ q: value, page: 0 })}
-                className="w-72 max-w-full"
-              />
-            }
-            end={<RefreshButton onRefresh={refresh} />}
-          >
-            <FilterSelect
-              ariaLabel="Level"
-              label="Level"
-              value={level}
-              onChange={(value) => url.patch({ level: value, page: 0 })}
-              options={LEVEL_OPTIONS}
+          <div className="otari-toolbar flex flex-wrap items-center gap-2">
+            <SearchField
+              label="Search sessions"
+              placeholder="Search by ID, name, agent or user"
+              value={query}
+              onChange={(value) => url.patch({ q: value, page: 0 })}
+              maxLength={SEARCH_MAX_LENGTH}
+              className="w-72 max-w-full"
             />
-          </FilterChips>
+            <div className="ml-auto flex items-center gap-3">
+              <RefreshButton onRefresh={refresh} />
+            </div>
+          </div>
 
           <TableScrollFrame className="otari-sessions-table">
             <DataTable
@@ -363,8 +403,14 @@ export function SessionsPage() {
               columns={tableColumns}
               rows={rows}
               getRowKey={(session) => session.trace_id}
+              sortDescriptor={sortDescriptor}
+              onSortChange={onSortChange}
               isLoading={traces.isPending && !traces.data}
-              emptyContent="No sessions in this window. A request joins a session when its client names one; otherwise it is a session of its own."
+              emptyContent={
+                search
+                  ? `No sessions in this window match “${search}”.`
+                  : "No sessions in this window. A request joins a session when its client names one; otherwise it is a session of its own."
+              }
               mobileLayout="cards"
               onRowAction={openPeek}
               rowClassName={(session) =>

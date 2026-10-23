@@ -5,6 +5,7 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from gateway.core.settings.declarations import declaration_digest
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
 from gateway.models.budgets import BUDGET_ID_PATTERN, MAX_COUNT_LIMIT, MAX_MINUTE_LIMIT, ResetAlignment
 from gateway.models.money import MAX_USD_LIMIT
@@ -39,6 +40,10 @@ class BudgetConfig(BaseModel):
             raise ValueError(msg)
         return self
 
+    def declaration_digest(self) -> str:
+        """A digest of this entry, which changes when any field config.yml sets for it does."""
+        return declaration_digest(self.model_dump(mode="json"))
+
 
 class BudgetSettings(BaseModel):
     """How spend is attributed to a user, held against a budget, and settled."""
@@ -71,7 +76,7 @@ class BudgetSettings(BaseModel):
         description=(
             "How often to sweep for leaked budget reservations across all users. 0 disables the "
             "sweep, leaving the opportunistic per-user reclaim that runs when a user next "
-            "reserves. Standalone mode only."
+            "reserves."
         ),
     )
     budget_reservation_sweep_batch: Annotated[int, OMITTED] = Field(
@@ -86,7 +91,7 @@ class BudgetSettings(BaseModel):
             "How long a settled, released or reclaimed budget reservation is kept before the "
             "sweep deletes it. The row exists to make an in-flight hold reclaimable; what a "
             "request cost is recorded durably in usage_logs, so this is an audit window rather "
-            "than an accounting record. 0 keeps every row forever. Standalone mode only."
+            "than an accounting record. 0 keeps every row forever."
         ),
     )
     stream_missing_usage_policy: Annotated[str, Shown(SettingsGroup.METERING)] = Field(
@@ -115,7 +120,7 @@ class BudgetSettings(BaseModel):
         description=(
             "Budgets this deployment declares, keyed by budget id. Each start creates a missing one and writes the "
             "declared values over an existing one, so config.yml wins over a change made through the API. A budget "
-            "removed from here is kept as it is. Standalone mode only."
+            "removed from here is kept as it is."
         ),
     )
 

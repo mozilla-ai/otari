@@ -9,28 +9,32 @@ How it narrows one request is the tools domain's rule, in ``services/tools/_web_
 Reading or writing a stored policy requires an owner or admin of the workspace or of its organization.
 Reads are gated as well as writes, because the row is the workspace's posture and not one member's allowance.
 
-:func:`resolve_workspace_web_search_config` reads a stored row.
-:func:`read_web_search_policy` reads a control plane's answer.
-None of them takes an identity, because the workspace comes from the authenticated key.
+:func:`resolve_workspace_web_search_config` reads a stored row, and :class:`WorkspaceWebSearchPolicies`
+is the policy a request runs under.
+Neither takes an identity, because the workspace comes from the authenticated key.
 """
 
 from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError, WebSearchPolicyResolutionFailure
 from gateway.models.tenancy import User, Workspace
-from gateway.models.tools import ResolvedWebSearchConfig, WorkspaceWebSearchConfig
+from gateway.models.tools import ResolvedWebSearchConfig, WebTool, WorkspaceWebSearchConfig
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.web_retrieval_policy import read_domain_list
+
+if TYPE_CHECKING:
+    from gateway.services.tools import WorkspaceSearchKeys
 
 # The largest result ceiling the column holds, a 32-bit integer. Not a ceiling
 # of the gateway's own, which sets none (decision 65): a larger value is refused
@@ -143,11 +147,12 @@ class WorkspaceWebSearchConfigPublic(BaseModel):
     # dashboard needs to say "not configured" instead of showing a policy
     # nobody set.
     configured: bool
-    # Whether this deployment can run web search at all, i.e. whether an
-    # operator has pointed it at a backend. The counterpart of
+    # Whether this workspace's ``otari_web_search`` declarations can run at all:
+    # the deployment has a search of its own, or the workspace has a usable
+    # organization search key. The counterpart of
     # `WorkspaceCodeExecutionPolicyPublic.sandbox_configured`, and the ceiling
-    # this row sits under: a workspace switched on where the deployment has no
-    # backend reads as unavailable rather than as working.
+    # this row sits under: a workspace switched on with nothing to search with
+    # reads as unavailable rather than as working.
     web_search_configured: bool
     # What a workspace with no row gets on this deployment: on, or off until a
     # workspace admin turns it on (``web_search_workspace_default``).
@@ -224,37 +229,6 @@ async def resolve_workspace_web_search_config(
     )
 
 
-def read_web_search_policy(answer: Mapping[str, Any]) -> ResolvedWebSearchConfig:
-    """Read the control plane's answer for one workspace's web search policy.
-
-    Raises ``ValueError`` when a recognized field is malformed, so a policy that cannot be read fails closed.
-    """
-    enabled = answer.get("enabled")
-    if not isinstance(enabled, bool):
-        raise ValueError("enabled must be a boolean")
-    max_results = answer.get("max_results")
-    if max_results is not None and (
-        not isinstance(max_results, int) or isinstance(max_results, bool) or max_results < 1
-    ):
-        raise ValueError("max_results must be an integer of at least 1")
-    purpose_hint = answer.get("purpose_hint")
-    if purpose_hint is not None and (not isinstance(purpose_hint, str) or len(purpose_hint) > _MAX_PURPOSE_HINT_LENGTH):
-        raise ValueError(f"purpose_hint must be a string of at most {_MAX_PURPOSE_HINT_LENGTH} characters")
-    provider_options = answer.get("provider_options")
-    if provider_options is not None and not isinstance(provider_options, dict):
-        raise ValueError("provider_options must be an object")
-    provider_options = _check_provider_options(provider_options)
-    return ResolvedWebSearchConfig(
-        enabled=enabled,
-        max_results=max_results,
-        purpose_hint=_blank_to_none(purpose_hint),
-        allowed_domains=read_domain_list(answer.get("allowed_domains")),
-        blocked_domains=read_domain_list(answer.get("blocked_domains")),
-        provider_options=provider_options,
-        authorized_tools=None,
-    )
-
-
 def _stored_domains(value: object) -> tuple[str, ...] | None:
     """Read a stored row's domain list, refusing one that cannot be enforced."""
     try:
@@ -263,27 +237,80 @@ def _stored_domains(value: object) -> tuple[str, ...] | None:
         raise InvalidStoredWebSearchDomainError("stored web-search domain list is invalid") from exc
 
 
+# Whether a workspace has a usable organization search key, which serves its
+# ``otari_web_search`` declarations where the deployment has no search of its own.
+HasSearchKey = Callable[[uuid.UUID], Awaitable[bool]]
+
+
+# The policy of a workspace that holds no row, carrying only its search key.
+_NO_NARROWING = ResolvedWebSearchConfig(
+    enabled=True,
+    max_results=None,
+    purpose_hint=None,
+    allowed_domains=None,
+    blocked_domains=None,
+    provider_options=None,
+    authorized_tools=None,
+)
+# The policy of a workspace that holds no row where this deployment makes web access opt-in.
+_NOT_TURNED_ON = replace(_NO_NARROWING, enabled=False)
+
+
+class WorkspaceWebSearchPolicies:
+    """The web search policy a workspace's requests run under, with its own keys where it has them."""
+
+    def __init__(self, db: AsyncSession, *, search_keys: WorkspaceSearchKeys, on_without_policy: bool) -> None:
+        self._db = db
+        self._search_keys = search_keys
+        self._on_without_policy = on_without_policy
+
+    async def resolve(
+        self, workspace_id: uuid.UUID, requested_tools: Sequence[WebTool]
+    ) -> ResolvedWebSearchConfig | None:
+        """The policy that governs ``requested_tools``, or ``None`` where the workspace has none.
+
+        Raises:
+            WebSearchPolicyResolutionFailedError: a stored domain rule is invalid.
+        """
+        # A stored row authorizes no tool by name, so the requested tools decide only which keys are read:
+        # the search key for a search, the fetch key for either tool, since it also enriches search hits.
+        try:
+            policy = await resolve_workspace_web_search_config(self._db, workspace_id)
+        except InvalidStoredWebSearchDomainError:
+            raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID) from None
+        if policy is None and not self._on_without_policy:
+            return _NOT_TURNED_ON
+        search = WebTool.SEARCH in requested_tools
+        keys = await self._search_keys.keys_for(
+            workspace_id, search=search, fetch=search or WebTool.FETCH in requested_tools
+        )
+        if keys.search is None and keys.fetch is None:
+            return policy
+        return replace(policy or _NO_NARROWING, credential=keys.search, fetch_credential=keys.fetch)
+
+
 class WorkspaceWebSearchService:
     """Read, upsert and clear one workspace's web-search configuration."""
 
-    def __init__(self, db: AsyncSession, *, web_search_configured: bool, default_enabled: bool):
+    def __init__(
+        self, db: AsyncSession, *, web_search_configured: bool, default_enabled: bool, has_search_key: HasSearchKey
+    ):
         self.db = db
-        self.organizations = OrganizationService(
-            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-        )
+        self.organizations = OrganizationService(db, membership_listener=None)
         # Passed in rather than read here: whether a backend is configured is a
         # question about the running deployment's config, which the route layer
         # already holds and a service has no business reaching for.
         self.web_search_configured = web_search_configured
         self.default_enabled = default_enabled
+        self.has_search_key = has_search_key
 
     async def get_config(self, *, user: User, workspace_id: uuid.UUID) -> WorkspaceWebSearchConfigPublic:
         """The workspace's configuration. Reading it takes the same role as setting it."""
         workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)
         config = await self.db.get(WorkspaceWebSearchConfig, workspace.id)
         if config is None:
-            return self._unconfigured(workspace.id)
-        return self._public(config)
+            return await self._unconfigured(workspace.id)
+        return await self._public(config, workspace.id)
 
     async def set_config(
         self,
@@ -328,7 +355,7 @@ class WorkspaceWebSearchService:
             self._apply(config, request)
             await self._commit()
         await self.db.refresh(config)
-        return self._public(config)
+        return await self._public(config, resolved_id)
 
     async def clear_config(self, *, user: User, workspace_id: uuid.UUID) -> WorkspaceWebSearchConfigPublic:
         """Drop the workspace's configuration, returning it to the deployment's behavior.
@@ -342,7 +369,7 @@ class WorkspaceWebSearchService:
         if config is not None:
             await self.db.delete(config)
             await self._commit()
-        return self._unconfigured(workspace.id)
+        return await self._unconfigured(workspace.id)
 
     async def _commit(self) -> None:
         """Commit, rolling back before any failure escapes.
@@ -369,14 +396,22 @@ class WorkspaceWebSearchService:
         config.blocked_domains = request.blocked_domains
         config.provider_options = request.provider_options
 
-    def _public(self, config: WorkspaceWebSearchConfig) -> WorkspaceWebSearchConfigPublic:
+    async def _can_search(self, workspace_id: uuid.UUID) -> bool:
+        """Whether the workspace's search declarations have something to run on, its own key counting."""
+        return self.web_search_configured or await self.has_search_key(workspace_id)
+
+    async def _public(
+        self, config: WorkspaceWebSearchConfig, workspace_id: uuid.UUID
+    ) -> WorkspaceWebSearchConfigPublic:
         return WorkspaceWebSearchConfigPublic.from_model(
-            config, web_search_configured=self.web_search_configured, default_enabled=self.default_enabled
+            config, web_search_configured=await self._can_search(workspace_id), default_enabled=self.default_enabled
         )
 
-    def _unconfigured(self, workspace_id: uuid.UUID) -> WorkspaceWebSearchConfigPublic:
+    async def _unconfigured(self, workspace_id: uuid.UUID) -> WorkspaceWebSearchConfigPublic:
         return WorkspaceWebSearchConfigPublic.unconfigured(
-            workspace_id, web_search_configured=self.web_search_configured, default_enabled=self.default_enabled
+            workspace_id,
+            web_search_configured=await self._can_search(workspace_id),
+            default_enabled=self.default_enabled,
         )
 
     async def _resolve_manageable(self, *, user: User, workspace_id: uuid.UUID) -> Workspace:

@@ -29,9 +29,31 @@ class TurnView:
     errors: int
     input_tokens: int
     output_tokens: int
+    cache_read_tokens: int
     cost: Decimal
     # True for the steps a session started with before any prompt was seen.
     continued: bool = False
+
+
+@dataclass(frozen=True)
+class GateSummary:
+    """How often one agent guardrail gate ran in a session, by what it decided.
+
+    ``span_id`` is the check to open first: the earliest that did anything but
+    pass, and None for a gate the guardrail declares that never ran. The type,
+    enforcement and message come from the guardrail's definition, when stored.
+    """
+
+    gate_id: str
+    passed: int
+    blocked: int
+    flagged: int
+    refused: int
+    undecided: int
+    span_id: str | None
+    gate_type: str | None = None
+    enforcement: str | None = None
+    message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -45,3 +67,4 @@ class TraceView:
     # Span ids whose start was inferred rather than measured.
     approximate: frozenset[str]
     truncated: bool
+    gates: tuple[GateSummary, ...] = ()

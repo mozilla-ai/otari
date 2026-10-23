@@ -1,7 +1,6 @@
 """Runtime search and fetch instances: dashboard-configured rows, merged over config.
 
-The search counterpart of :mod:`gateway.services.provider_store_service`, and
-deliberately the same shape. A search instance can come from two places:
+A search instance can come from two places:
 ``config.yml`` ``search_tools:`` entries, immutable at runtime and validated at
 startup, and ``search_tool_credentials`` rows written through the dashboard.
 Both mean the same thing to a request, so the dispatch path must see them merged.
@@ -21,8 +20,7 @@ replica arrives with the rows it names.
 The API key is held encrypted and is optional (a ``searxng`` backend is normally
 keyless); it is decrypted here only to build the in-memory overlay. A row whose
 key cannot be decrypted (no or wrong ``OTARI_SECRET_KEY``) is skipped with a
-warning rather than crashing the gateway. Standalone mode only: the caller must
-not load or refresh this in the hybrid platform path.
+warning rather than crashing the gateway.
 """
 
 import asyncio
@@ -386,7 +384,7 @@ async def save_search_tool(
     if not isinstance(timeout, _Unset):
         row.timeout_seconds = timeout
     if not isinstance(options, _Unset):
-        # Same mask round-trip rule as ``provider_store_service.save_credential``.
+        # A value echoed back as the mask keeps the stored one.
         row.options = restore_redacted_values(options, existing.options if existing else None) or {}
     if not isinstance(api_key, _Unset):
         if api_key:

@@ -126,6 +126,7 @@ def _fetch_providers(config: GatewayConfig, *, operates: bool) -> list[SearchPro
                 max_urls_per_call=metadata.max_urls_per_call,
                 renders_javascript=metadata.renders_javascript,
                 formats=list(metadata.formats),
+                reports_final_url=metadata.reports_final_url,
             )
         )
     return sorted(entries, key=lambda entry: entry.id)

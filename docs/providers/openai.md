@@ -4,7 +4,7 @@ Route requests to OpenAI models (GPT-4o, GPT-4.1, the o-series, and others) thro
 
 ## What you'll set up
 
-An OpenAI provider entry in your `config.yml` (or a single environment variable), then a first request that Otari routes to OpenAI.
+An OpenAI provider entry in your `config.yml` that reads your key from `OPENAI_API_KEY` (or the key stored on the dashboard's Providers page), then a first request that Otari routes to OpenAI.
 
 ## Prerequisites
 
@@ -36,7 +36,7 @@ providers:
 export OPENAI_API_KEY=sk-...
 ```
 
-> Otari routes through [any-llm](https://pypi.org/project/any-llm-sdk/), so a standard `OPENAI_API_KEY` in the environment is picked up automatically even if you don't list the provider explicitly.
+> `OPENAI_API_KEY` alone is not enough, and neither is a bare `openai:` entry: Otari reads the variable only where an entry names it, as the `api_key: ${OPENAI_API_KEY}` line above does. The dashboard's Providers page and an organization's own key work too. Otari logs a warning at startup when the variable is set and no entry reads it.
 
 ### Optional settings
 
@@ -74,7 +74,7 @@ OpenAI-compatible client also works), using an `openai:<model>` selector:
 ```python
 from otari import OtariClient
 
-client = OtariClient(api_base="http://localhost:8000", api_key="gw-...")
+client = OtariClient(api_base="http://localhost:8000", api_key="tk-...")
 resp = client.completion(
     model="openai:gpt-4o-mini",
     messages=[{"role": "user", "content": "Say hello in five words."}],
@@ -97,7 +97,7 @@ Hello, nice to meet you!
 | HTTP 502 `The upstream provider account is out of credit or over its billing limit.` | The provider rejected the call because the account Otari billed has no credit left or has hit its billing limit (for example OpenAI's "billing hard limit reached", or Anthropic's "credit balance is too low", which arrives as a 400). Top up the provider account, or point the model at a provider that has credit. The usage log keeps the status the provider actually returned, so these stay countable. |
 | HTTP 502 `The provider failed the request with HTTP 5xx`, `The provider closed the connection before answering`, or `The gateway could not connect to the provider` | OpenAI failed on its side or the connection to it broke. These are retryable. `LLM provider error` is the same answer for a failure Otari could not place. |
 | HTTP 402 `No pricing configured for model ...` | Otari could not resolve pricing for that model and `require_pricing` rejected the request. Add a `pricing:` entry, enable `default_pricing: true` for bundled fallback pricing, or use a model that already has pricing coverage. |
-| HTTP 401 `Invalid master key` on `/api/v1/keys` | You passed a client (`gw-...`) key, or the wrong master key, instead of the configured master key. |
+| HTTP 401 `Invalid master key` on `/api/v1/keys` | You passed a client (`tk-...`) key, or the wrong master key, instead of the configured master key. |
 
 ## Pricing (optional)
 

@@ -11,8 +11,9 @@ The records carry the privacy rules, so nothing downstream can weaken them:
   ``attributes``, takes only the keys in :data:`SPAN_ATTRIBUTES`, each with a
   scalar value. An id must be id-shaped, and every other string a short
   identifier that does not look like an email address, a file path or a
-  credential, so prose and the obvious kinds of personal data are refused. There
-  is no field for a raw OTLP body.
+  credential, so prose and the obvious kinds of personal data are refused. A
+  gateway step's name, the endpoint label the gateway chose, has a shape of its
+  own. There is no field for a raw OTLP body.
 - **Tenant first.** Every key starts with the workspace, and every read takes
   a :class:`TraceScope` the caller derived from the authenticated principal, so
   an id a client chose never reaches another tenant's rows.
@@ -28,6 +29,9 @@ from datetime import datetime
 from decimal import Decimal
 from types import MappingProxyType
 from typing import Literal
+
+from otari_agent.domain.definitions import GateDefinition
+from otari_agent.domain.policy import MAX_GATE_ID_LENGTH
 
 # The longest id the tables hold: a gateway request id (a UUID, 36), an OTel
 # trace id (32 hex) or span id (16 hex), and the hashes derived from them.
@@ -52,8 +56,10 @@ SpanOrigin = Literal["gateway", "otlp"]
 SPAN_ORIGINS: tuple[SpanOrigin, ...] = ("gateway", "otlp")
 
 # ``unknown`` is a client-run tool whose result no later request has carried yet.
-SpanOutcome = Literal["ok", "error", "unknown"]
-SPAN_OUTCOMES: tuple[SpanOutcome, ...] = ("ok", "error", "unknown")
+# ``blocked`` is work a guardrail stopped on purpose: the guardrail doing its job,
+# so it is never counted as an error.
+SpanOutcome = Literal["ok", "error", "unknown", "blocked"]
+SPAN_OUTCOMES: tuple[SpanOutcome, ...] = ("ok", "error", "unknown", "blocked")
 
 # The signal that grouped a trace's requests into one session. ``none`` is a request
 # that named no session, which is a trace of its own: the gateway never infers that
@@ -65,26 +71,34 @@ SESSION_SOURCES: tuple[SessionSource, ...] = ("client", "harness", "otlp", "none
 # an identifier, never prose. 128 characters is room for any tool, model or
 # provider name and for a namespaced identifier, and too little for a sentence to
 # matter if one did fit the character set.
-IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_.:/@+-]{1,128}$")
+IDENTIFIER_MAX_LENGTH = 128
+IDENTIFIER_PATTERN = re.compile(rf"^[A-Za-z0-9_.:/@+-]{{1,{IDENTIFIER_MAX_LENGTH}}}$")
 # An id is narrower still: a hash, a UUID, OTel hex, or one of those with a prefix.
 ID_PATTERN = re.compile(rf"^[A-Za-z0-9_.:-]{{1,{TRACE_ID_MAX_LENGTH}}}$")
+# A gateway step is named for the endpoint label that served it. The gateway chose
+# that value, so it is held to this shape instead of the identifier rule, which
+# refuses a leading slash as a client's file path.
+ENDPOINT_PATTERN = re.compile(r"^/v[0-9]+(?:/[a-z_]+)+$")
 
 # Values that fit the character set and are still a client's data rather than a
-# name: an email address, a file path, or something shaped like a credential.
+# name: an email address, a file path, or something shaped like a credential,
+# including one with a line number or other suffix after it.
 # A heuristic, not a guarantee; it errs toward refusing, and a refused name is
 # simply not stored.
 _NOT_A_NAME = (
-    re.compile(r"[^@]+@[^@]+\.[A-Za-z]{2,}$"),
+    re.compile(r"[^@]+@[^@]+\.[A-Za-z]{2,}"),
     re.compile(r"^[/~.]|//"),
-    re.compile(r"/[^/]*\.[A-Za-z][A-Za-z0-9]{0,4}$"),
-    re.compile(r"^(sk|pk|rk|tk|ak)[-_]|^(ghp|gho|ghs|ghu|github_pat|glpat|xox[abposr])[-_]|^AKIA[0-9A-Z]{8}|^AIza"),
+    re.compile(r"/[^/]*\.[A-Za-z][A-Za-z0-9]{0,4}(?=$|[:@])"),
+    re.compile(
+        r"^(?i:sk|pk|rk|tk|ak|api[-_]?key)[-_]|^(?i:ghp|gho|ghs|ghu|github_pat|glpat|xox[abposr])[-_]|^A[KS]IA[0-9A-Z]{8}|^AIza"
+    ),
     re.compile(r"(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]{24,}"),
 )
 
 # The attributes a span may carry beyond its typed fields, with the scalar type each
 # takes. Anything a span needs to be queried by is a typed field instead.
 SPAN_ATTRIBUTES: Mapping[str, type] = {
-    "gen_ai.response.finish_reason": str,
+    "gen_ai.response.finish_reasons": str,
     "gen_ai.request.max_tokens": int,
     "error.type": str,
     "http.response.status_code": int,
@@ -97,7 +111,22 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.mcp.tool_count": int,
     "otari.tool_loop.round": int,
     "otari.harness.version": str,
+    "otari.tool.decision": str,
+    "otari.tool.decision_source": str,
+    "otari.tool.succeeded": bool,
+    "otari.gate.id": str,
+    "otari.gate.type": str,
+    "otari.gate.origin": str,
+    "otari.gate.outcome": str,
+    "otari.gate.moment": str,
+    "otari.gate.blocked": bool,
+    "otari.policy.digest": str,
 }
+# The allowlisted attributes OTel defines as an array of strings. Each is stored as
+# its elements joined by LIST_SEPARATOR, so every stored attribute stays a scalar,
+# and each element is held to the identifier rule on its own.
+LIST_ATTRIBUTES = frozenset({"gen_ai.response.finish_reasons"})
+LIST_SEPARATOR = ","
 
 
 class InvalidSpanError(ValueError):
@@ -112,6 +141,21 @@ class InvalidSpanError(ValueError):
 def is_identifier(value: str) -> bool:
     """Whether a client-supplied name is safe to store as it is."""
     return IDENTIFIER_PATTERN.fullmatch(value) is not None and not any(pattern.search(value) for pattern in _NOT_A_NAME)
+
+
+def is_gate_id(value: object) -> bool:
+    """Whether a value is a gate id a guardrail could declare, which is held to that rule, not the identifier one."""
+    return isinstance(value, str) and 0 < len(value) <= MAX_GATE_ID_LENGTH
+
+
+def is_identifier_list(value: str) -> bool:
+    """Whether a list attribute, joined for storage, is short and each of its elements an identifier."""
+    return len(value) <= IDENTIFIER_MAX_LENGTH and all(is_identifier(part) for part in value.split(LIST_SEPARATOR))
+
+
+def is_endpoint(value: str) -> bool:
+    """Whether a name the gateway chose is shaped like one of its endpoint labels."""
+    return len(value) <= IDENTIFIER_MAX_LENGTH and ENDPOINT_PATTERN.fullmatch(value) is not None
 
 
 def _check_choice(name: str, value: str, choices: tuple[str, ...]) -> None:
@@ -154,6 +198,9 @@ class SpanRecord:
     provider: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    reasoning_tokens: int | None = None
     cost_snapshot: Decimal | None = None
     tool_name: str | None = None
     tool_type: str | None = None
@@ -167,17 +214,17 @@ class SpanRecord:
         _check_choice("kind", self.kind, SPAN_KINDS)
         _check_choice("origin", self.origin, SPAN_ORIGINS)
         _check_choice("outcome", self.outcome, SPAN_OUTCOMES)
-        for name in ("span_id", "parent_span_id", "request_id", "otel_trace_id", "otel_span_id"):
+        for name in ("span_id", "parent_span_id", "request_id", "otel_trace_id", "otel_span_id", "tool_call_id"):
             _check_id(name, getattr(self, name))
+        if not (self.origin == "gateway" and self.kind == "step" and is_endpoint(self.name)):
+            _check_identifier("name", self.name)
         for name in (
-            "name",
             "operation",
             "error_class",
             "model",
             "provider",
             "tool_name",
             "tool_type",
-            "tool_call_id",
         ):
             _check_identifier(name, getattr(self, name))
         # Copied before it is checked and frozen after, so the mapping a caller still
@@ -189,7 +236,12 @@ class SpanRecord:
                 raise InvalidSpanError("attributes may only hold allowlisted keys")
             if type(value) is not expected:
                 raise InvalidSpanError(f"attribute {key} must be a {expected.__name__}")
-            if isinstance(value, str) and not is_identifier(value):
+            if key == "otari.gate.id":
+                if not is_gate_id(value):
+                    raise InvalidSpanError(f"attribute {key} must be a gate id")
+            elif isinstance(value, str) and not (
+                is_identifier_list(value) if key in LIST_ATTRIBUTES else is_identifier(value)
+            ):
                 raise InvalidSpanError(f"attribute {key} must be identifier-shaped")
         object.__setattr__(self, "attributes", MappingProxyType(attributes))
 
@@ -274,7 +326,21 @@ class TraceFilter:
     harnesses: tuple[str, ...] = ()
     session_sources: tuple[str, ...] = ()
     has_error: bool | None = None
-    trace_id_prefix: str | None = None
+    # Matches any part of a trace's id, name, harness or user id, in any case.
+    search: str | None = None
+
+
+# What the session list can be ordered by. Latency is a session's span from its
+# start to its last activity, and tokens are input and output together.
+TraceSortKey = Literal["last_activity", "latency", "tokens", "cost", "errors"]
+
+
+@dataclass(frozen=True)
+class TraceSort:
+    """The order a page of traces is read in. Ties fall back to newest activity first."""
+
+    key: TraceSortKey = "last_activity"
+    descending: bool = True
 
 
 @dataclass(frozen=True)
@@ -314,10 +380,18 @@ class TraceBucket:
 
 @dataclass(frozen=True)
 class TracePage:
-    """One page of traces, newest activity first."""
+    """One page of traces, in the order the read asked for."""
 
     items: tuple[TraceSummary, ...]
     has_more: bool
+
+
+@dataclass(frozen=True)
+class GuardrailDefinition:
+    """One version of an agent guardrail, by the fingerprint its gate spans name."""
+
+    digest: str
+    gates: tuple[GateDefinition, ...]
 
 
 @dataclass(frozen=True)
@@ -326,8 +400,10 @@ class TraceDetail:
 
     ``truncated`` says the trace holds more spans than the read was allowed to
     return, so a caller never mistakes a cut-off trace for a short one.
+    ``definitions`` are the guardrail versions its gate spans name, those stored.
     """
 
     summary: TraceSummary
     spans: tuple[SpanRecord, ...]
     truncated: bool
+    definitions: tuple[GuardrailDefinition, ...] = ()

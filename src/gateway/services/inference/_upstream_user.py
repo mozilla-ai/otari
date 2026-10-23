@@ -28,8 +28,6 @@ reads just before the call.
 # gets nothing, because an API that does not take ``user`` can fail the call.
 _USER_FIELD = frozenset(
     {
-        LLMProvider.OPENAI,
-        LLMProvider.AZUREOPENAI,
         LLMProvider.CEREBRAS,
         LLMProvider.DEEPSEEK,
         LLMProvider.FIREWORKS,
@@ -39,7 +37,7 @@ _USER_FIELD = frozenset(
     }
 )
 # Chat APIs that document ``safety_identifier`` and deprecate ``user``.
-_SAFETY_IDENTIFIER_FIELD = frozenset({LLMProvider.META})
+_SAFETY_IDENTIFIER_FIELD = frozenset({LLMProvider.OPENAI, LLMProvider.AZUREOPENAI, LLMProvider.META})
 # Anthropic's API reads ``metadata.user_id`` and rejects ``user``.
 _METADATA_USER_ID = frozenset({LLMProvider.ANTHROPIC, LLMProvider.AZUREANTHROPIC, LLMProvider.VERTEXAIANTHROPIC})
 # Bedrock's abuse detection reads no end-user id, but ``requestMetadata`` reaches the
@@ -73,23 +71,20 @@ class UnidentifiedEndUserError(Exception):
 
 def end_user_identifier(
     *,
-    enabled: bool,
     key: str | None,
     workspace_id: str | None,
     tag: str | None,
     user_id: str | None,
     session: bool = False,
-) -> str | None:
-    """The identifier a request's provider calls carry, or ``None`` while the feature is off.
+) -> str:
+    """The identifier a request's provider calls carry.
 
     The caller's own user tag wins over the resolved user, except on a dashboard
     ``session``: it names no end user, so its tag would let a member pick another's
-    identifier. While the feature is on, a request with nothing to derive it from
-    raises :class:`UnidentifiedEndUserError` rather than going upstream unscoped,
-    where a block would land on the whole account.
+    identifier. A request with nothing to derive it from raises
+    :class:`UnidentifiedEndUserError` rather than going upstream unscoped, where a
+    block would land on the whole account.
     """
-    if not enabled:
-        return None
     subject = user_id if session else tag or user_id
     if not workspace_id or not subject:
         raise UnidentifiedEndUserError
@@ -97,8 +92,9 @@ def end_user_identifier(
 
 
 def bind_upstream_user(request_fields: dict[str, Any], identifier: str | None) -> dict[str, Any]:
-    """Replace the caller's ``user`` with ``identifier``, in place."""
+    """Replace the caller's ``user`` and ``safety_identifier`` with ``identifier``, in place."""
     request_fields.pop("user", None)
+    request_fields.pop("safety_identifier", None)
     request_fields.pop(UPSTREAM_USER_FIELD, None)
     if identifier is not None:
         request_fields[UPSTREAM_USER_FIELD] = identifier

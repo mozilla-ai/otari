@@ -49,7 +49,6 @@ from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRep
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
 
 
 class WorkspaceService:
@@ -61,17 +60,13 @@ class WorkspaceService:
         *,
         uow: UnitOfWork,
         membership_listener: MembershipListener,
-        workspace_listener: WorkspaceListener,
     ):
         """Build the service on a session and a Unit of Work over it, which the listener writes through."""
         self.db = db
         self._uow = uow
         self.workspaces = WorkspaceRepository(db)
         self.members = WorkspaceMemberRepository(db)
-        self.organizations = OrganizationService(
-            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-        )
-        self._workspace_listener = workspace_listener
+        self.organizations = OrganizationService(db, membership_listener=None)
         self._membership_listener = membership_listener
 
     # ------------------------------------------------------------------
@@ -186,7 +181,6 @@ class WorkspaceService:
                     organization_id=organization.id,
                     created_by_user_id=user.id,
                 )
-                await self._workspace_listener.workspace_created(workspace.id)
                 member = await self.members.create(workspace_id=workspace.id, user_id=user.id, role="owner")
                 # No-op today: a workspace this fresh has no defaults of its own yet.
                 # Called anyway so every WorkspaceMember-creating path materializes
@@ -374,14 +368,12 @@ class WorkspaceService:
         # member gets neither.
         await self.workspaces.lock(workspace.id)
 
-        # As in create_workspace: the pre-check races the insert, and the unique
-        # constraint is what actually decides.
-        try:
-            async with self._uow:
-                member = await self.members.create(workspace_id=workspace.id, user_id=user_id, role=role)
-                await self._membership_listener.member_joined(member)
-        except IntegrityError:
-            raise WorkspaceMemberAlreadyExistsError(user_id) from None
+        # As in create_workspace: the pre-check races the insert, and the database
+        # is what actually decides. ``add`` reports a concurrent add as a duplicate
+        # and a concurrent delete as a missing workspace.
+        async with self._uow:
+            member = await self.members.add(workspace_id=workspace.id, user_id=user_id, role=role)
+            await self._membership_listener.member_joined(member)
         return WorkspaceMemberPublic.model_validate(member)
 
     async def update_member_role(

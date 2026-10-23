@@ -7,10 +7,9 @@ configured instance is served on the deployment's own credential. The port is
 asked after every rung upstream of it has missed, so a row here never displaces
 a credential the caller supplied.
 
-Built with the request's Unit of Work, which the composition root hands in. In
-hybrid mode there is no database and no Unit of Work, so the adapter is built
-with no service and answers nothing: a hybrid data plane resolves credentials
-over the platform protocol, never through this port.
+Built with the request's Unit of Work, which the composition root hands in.
+Without one (the boot-time shape check) the adapter is built with no service
+and answers nothing.
 
 The adapter hands nothing out over the wire: its one consumer on the request
 path puts the key in an any-llm client in this process and dials the upstream.
@@ -41,15 +40,16 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
 
         ``model`` selects nothing (a hosted provider is one credential) but it
         can refuse: only a model the operator switched on in this provider's
-        roster is served, so one switched off or never offered is refused.
+        roster is served, so one switched off is refused, and so is one never
+        offered unless the provider serves unlisted models.
 
         ``organization_id`` decides one thing: a provider restricted to another
         organization answers ``None``, as if it were not configured, so a tenant
         learns nothing about a credential kept from it. ``workspace_id`` is
         attribution only and unused.
 
-        ``provider`` is the caller's *instance* name, which equals the any-llm
-        implementation for a bare selector. A ``config.yml`` instance of its own
+        ``provider`` is the caller's *instance* name: the any-llm
+        implementation for a bare selector, or a hosted provider's own name. A ``config.yml`` instance of its own
         name is credentialed upstream of this port and never reaches it. An
         accepted alias (``openai-compatible``) is served by the provider it
         folds to, and is answered under that provider's name.
@@ -66,8 +66,9 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
             # The stored name, so an alias settles under the key the provider is
             # priced and switched under rather than under the alias, which
             # nothing prices. Equal to ``provider`` for anything but an alias.
-            response_provider=resolved.provider or provider,
+            response_provider=resolved.name or provider,
             client_args=resolved.client_args,
+            implementation=resolved.implementation,
         )
 
     async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:

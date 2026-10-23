@@ -1,4 +1,4 @@
-# Minimal standalone Otari configuration.
+# Minimal Otari configuration.
 # See docs/configuration.md for sources, precedence, and advanced settings.
 
 # Docker Compose provides this PostgreSQL service. For a local process without
@@ -86,10 +86,9 @@ providers:
 # OTARI_SECRET_KEY in the process environment.
 # Provider copies of attached files, on by default, require
 # OTARI_PROVIDER_ACCOUNT_PEPPER: its own random value of at least 32 characters.
-# Each provider call carries a per-end-user identifier, on by default. Set
+# Each provider call carries a per-end-user identifier. Set
 # OTARI_PROVIDER_USER_IDENTIFIER_KEY (32+ random characters) to key it. See
 # docs/configuration.md#end-user-identifiers.
-# provider_user_identifier_enabled: false
 
 # Optional email delivery. public_base_url is also used by passkeys and OAuth.
 # public_base_url: "https://otari.example.com"
@@ -160,7 +159,7 @@ providers:
 
 # What a workspace with no tool policy of its own gets. false makes web access
 # (search, fetch, POST /api/v1/search) or code execution something a workspace
-# owner or admin turns on. Unset: on, except on a hosted deployment.
+# owner or admin turns on. Both default to true.
 # See docs/configuration.md.
 # web_search_workspace_default: false
 # code_execution_workspace_default: false

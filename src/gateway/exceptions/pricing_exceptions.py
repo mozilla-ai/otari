@@ -45,9 +45,8 @@ class OrganizationPricingManagedModelError(TenancyForbiddenError):
     what a budget counts down.
 
     Withheld from an organization manager, not from everyone: a deployment
-    operator is the party that pays, so the standalone deployment whose one
-    administrator is also its only tenant keeps setting its own rates exactly as
-    before (otari-ai#2095).
+    operator is the party that pays, so a deployment whose one administrator is
+    also its only tenant keeps setting its own rates (otari-ai#2095).
     """
 
     def __init__(self, model_key: str):
@@ -55,6 +54,20 @@ class OrganizationPricingManagedModelError(TenancyForbiddenError):
             f"'{model_key}' resolves on a credential this deployment, not your organization, supplies, "
             "so its rate is set on the deployment price list rather than per organization. An override "
             "applies to a model your organization supplies its own provider key for."
+        )
+
+
+class OrganizationPricingToolRateError(TenancyForbiddenError):
+    """An organization manager's override of a search or fetch instance's rate.
+
+    An instance always runs on the deployment's own key, so its rate is what the
+    deployment charges, which is the operator's alone to set.
+    """
+
+    def __init__(self, kind: str, name: str):
+        super().__init__(
+            f"'{name}' is a {kind} tool this deployment runs on its own key, so only the deployment "
+            "operator sets its rate."
         )
 
 
@@ -77,4 +90,5 @@ __all__ = [
     "OrganizationPricingNotFoundError",
     "OrganizationPricingOperatorRateError",
     "OrganizationPricingOverlapError",
+    "OrganizationPricingToolRateError",
 ]

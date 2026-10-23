@@ -1,6 +1,6 @@
 """Endpoint tests for /api/v1/tool-settings (sqlite-backed TestClient)."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -182,26 +182,6 @@ def test_test_endpoint_unknown_service(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         resp = client.post(f"{API_ROOT}/tool-settings/bogus/test", headers=AUTH, json={"url": "http://x:8080"})
     assert resp.status_code == 404
-
-
-@pytest.fixture
-def _hybrid_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    yield
-
-
-def test_tool_settings_not_mounted_in_hybrid_mode(tmp_path: Path, _hybrid_env: None) -> None:
-    config = GatewayConfig(
-        mode="hybrid",
-        master_key="sk-test-master",
-        platform={"base_url": "https://otari.ai"},
-    )
-    with TestClient(create_app(config)) as client:
-        # Standalone-only: the management route is not registered in hybrid mode.
-        assert client.get(f"{API_ROOT}/tool-settings", headers=AUTH).status_code == 404
-        # And the catalog reads with it, since they sit on the same router.
-        assert client.get(f"{API_ROOT}/tool-settings/guardrails/profiles", headers=AUTH).status_code == 404
-        assert client.get(f"{API_ROOT}/tool-settings/guardrails/catalog", headers=AUTH).status_code == 404
 
 
 def test_patch_persists_the_sandbox_image(tmp_path: Path) -> None:

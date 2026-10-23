@@ -1,6 +1,6 @@
 # Dashboard demo GIF
 
-Regenerates `assets/otari-demo.gif` (the README hero): a tour of the standalone
+Regenerates `assets/otari-demo.gif` (the README hero): a tour of the
 dashboard's most useful pages, populated with seven providers, fourteen current
 models, routing policies, organization members, budgets, keys, and ~26k usage
 rows, with a side-by-side Playground comparison streamed from a mock upstream.
@@ -24,8 +24,7 @@ must be free.
   `web/node_modules`).
 - A built dashboard bundle in `src/gateway/static/dashboard` (gitignored, so a
   fresh clone has none): `make dashboard`. Rebuild after any change under
-  `web/src` or to `docs/dashboard.md` (bundled into the app), otherwise the
-  recording shows the previous build.
+  `web/src`, otherwise the recording shows the previous build.
 - Network access: the Models page reads model metadata (vendor, context length,
   modalities) from models.dev at runtime, and shows bare ids without it.
 - On arm64 Linux, `record.sh` sets the Playwright platform override automatically; on x86_64 it leaves Playwright's native detection and host checks in place.

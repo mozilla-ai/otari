@@ -13,22 +13,21 @@ test("the deployment bootstrap is served unauthenticated", async ({
 
   expect(response.status()).toBe(200)
   expect(await response.json()).toEqual({
-    deployment_type: "standalone",
-    session_type: "local_operator",
     // Spelled out rather than derived: this is the list the sidebar gates on,
     // and a surface that quietly appears or disappears should fail here.
     surfaces: [
       "admin",
       "budgets",
+      "health_checks",
       "hosted_providers",
       "keys",
       "models",
       "organization_guardrails",
       "organization_providers",
+      "organization_usage",
       "organizations",
       "playground",
       "pricing",
-      "providers",
       "routing",
       "settings",
       "tools",
@@ -43,14 +42,8 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // sign-in credential while staying the API one; see
     // docs/access-control.md#dashboard-sessions-and-identity.
     sign_in_methods: ["master_key"],
-    management_url: null,
-    // Null because this gateway is its own data plane, which is what makes the
-    // dashboard's request snippets correct when they name the address the
-    // browser reached. Only a hosted control plane sets it; see otari#823.
-    data_plane_url: null,
     // No docs_url in this e2e environment, so the dashboard's Documentation
-    // links stay on the operator guide bundled with this gateway; see
-    // docs/configuration.md#documentation-links.
+    // links open docs.otari.ai; see docs/configuration.md#documentation-links.
     docs_url: null,
     // No legal pages configured here; see docs/configuration.md#legal-pages.
     terms_url: null,
@@ -70,6 +63,8 @@ test("the deployment bootstrap is served unauthenticated", async ({
     passkeys_ready: false,
     oauth_providers: [],
     feedback_enabled: true,
+    // On in e2e/otari.yml, for the workload identity spec.
+    federation_member_rules: true,
     // No SMTP configured in this e2e environment, so invitations are
     // creatable but not emailed; see docs/configuration.md#mail.
     mail_ready: false,

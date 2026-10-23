@@ -106,7 +106,6 @@ from gateway.services.tenancy.authorization import (
     resolve_workspace_in_organization,
 )
 from gateway.services.tenancy.organization_model_access import resolve_session_model_allowlist
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 # Authentication only, like the rest of the ``/api/v1/organizations/me`` surface.
 # What the caller may read or write is decided per request below, which is the
@@ -153,7 +152,7 @@ async def _writable_workspace_id(
     caller's own organization, so another tenant's id is a 404 rather than a 403.
     Then the targets, against the organization's own reach.
     """
-    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    organizations = OrganizationService(db, membership_listener=None)
     organization = await organizations.get_active_organization_for_user(user)
     await organizations.require_active_organization_management_access(user=user, organization=organization)
     if workspace_id is None:
@@ -275,7 +274,7 @@ async def list_visible_routing_policies(
     scope = await resolve_visible_workspace_scope(
         db,
         user=current_identity,
-        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+        organizations=OrganizationService(db, membership_listener=None),
     )
     statement = select(RoutingPolicy).where(
         col(RoutingPolicy.workspace_id).in_(_visible_workspace_ids(scope)),
@@ -381,7 +380,7 @@ async def list_visible_aliases(
     scope = await resolve_visible_workspace_scope(
         db,
         user=current_identity,
-        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+        organizations=OrganizationService(db, membership_listener=None),
     )
     statement = select(ModelAlias).where(
         col(ModelAlias.workspace_id).in_(_visible_workspace_ids(scope)),

@@ -20,6 +20,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict, runtime_checkable
 
+from anthropic.types import ServerToolUsage
 from anthropic.types.beta import BetaMCPToolResultBlock, BetaMCPToolUseBlock
 from anthropic.types.beta.beta_container import BetaContainer
 from any_llm.types.messages import (
@@ -37,6 +38,7 @@ from gateway.services._tool_loop import (
     tool_failure_detail,
 )
 from gateway.services.code_execution import ContainerLease
+from gateway.services.inference import call_messages
 from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
@@ -224,6 +226,11 @@ def _content_to_dicts(content: list[Any]) -> list[dict[str, Any]]:
 class _MessagesUsageAccumulator(TypedDict):
     input: int
     output: int
+    cache_read: int
+    cache_creation: int
+    # The provider's own server-tool calls over every round, which a round's usage counts for that round only.
+    web_search_requests: int
+    web_fetch_requests: int
     iterations: list[Any]
     # Native server-tool blocks for the searches this loop ran, prepended to the
     # final content by ``fold_usage``. Always present, only filled when the
@@ -231,21 +238,46 @@ class _MessagesUsageAccumulator(TypedDict):
     native_blocks: list[Any]
 
 
-def _fold_usage(result: MessageResponse, input_total: int, output_total: int) -> None:
+def _fold_usage(result: MessageResponse, acc: _MessagesUsageAccumulator) -> None:
     """Replace ``result.usage`` token counts with the loop's running totals.
 
     Mirrors :func:`gateway.services.mcp_loop._fold_usage` but in Anthropic
-    field naming (``input_tokens`` / ``output_tokens`` instead of
-    ``prompt_tokens`` / ``completion_tokens``).
+    field naming, where cached input is counted apart from ``input_tokens``.
     """
     if result.usage is None:
         return
-    result.usage.input_tokens = input_total
-    result.usage.output_tokens = output_total
+    result.usage.input_tokens = acc["input"]
+    result.usage.output_tokens = acc["output"]
+    if acc["cache_read"]:
+        result.usage.cache_read_input_tokens = acc["cache_read"]
+    if acc["cache_creation"]:
+        result.usage.cache_creation_input_tokens = acc["cache_creation"]
+    if acc["web_search_requests"] or acc["web_fetch_requests"]:
+        result.usage.server_tool_use = ServerToolUsage(
+            web_search_requests=acc["web_search_requests"], web_fetch_requests=acc["web_fetch_requests"]
+        )
+
+
+def _server_tool_requests(usage: Any) -> tuple[int, int]:
+    """The searches and fetches the provider ran itself, as one round's usage reports them."""
+    server_tool_use = getattr(usage, "server_tool_use", None)
+    return (
+        getattr(server_tool_use, "web_search_requests", None) or 0,
+        getattr(server_tool_use, "web_fetch_requests", None) or 0,
+    )
 
 
 class _MessagesStreamAccumulator(TypedDict):
     output_tokens: int
+    # Input counted on hidden rounds' ``message_delta`` usage. Anthropic reports a
+    # round's input on its ``message_start``, which a hidden round never forwards; the
+    # Responses bridge reports it only on the delta.
+    input_tokens: int
+    cache_read_input_tokens: int
+    cache_creation_input_tokens: int
+    # The provider's own server-tool calls on hidden rounds, added to the final delta's.
+    web_search_requests: int
+    web_fetch_requests: int
     started: int
     next_index: int
     iterations: list[Any]
@@ -261,8 +293,15 @@ def _maybe_fold_message_delta(event: Any, acc: _MessagesStreamAccumulator) -> An
         return event
 
     usage_update: dict[str, Any] = {}
-    if acc["output_tokens"] > 0:
-        usage_update["output_tokens"] = (getattr(usage, "output_tokens", 0) or 0) + acc["output_tokens"]
+    for field in ("output_tokens", "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
+        if acc[field] > 0:
+            usage_update[field] = (getattr(usage, field, 0) or 0) + acc[field]
+    if acc["web_search_requests"] or acc["web_fetch_requests"]:
+        searches, fetches = _server_tool_requests(usage)
+        usage_update["server_tool_use"] = ServerToolUsage(
+            web_search_requests=searches + acc["web_search_requests"],
+            web_fetch_requests=fetches + acc["web_fetch_requests"],
+        )
     if acc["iterations"]:
         usage_update["iterations"] = [*acc["iterations"], *(getattr(usage, "iterations", None) or [])]
 
@@ -492,20 +531,34 @@ class _MessagesToolLoopStrategy:
     # ---- non-streaming hooks ----
 
     async def call(self, kwargs: dict[str, Any]) -> MessageResponse:
-        result: MessageResponse = await amessages(**kwargs)  # type: ignore[assignment]
+        result: MessageResponse = await call_messages(amessages, kwargs)
         return result
 
     def new_usage_accumulator(self) -> _MessagesUsageAccumulator:
-        return {"input": 0, "output": 0, "iterations": [], "native_blocks": []}
+        return {
+            "input": 0,
+            "output": 0,
+            "cache_read": 0,
+            "cache_creation": 0,
+            "web_search_requests": 0,
+            "web_fetch_requests": 0,
+            "iterations": [],
+            "native_blocks": [],
+        }
 
     def accumulate_usage(self, acc: _MessagesUsageAccumulator, result: MessageResponse) -> None:
         if result.usage:
             acc["input"] += result.usage.input_tokens or 0
             acc["output"] += result.usage.output_tokens or 0
+            acc["cache_read"] += result.usage.cache_read_input_tokens or 0
+            acc["cache_creation"] += result.usage.cache_creation_input_tokens or 0
+            searches, fetches = _server_tool_requests(result.usage)
+            acc["web_search_requests"] += searches
+            acc["web_fetch_requests"] += fetches
             acc["iterations"].extend(result.usage.iterations or [])
 
     def fold_usage(self, result: MessageResponse, acc: _MessagesUsageAccumulator) -> None:
-        _fold_usage(result, acc["input"], acc["output"])
+        _fold_usage(result, acc)
         if result.usage is not None and acc["iterations"]:
             result.usage.iterations = acc["iterations"]
         if self._container is not None:
@@ -591,7 +644,7 @@ class _MessagesToolLoopStrategy:
     # ---- streaming hooks ----
 
     async def open_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
-        stream: AsyncIterator[MessageStreamEvent] = await amessages(**kwargs)  # type: ignore[assignment]
+        stream: AsyncIterator[MessageStreamEvent] = await call_messages(amessages, kwargs)
         return stream
 
     def new_stream_state(self) -> _MessagesStreamState:
@@ -610,6 +663,11 @@ class _MessagesToolLoopStrategy:
         # stream accumulator rejects.
         return {
             "output_tokens": 0,
+            "input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "web_search_requests": 0,
+            "web_fetch_requests": 0,
             "started": 0,
             "next_index": 0,
             "iterations": [],
@@ -760,7 +818,16 @@ class _MessagesToolLoopStrategy:
                 continue
             usage = getattr(term, "usage", None)
             if usage is not None:
-                acc["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
+                for field in (
+                    "output_tokens",
+                    "input_tokens",
+                    "cache_read_input_tokens",
+                    "cache_creation_input_tokens",
+                ):
+                    acc[field] += getattr(usage, field, 0) or 0
+                searches, fetches = _server_tool_requests(usage)
+                acc["web_search_requests"] += searches
+                acc["web_fetch_requests"] += fetches
                 acc["iterations"].extend(getattr(usage, "iterations", None) or [])
             context_management = getattr(term, "context_management", None)
             if context_management is not None:

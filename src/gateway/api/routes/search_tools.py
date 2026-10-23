@@ -3,8 +3,7 @@
 ``POST /api/v1/search`` dispatches against the ``search_tools`` map. That map used to
 come only from a config file, so a deployment configured entirely through the
 dashboard and environment variables could not use the endpoint at all (issue
-#601). These endpoints are the missing route in, and they are deliberately the
-same shape as ``/api/v1/provider-credentials``: rows in ``search_tool_credentials``,
+#601). These endpoints are the missing route in: rows in ``search_tool_credentials``,
 the API key encrypted at rest and never returned, merged over the config-file
 tools with the stored row winning on a name collision. A row is a search or a
 fetch instance, as its ``kind`` says, and fetch instances share these routes, so
@@ -14,7 +13,7 @@ Config-file tools stay honored and stay read-only here; they are reported by the
 list endpoint so the dashboard can show every tool a request could name, not just
 the editable ones.
 
-Operator-gated and standalone-only (the router is not mounted in hybrid). URL
+Operator-gated. URL
 validation is structural, matching ``/api/v1/tool-settings`` rather than the provider
 SSRF gate: the backend this most often points at is a SearXNG sidecar on a
 private address, which a deny-private gate would refuse.
@@ -239,7 +238,7 @@ async def reencrypt_stored_search_tool_keys(
     """Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.
 
     The search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it
-    alongside ``POST /api/v1/provider-credentials/reencrypt``. Rows that cannot be
+    alongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be
     decrypted are left untouched and must be recovered by replacing the affected
     tool's key.
     """
@@ -510,8 +509,8 @@ async def test_search_tool(
     """Test a configured or stored instance with one search or one fetch.
 
     Takes ``query`` for a search instance or ``url`` for a fetch instance, and
-    answers as ``POST /search-tools/test`` does. ``builtin_fetch`` has no test
-    yet, and answers a 400.
+    answers as ``POST /search-tools/test`` does. ``builtin_fetch``, the built-in
+    fetcher, fetches as a fetch tool call does, with no domain policy.
     """
     try:
         # The instance may have been stored through another replica.

@@ -7,8 +7,6 @@ import { COUNTS, PARITY } from "./parity-data"
 // one worker against one gateway either way (see web/playwright.config.ts).
 test.describe.configure({ mode: "serial" })
 
-// The scratch rows are consumed by the Activity spec's bulk-delete flow, which
-// runs before this file, so they are deliberately not counted here.
 const SEEDED = COUNTS.priced + COUNTS.unpriced + COUNTS.errors
 
 test.describe("overview", () => {

@@ -46,6 +46,7 @@ describe("summarizeTrace", () => {
           type: "SPAN",
           promptTokens: 15,
           completionTokens: 3,
+          cachedTokens: 12,
         }),
         observation({
           id: "llm-1",
@@ -53,6 +54,7 @@ describe("summarizeTrace", () => {
           type: "GENERATION",
           promptTokens: 10,
           completionTokens: 2,
+          cachedTokens: 8,
         }),
         observation({
           id: "llm-2",
@@ -60,6 +62,7 @@ describe("summarizeTrace", () => {
           type: "GENERATION",
           promptTokens: 5,
           completionTokens: 1,
+          cachedTokens: 4,
         }),
       ]),
     )
@@ -67,6 +70,7 @@ describe("summarizeTrace", () => {
     expect(summary).toMatchObject({
       promptTokens: 15,
       completionTokens: 3,
+      cachedTokens: 12,
       totalTokens: 18,
     })
   })
@@ -114,6 +118,7 @@ describe("summarizeTrace", () => {
       latencyMs: 0,
       promptTokens: 0,
       completionTokens: 0,
+      cachedTokens: 0,
       totalTokens: 0,
       totalCost: 0,
       models: [],

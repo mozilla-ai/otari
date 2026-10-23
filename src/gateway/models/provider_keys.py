@@ -3,11 +3,9 @@
 Decided at otari-ai#1748: the platform's ``ProviderKey`` shape
 (organization scope, archival, one default per organization+provider,
 per-workspace pin/disable overrides, per-workspace model allow-lists) ports
-into otari as new, additive tables. ``provider_credentials`` and its
-config.yml-merge overlay (``services/provider_store_service.py``) are
-unchanged: they stay the mechanism for config.yml-defined and legacy
-deployment-global stored credentials, addressed by instance name exactly as
-before. These two mechanisms are disjoint by construction (see
+into otari as new, additive tables. ``config.providers`` stays the
+mechanism for config.yml-defined credentials, addressed by instance name
+exactly as before. These two mechanisms are disjoint by construction (see
 ``services/provider_kwargs.py``): an ``instance:model`` selector that matches
 an existing ``config.providers`` entry never consults these tables, and a
 bare ``provider:model`` selector never consults ``config.providers`` for a
@@ -66,10 +64,10 @@ from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin,
 
 # ``client_args`` is arbitrary JSON, and this gateway's own Bedrock support is
 # the reason a credential-shaped entry in it cannot simply be rejected outright:
-# standalone mode's classic AWS IAM shape genuinely requires
+# the classic AWS IAM shape genuinely requires
 # ``aws_access_key_id`` and ``aws_secret_access_key`` inside ``client_args``
 # (any-llm-sdk's ``BedrockProvider`` never forwards ``api_key`` into the boto3
-# client it builds; see ``services/bedrock_gateway_auth.py``), so those are real
+# client it builds), so those are real
 # credentials this field is *supposed* to carry, not smuggled duplicates of
 # ``encrypted_api_key``. They still must never round-trip over the API, the same
 # treatment ``encrypted_api_key`` already gets (only ``last4`` comes back);

@@ -1,8 +1,6 @@
 import { Link } from "@heroui/react"
 import { Button } from "@/design-system/actions/Button"
 import { Popover } from "@/design-system/overlays/Popover"
-import { welcomeGuideHref } from "@/shared/helpers/welcomeGuide"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 import { PublicAuthLink } from "./PublicAuthLayout"
 
 /**
@@ -28,10 +26,6 @@ export function AuthHelp({
   offersRecovery: boolean
   credential?: "password" | "master-key"
 }) {
-  // Absent on a hosted deployment, which serves no such page; see
-  // `welcomeGuideHref`. Both rows below it are the same link, so both go.
-  const welcomeHref = welcomeGuideHref(useDeployment())
-
   return (
     <Popover
       label="Help"
@@ -49,14 +43,12 @@ export function AuthHelp({
             Send a new verification link
           </PublicAuthLink>
         ) : null}
-        {welcomeHref ? (
-          <Link
-            href={welcomeHref}
-            className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
-          >
-            Open the welcome guide
-          </Link>
-        ) : null}
+        <Link
+          href="/welcome"
+          className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
+        >
+          Open the welcome guide
+        </Link>
         {credential ? (
           <p className="border-t border-border pt-3 text-caption">
             {credential === "password" ? (
@@ -64,16 +56,9 @@ export function AuthHelp({
             ) : (
               <>
                 Your{" "}
-                {welcomeHref ? (
-                  <a
-                    href={welcomeHref}
-                    className="text-link hover:text-link-hover"
-                  >
-                    master key
-                  </a>
-                ) : (
-                  "master key"
-                )}{" "}
+                <a href="/welcome" className="text-link hover:text-link-hover">
+                  master key
+                </a>{" "}
                 is sent once and exchanged for a session cookie. It is never
                 stored in the browser.
               </>

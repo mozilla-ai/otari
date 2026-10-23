@@ -1,12 +1,11 @@
 # Deployment
 
 Otari publishes `mzdotai/otari` on Docker Hub. Use the
-[Quickstart](quickstart.md) for local setup; this page covers production choices
-and hybrid gateways.
+[Quickstart](quickstart.md) for local setup; this page covers production choices.
 
-## Standalone checklist
+## Production checklist
 
-A durable standalone deployment should:
+A durable deployment should:
 
 - use PostgreSQL and back it up
 - set a strong master key in a secret store
@@ -84,44 +83,6 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 
 That page owns its current image tag, variables, platform limits, and
 maintenance instructions.
-
-## Connect a gateway to otari.ai
-
-Create a gateway in otari.ai and copy its gateway token, then start Otari in
-hybrid mode. Put the token in a private environment file:
-
-```dotenv
-OTARI_AI_TOKEN=gw_your_gateway_token
-```
-
-```bash
-docker run --rm -p 8000:8000 \
-  --env-file .env \
-  mzdotai/otari:0.4.0 \
-  otari serve
-```
-
-Hybrid mode does not initialize a local management database or use local
-provider credentials. Clients send an otari.ai user token to the gateway:
-
-```bash
-curl http://localhost:8000/api/v1/chat/completions \
-  -H "Authorization: Bearer tk_your_user_token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "openai/gpt-4o",
-    "messages": [{"role": "user", "content": "Say hello."}]
-  }'
-```
-
-Verify both liveness and control-plane reachability:
-
-```bash
-curl http://localhost:8000/api/v1/health
-curl http://localhost:8000/api/v1/health/readiness
-```
-
-See [Runtime modes](modes.md) for the trust and credential model.
 
 ## Optional services
 

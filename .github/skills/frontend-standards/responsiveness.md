@@ -2,7 +2,7 @@
 
 The dashboard is installable to a phone home screen. `web/public/pwa/` ships a maskable
 Android icon and an `apple-touch-icon`, `index.html` carries the `apple-mobile-web-app-*`
-tags, and the gateway serves the manifest in standalone mode, so an operator can and does add
+tags, and the gateway serves the manifest, so an operator can and does add
 it to a home screen. A page that only works at 1440px is a broken page, not a desktop-first
 one.
 

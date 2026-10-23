@@ -1,4 +1,4 @@
-"""API key settings: the keys a deployment declares in config.yml.
+"""API key settings: the keys a deployment declares in config.yml, and the issuers a key may federate with.
 
 A declared key carries a secret the operator chose, so the service that
 presents it and this gateway share one value that survives restarts and
@@ -7,13 +7,16 @@ an error message or an API response: validation errors here name the key,
 never the value.
 """
 
+import hashlib
 import re
 from typing import Annotated, Any, Self
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from gateway.auth.models import API_KEY_PREFIX, MIN_API_KEY_LENGTH
-from gateway.core.settings_view import SECRET
+from gateway.core.settings.declarations import declaration_digest
+from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.models.api_keys import MAX_END_USER_BUDGETS
 from gateway.models.budgets import BUDGET_ID_PATTERN
 
@@ -63,6 +66,12 @@ class ApiKeyConfig(BaseModel):
         max_length=MAX_END_USER_BUDGETS,
         description="Budgets a request may start a new end user on with Otari-End-User-Budget.",
     )
+    max_end_users: int | None = Field(
+        default=None,
+        ge=0,
+        description="Most live end users the key may have on the budgets it assigns, or on any budget when it "
+        "assigns none; null is no cap.",
+    )
     ceiling: str | None = Field(
         default=None,
         description=(
@@ -101,6 +110,69 @@ class ApiKeyConfig(BaseModel):
             raise ValueError(msg)
         return self
 
+    def declaration_digest(self) -> str:
+        """A digest of this entry, which changes when any field config.yml sets for it, or its secret, does.
+
+        The secret enters as its own SHA-256, so the digest stored beside the key
+        says no more about it than the key's hash already does.
+        """
+        entry = self.model_dump(mode="json", exclude={"secret"})
+        entry["secret_sha256"] = hashlib.sha256(self.secret.get_secret_value().encode()).hexdigest()
+        return declaration_digest(entry)
+
+
+def https_url_problem(value: str) -> str | None:
+    """Why ``value`` is not an absolute https URL without credentials, a query or a fragment, or None."""
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return "must be an absolute https URL"
+    if parts.scheme != "https" or not parts.hostname:
+        return "must be an absolute https URL"
+    if parts.username or parts.password or parts.query or parts.fragment:
+        return "must not carry credentials, a query or a fragment"
+    return None
+
+
+class FederationIssuer(BaseModel):
+    """An OpenID Connect issuer whose identity tokens may stand in for an API key's secret."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    issuer: str = Field(
+        description=(
+            "The issuer exactly as tokens carry it in their 'iss' claim, an https URL; "
+            "for Google, https://accounts.google.com."
+        ),
+    )
+    jwks_uri: str | None = Field(
+        default=None,
+        description=(
+            "Where the issuer publishes its signing keys. Unset discovers it from "
+            "<issuer>/.well-known/openid-configuration."
+        ),
+    )
+
+    @field_validator("issuer")
+    @classmethod
+    def _issuer_is_https(cls, value: str) -> str:
+        problem = https_url_problem(value)
+        if problem is not None:
+            msg = f"federation issuer '{value}' {problem}"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("jwks_uri")
+    @classmethod
+    def _jwks_uri_is_https(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        problem = https_url_problem(value)
+        if problem is not None:
+            msg = f"federation jwks_uri '{value}' {problem}"
+            raise ValueError(msg)
+        return value
+
 
 class ApiKeySettings(BaseModel):
     """API keys a deployment declares rather than mints."""
@@ -110,9 +182,63 @@ class ApiKeySettings(BaseModel):
         description=(
             "API keys this deployment declares, keyed by a stable name. Each start creates a missing key and "
             "writes the declared secret and settings over an existing one, so config.yml wins over a change made "
-            "through the API. A key removed from here is kept as it is. Standalone mode only."
+            "through the API. A key removed from here is kept as it is."
         ),
     )
+
+    federation_issuers: Annotated[list[FederationIssuer], OMITTED] = Field(
+        default_factory=list,
+        description=(
+            "OpenID Connect issuers whose identity tokens may authenticate as an API key, in place of its secret, "
+            "when they match one of the key's federation rules. Each entry is an https issuer URL or a mapping "
+            "with 'issuer' and an optional 'jwks_uri'. Empty, the default, turns workload identity off."
+        ),
+    )
+
+    federation_member_rules: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
+        default=False,
+        description=(
+            "Let an organization's owners and admins give their own API keys federation rules naming any public "
+            "https issuer. Such a rule authenticates only through the token exchange that names it, never as a bare "
+            "identity token, so it cannot claim another tenant's workload. Off by default."
+        ),
+    )
+
+    federation_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
+        default=False,
+        description=(
+            "Let a federation issuer's discovery document and signing keys be fetched from a private, loopback or "
+            "link-local address, for an issuer on the deployment's own network. Off by default."
+        ),
+    )
+    federation_access_token_ttl_sec: Annotated[int, Shown(SettingsGroup.GENERAL)] = Field(
+        default=600,
+        ge=60,
+        le=3600,
+        description=(
+            "How long an access token from POST /api/v1/oauth/token lasts, in seconds, and never past the identity "
+            "token it was exchanged for. Between 60 and 3600."
+        ),
+    )
+
+    @field_validator("federation_issuers", mode="before")
+    @classmethod
+    def _issuer_shorthand(cls, value: Any) -> Any:
+        """Accept a bare issuer URL for an entry with no explicit ``jwks_uri``."""
+        if isinstance(value, list):
+            return [{"issuer": entry} if isinstance(entry, str) else entry for entry in value]
+        return value
+
+    @field_validator("federation_issuers")
+    @classmethod
+    def _issuers_unique(cls, value: list[FederationIssuer]) -> list[FederationIssuer]:
+        seen: set[str] = set()
+        for entry in value:
+            if entry.issuer in seen:
+                msg = f"federation issuer '{entry.issuer}' is listed more than once"
+                raise ValueError(msg)
+            seen.add(entry.issuer)
+        return value
 
     @field_validator("api_keys", mode="before")
     @classmethod

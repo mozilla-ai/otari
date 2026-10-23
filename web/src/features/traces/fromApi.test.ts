@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import { traceDetail, traceSpan, traceSummary } from "@/tests/traceFixtures"
+import {
+  gateSummary,
+  traceDetail,
+  traceSpan,
+  traceSummary,
+} from "@/tests/traceFixtures"
 
 import { toTrace } from "./fromApi"
 import { summarizeTrace } from "./types"
@@ -36,6 +41,34 @@ describe("toTrace", () => {
       endMs: 60_000,
     })
     expect(byId.get("call-toolu_1")?.metadata?.Timing).toBe("Approximate")
+  })
+
+  it("carries a call's cache and reasoning counts, and a turn's cached reads", () => {
+    const detail = traceDetail()
+    const spans = detail.spans.map((span) =>
+      span.span_id === "llm-1"
+        ? {
+            ...span,
+            cache_read_tokens: 6,
+            cache_write_tokens: 2,
+            reasoning_tokens: 1,
+          }
+        : span,
+    )
+    const turns = [
+      { ...detail.turns[0], cache_read_tokens: 6 },
+      { ...detail.turns[0], index: 1, step_ids: ["req-2"] },
+    ]
+    const trace = toTrace(traceSummary(), { ...detail, spans, turns })
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("llm-1")).toMatchObject({
+      promptTokens: 10,
+      cachedTokens: 6,
+      cacheWriteTokens: 2,
+      reasoningTokens: 1,
+    })
+    expect(byId.get("turn-0")?.cachedTokens).toBe(6)
   })
 
   it("marks a failure a fallback recovered as a warning, not an error", () => {
@@ -96,6 +129,132 @@ describe("toTrace", () => {
       "Flagged",
       "Unreachable",
     ])
+  })
+
+  it("draws a tool a hook refused as blocked, with who refused it, not as an error", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1", origin: "otlp" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            origin: "otlp",
+            tool_name: "Edit",
+            outcome: "blocked",
+            attributes: {
+              "otari.tool.decision": "reject",
+              "otari.tool.decision_source": "hook",
+            },
+          }),
+        ],
+      }),
+    )
+
+    expect(trace.observations.find((o) => o.id === "tool-1")).toMatchObject({
+      level: "WARNING",
+      statusMessage: "Blocked by a hook before it ran.",
+    })
+  })
+
+  it("draws a gate that blocked a tool call as a warning that explains it, not an error", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        gates: [
+          gateSummary({
+            gate_id: "no-changelog",
+            message: "CHANGELOG.md is generated.",
+          }),
+        ],
+        spans: [
+          traceSpan({ span_id: "req-1", origin: "otlp" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            origin: "otlp",
+            tool_name: "Edit",
+            outcome: "blocked",
+            attributes: {
+              "otari.tool.decision": "reject",
+              "otari.tool.decision_source": "hook",
+            },
+          }),
+          traceSpan({
+            span_id: "gate-1",
+            parent_span_id: "tool-1",
+            kind: "guardrail",
+            origin: "otlp",
+            outcome: "blocked",
+            attributes: {
+              "otari.guardrail.profile": "no-changelog",
+              "otari.guardrail.mode": "block",
+              "otari.gate.id": "no-changelog",
+              "otari.gate.outcome": "fail",
+              "otari.gate.blocked": true,
+            },
+          }),
+          traceSpan({
+            span_id: "gate-2",
+            parent_span_id: "req-1",
+            kind: "guardrail",
+            origin: "otlp",
+            attributes: {
+              "otari.guardrail.profile": "docs-updated",
+              "otari.guardrail.mode": "monitor",
+              "otari.gate.outcome": "fail",
+              "otari.gate.blocked": false,
+            },
+          }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("tool-1")).toMatchObject({
+      level: "WARNING",
+      statusMessage: "Blocked by a hook before it ran.",
+    })
+    expect(byId.get("gate-1")).toMatchObject({
+      name: "no-changelog",
+      parentObservationId: "tool-1",
+      level: "WARNING",
+      statusMessage: "Blocked the agent's action. CHANGELOG.md is generated.",
+    })
+    expect(byId.get("gate-2")).toMatchObject({
+      level: "WARNING",
+      statusMessage: "Flagged. The gate is advisory, so the agent went ahead.",
+    })
+  })
+
+  it("names the user for every user_* decision source Claude Code reports", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1", origin: "otlp" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            origin: "otlp",
+            tool_name: "Bash",
+            outcome: "blocked",
+            attributes: {
+              "otari.tool.decision": "reject",
+              "otari.tool.decision_source": "user_reject",
+            },
+          }),
+        ],
+      }),
+    )
+
+    expect(
+      trace.observations.find((o) => o.id === "tool-1")?.statusMessage,
+    ).toBe("Refused by the user.")
   })
 
   it("has no gateway report until the spans load", () => {

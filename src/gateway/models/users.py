@@ -49,6 +49,9 @@ class User(Base):
     # canonical instance:model entries (see services/model_access.py). A key may
     # narrow this default but never broaden it (validated on key write).
     allowed_models: Mapped[list[str] | None] = mapped_column(JSON)
+    # Default search tool allow-list the user's keys inherit, in the key's
+    # grammar. A key may narrow it but never broaden it.
+    allowed_tools: Mapped[list[str] | None] = mapped_column(JSON)
     # ``UtcDateTime`` because the budget gate compares these to an aware ``now``,
     # and a plain ``DateTime(timezone=True)`` reads back naive on SQLite.
     budget_started_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
@@ -83,6 +86,7 @@ class User(Base):
             "reserved": self.reserved,
             "budget_id": self.budget_id,
             "allowed_models": self.allowed_models,
+            "allowed_tools": self.allowed_tools,
             "budget_started_at": self.budget_started_at.isoformat() if self.budget_started_at else None,
             "next_budget_reset_at": self.next_budget_reset_at.isoformat() if self.next_budget_reset_at else None,
             "blocked": self.blocked,

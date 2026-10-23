@@ -63,11 +63,15 @@ Adding a provider offers every model its key lists. A model the deployment
 price list already prices is switched on at that rate. Otherwise, where
 `default_pricing` is on, the model is seeded with its models.dev rate and
 switched on; where it is off, or models.dev does not price the model, the model
-is offered switched off until the operator prices it. Refreshing a provider's
-models moves a seeded rate nobody has changed to the current default, and
-leaves a rate the operator set alone. The API never returns a hosted provider's
-key, only its last four characters, and it masks credentials in `client_args`
-and in the base URL.
+is offered switched off until it is priced, by the operator or by a later
+refresh once models.dev prices it. Refreshing a provider's models moves a
+seeded rate nobody has changed to the current default, leaves a rate the
+operator set alone, and never switches on a model the operator switched off.
+A model switched on without a price on purpose stays on through a refresh: one
+a moved or copied provider lists, one an operator switched on while nothing
+priced it, and every model of a provider that serves models not on its list.
+The API never returns a hosted provider's key, only its last four characters,
+and it masks credentials in `client_args` and in the base URL.
 
 ## Organizations and workspaces
 
@@ -96,9 +100,10 @@ General (`DELETE /api/v1/organizations/me`) while it has no usage: the gateway
 refuses an organization whose workspaces still hold usage, API keys, aliases or
 routing policies, so a deletion never takes spend history with it. The
 deployment's default organization and the only organization the caller belongs
-to cannot be deleted either. Its workspaces, memberships and organization-level
-settings go with it, and everyone whose active organization it was moves to
-another organization they belong to.
+to cannot be deleted either. Its workspaces, memberships, pending invitations
+and organization-level settings go with it. Everyone whose active organization
+it was moves to the oldest other organization they belong to; someone who
+belongs to no other organization is left with none until they join one.
 
 ## Users and identities
 
@@ -111,6 +116,33 @@ which bills end users that belong to its own user.
 A user's `allowed_models` is inherited by newly created keys unless the key
 defines its own list. A missing list allows any model, an empty list allows none,
 and entries may use provider wildcards such as `openai:*`.
+
+Search tools have a list of their own, `allowed_tools`, which governs
+`POST /api/v1/search`; the in-loop `otari_web_search` tool, which runs on the same
+search tools, does not read it. Its entries are search tool names, as `search_tools` or the
+dashboard names them, or `*` for every search tool, and no wildcard in
+`allowed_models` reaches a tool: a search provider can share its name with a model
+provider, as DeepSeek does, and `deepseek:*` is for DeepSeek's models. A key's own
+`allowed_tools` wins over its user's, and a key may narrow its user's list but never
+broaden it. An empty list allows no tool.
+
+With no `allowed_tools` on the key or its user, the search tools are read off the
+model list as before: a key unrestricted for models may run any search tool, and a
+key restricted for models may run only the tools its `allowed_models` names whole
+as `<provider>:<tool>`, such as `exa:exa-search`, and that its user's model list
+grants too. That form is deprecated: startup counts the keys and users that still
+rely on it, names the tools some reached only through a wildcard, which no longer
+grants them, and a later release removes it. A model list no longer takes a
+wildcard or another name under a provider that serves only search tools, such as
+`exa:*`; it takes that provider's exact `<provider>:<tool>` keys alone.
+
+When a user is first given `allowed_tools`, each of their keys that has a model
+list of its own and no `allowed_tools` is set to the tools it could run before
+that are also on the user's new list, so moving a user off the deprecated form
+never widens a key that had narrowed its search away. A list sent back unchanged,
+as the dashboard's edit forms do, is not checked again, so a key or user naming
+a tool deleted since still saves an unrelated change. No search tool may be
+named `*`.
 
 Deleting or deactivating a user prevents future access but preserves historical
 usage.
@@ -125,7 +157,8 @@ may also define:
 - budget exemption
 - a budget of its own: a spend ceiling on the key, which its owner's budget does
   not replace (both apply)
-- whether mismatched client `user` fields are accepted
+- whether mismatched client `user` fields are accepted (see
+  [Mismatched `user` fields](#mismatched-user-fields))
 - whether content-free agent telemetry is captured
 - whether it is a service key, which may name end users
 - application metadata
@@ -133,19 +166,57 @@ may also define:
 The plaintext key is returned only when it is created or rotated. Store it then.
 Rotation preserves the key record and invalidates the previous secret.
 A key can also be declared in config.yml with a secret you choose, in which
-case config.yml owns it and writes it back at every start; see
+case config.yml owns it and writes it back whenever its entry changes; see
 [Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
-Rotating a declared key through the API lasts only until the next start, which
-restores the secret config.yml declares.
+Rotating a declared key through the API lasts until config.yml changes the
+key's entry or its secret, which restores the secret config.yml declares.
 
 A budget-exempt key is also exempt from `require_pricing`. Reserve such keys for
 usage import or other intentional observability-only traffic.
+
+A backend on Google Cloud, or behind another OpenID Connect issuer, can
+authenticate as a key with its platform identity token instead of the key's
+secret, once the operator trusts the issuer and gives the key a federation
+rule; see [Workload identity](workload-identity.md).
 
 `/api/v1/keys` manages every key in the caller's organization and requires the
 deployment operator's standing. A signed-in member without it manages their own
 keys at `/api/v1/organizations/me/keys`, which derives the owner rather than
 accepting one, mints only into a workspace the caller may see, and never issues
 a budget-exempt key.
+
+### Mismatched `user` fields
+
+A request can name a user: `user` on Chat Completions, Responses and the
+pass-through routes, `metadata.user_id` on Messages. On an ordinary key that
+value may only be the key's own user; anything else is refused with `403`. A
+key's `reject_user_mismatch` changes that for the key alone:
+
+| Value | Dashboard choice | A request naming another user |
+| --- | --- | --- |
+| `null` (default) | Use the deployment setting | Follows the deployment-wide `reject_user_mismatch`, which rejects unless changed |
+| `true` | Always reject (403) | Rejected, even where the deployment accepts |
+| `false` | Always accept | Accepted, and billed to the key's user |
+
+Spend binds to the key's own user whichever value applies, so accepting a
+mismatch never lets a key charge someone else.
+
+Accept mismatches on a key whose client puts something other than an Otari
+user ID in that field. Claude Code sends a telemetry value there (see
+[Use with Claude Code](use-with-claude-code.md)). So does an application that
+sends every request on one key and passes its own end user's ID. That
+application has two choices:
+
+- Accept mismatches, and every request bills the key's user: one budget for
+  the whole application.
+- Make the key a [service key](#service-keys-and-end-users), and each ID
+  becomes an end user with spend and a budget of its own.
+
+Set the value in the dashboard's key form (under **Advanced** when creating a
+key, and on the edit form), as `reject_user_mismatch` on `POST` or `PATCH`
+`/api/v1/keys` and `/api/v1/organizations/me/keys`, or on a key declared in
+config.yml. The deployment-wide default is a runtime setting, changed on the
+Settings page or with `PATCH /api/v1/settings`.
 
 ## Service keys and end users
 
@@ -184,12 +255,37 @@ A request that names nobody, or the key's own user, bills the key's user as it
 would on any other key. Blocking the key's user stops its end users too.
 
 Each distinct `user` value creates an end user, whether or not the request is
-then admitted, and nothing else caps how many a key can create. Set a rate
-limit on a deployment that issues service keys, and send a stable id per end
-user rather than a per-session or per-request value. An id is at most 256
+then admitted. Unless the key sets `max_end_users` (see
+[Capping a key's end users](#capping-a-keys-end-users)), nothing caps how many
+it can create. Set a rate limit on a deployment that issues service keys, and
+send a stable id per end user rather than a per-session or per-request value. An id is at most 256
 characters and may otherwise be any string, `/` included, such as a base64 key
 id. The routes below name every end user with the `external_id` query
 parameter, which carries any id intact.
+
+### Capping a key's end users
+
+`max_end_users` on a service key (in `POST` or `PATCH /api/v1/keys`, or in
+config.yml) caps how many live end users it may have. A request that would
+create one more, or revive one that was deleted, is refused with 403 and the
+code `end_user_limit_reached`, and nothing is created; the end users the key
+already has keep working. Deleting end users makes room again. `null`, the
+default, is no cap, and `0` admits no new end user at all.
+
+The cap counts the end users of the key's user that are on a budget the key may
+assign (its `end_user_budget_ids`, or its default alone), or every end user of
+that user when the key assigns none. A key with a list and no default also
+counts the end users on no budget, which is where a request naming none starts
+one. So two service keys of one user, each with budgets of its own, such as one
+for signed-in users and one for guests, keep separate caps. For a key with
+budgets of its own, an end user moved to a budget outside its list stops
+counting toward it, and moving one onto the list from outside takes a place, so
+that move is refused with `end_user_limit_reached` when the key is full. A key
+that assigns no budget counts every end user wherever it is moved.
+
+Replicas admitting end users at once cannot exceed the cap: each new or revived
+end user is counted and created while the key's user is locked. Requests from
+live end users never take that lock.
 
 ### Several budgets on one key
 
@@ -259,8 +355,9 @@ api_keys:
 `ceiling` is the key's own ceiling, the scoped budget on the API key that pools
 every end user. The service reads the same `MLPA_SERVICE_KEY` and presents it as
 its API key, so nothing has to hand a freshly minted secret from one to the
-other, and a restart or a second replica does not change it. Every start writes
-the declared settings back over changes made through the API; see
+other, and a restart or a second replica does not change it. A start writes
+the declared settings back over changes made through the API only when the
+key's entry in config.yml changed; see
 [What config.yml owns](configuration.md#what-configyml-owns).
 
 ### Managing end users
@@ -274,6 +371,8 @@ by the id it names it by. It needs neither the master key nor its key's id:
 | `GET /api/v1/end-users?external_id=...` | Reads the end user: its budget, counters and whether it is blocked, as a list of one, or none when no end user goes by the id |
 | `PUT /api/v1/end-users?external_id=...` `{"budget_id": ...}` | Puts the end user on a budget, creating it first if it has not made a request yet (201) |
 | `PATCH /api/v1/end-users?external_id=...` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
+| `DELETE /api/v1/end-users?external_id=...` | Deletes the end user, answering `{"deleted": 1}`, or 404 |
+| `DELETE /api/v1/end-users?created_before=...` | Deletes up to `limit` (default 100, at most 1000) of the oldest end users created before that time, answering `{"deleted": n}`; repeat until `n` is 0 |
 | `GET /api/v1/end-user-budgets` | Lists the budgets on the key's list, with how many end users are on each |
 
 ```http
@@ -286,8 +385,8 @@ Authorization: Bearer <service key>
 The query parameter names any end user, so use it for an id that may contain
 `/`, and URL-encode the id as any query value is (`/` as `%2F`, `+` as `%2B`).
 The id can also go in the path, `/api/v1/end-users/{external_id}`, for `GET`,
-`PUT` and `PATCH`, which answer as their query forms do (the `GET` with the
-end user itself, or 404). That form suits an id without `/`: a
+`PUT`, `PATCH` and `DELETE`, which answer as their query forms do (the `GET`
+with the end user itself, or 404, and the `DELETE` with 204, or 404). That form suits an id without `/`: a
 proxy can merge the `//` of an id like `ab//cd`, and an HTTP client collapses
 `.` and `..` segments, so in a path such an id can reach another end user. An
 id with a `.` or `..` segment is refused there with 400.
@@ -302,6 +401,15 @@ routes still reach them.
 every match in the `Otari-Total-Count` header. Its list and the counts on
 `/api/v1/end-user-budgets` leave out deleted end users, and the counts include
 blocked ones, which `blocked_end_user_count` also gives on its own.
+
+Deleting an end user erases its telemetry and agent traces, as deleting any
+user does, and stops it being listed or counted. Its row stays, with what it
+has spent and used: a request that names the same id again revives it with
+those counters, on the budget it was on, so deleting an end user cannot reset
+its budget. Its usage history stays too. A service whose end users are
+short-lived, such as one id per guest session, can delete the expired ones by
+age with `created_before` (`2026-10-10T00:00:00Z`), a page per call. When
+erasure fails the call answers 5xx and deletes nothing, so it can be repeated.
 
 A budget set this way must be on the key's list: any other is refused with 403
 and `end_user_budget_not_allowed`, so a key cannot put an end user on a budget
@@ -332,8 +440,7 @@ key's list.
 End users are supported on the endpoints above. The other endpoints
 (embeddings, files, batches and the other pass-through
 routes) treat a service key as an ordinary key, so a `user` naming someone else
-is handled by the `reject_user_mismatch` setting there. Hybrid mode resolves
-users on the platform and does not support service keys.
+is handled by the `reject_user_mismatch` setting there.
 
 ## Budgets
 
@@ -458,7 +565,7 @@ sessions. A request whose session cookie no longer authenticates is refused
 with 401 "Your dashboard session has ended. Sign in again."
 
 A session authorizes the management API. It does not authorize
-`/api/v1/chat/completions` or any other data-plane path, which take an API key
+`/api/v1/chat/completions` or any other inference path, which take an API key
 or the master key and nothing else: a keyless request resolves to the
 deployment's default workspace, so honoring a cookie there would let any member
 of any organization spend that workspace's provider credential.

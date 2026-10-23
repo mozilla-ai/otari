@@ -87,13 +87,15 @@ from gateway.services.external_usage_service import (
     ingest_external_events,
     is_reserved_source,
 )
-from gateway.services.traces import OtlpSpan, TraceWriter, record_otlp_export
+from gateway.services.traces import HOOK_SCOPE, OtlpSpan, TraceWriter, record_otlp_export
 
 router = APIRouter(tags=["otel"])
 
 _JSON = "application/json"
 _PROTOBUF = ("application/x-protobuf", "application/octet-stream")
 _DEFAULT_SOURCE = "otel"
+# What a judge gate's model calls, reported on its span by ``otari hook``, are imported as.
+_HOOK_SOURCE = "otari-hook"
 
 # Request bounds. OTLP exporters batch to a few MiB per export; the cap keeps one
 # request from expanding without bound in memory (gzip bombs decompress fully
@@ -207,8 +209,12 @@ def _hex_ids_to_base64(document: Any) -> None:
                 _hex_id_to_base64(record)
 
 
-def _any_value(value: Any) -> Any:
-    """Unwrap an OTLP AnyValue protobuf into a Python scalar (or None)."""
+def _any_value(value: Any, *, arrays: bool = False) -> Any:
+    """Unwrap an OTLP AnyValue protobuf into a Python scalar (or None).
+
+    With ``arrays``, an array becomes a tuple of its elements, each unwrapped the
+    same way, so a nested array or map is a None inside it.
+    """
     kind = value.WhichOneof("value")
     if kind == "string_value":
         return value.string_value
@@ -218,11 +224,16 @@ def _any_value(value: Any) -> Any:
         return value.double_value
     if kind == "bool_value":
         return value.bool_value
+    if kind == "array_value" and arrays:
+        return tuple(_any_value(item) for item in value.array_value.values)
     return None
 
 
-def _attributes(kv_list: Any) -> dict[str, Any]:
-    return {kv.key: _any_value(kv.value) for kv in kv_list}
+def _attributes(kv_list: Any, *, arrays: bool = False) -> dict[str, Any]:
+    # Only a trace asks for arrays. The usage and telemetry readers stringify or
+    # hash what they get (a metric's series key is every attribute's str()), so an
+    # array there would change what they store.
+    return {kv.key: _any_value(kv.value, arrays=arrays) for kv in kv_list}
 
 
 def _int(value: Any) -> int:
@@ -302,16 +313,10 @@ def _build_event(
     """
     provider: Any
     duration: Any
-    # No GenAI or Claude Code OTLP shape carries the 5m/1h cache-write split, so every cache write stays in
-    # the base (5m) bucket. Claude Code writes with both TTLs (measured on real session
-    # transcripts, roughly a quarter to a third of creation tokens are 5m and the rest
-    # 1h), so either default is wrong for the other share: 5m undercharges the 1h
-    # tokens, 1h overcharges the 5m ones. Anthropic prices a 1h write at 2x base input
-    # against 1.25x for a 5m one, so booking the base bucket keeps an imported estimate
-    # from ever reading above true cost. Callers holding the real split use
-    # POST /api/v1/usage/external-events, which takes cache_write_1h_tokens directly.
-    # No branch below reassigns this today: it stays a variable rather than a literal at
-    # the construction site as the seam for an emitter that does report the split.
+    # Neither Claude Code's events nor the GenAI attributes read below carry the 5m/1h cache-write split, so
+    # every write books at the cache-write rate. That is below the 2x input a Claude model's 1h write costs,
+    # so an imported estimate never reads above true cost. A caller holding the split sends
+    # cache_write_1h_tokens to POST /api/v1/usage/external-events.
     cache_write_1h = 0
     reasoning = 0
     event_name = attrs.get("event.name")
@@ -398,7 +403,7 @@ def _build_event(
     return source, event
 
 
-def _otlp_span(span: Any) -> OtlpSpan:
+def _otlp_span(span: Any, scope: str) -> OtlpSpan:
     """Read the fields a trace keeps out of one received span."""
     return OtlpSpan(
         trace_id=span.trace_id.hex(),
@@ -408,7 +413,8 @@ def _otlp_span(span: Any) -> OtlpSpan:
         start_time=_nanos_to_dt(span.start_time_unix_nano),
         end_time=_nanos_to_dt(span.end_time_unix_nano),
         failed=span.status.code == _STATUS_CODE_ERROR,
-        attributes=_attributes(span.attributes),
+        attributes=_attributes(span.attributes, arrays=True),
+        scope=scope,
     )
 
 
@@ -522,13 +528,13 @@ async def receive_traces(
     assert isinstance(parsed, ExportTraceServiceRequest)
 
     pairs: list[tuple[str, ExternalUsageEvent]] = []
-    received: list[Any] = []
+    received: list[tuple[str, Any]] = []
     for resource_spans in parsed.resource_spans:
         for scope_spans in resource_spans.scope_spans:
             scope = scope_spans.scope.name
             claude = scope.startswith(CLAUDE_SCOPE_PREFIX)
             for span in scope_spans.spans:
-                received.append(span)
+                received.append((scope, span))
                 duration = None
                 if span.start_time_unix_nano and span.end_time_unix_nano:
                     duration = (span.end_time_unix_nano - span.start_time_unix_nano) / 1_000_000
@@ -545,8 +551,12 @@ async def receive_traces(
                     )
                     pairs.extend((CLAUDE_SOURCE, event) for event in events)
                     continue
+                attrs = _attributes(span.attributes)
+                if scope == HOOK_SCOPE:
+                    # A judge's calls are made for the agent's session, so they are booked to it.
+                    attrs = {**attrs, "otari.client_name": _HOOK_SOURCE, "otari.session_label": attrs.get("session.id")}
                 mapped = _build_event(
-                    _attributes(span.attributes),
+                    attrs,
                     fallback_event_id=span.span_id.hex() or None,
                     default_timestamp=_nanos_to_dt(span.start_time_unix_nano),
                     duration_ms=duration,
@@ -568,7 +578,7 @@ async def receive_traces(
     if writer is not None and received:
         record_otlp_export(
             writer,
-            (_otlp_span(span) for span in received),
+            (_otlp_span(span, scope) for scope, span in received),
             total=len(received),
             budget_exempt=api_key.exclude_from_budget,
             workspace_id=api_key.workspace_id,

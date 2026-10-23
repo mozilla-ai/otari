@@ -40,6 +40,8 @@ PRICING_REQUIRED = "pricing_required"
 # The organization has no funds paid in to cover a request the deployment pays for.
 INSUFFICIENT_FUNDS = "insufficient_funds"
 END_USER_BUDGET_NOT_ALLOWED = "end_user_budget_not_allowed"
+# A service key already has as many end users as its ``max_end_users`` allows.
+END_USER_LIMIT_REACHED = "end_user_limit_reached"
 ALL_CANDIDATES_REJECTED = "all_candidates_rejected"
 PROVIDER_NOT_CONFIGURED = "provider_not_configured"
 # The provider refused the credential the gateway holds for it (an upstream 401 or 403).

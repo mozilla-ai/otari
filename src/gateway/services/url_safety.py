@@ -1,6 +1,6 @@
 """URL safety checks for outbound HTTP fetches the gateway makes on behalf of a request.
 
-Four call sites with overlapping but not identical threat models:
+Five call sites with overlapping but not identical threat models:
 
 * **MCP server endpoints** (:func:`validate_mcp_url`) — URL comes from the
   request body. We block private/link-local/reserved IPs to prevent SSRF.
@@ -22,12 +22,17 @@ Four call sites with overlapping but not identical threat models:
   setups (private indexes etc.).
 
 * **Provider ``api_base``** (:func:`validate_provider_api_base`): the URL is
-  operator-supplied (master-key gated, standalone-only), the same trust level
+  operator-supplied (master-key gated), the same trust level
   as a config.yml provider endpoint. This one defaults to *allow-all*: the
   home-lab / self-hosted use case depends on private-network endpoints
   (``localhost``, RFC 1918), so the check is off unless an operator opts in via
   ``OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false``, at which point it blocks the
   same private/link-local/reserved ranges as the web-search path.
+
+* **Workload identity discovery and JWKS** (:func:`validate_federation_url`):
+  the issuer is operator-configured and its signing-key location comes from
+  its discovery document. https only, and private hosts are blocked unless
+  the ``federation_allow_private_hosts`` setting is on.
 
 These checks are intentionally conservative: DNS rebinding can defeat host-based
 allowlists. Production deployments should also enforce egress policy at the
@@ -277,7 +282,7 @@ async def validate_provider_api_base(url: str) -> None:
     """Reject a provider ``api_base`` that resolves to an internal address.
 
     Opt-in and default-allow: an operator-supplied ``api_base`` is master-key
-    gated and standalone-only, the same trust level as a config.yml provider
+    gated, the same trust level as a config.yml provider
     endpoint, and the home-lab / self-hosted use case depends on private-network
     endpoints (``localhost``, RFC 1918). So this is a no-op unless an operator
     sets ``OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false``, which turns on the same
@@ -292,8 +297,7 @@ async def validate_provider_api_base(url: str) -> None:
 
     Scope: this gate covers the paths that *report* on an ``api_base`` (the
     connection-test endpoints and model discovery) and the credential write path
-    that persists it (``POST /v1/provider-credentials`` and
-    ``PATCH /v1/provider-credentials/{instance}``). It does not
+    that persists it (creating or editing a hosted provider). It does not
     gate the chat dispatch that dials the endpoint for real on every request, so
     it is not a general egress control.
 
@@ -313,3 +317,23 @@ async def validate_provider_api_base(url: str) -> None:
         raise UnsafeURLError("provider api_base must include a hostname")
 
     await _reject_internal_host(host, host_label="provider api_base", override_var="OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS")
+
+
+async def validate_federation_url(url: str, *, allow_private_hosts: bool = False) -> None:
+    """Reject an OpenID discovery or JWKS URL that is not https or that reaches an internal address.
+
+    The issuer is operator-configured, but the JWKS location comes from the
+    issuer's discovery document, so it is checked like any URL the gateway did
+    not write itself. Private hosts are refused unless ``allow_private_hosts``,
+    the ``federation_allow_private_hosts`` setting, is on for an issuer on the
+    deployment's own network. Raises :class:`UnsafeURLError` on rejection.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme.lower() != "https":
+        raise UnsafeURLError("federation URL must use https")
+    host = parsed.hostname
+    if not host:
+        raise UnsafeURLError("federation URL must include a hostname")
+    if allow_private_hosts:
+        return
+    await _reject_internal_host(host, host_label="federation", override_var="OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS")
