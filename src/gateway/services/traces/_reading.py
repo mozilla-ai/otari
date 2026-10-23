@@ -321,4 +321,6 @@ def trace_view(detail: TraceDetail, *, now: datetime, context_window_of: Context
         gates=_gate_summaries(spans, detail.definitions),
         tool_costs=costs,
         context_windows=_context_windows(spans, context_window_of) if context_window_of is not None else {},
+        content_access=detail.content_access,
+        content_share=detail.content_share,
     )

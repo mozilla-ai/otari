@@ -1727,6 +1727,14 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/traces/definition_repository.py",
         "baseline": (),
     },
+    "gateway.models.traces.TraceContentShare": {
+        "repository": "gateway/repositories/traces/share_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceContentRead": {
+        "repository": "gateway/repositories/traces/share_repository.py",
+        "baseline": (),
+    },
     "gateway.models.usage.AgentTelemetry": {
         "repository": None,
         "baseline": ("gateway/adapters/telemetry_storage_adapter.py",),

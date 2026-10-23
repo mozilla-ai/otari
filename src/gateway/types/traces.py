@@ -150,6 +150,10 @@ LIST_SEPARATOR = ","
 # and never searched: shown on the span, and only there.
 SPAN_CONTENT_KEYS = frozenset({"prompt", "command", "file_path", "gate.evidence", "gate.detail"})
 SPAN_CONTENT_MAX_LENGTH = 4_000
+# How long a share of a session's content lasts by default, and at most, and how long its note may be.
+SHARE_DEFAULT_DAYS = 30
+SHARE_MAX_DAYS = 90
+SHARE_NOTE_MAX_LENGTH = 500
 
 
 class InvalidSpanError(ValueError):
@@ -243,6 +247,8 @@ class SpanRecord:
     otel_span_id: str | None = None
     attributes: Mapping[str, str | int | float | bool] = field(default_factory=dict)
     content: Mapping[str, str] = field(default_factory=dict)
+    # The span holds content the reader may not open: it is private to the session's owner.
+    content_private: bool = False
 
     def __post_init__(self) -> None:
         _check_choice("kind", self.kind, SPAN_KINDS)
@@ -327,6 +333,24 @@ class WriteResult:
     rejected: int = 0
 
 
+ShareAudience = Literal["organization_admins", "deployment_operator"]
+SHARE_AUDIENCES: tuple[ShareAudience, ...] = ("organization_admins", "deployment_operator")
+# How a read reached a session's content: as its owner, through a share, or not at all.
+ContentAccess = Literal["owner", "share", "none"]
+
+
+@dataclass(frozen=True)
+class ContentReader:
+    """Who is reading a session's content, and which shares they may read it through."""
+
+    user_id: uuid.UUID
+    email: str
+    audience: ShareAudience | None = None
+    """The shares this reader may read through: none for a member who manages nothing."""
+    reads_ownerless: bool = False
+    """Whether they read a session no user owns, a service key's: an organization owner or admin does."""
+
+
 @dataclass(frozen=True)
 class TraceScope:
     """The tenants a read may touch, derived from the authenticated caller.
@@ -334,30 +358,37 @@ class TraceScope:
     Built through :meth:`deployment` or :meth:`workspaces`, never directly, so
     "every workspace" is always a deliberate choice: an empty workspace set
     matches nothing.
+
+    A session's content (prompts, commands, file paths) opens for the user it
+    belongs to and nobody else, managers and operators included, unless its owner
+    shared it with them. ``all_content`` is for the deployment's own reads, never
+    a person's.
     """
 
     workspace_ids: frozenset[uuid.UUID]
     deployment_wide: bool = False
-    # A span's retained content (prompts, commands) goes to whoever manages the
-    # workspaces and to the user the trace belongs to; anyone else reads it empty.
     all_content: bool = False
-    content_user_id: str | None = None
+    reader: ContentReader | None = None
 
     @classmethod
     def deployment(cls) -> "TraceScope":
-        """Every workspace: only for a deployment operator."""
+        """Every workspace, with every session's content: for the deployment's own reads, never a person's."""
         return cls(workspace_ids=frozenset(), deployment_wide=True, all_content=True)
 
     @classmethod
-    def workspaces(
-        cls, workspace_ids: frozenset[uuid.UUID], *, all_content: bool = False, content_user_id: str | None = None
-    ) -> "TraceScope":
-        """Only these workspaces, with every trace's content or only ``content_user_id``'s own."""
-        return cls(workspace_ids=workspace_ids, all_content=all_content, content_user_id=content_user_id)
+    def workspaces(cls, workspace_ids: frozenset[uuid.UUID], *, reader: ContentReader | None = None) -> "TraceScope":
+        """Only these workspaces, read by ``reader``; without one, no session's content opens."""
+        return cls(workspace_ids=workspace_ids, reader=reader)
+
+    def owns(self, user_id: str | None) -> bool:
+        """Whether the reader is the user a session belongs to."""
+        return self.reader is not None and user_id is not None and user_id == str(self.reader.user_id)
 
     def reads_content_of(self, user_id: str | None) -> bool:
-        """Whether a read in this scope returns the content of a trace ``user_id`` owns."""
-        return self.all_content or (user_id is not None and user_id == self.content_user_id)
+        """Whether a read in this scope opens the content of a session ``user_id`` owns, without a share."""
+        if self.all_content or self.owns(user_id):
+            return True
+        return user_id is None and self.reader is not None and self.reader.reads_ownerless
 
 
 @dataclass(frozen=True)
@@ -475,3 +506,32 @@ class TraceDetail:
     spans: tuple[SpanRecord, ...]
     truncated: bool
     definitions: tuple[GuardrailDefinition, ...] = ()
+    content_access: ContentAccess = "none"
+    content_share: "ContentShare | None" = None
+    """The share the content was read through, where it was."""
+
+
+@dataclass(frozen=True)
+class ContentRead:
+    """One read of a session's content through a share."""
+
+    reader_user_id: uuid.UUID | None
+    reader_email: str
+    read_at: datetime
+
+
+@dataclass(frozen=True)
+class ContentShare:
+    """A session's owner letting an audience read what it was about, and the reads made through it."""
+
+    id: uuid.UUID
+    audience: ShareAudience
+    note: str | None
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+    reads: tuple[ContentRead, ...] = ()
+
+    def active(self, now: datetime) -> bool:
+        """Whether it still lets its audience read."""
+        return self.revoked_at is None and self.expires_at > now

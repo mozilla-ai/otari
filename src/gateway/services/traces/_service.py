@@ -17,9 +17,11 @@ from gateway.exceptions.traces_exceptions import (
     GuardrailVersionLimitError,
     RequestTraceNotFoundError,
     TraceAmbiguousError,
+    TraceContentShareForbiddenError,
+    TraceContentShareNotFoundError,
     TraceNotFoundError,
 )
-from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
+from gateway.models.traces import Trace, TraceContentShare, TraceGuardrailDefinition, TraceSpan
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
 from gateway.services.traces._collector import CALL_ID_DIGEST, call_id_digest
 from gateway.services.traces._content import SpanContent
@@ -28,7 +30,12 @@ from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
     TRACE_BUCKET_DURATION,
     USAGE_OPERATION,
+    ContentAccess,
+    ContentRead,
+    ContentReader,
+    ContentShare,
     GuardrailDefinition,
+    ShareAudience,
     SpanRecord,
     TraceBucket,
     TraceBucketGrain,
@@ -73,6 +80,7 @@ class TraceService:
         self._traces = repositories.traces
         self._spans = repositories.spans
         self._definitions = repositories.definitions
+        self._shares = repositories.shares
 
     async def write(self, traces: Sequence[TraceWrite]) -> WriteResult:
         """Store these traces' spans, creating each trace on its first span.
@@ -163,10 +171,15 @@ class TraceService:
 
         A trace in another tenant's workspace reads as absent, never as forbidden.
 
+        Its content opens for the user it belongs to, or for a reader its owner
+        shared it with, in which case the read is recorded for the owner to see.
+        For anyone else a span that holds content says so, and shows none.
+
         Raises:
             TraceAmbiguousError: no ``workspace_id`` was given and the id is in more
                 than one of the scope's workspaces.
         """
+        now = datetime.now(UTC)
         async with self._uow:
             rows = await self._traces.find(_workspace_ids(scope), trace_id, workspace_id=workspace_id)
             if not rows:
@@ -174,26 +187,119 @@ class TraceService:
             if len(rows) > 1:
                 raise TraceAmbiguousError(trace_id)
             row = rows[0]
-            spans = await self._spans.for_trace(row.workspace_id, row.trace_id, limit=span_limit + 1)
+            spans = list(await self._spans.for_trace(row.workspace_id, row.trace_id, limit=span_limit + 1))
             records = [_span_record(span) for span in spans[:span_limit]]
             digests = {
                 digest for span in records if isinstance(digest := span.attributes.get("otari.policy.digest"), str)
             }
             definitions = await self._definitions.for_digests(row.workspace_id, digests)
+            sealed = any(span.content_sealed for span in spans[:span_limit])
+            access: ContentAccess = "owner" if scope.reads_content_of(row.user_id) else "none"
+            share = None
+            if access == "none" and sealed and scope.reader is not None and scope.reader.audience is not None:
+                share = await self._shares.active(row.workspace_id, row.trace_id, scope.reader.audience, now)
+                if share is not None:
+                    access = "share"
+                    await self._shares.record_read(share.id, scope.reader.user_id, scope.reader.email)
         # Opened after the block, so a key source's round trip holds no connection.
-        if scope.reads_content_of(row.user_id):
-            for position, span in enumerate(spans[:span_limit]):
-                if span.content_sealed:
-                    content = await self._content.open(
-                        span.content_sealed, workspace_id=span.workspace_id, span_id=span.span_id
-                    )
-                    records[position] = dataclasses.replace(records[position], content=content)
+        for position, span in enumerate(spans[:span_limit]):
+            if not span.content_sealed:
+                continue
+            if access == "none":
+                records[position] = dataclasses.replace(records[position], content_private=True)
+                continue
+            content = await self._content.open(
+                span.content_sealed, workspace_id=span.workspace_id, span_id=span.span_id
+            )
+            records[position] = dataclasses.replace(records[position], content=content)
         return TraceDetail(
             summary=_summary(row),
             spans=tuple(records),
             truncated=len(spans) > span_limit,
             definitions=tuple(_definition(definition) for definition in definitions),
+            content_access=access,
+            content_share=_share(share) if share is not None else None,
         )
+
+    async def share_content(
+        self,
+        scope: TraceScope,
+        trace_id: str,
+        *,
+        audience: ShareAudience,
+        note: str | None,
+        days: int,
+        workspace_id: uuid.UUID | None = None,
+    ) -> ContentShare:
+        """Let ``audience`` read what the session was about for ``days`` days. Its own user only.
+
+        Raises:
+            TraceNotFoundError: the scope holds no such trace.
+            TraceAmbiguousError: no ``workspace_id`` was given and the id is in more than one workspace.
+            TraceContentShareForbiddenError: the reader is not the session's own user.
+        """
+        reader = _owner(scope)
+        async with self._uow:
+            row = await self._owned(scope, trace_id, workspace_id)
+            share = await self._shares.add(
+                workspace_id=row.workspace_id,
+                trace_id=row.trace_id,
+                audience=audience,
+                note=note,
+                shared_by_user_id=reader.user_id,
+                expires_at=datetime.now(UTC) + timedelta(days=days),
+            )
+            return _share(share)
+
+    async def content_shares(
+        self, scope: TraceScope, trace_id: str, *, workspace_id: uuid.UUID | None = None
+    ) -> tuple[ContentShare, ...]:
+        """Every share the session has had, newest first, each with the reads made through it. Its own user only.
+
+        Raises:
+            TraceNotFoundError: the scope holds no such trace.
+            TraceAmbiguousError: no ``workspace_id`` was given and the id is in more than one workspace.
+            TraceContentShareForbiddenError: the reader is not the session's own user.
+        """
+        _owner(scope)
+        async with self._uow:
+            row = await self._owned(scope, trace_id, workspace_id)
+            shares = await self._shares.for_trace(row.workspace_id, row.trace_id)
+            reads = await self._shares.reads([share.id for share in shares])
+        by_share: dict[uuid.UUID, list[ContentRead]] = defaultdict(list)
+        for read in reads:
+            by_share[read.share_id].append(
+                ContentRead(reader_user_id=read.reader_user_id, reader_email=read.reader_email, read_at=read.read_at)
+            )
+        return tuple(_share(share, tuple(by_share[share.id])) for share in shares)
+
+    async def end_content_share(
+        self, scope: TraceScope, trace_id: str, share_id: uuid.UUID, *, workspace_id: uuid.UUID | None = None
+    ) -> None:
+        """Stop a share letting its audience read. Its own user only; ending one already ended does nothing.
+
+        Raises:
+            TraceNotFoundError: the scope holds no such trace.
+            TraceContentShareNotFoundError: the session holds no such share.
+            TraceContentShareForbiddenError: the reader is not the session's own user.
+        """
+        _owner(scope)
+        async with self._uow:
+            row = await self._owned(scope, trace_id, workspace_id)
+            share = await self._shares.find(row.workspace_id, row.trace_id, share_id)
+            if share is None:
+                raise TraceContentShareNotFoundError(str(share_id))
+            await self._shares.revoke(share, datetime.now(UTC))
+
+    async def _owned(self, scope: TraceScope, trace_id: str, workspace_id: uuid.UUID | None) -> Trace:
+        rows = await self._traces.find(_workspace_ids(scope), trace_id, workspace_id=workspace_id)
+        if not rows:
+            raise TraceNotFoundError(trace_id)
+        if len(rows) > 1:
+            raise TraceAmbiguousError(trace_id)
+        if not scope.owns(rows[0].user_id):
+            raise TraceContentShareForbiddenError
+        return rows[0]
 
     async def record_definition(self, workspace_id: uuid.UUID, gates: Sequence[GateDefinition], digest: str) -> str:
         """Store this version of a workspace's agent guardrail, once, and return its fingerprint.
@@ -430,6 +536,24 @@ def _span_record(row: TraceSpan) -> SpanRecord:
         otel_trace_id=row.otel_trace_id,
         otel_span_id=row.otel_span_id,
         attributes=row.attributes or {},
+    )
+
+
+def _owner(scope: TraceScope) -> ContentReader:
+    if scope.reader is None:
+        raise TraceContentShareForbiddenError
+    return scope.reader
+
+
+def _share(row: TraceContentShare, reads: tuple[ContentRead, ...] = ()) -> ContentShare:
+    return ContentShare(
+        id=row.id,
+        audience=row.audience,  # type: ignore[arg-type]
+        note=row.note,
+        created_at=row.created_at,
+        expires_at=row.expires_at,
+        revoked_at=row.revoked_at,
+        reads=reads,
     )
 
 
