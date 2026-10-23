@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -352,6 +359,41 @@ describe("ModelDetailPage", () => {
         (within(drawer).getByLabelText("cURL") as HTMLTextAreaElement).value,
       ).toContain('"model": "fireworks:z-ai/glm-5.3"'),
     )
+  })
+
+  it("lets the selector in the drawer's header be copied and highlighted", async () => {
+    mockApi()
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+    const user = userEvent.setup()
+    // Install after userEvent.setup(), which otherwise replaces navigator.clipboard
+    // with its own stub.
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Use this model" }),
+    )
+    const drawer = await screen.findByRole("dialog", { name: "Use this model" })
+
+    await user.click(
+      within(drawer).getByRole("button", { name: "Copy model selector" }),
+    )
+    expect(writeText).toHaveBeenCalledWith("z-ai/glm-5.3")
+
+    // The header is the drawer's drag handle. A drag across the selector has to
+    // stay a text selection rather than pull the drawer shut. jsdom has no
+    // pointer capture, which the drag takes as it starts.
+    const setPointerCapture = vi.fn()
+    Object.assign(drawer, { setPointerCapture, releasePointerCapture: vi.fn() })
+    const selector = within(drawer).getByText("z-ai/glm-5.3")
+    fireEvent.pointerDown(selector, { button: 0, clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(selector, { clientX: 200, pointerId: 1 })
+    expect(setPointerCapture).not.toHaveBeenCalled()
+    expect(drawer.style.transform).toBe("")
+    fireEvent.pointerUp(selector, { clientX: 200, pointerId: 1 })
   })
 
   it("names each offering's model ID among the drawer's providers", async () => {

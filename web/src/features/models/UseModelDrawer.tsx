@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 
 import type { CatalogModelDetail, CatalogOffering } from "@/client"
-import { CopyField } from "@/design-system/actions/CopyField"
+import { CopyableValue, CopyField } from "@/design-system/actions/CopyField"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { formatRate } from "@/shared/helpers/format"
@@ -90,9 +90,16 @@ export function UseModelDrawer({
                   <Drawer.Heading className="text-heading">
                     Use {model.name}
                   </Drawer.Heading>
+                  {/* `CopyableValue` because the header is the drawer's drag
+                      handle: a press on plain text here starts a drag to
+                      dismiss and captures the pointer, so the selector could
+                      not be highlighted. It keeps the press off the handle. */}
                   <p className="text-sm text-muted">
-                    Send <code className="text-mono-caption">{sendAs}</code> as{" "}
-                    <code className="text-mono-caption">model</code>.
+                    Send{" "}
+                    <CopyableValue value={sendAs} label="model selector">
+                      <code className="text-mono-caption">{sendAs}</code>
+                    </CopyableValue>{" "}
+                    as <code className="text-mono-caption">model</code>.
                   </p>
                 </div>
                 <Button
