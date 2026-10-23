@@ -54,6 +54,7 @@ import {
   catalogRefreshFailures,
   catalogRefreshOutcome,
 } from "./refreshOutcome"
+import { formatCountries } from "./supportedCountries"
 
 // The providers this deployment serves inference on with its own keys, for a
 // request that brings no credential of its own. Deployment-scoped, which is
@@ -440,6 +441,20 @@ export function HostedProvidersPage() {
           </span>
         ) : (
           <span className="text-muted">Every organization</span>
+        ),
+    },
+    {
+      id: "countries",
+      header: "Countries",
+      cell: (row) =>
+        row.supported_countries == null ? (
+          <span className="text-muted">Every country</span>
+        ) : row.supported_countries.length === 0 ? (
+          <span className="text-body">None</span>
+        ) : (
+          <span className="text-body">
+            {formatCountries(row.supported_countries)}
+          </span>
         ),
     },
     {
