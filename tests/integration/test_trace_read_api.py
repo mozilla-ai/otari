@@ -14,10 +14,10 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 import pytest
-from fastapi import status
+from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -593,3 +593,82 @@ def test_only_a_manager_or_the_sessions_own_user_reads_what_its_spans_were_about
         session.commit()
 
     assert content(world["member"]) == {"command": "pytest -x"}
+
+
+def _workspace_id(db_session_factory: Callable[[], Session], name: str) -> uuid.UUID:
+    with db_session_factory() as session:
+        workspace_id: uuid.UUID = session.scalars(select(Workspace.id).where(col(Workspace.name) == name)).one()
+        return workspace_id
+
+
+def _as(client: TestClient, cookie: str, method: str, path: str, **kwargs: Any) -> Any:
+    client.cookies.set(SESSION_COOKIE_NAME, cookie)
+    try:
+        return client.request(method, f"{API_ROOT}{path}", **kwargs)
+    finally:
+        client.cookies.clear()
+
+
+def test_a_workspace_keeps_no_content_until_its_managers_turn_it_on(
+    client: TestClient, world: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    workspace_id = _workspace_id(db_session_factory, "One")
+
+    shown = _as(client, world["admin"], "GET", f"/workspaces/{workspace_id}")
+    assert shown.json()["trace_content_enabled"] is False
+    refused = _as(client, world["member"], "PATCH", f"/workspaces/{workspace_id}", json={"trace_content_enabled": True})
+    assert refused.status_code == status.HTTP_403_FORBIDDEN
+    turned_on = _as(
+        client, world["admin"], "PATCH", f"/workspaces/{workspace_id}", json={"trace_content_enabled": True}
+    )
+    assert turned_on.status_code == status.HTTP_200_OK, turned_on.text
+    assert turned_on.json()["trace_content_enabled"] is True
+    # A null leaves the switch where it is rather than failing the update.
+    renamed = _as(
+        client,
+        world["admin"],
+        "PATCH",
+        f"/workspaces/{workspace_id}",
+        json={"name": "Uno", "trace_content_enabled": None},
+    )
+    assert renamed.status_code == status.HTTP_200_OK, renamed.text
+    assert renamed.json()["trace_content_enabled"] is True
+
+
+def test_a_workspaces_managers_delete_its_stored_content_and_keep_its_sessions(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace_id = _workspace_id(db_session_factory, "One")
+    with db_session_factory() as session:
+        span = session.scalars(select(TraceSpan).where(col(TraceSpan.span_id) == "call-toolu_1")).first()
+        assert span is not None
+        span.content_sealed = _sealed({"command": "pytest -x"}, workspace_id=span.workspace_id, span_id=span.span_id)
+        session.commit()
+
+    refused = _as(client, world["member"], "DELETE", f"/workspaces/{workspace_id}/trace-content")
+    assert refused.status_code == status.HTTP_403_FORBIDDEN
+    deleted = _as(client, world["admin"], "DELETE", f"/workspaces/{workspace_id}/trace-content")
+    assert deleted.status_code == status.HTTP_200_OK, deleted.text
+
+    with db_session_factory() as session:
+        held = session.scalars(
+            select(TraceSpan.span_id).where(
+                col(TraceSpan.workspace_id) == workspace_id, col(TraceSpan.content_sealed).is_not(None)
+            )
+        ).all()
+        kept = session.scalars(select(TraceSpan.span_id).where(col(TraceSpan.workspace_id) == workspace_id)).all()
+    assert held == [] and kept
+
+
+def test_the_bootstrap_says_whether_the_deployment_keeps_content(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = cast(FastAPI, client.app).state.config
+    assert client.get(f"{API_ROOT}/bootstrap").json()["trace_content_available"] is False
+
+    monkeypatch.setattr(config, "trace_content_enabled", True)
+    assert client.get(f"{API_ROOT}/bootstrap").json()["trace_content_available"] is True

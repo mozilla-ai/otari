@@ -230,7 +230,18 @@ A trace keeps no prompt, command or file path. A deployment can keep them by
 setting `OTARI_TRACE_CONTENT_ENABLED=true`. They are stored encrypted, under
 `OTARI_SECRET_KEY` (the key that encrypts stored provider credentials) by
 default or under an AWS KMS key, and are not kept at all on a deployment with
-neither. They are kept only when the agent sends them:
+neither.
+
+Each workspace then chooses for itself. Content is off in every workspace until
+one of its managers (a workspace owner or admin, or an organization owner or
+admin) turns on **Keep what agent sessions were about** in the workspace's
+settings, or sends `PATCH /api/v1/workspaces/{id}` with
+`{"trace_content_enabled": true}`. Turning it off keeps nothing new from the
+next export on; `DELETE /api/v1/workspaces/{id}/trace-content` also deletes what
+is already stored, and the sessions stay. `GET /api/v1/bootstrap` reports
+`trace_content_available`, whether the deployment allows content at all.
+
+Content is kept only when the agent sends it too:
 
 - Claude Code sends the prompt that opened a turn with `OTEL_LOG_USER_PROMPTS=1`,
   and each tool's command or file path with `OTEL_LOG_TOOL_DETAILS=1`. Otari

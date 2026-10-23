@@ -115,6 +115,11 @@ class TraceService:
             await self._traces.add_totals([_growth(key, spans, written_at) for key, spans in grown.items()])
         return WriteResult(accepted=accepted, duplicate=duplicate, rejected=rejected)
 
+    async def forget_content(self, workspace_id: uuid.UUID) -> int:
+        """Delete what every span in the workspace was about, keeping the spans; returns how many held content."""
+        async with self._uow:
+            return await self._spans.clear_content(workspace_id)
+
     async def _seal(self, traces: Sequence[TraceWrite]) -> dict[tuple[uuid.UUID, str], str]:
         sealed: dict[tuple[uuid.UUID, str], str] = {}
         for trace in traces:

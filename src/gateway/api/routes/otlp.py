@@ -63,7 +63,13 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
 from opentelemetry.proto.metrics.v1.metrics_pb2 import AggregationTemporality
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import TelemetryStoragePortDep, get_config, get_db, verify_api_key_or_master_key
+from gateway.api.deps import (
+    TelemetryStoragePortDep,
+    get_config,
+    get_db,
+    verify_api_key_or_master_key,
+    workspace_keeps_trace_content,
+)
 from gateway.api.routes._helpers import retryable_on_database_outage
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
@@ -612,6 +618,7 @@ async def receive_traces(
     # request path; the writer is absent where nothing records traces.
     writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
     if writer is not None and received:
+        keeps_content = await workspace_keeps_trace_content(db, config, api_key.workspace_id)
         record_otlp_export(
             writer,
             (_otlp_span(span, scope) for scope, span in received),
@@ -621,7 +628,7 @@ async def receive_traces(
             user_id=api_key.user_id,
             api_key_id=api_key.id,
             retention=timedelta(days=config.trace_retention_days),
-            content_enabled=config.trace_content_enabled,
+            content_enabled=keeps_content,
         )
     _record_priced(request, priced, api_key=api_key, config=config)
     return _otlp_response(content_type, response)
