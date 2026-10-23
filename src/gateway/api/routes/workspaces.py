@@ -103,14 +103,19 @@ async def update_workspace(
     Turning content off keeps nothing new from the next export on; what is already
     stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
     """
+    stopping = body.trace_content_enabled is False
+    if stopping:
+        # Before the switch: what is queued now is never stored, and a failure here
+        # changes nothing and can be retried. Only managers get this far.
+        await service.require_management_access(user=current_identity, workspace_id=workspace_id)
+        await traces.stop_content(workspace_id)
     updated = await service.update_workspace(
         user=current_identity,
         workspace_id=workspace_id,
         workspace_update=body,
     )
-    # After the switch is off, so an export that read it on before carries the
-    # generation this ends, and its queued content is never stored.
-    if body.trace_content_enabled is False:
+    if stopping:
+        # And after it, for an export that read the switch on in between.
         await traces.stop_content(workspace_id)
     return updated
 
