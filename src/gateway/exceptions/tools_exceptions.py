@@ -212,6 +212,10 @@ class SandboxImageNotAllowedError(TenancyValidationError):
     """
 
 
+class SandboxCredentialRefusedError(TenancyValidationError):
+    """A sandbox key write this deployment cannot take: a blank key, or a provider that leases with none."""
+
+
 class McpSessionsInterruptedError(Exception):
     """A request's MCP sessions were canceled while they opened, by something other than the request."""
 
@@ -404,6 +408,7 @@ __all__ = [
     "DirectSearchFailedError",
     "DirectSearchFieldRefusedError",
     "McpSessionsInterruptedError",
+    "SandboxCredentialRefusedError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",
     "SearchToolMisconfiguredError",

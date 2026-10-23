@@ -20,7 +20,7 @@ from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import ModelProviderPort
-from gateway.services.catalog import apply_model_limits, load_catalog_metadata
+from gateway.services.catalog import apply_model_metadata, load_catalog_metadata
 from gateway.services.merged_catalog_service import (
     ModelObject,
     alias_model,
@@ -391,7 +391,7 @@ async def _find_model(
         fallback = ModelObject(id=model_id, created=0, owned_by=owner_from_key(model_id))
         apply_default_pricing(fallback)
         if fallback.pricing is not None:
-            apply_model_limits(config, await load_catalog_metadata(config), fallback)
+            apply_model_metadata(config, await load_catalog_metadata(config), fallback)
             return mark_deployment_managed(
                 config, fallback, deployment_supplied_providers=scope.deployment_supplied_providers
             ), aliases
@@ -412,7 +412,7 @@ async def _find_model(
             pricing_source="configured" if pricing else "none",
         )
         apply_default_pricing(obj)
-        apply_model_limits(config, await load_catalog_metadata(config), obj)
+        apply_model_metadata(config, await load_catalog_metadata(config), obj)
         return mark_deployment_managed(
             config, obj, deployment_supplied_providers=scope.deployment_supplied_providers
         ), aliases
@@ -420,7 +420,7 @@ async def _find_model(
     # Pricing-only model (no discovery data).
     assert pricing is not None
     obj = model_from_pricing(pricing)
-    apply_model_limits(config, await load_catalog_metadata(config), obj)
+    apply_model_metadata(config, await load_catalog_metadata(config), obj)
     return mark_deployment_managed(
         config, obj, deployment_supplied_providers=scope.deployment_supplied_providers
     ), aliases

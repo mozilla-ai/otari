@@ -254,6 +254,16 @@ answers 404 for it. A provider that merely refused is retried on a later event
 naming the same file, where the response offers one; an allowance it ran past
 is not, because the allowance only shrinks.
 
+Gemini is the exception to keeping the provider's ID: its code returns what it
+produced as bytes in the reply, with no ID at all. Otari stores each such file
+under a new ID of its own and puts that ID where the bytes were. On Messages
+that is a `code_execution_output` entry in the `code_execution_tool_result`, the
+shape an Anthropic reply has; on Chat Completions it is a `file_id` on the
+`code_execution_output` item (see [Code-execution executor](tools.md#code-execution-executor)).
+The same allowances apply, and a file past them, or one the store refused, stays
+in the reply as bytes. A chart the model also shows inline stays in the
+message's `images` as well.
+
 `files_output_max_files` and `files_output_max_bytes` (20 files and 64 MB by
 default, the latter also bounded by `files_max_bytes`) are each spent twice
 over, once per source: one call may store that many files from Otari's own
@@ -304,6 +314,19 @@ document block the caller wrote inline is forwarded as written.
 Scanned/image-only PDFs (no extractable text) are rasterized page-by-page and
 sent through the image path.
 
+Gemini refuses a request past 20 MB, attachments included. Once a request's
+attachments to a Gemini model would pass `files_gemini_inline_max_bytes` (16 MiB
+by default, counted as sent, base64-encoded, which leaves room for the rest of
+the request), Otari uploads each further one to Gemini's Files API with the key
+the request is served with, a hosted provider's included, and sends a reference
+to it instead of the bytes. An
+upload is remembered for 47 hours, one less than Gemini keeps the file, so an
+agent resending the same conversation does not upload it again. Where Gemini
+refuses the upload, the request is answered with a 400 before it reaches the
+provider. A request that may fall back to a provider other than Gemini is sent
+as it is, since a Gemini file reference means nothing to the fallback, and so is
+one to Vertex AI, which has no Files API in any-llm.
+
 ### Capability resolution
 
 Otari must know whether the target model is natively multimodal. It uses,
@@ -346,7 +369,9 @@ resolve; with it on, the same fault stops the boot.
 `files_output_max_files` and `files_output_max_bytes` each bound what one
 code-execution call may store from its sandbox and, separately, what one
 request may copy from a provider's, and `files_provider_copy_max_sec` bounds
-how long that copying may take (see above). An expired file answers 404 at once, and the
+how long that copying may take (see above). `files_gemini_inline_max_bytes` is
+the inline attachment budget for a Gemini request (see
+[What Otari does per attachment](#what-otari-does-per-attachment)). An expired file answers 404 at once, and the
 background sweep (`files_sweep_interval_sec`, hourly by default, `0` to
 disable) then reclaims its bytes and row along with those of deleted files and
 of uploads that never completed.

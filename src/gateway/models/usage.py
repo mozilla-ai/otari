@@ -84,6 +84,13 @@ class UsageLog(Base):
     # ...), bounded at intake; see ``api/routes/_request_tags.py``. Null when the
     # request sent none, and on every row written before the column existed.
     tags: Mapped[dict[str, str] | None] = mapped_column(JSON)
+    # The end-user identifier the request's provider calls carry (see
+    # ``services/inference/_upstream_user.py``), so an identifier a provider reports
+    # in an abuse case can be traced back to its workspace, user and key. Indexed
+    # for that lookup. Null where the request had none: imported usage, the
+    # pass-through endpoints, a request refused before its user was resolved, and
+    # every row written before the column existed.
+    safety_identifier: Mapped[str | None] = mapped_column(String(64), index=True)
     # Whether this row's cost participates in budget enforcement. True for normal
     # gateway rows; false for imported usage and for rows from keys flagged
     # exclude_from_budget. False rows are recorded (and appear in cost analytics)

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from any_llm import AnyLLM
+
 from gateway.models.tools import CodeExecutor
 from gateway.services.tools._declarations import Tool, extract_first_matching_tool, first_matching_tool
 from gateway.services.tools._native import Dialect
@@ -51,16 +53,26 @@ def _is_code_execution_tool_type(type_value: Any) -> bool:
 _BARE_CODE_EXECUTION_TYPES = frozenset({"code_execution", "code_interpreter"})
 _VERSIONED_CODE_EXECUTION_PREFIX = "code_execution_"
 _OPENAI_CODE_INTERPRETER_TYPE = "code_interpreter"
-# The one provider each native vocabulary belongs to, and the wire format it is
-# native in. Anthropic's dated ``code_execution_<date>`` is a Messages server
-# tool; OpenAI's ``code_interpreter`` is a Responses built-in tool. Neither has a
-# native form on Chat Completions, and the bare ``code_execution`` short form is
-# nobody's, so a request declaring it is never natively served and ``auto``
-# always runs it here.
-_NATIVE_CODE_EXECUTION: dict[str, tuple[str, Dialect]] = {
-    _VERSIONED_CODE_EXECUTION_PREFIX: ("anthropic", Dialect.MESSAGES),
-    _OPENAI_CODE_INTERPRETER_TYPE: ("openai", Dialect.RESPONSES),
+# The providers and wire formats each keyword is native to. Anthropic's dated
+# ``code_execution_<date>`` is a Messages server tool; OpenAI's
+# ``code_interpreter`` is a Responses built-in tool. Gemini runs code natively on
+# both Chat Completions and Messages, and any-llm maps its results into the shape
+# each format expects, so Gemini also serves the bare short form and, on
+# Messages, Anthropic's dated keyword. Every other pairing is one ``auto`` brings
+# to the gateway's sandbox. Vertex AI is left out: the question is asked per
+# provider, and that provider serves Claude and Mistral models as well as Gemini.
+_GOOGLE_PROVIDERS = frozenset({"gemini"})
+_NATIVE_CODE_EXECUTION: dict[str, frozenset[tuple[str, Dialect]]] = {
+    _VERSIONED_CODE_EXECUTION_PREFIX: frozenset(
+        {("anthropic", Dialect.MESSAGES), *((provider, Dialect.MESSAGES) for provider in _GOOGLE_PROVIDERS)}
+    ),
+    _OPENAI_CODE_INTERPRETER_TYPE: frozenset({("openai", Dialect.RESPONSES)}),
+    "code_execution": frozenset(
+        (provider, dialect) for provider in _GOOGLE_PROVIDERS for dialect in (Dialect.CHAT, Dialect.MESSAGES)
+    ),
 }
+# Gemini's own declaration: a tool object keyed by the tool name, with no ``type``.
+_GEMINI_CODE_EXECUTION_KEY = "code_execution"
 
 
 def _is_provider_code_execution_tool_type(type_value: Any) -> bool:
@@ -107,9 +119,9 @@ def native_code_execution_dialect(tool_entry: Mapping[str, Any] | None) -> Diale
     if not isinstance(type_value, str):
         return None
     if type_value.startswith(_VERSIONED_CODE_EXECUTION_PREFIX):
-        return _NATIVE_CODE_EXECUTION[_VERSIONED_CODE_EXECUTION_PREFIX][1]
+        return Dialect.MESSAGES
     if type_value == _OPENAI_CODE_INTERPRETER_TYPE:
-        return _NATIVE_CODE_EXECUTION[_OPENAI_CODE_INTERPRETER_TYPE][1]
+        return Dialect.RESPONSES
     return None
 
 
@@ -120,11 +132,12 @@ def provider_runs_code_natively(
 
     True only when the keyword is the provider's own vocabulary *and* the request
     arrived in the wire format that vocabulary is native to: Anthropic's dated
-    keyword on Messages against an Anthropic model, OpenAI's ``code_interpreter``
-    on Responses against an OpenAI model. Everything else (a Mistral model asked
-    in Anthropic's words, any keyword on Chat Completions, an unknown provider)
-    is a declaration the provider cannot honor, which is exactly when ``auto``
-    brings the code here.
+    keyword on Messages against an Anthropic or Gemini model, OpenAI's
+    ``code_interpreter`` on Responses against an OpenAI model, the bare
+    ``code_execution`` against Gemini on Chat Completions or Messages (see
+    ``_NATIVE_CODE_EXECUTION``). Everything else (a Mistral model asked in
+    Anthropic's words, an unknown provider) is a declaration the provider cannot
+    honor, which is exactly when ``auto`` brings the code here.
     """
     if provider is None or tool_entry is None:
         return False
@@ -132,8 +145,66 @@ def provider_runs_code_natively(
     if not isinstance(type_value, str):
         return False
     key = _VERSIONED_CODE_EXECUTION_PREFIX if type_value.startswith(_VERSIONED_CODE_EXECUTION_PREFIX) else type_value
-    native = _NATIVE_CODE_EXECUTION.get(key)
-    return native is not None and native == (provider.lower(), dialect)
+    return (provider.lower(), dialect) in _NATIVE_CODE_EXECUTION.get(key, frozenset())
+
+
+def _is_gemini_code_execution_tool(entry: Any) -> bool:
+    """Gemini's own ``{"code_execution": {...}}`` declaration, which carries no ``type``."""
+    return isinstance(entry, dict) and set(entry) == {_GEMINI_CODE_EXECUTION_KEY}
+
+
+def with_typed_code_execution_tool(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """``tools`` with Gemini's own ``{"code_execution": {}}`` declared as the bare ``code_execution`` keyword.
+
+    Admission reads a declaration's ``type``, so a request in Gemini's spelling is
+    decided like any other code-execution keyword: a workspace pinned to ``otari``
+    runs it on the sandbox, and a non-Gemini candidate under ``auto`` does too. A
+    Gemini attempt gets Gemini's spelling back (:func:`with_native_code_execution_tool`).
+    """
+    if not tools or not any(_is_gemini_code_execution_tool(entry) for entry in tools):
+        return tools
+    return [{"type": "code_execution"} if _is_gemini_code_execution_tool(entry) else entry for entry in tools]
+
+
+def with_native_code_execution_tool(
+    tools: list[dict[str, Any]] | None, *, provider: str
+) -> list[dict[str, Any]] | None:
+    """``tools`` with a provider-named code-execution keyword in Gemini's own form, for a Gemini attempt.
+
+    Gemini declares the tool as ``{"code_execution": {}}``, and rejects the
+    ``type``-keyed spellings the other providers use. Rewritten per attempt, not
+    per request, so a fallback to another provider still receives the keyword as
+    the caller wrote it. A second keyword collapses into the first, since Gemini
+    takes the tool once.
+    """
+    if not tools or provider.lower() not in _GOOGLE_PROVIDERS:
+        return tools
+    out: list[dict[str, Any]] = []
+    declared = False
+    for entry in tools:
+        if isinstance(entry, dict) and (
+            _is_provider_code_execution_tool_type(entry.get("type")) or _is_gemini_code_execution_tool(entry)
+        ):
+            if not declared:
+                out.append({_GEMINI_CODE_EXECUTION_KEY: {}})
+                declared = True
+            continue
+        out.append(entry)
+    return out
+
+
+def provider_attempt_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """``kwargs`` adjusted for the provider its ``provider:model`` selector dispatches to.
+
+    Idempotent, so every attempt path can apply it without tracking whether another already has.
+    """
+    try:
+        provider, _ = AnyLLM.split_model_provider(str(kwargs.get("model") or ""))
+    except Exception:  # noqa: BLE001 - an unknown selector is left for the provider call to refuse
+        return kwargs
+    tools = kwargs.get("tools")
+    rewritten = with_native_code_execution_tool(tools, provider=str(getattr(provider, "value", provider)))
+    return kwargs if rewritten is tools else {**kwargs, "tools": rewritten}
 
 
 def parse_code_execution_header(value: str | None) -> CodeExecutor | None:

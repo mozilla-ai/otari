@@ -10,7 +10,8 @@ and both callers import them from here.
 
 import re
 
-_REDACTION_PLACEHOLDER = "[redacted]"
+from gateway.secret_shapes import CREDENTIAL_SHAPES, REDACTION_PLACEHOLDER
+
 # Cap on an exposed upstream message. Providers occasionally echo the offending
 # request back in the error body, and a response detail is not the place for a
 # few hundred KB of it.
@@ -19,17 +20,8 @@ MAX_EXPOSED_DETAIL_CHARS = 400
 # apart its path. Each targets a shape that carries secrets rather than meaning:
 # nothing here removes text a caller needs to understand what it got wrong.
 _SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
-    # Authorization-header credentials, whatever scheme.
-    re.compile(r"(?:Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
-    # Provider key formats: a known prefix plus the key body. Covers OpenAI
-    # (sk-, sk-proj-), Anthropic (sk-ant-), Groq (gsk_), xAI (xai-), and
-    # otari's own keys (tk-, tk_, legacy gw-).
-    re.compile(r"\b(?:sk|pk|rk|gsk|xai|tk|gw)[-_][A-Za-z0-9._-]{8,}", re.IGNORECASE),
-    # Google API keys, which carry a fixed prefix and no separator.
-    re.compile(r"\bAIza[A-Za-z0-9._-]{10,}"),
-    # An explicitly named credential, as it appears in a query string or an
-    # echoed request body.
-    re.compile(r"\b(?:api[_-]?key|access[_-]?token|token|secret|password)\s*[=:]\s*\S+", re.IGNORECASE),
+    # Credentials first (secret_shapes.py, shared with the log filter).
+    *CREDENTIAL_SHAPES,
     # Upstream account identifiers. A managed-model request runs on the
     # platform's own provider account, so an error naming that account would
     # tell a workspace user whose credentials served them.
@@ -85,7 +77,7 @@ def redact_upstream_message(message: str) -> str:
     if _PAYLOAD_ECHO.search(redacted):
         return ""
     for pattern in _SECRET_SHAPES:
-        redacted = pattern.sub(_REDACTION_PLACEHOLDER, redacted)
+        redacted = pattern.sub(REDACTION_PLACEHOLDER, redacted)
     redacted = " ".join(redacted.split())
     if len(redacted) > MAX_EXPOSED_DETAIL_CHARS:
         redacted = redacted[: MAX_EXPOSED_DETAIL_CHARS - len("...")].rstrip() + "..."

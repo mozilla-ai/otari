@@ -74,7 +74,7 @@ A **port** is a domain-named interface (a Python `Protocol`), named for what it 
 | `UsageSignalPort` | Telling an outside analytics or CRM vendor about each usage row a request settles. |
 | `TelemetryStoragePort` | Where captured agent telemetry is stored and read back. |
 | `FileStoragePort` | Where the bytes behind an uploaded file are kept. Three core adapters: a local directory, S3, and any fsspec filesystem. |
-| `ProviderFilePort` | Reading and writing the files a provider holds: a copy an attached file gets for the provider's own code execution, and a file that code produced. The core adapter reaches them through any-llm. |
+| `ProviderFilePort` | Reading and writing the files a provider holds: a copy an attached file gets for the provider's own code execution, a file that code produced, and an attachment too large to send inline (Gemini). The core adapter reaches them through any-llm. |
 | `ApiKeyFormatPort` | The shape of the API keys a build mints, and where a presented key is checked. |
 | `RateLimitStorePort` | Where rate-limit counts and concurrency slots are kept. Two core adapters: this process's memory, and Redis for a count every replica shares. |
 | `AgentModelRecommenderPort` | Which model a coding agent's subagent should start on, and at what price. The core adapter puts one choice question to the decision model the deployment configured and quotes no price of its own. |

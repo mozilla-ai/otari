@@ -201,6 +201,8 @@ export function bootstrap(
     oauth_providers: [],
     mail_ready: false,
     feedback_enabled: true,
+    // Off, the setting default: the workload identity tests turn it on.
+    federation_member_rules: false,
     // Off by default, matching the config default; the public-catalog tests
     // turn it on.
     public_catalog: false,

@@ -1930,24 +1930,22 @@ main {
    17px at md where a primary puts it at 12 and 16. The padding gives the pixel
    back. Both sizes, because the rule is about the border rather than about
    which sizes happen to be in use today. Icon-only is excluded: it has no
-   label to inset and HeroUI zeroes its padding to keep it square. */
-.button--ghost.button--sm:not(.button--icon-only),
+   label to inset and HeroUI drops its padding to keep it square.
+
+   The rail is excluded too: its band controls set their own lane (`px-6`),
+   which this unlayered rule would outrank. `:where` keeps the specificity
+   unchanged. Do not hand the lane back with `revert-layer` instead: Safari 26
+   resolves a reverted `var()` logical shorthand to no padding (WebKit bug
+   310435). */
+.button--ghost.button--sm:not(.button--icon-only):where(:not(.otari-rail *)),
 .button--danger.button--sm:not(.button--icon-only) {
   padding-inline: 0.6875rem;
 }
-.button--ghost:not(.button--sm):not(.button--icon-only),
+.button--ghost:not(.button--sm):not(.button--icon-only):where(
+  :not(.otari-rail *)
+),
 .button--danger:not(.button--sm):not(.button--icon-only) {
   padding-inline: 0.9375rem;
-}
-
-/* The rail is the exception, and it has to be one: its two band controls set
-   their own lane so their mark and their label line up with the nav rows'
-   icon lane, which is a call-site decision this rule would otherwise outrank
-   (an unlayered rule beats `@layer utilities`, so `px-6` cannot win on its
-   own). `revert-layer` hands the value back to the utility rather than
-   restating the number here, so the lane stays declared in exactly one place. */
-.otari-rail .button--ghost:not(.button--icon-only) {
-  padding-inline: revert-layer;
 }
 
 /* =============================================================

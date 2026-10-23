@@ -88,6 +88,8 @@ MODEL_HEADER = "Otari-Model"
 ATTEMPT_COUNT_HEADER = "Otari-Attempt-Count"
 FALLBACK_HEADER = "Otari-Fallback"
 RESPONSE_DURATION_HEADER = "Otari-Response-Duration-Ms"
+# The same duration split into the gateway's own time and the provider's (W3C Server Timing).
+SERVER_TIMING_HEADER = "Server-Timing"
 # Request header naming the budget a service key's new end user starts on, and
 # response header naming the budget that end user is on.
 END_USER_BUDGET_HEADER = "Otari-End-User-Budget"
@@ -355,6 +357,14 @@ class RateLimitRule(BaseModel):
     call the model rather than at admission, so a routing policy skips a full
     model and tries its next candidate; a request with no candidate left is
     refused.
+
+    ``per: budget`` is one count for every user on the same budget, such as all
+    of a service key's end users on one feature's budget; ``budgets`` narrows it
+    to those budgets.
+
+    ``mode: report`` counts the same way and never refuses: a request over the
+    limit is served, and the response names the rule in
+    ``Otari-Rate-Limit-Exceeded``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -363,13 +373,28 @@ class RateLimitRule(BaseModel):
         pattern=r"^[A-Za-z0-9_.-]+$",
         description="Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.",
     )
-    per: Literal["deployment", "key", "user", "model"] = Field(description="What one count is shared by.")
+    per: Literal["deployment", "key", "user", "model", "budget"] = Field(description="What one count is shared by.")
     models: list[str] | None = Field(
         default=None,
         description=(
             "The models a `per: model` rule limits, each as instance:model (the provider instance the "
             "model is called through, then the model), each counted on its own. Required there and "
             "refused on any other rule."
+        ),
+    )
+    budgets: list[str] | None = Field(
+        default=None,
+        description=(
+            "The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. "
+            "Refused on any other rule."
+        ),
+    )
+    mode: Literal["enforce", "report"] = Field(
+        default="enforce",
+        description=(
+            "'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way "
+            "but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a "
+            "limit can be watched before it is enforced."
         ),
     )
     rpm: int | None = Field(default=None, ge=1, description="Requests per minute.")
@@ -405,6 +430,13 @@ class RateLimitRule(BaseModel):
     def _requires_a_limit(self) -> "RateLimitRule":
         if self.rpm is None and self.tpm is None and self.max_concurrent is None:
             msg = f"rate limit rule '{self.name}' sets none of rpm, tpm or max_concurrent"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _budgets_belong_to_per_budget(self) -> "RateLimitRule":
+        if self.budgets is not None and self.per != "budget":
+            msg = f"rate limit rule '{self.name}' sets budgets, which only a per: budget rule reads"
             raise ValueError(msg)
         return self
 
@@ -1206,6 +1238,17 @@ class GatewayConfig(
         ge=1,
         description="Maximum size in bytes for a single uploaded file.",
     )
+    files_gemini_inline_max_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=16 * 1024 * 1024,
+        ge=1,
+        description=(
+            "Most attachment bytes, counted as sent (base64), one request to a Gemini model carries inline. "
+            "Gemini caps a whole request at 20 MB, so the default leaves room for the rest of it. Past it, each "
+            "further attachment is uploaded to Gemini's file storage with the key the request is served with and "
+            "referenced by URI, and where Gemini refuses that upload the request is refused up front rather than "
+            "by Gemini. A request that may fall back to another provider is sent as it is."
+        ),
+    )
     files_output_max_files: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
         default=20,
         ge=0,
@@ -1560,6 +1603,11 @@ class GatewayConfig(
         return self.effective_mail_transport != "none"
 
     @property
+    def federation_enabled(self) -> bool:
+        """Whether an identity token may authenticate as some key: an issuer is trusted, or members may name one."""
+        return bool(self.federation_issuers) or self.federation_member_rules
+
+    @property
     def mail_ready(self) -> bool:
         """Whether this deployment can send a message that links back to itself.
 
@@ -1808,11 +1856,12 @@ class GatewayConfig(
 
     def validate_declared_access(self) -> None:
         """Refuse federation without ``OTARI_SECRET_KEY``."""
-        if self.federation_issuers and not (otari_env("SECRET_KEY") or "").replace(",", " ").strip():
+        if self.federation_enabled and not (otari_env("SECRET_KEY") or "").replace(",", " ").strip():
+            setting = "federation_issuers" if self.federation_issuers else "federation_member_rules"
             msg = (
-                "federation_issuers is set, but OTARI_SECRET_KEY is not; it signs the access tokens "
+                f"{setting} is set, but OTARI_SECRET_KEY is not; it signs the access tokens "
                 "POST /api/v1/oauth/token issues. Set OTARI_SECRET_KEY (generate one with "
-                "`otari gen-secret-key`) or clear federation_issuers"
+                f"`otari gen-secret-key`) or clear {setting}"
             )
             raise ValueError(msg)
 

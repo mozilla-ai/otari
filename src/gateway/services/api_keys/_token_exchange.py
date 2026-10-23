@@ -15,7 +15,7 @@ from gateway.services.api_keys._access_tokens import (
     AccessTokenClaims,
     FederationGrantError,
     access_token_expiry,
-    grant_names_key,
+    grant_names_organization,
     mint_access_token,
 )
 from gateway.services.api_keys._admission import key_refusal
@@ -48,10 +48,11 @@ def _unavailable(reason: str) -> FederationGrantError:
 class FederationTokenExchange:
     """Exchange a verified identity token, naming one federation rule, for a short-lived access token.
 
-    The RFC 7523 ``jwt-bearer`` grant. The identity token must verify and match the named rule, the rule's key must
-    be active and unexpired, and any organization, workspace or service account the request names must be that
-    key's own. Its one Unit of Work block only reads, and a refusal raised inside it rolls it back, so an exchange,
-    refused or not, writes nothing.
+    The RFC 7523 ``jwt-bearer`` grant. The identity token must verify and match the named rule, whether an operator's
+    rule on an allow-listed issuer or a member's on the issuer it names; the rule's key must be active and unexpired,
+    and any organization the request names must be that key's own. A member's rule
+    exchanges only while the deployment admits members' rules. Its Unit of Work blocks only read, and a refusal raised
+    inside one rolls it back, so an exchange, refused or not, writes nothing.
     """
 
     def __init__(
@@ -79,8 +80,6 @@ class FederationTokenExchange:
         assertion: str | None,
         federation_rule_id: str | None,
         organization_id: str | None,
-        workspace_id: str | None,
-        service_account_id: str | None,
     ) -> tuple[str, int]:
         """Return the access token and its lifetime in seconds.
 
@@ -106,22 +105,26 @@ class FederationTokenExchange:
         if unverified_issuer(assertion) is None:
             raise _invalid_grant("federation_invalid_token")
         try:
-            identity = await self._verifier.verify(assertion)
+            # The rule is read first, since a member's rule names the issuer to verify against, and the block is
+            # closed before verifying, so fetching a member-chosen issuer's keys holds no database connection.
             async with self._uow:
                 rule = await self._rules.get(federation_rule_id)
-                if rule is None or not rule_matches(rule, identity):
-                    raise FederationRefusedError("federation_no_rule")
+            if rule is None:
+                raise FederationRefusedError("federation_no_rule")
+            identity = await self._verifier.verify(
+                assertion, member_issuer=rule.issuer if rule.member_managed else None
+            )
+            if not rule_matches(rule, identity):
+                raise FederationRefusedError("federation_no_rule")
+            if rule.member_managed and not self._verifier.member_issuers:
+                raise FederationRefusedError("federation_member_rules_off")
+            async with self._uow:
                 api_key = await self._keys.get(rule.api_key_id)
                 if api_key is None:
                     raise FederationRefusedError("federation_no_rule")
                 key_organization_id = await self._organization_of_workspace(api_key.workspace_id)
-                if key_organization_id is None or not grant_names_key(
-                    organization_id=organization_id,
-                    workspace_id=workspace_id,
-                    service_account_id=service_account_id,
-                    key_organization_id=key_organization_id,
-                    key_workspace_id=api_key.workspace_id,
-                    api_key_id=api_key.id,
+                if key_organization_id is None or not grant_names_organization(
+                    organization_id=organization_id, key_organization_id=key_organization_id
                 ):
                     raise FederationRefusedError("federation_grant_mismatch")
                 refusal = key_refusal(api_key, datetime.now(UTC))

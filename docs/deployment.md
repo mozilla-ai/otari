@@ -15,7 +15,7 @@ A durable deployment should:
 - terminate TLS in front of the gateway
 - restrict database and management access
 - monitor `/api/v1/health/readiness` and, when enabled, `/metrics`
-- pin an image version and test migrations before upgrading
+- pin an image version, [verify it](#verify-the-image), and test migrations before upgrading
 
 The default SQLite database is intended for evaluation and single-node local use.
 
@@ -57,9 +57,42 @@ connections beyond it, so its capacity is the two added together. The `log`
 pool is sized by `db_log_pool_size` and has no overflow, so its capacity is
 that value.
 
+### Watch providers and refusals
+
+`/metrics` also reports each upstream attempt, labeled by the provider instance
+and the model a usage row names, so a dashboard can follow one provider's
+errors, latency and spend without reading the usage log:
+
+| Metric | Labels | Meaning |
+| --- | --- | --- |
+| `gateway_upstream_attempts_total` | `provider`, `model`, `outcome` (`success` or `error`), `status_code`, `fallback` | One per attempt on the completion, embedding, image, audio, moderation and rerank routes, including a routing policy's failed candidates. `status_code` is `200` for a success, the HTTP status that classified a failure (a timeout is `504`, an unclassified connection failure `502`), or `none` for a failure that carried no status, such as a stream that ended without reporting its usage. `fallback` is `true` for a candidate after the plan's first |
+| `gateway_attempt_duration_seconds` | `provider`, `model`, `outcome` | From the start of the request to the end of the attempt, observed for a plan's first candidate only, since a fallback's would include its predecessors' time |
+| `gateway_time_to_first_token_seconds` | `provider`, `model` | From the start of the request to a streamed attempt's first chunk, for a plan's first candidate only |
+| `gateway_tokens_total` | `provider`, `model`, `type` | Input and output tokens |
+| `gateway_request_cost_dollars` | `provider`, `model` | Each request's cost in USD |
+| `gateway_abandoned_attempts_total` | `provider`, `model`, `reason`, `position` | Attempts given up before their first chunk |
+| `gateway_refusals_total` | `code`, `budget_scope` | Responses refused with an [`Otari-Error-Code`](api-reference.md#error-codes), by that code and, for `budget_exceeded`, the scope that refused (`user`, `api_token`, ...; empty otherwise) |
+
+`model` is the model as the provider was sent it. A request that names its own
+`provider:model` adds a series per distinct model, so restrict keys to the
+models they may use where callers are not trusted to pick.
+
 Alert on checked-out connections approaching capacity for a sustained period.
 These metrics do not appear on SQLite, which opens a connection per use and
 keeps no pool.
+
+### Verify the image
+
+Each published image carries a signed build provenance attestation, which ties it
+to the `mozilla-ai/otari` repository and the workflow that built it. Check it with
+the GitHub CLI before you deploy a tag:
+
+```sh
+gh attestation verify oci://docker.io/mzdotai/otari:<tag> --repo mozilla-ai/otari
+```
+
+The command fails for an image that this repository's publishing workflow did not
+build, such as one pushed to Docker Hub with stolen credentials.
 
 ## Docker Compose
 

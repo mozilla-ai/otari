@@ -372,6 +372,15 @@ one sets `sandbox_provider: e2b` instead and Otari runs the code on
 everything below is the same either way. A runnable example lives under
 `demo/code-exec/`.
 
+E2B needs an API key. Store it on the Tools page under Code execution, or with
+`PUT /api/v1/tool-settings/sandbox/credential`, and it is used for the next
+sandbox on every replica within 30 seconds, so rotating or replacing a revoked
+key needs no redeploy. A stored key wins over `E2B_API_KEY`, which serves when
+none is stored; clearing the stored key falls back to it. The key is held
+encrypted with `OTARI_SECRET_KEY` and never shown again, only its last four
+characters. With no key in either place the gateway still starts, logs an
+error, and refuses each code-execution call until one is set.
+
 ### Reusing a sandbox across requests
 
 Within one request, every code call the model makes shares one sandbox, so a
@@ -499,9 +508,23 @@ purely because its model changed. On Responses a claimed `code_interpreter` is a
 `code_interpreter_call` item per run, in the order the calls ran among the
 gateway's other native items (a `web_search_call`, say). Chat Completions has no
 native shape, so a claimed declaration there resolves inside the tool loop and
-only the final message is returned. Nothing runs natively on Chat Completions,
-and the bare `code_execution` form is no provider's, so under `auto` both always
-run on the sandbox.
+only the final message is returned.
+
+Gemini runs code natively on both Chat Completions and Messages, so under `auto`
+a Gemini model keeps the bare `code_execution` form on either format, and
+Anthropic's `code_execution_<date>` on Messages. Otari rewrites the declaration
+into Gemini's own `{"code_execution": {}}` for each attempt that goes to Gemini
+(a fallback to another provider still receives it as written). A request may
+also send `{"code_execution": {}}` itself; Otari reads it as the bare form, so a
+workspace pin or a fallback with no native code execution decides it the same
+way. On Messages the run comes back as the same `server_tool_use` and
+`code_execution_tool_result` blocks Anthropic returns. On Chat Completions,
+which has no native shape, it comes back on the assistant message as
+`extra_content.google.code_execution`: a list of `executable_code`,
+`code_execution_result` and `code_execution_output` items in the order Gemini
+produced them. For every other provider nothing runs natively on Chat
+Completions, and the bare form is no other provider's, so under `auto` those run
+on the sandbox.
 
 The executor also decides where an attached file goes. Code running on Otari's
 sandbox is given the file from Otari's own store, and code running in the
@@ -848,10 +871,13 @@ archive it, and make one key of each kind the organization's default. Only the
 last four characters of a key are ever shown. A key carries an API key when its
 provider needs one, and may carry its own `api_base` and provider `options`,
 which are checked against the provider when the key is written. An `api_base`
-must use https when the key carries an API key, and the deployment's
-`OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false` refuses one on an internal address,
-as for an organization's model provider keys. A `tavily` or `brave` key takes
-neither, since the older backend that runs them calls their public endpoints.
+must use https when the key carries an API key, and must reach public addresses
+only, whatever `OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS` says, since an organization
+rather than the operator chose it. Calls to it are held to the same rule: each
+one connects to the address that was checked, follows no redirect, and bypasses
+any environment proxy, as calls to a workspace's own model endpoint do. A
+`tavily` or `brave` key takes neither, since the older backend that runs them
+calls their public endpoints.
 A key's calls never fall back to the deployment's own key or endpoint for its
 provider.
 

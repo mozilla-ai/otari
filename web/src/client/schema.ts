@@ -1657,6 +1657,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/hooks/guardrails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Guardrail Definition
+         * @description Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.
+         *
+         *     `otari hook` sends this once per version, the first time it reports a check
+         *     against it. The fingerprint is recomputed from the gates, and one that does
+         *     not match the one sent is refused, so a version cannot be stored under
+         *     another's name. Sending a version again changes nothing. It is stored in the
+         *     API key's workspace, beside that key's traces, and takes the same key a trace
+         *     export does: a budget-exempt API key, never the master key.
+         */
+        post: operations["hooks-record_guardrail_definition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/hosted-providers": {
         parameters: {
             query?: never;
@@ -2534,10 +2561,12 @@ export interface paths {
          * Exchange Token
          * @description Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).
          *
-         *     The identity token must verify against an issuer on ``federation_issuers`` and match the federation rule
-         *     ``federation_rule_id`` names. ``organization_id``, ``workspace_id`` and ``service_account_id``, where set, must
-         *     be the UUIDs of the rule's key's organization and workspace and the key's id. The access token authenticates as
-         *     that key until ``expires_in`` runs out, the rule is deleted or the key stops passing its checks.
+         *     The identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:
+         *     one on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,
+         *     where set, must be the UUID of the rule's key's organization. ``workspace_id`` and ``service_account_id`` are
+         *     accepted and ignored, so a client configured for Anthropic needs only its rule and organization changed. The
+         *     access token authenticates as that key until ``expires_in`` runs out, the rule is deleted or the key stops passing
+         *     its checks.
          *
          *     Every refusal of the identity token answers 401 ``invalid_grant`` with the same description.
          */
@@ -3105,6 +3134,62 @@ export interface paths {
          * @description Update one of the caller's own API keys.
          */
         patch: operations["organization-keys-update_own_key"];
+        trace?: never;
+    };
+    "/api/v1/organizations/me/keys/{key_id}/federation-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Own Federation Rules
+         * @description List the identities that may authenticate as a key, oldest first.
+         *
+         *     The caller's own key, or for the deployment operator any key in their active organization. Includes any rule
+         *     the operator gave the key on ``/api/v1/keys``, which ``member_managed`` tells apart.
+         */
+        get: operations["organization-keys-list_own_federation_rules"];
+        put?: never;
+        /**
+         * Create Own Federation Rule
+         * @description Let an OpenID Connect identity token stand in for a key, through the token exchange.
+         *
+         *     Needs ``federation_member_rules``, else 403, and an organization owner or admin acting on their own key, or the
+         *     deployment operator on any key in their active organization, else 403. The issuer may be any https URL; its
+         *     signing keys are fetched only from a public host. The rule matches only in ``POST /api/v1/oauth/token`` naming
+         *     its id, never as a bare identity token, so it lets a workload act as this key and no other: a rule naming another
+         *     tenant's workload gives that workload nothing it did not ask for. A rule this key already holds answers 409.
+         */
+        post: operations["organization-keys-create_own_federation_rule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/keys/{key_id}/federation-rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Own Federation Rule
+         * @description Remove a federation rule from a key. Tokens it matched stop with the next request.
+         *
+         *     The caller's own key whatever their role, or for the deployment operator any key in their active organization.
+         *     Works whether or not ``federation_member_rules`` is on, so a rule can always be taken back.
+         */
+        delete: operations["organization-keys-delete_own_federation_rule"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/organizations/me/keys/{key_id}/rotate": {
@@ -3973,11 +4058,14 @@ export interface paths {
         };
         /**
          * Trace Series
-         * @description Count sessions per bucket of their start, split by whether they failed.
+         * @description Count the sessions active in each bucket, split by whether they failed.
          *
-         *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
-         *     goes back to the model, an MCP tool's included, so a session whose only errors are tools'
-         *     counts as succeeded.
+         *     A session is active from its start to its last activity, so a long one counts in every bucket it ran
+         *     through. Here ``start`` and ``end`` bound the buckets: a session that began before
+         *     ``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are
+         *     aligned to their size in UTC and only the populated ones are returned. A session failed when it holds an
+         *     unrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so
+         *     a session whose only errors are tools' counts as succeeded.
          */
         get: operations["organization-traces-trace_series"];
         put?: never;
@@ -4279,8 +4367,9 @@ export interface paths {
          *     also have to be added to the pipeline's strip list, and a gateway-internal
          *     field that is not stripped is forwarded to the provider as a call kwarg.
          *
-         *     ``user`` in the body is the one field the pipeline will not read here: spend
-         *     binds to the session's own attribution user, derived and never accepted.
+         *     ``user`` and ``safety_identifier`` in the body are the fields the pipeline
+         *     will not read here: spend and the provider's end-user identifier both bind
+         *     to the session's own attribution user, derived and never accepted.
          */
         post: operations["playground-playground_chat_completions"];
         delete?: never;
@@ -5856,6 +5945,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tool-settings/sandbox/credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Sandbox Credential
+         * @description Store the key this deployment's hosted sandbox provider leases sandboxes with.
+         *
+         *     Wins over the provider's environment variable (``E2B_API_KEY``), on this
+         *     worker at once and on every other within 30 seconds, so a rotated key needs
+         *     no redeploy. Refused for the ``protocol`` provider, which takes no key of
+         *     its own. Operator-gated.
+         */
+        put: operations["tool-settings-set_sandbox_credential"];
+        post?: never;
+        /**
+         * Clear Sandbox Credential
+         * @description Delete the stored sandbox key, so sandboxes are leased with the environment's key again.
+         *
+         *     Clearing a key that was never stored is not an error. Operator-gated.
+         */
+        delete: operations["tool-settings-clear_sandbox_credential"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tool-settings/{service}/test": {
         parameters: {
             query?: never;
@@ -5977,11 +6097,14 @@ export interface paths {
         };
         /**
          * Trace Series
-         * @description Count sessions per bucket of their start, split by whether they failed.
+         * @description Count the sessions active in each bucket, split by whether they failed.
          *
-         *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
-         *     goes back to the model, an MCP tool's included, so a session whose only errors are tools'
-         *     counts as succeeded.
+         *     A session is active from its start to its last activity, so a long one counts in every bucket it ran
+         *     through. Here ``start`` and ``end`` bound the buckets: a session that began before
+         *     ``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are
+         *     aligned to their size in UTC and only the populated ones are returned. A session failed when it holds an
+         *     unrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so
+         *     a session whose only errors are tools' counts as succeeded.
          */
         get: operations["traces-trace_series"];
         put?: never;
@@ -6735,6 +6858,9 @@ export interface paths {
         /**
          * Add Workspace Member
          * @description Add an existing organization member to a workspace.
+         *
+         *     The 404 for a workspace deleted during the add describes PostgreSQL. SQLite does not name the
+         *     foreign key it enforced, so it surfaces that race as a 500.
          */
         post: operations["workspaces-add_workspace_member"];
         /**
@@ -8877,6 +9003,11 @@ export interface components {
             response_format?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Safety Identifier
+             * @description A stable identifier for the end user behind the request, used as the tag the provider's end-user identifier is derived from. Wins over `user` for that, and is never sent upstream. The dashboard's Playground ignores it.
+             */
+            safety_identifier?: string | null;
             /** Seed */
             seed?: number | null;
             /** Service Tier */
@@ -9723,6 +9854,11 @@ export interface components {
              */
             docs_url: string | null;
             /**
+             * Federation Member Rules
+             * @description Whether an organization's owners and admins may give their own API keys federation rules (the federation_member_rules setting), so the dashboard offers workload identity on their keys.
+             */
+            federation_member_rules: boolean;
+            /**
              * Feedback Enabled
              * @description Whether this deployment accepts deliberate feedback submissions.
              */
@@ -10485,7 +10621,7 @@ export interface components {
             email?: string | null;
             /**
              * Issuer
-             * @description The token's 'iss', one of the deployment's federation_issuers.
+             * @description The token's 'iss'. On an operator's rule, one of the deployment's federation_issuers; on a member's own key, any https issuer, whose discovery document and signing keys are fetched only from a public host.
              */
             issuer: string;
             /**
@@ -10514,6 +10650,11 @@ export interface components {
             id: string;
             /** Issuer */
             issuer: string;
+            /**
+             * Member Managed
+             * @description Whether a member gave the rule to their own key: it then matches only in the token exchange.
+             */
+            member_managed: boolean;
             /** Subject */
             subject: string | null;
         };
@@ -10553,12 +10694,12 @@ export interface components {
             organization_id?: string | null;
             /**
              * Service Account Id
-             * @description When set, the id of the rule's key.
+             * @description Ignored. Accepted so that a client configured for Anthropic's service account id is not refused.
              */
             service_account_id?: string | null;
             /**
              * Workspace Id
-             * @description When set, the UUID of the rule's key's workspace.
+             * @description Ignored. Accepted so that a client configured for Anthropic's workspace id is not refused.
              */
             workspace_id?: string | null;
         };
@@ -10580,6 +10721,33 @@ export interface components {
              */
             token_type: string;
         };
+        /**
+         * GateDefinitionRequest
+         * @description One gate of a guardrail version: what it is, when it runs, and what it says when it fails.
+         */
+        GateDefinitionRequest: {
+            /**
+             * Enforcement
+             * @enum {string}
+             */
+            enforcement: "required" | "advisory";
+            /** Gate Id */
+            gate_id: string;
+            /**
+             * Gate Type
+             * @enum {string}
+             */
+            gate_type: "command" | "command_if_changed" | "judge" | "path" | "verifier";
+            /** Message */
+            message: string;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "repo" | "user";
+            /** Runs */
+            runs: ("pre_tool_use.edit_target" | "pre_tool_use.read_target" | "pre_tool_use.command" | "stop.working_tree" | "stop.session" | "stop.verifier")[];
+        };
         /** GateResultResponse */
         GateResultResponse: {
             /** Detail */
@@ -10592,6 +10760,63 @@ export interface components {
             message: string;
             /** Outcome */
             outcome: string;
+        };
+        /**
+         * GateSummaryPublic
+         * @description How often one agent guardrail gate ran in a session, by what it decided.
+         */
+        GateSummaryPublic: {
+            /**
+             * Blocked
+             * @description Checks where the gate stopped the agent.
+             */
+            blocked: number;
+            /** Enforcement */
+            enforcement: ("required" | "advisory") | null;
+            /**
+             * Flagged
+             * @description Checks an advisory gate failed; the agent went ahead.
+             */
+            flagged: number;
+            /** Gate Id */
+            gate_id: string;
+            /**
+             * Gate Type
+             * @description From the guardrail's definition, when it was sent.
+             */
+            gate_type: string | null;
+            /**
+             * Message
+             * @description What the gate says when it fails, from the guardrail's definition.
+             */
+            message: string | null;
+            /**
+             * Origin
+             * @description Whether the gate is the repository's (.otari/) or the user's own (~/.otari/).
+             */
+            origin: ("repo" | "user") | null;
+            /** Passed */
+            passed: number;
+            /**
+             * Refused
+             * @description Checks where the gate could not decide and held the agent anyway.
+             */
+            refused: number;
+            /**
+             * Runs
+             * @description The moments the gate runs at (pre_tool_use.edit_target, stop.session, ...).
+             */
+            runs: string[];
+            /**
+             * Span Id
+             * @description The check to open first: the earliest that did anything but pass. Null for a gate that never ran.
+             */
+            span_id: string | null;
+            /**
+             * Undecided
+             * @description Checks where the gate could not decide; the agent went ahead unchecked.
+             */
+            undecided: number;
         };
         /**
          * GatewaySettings
@@ -10683,6 +10908,18 @@ export interface components {
             validate_kwargs?: {
                 [key: string]: unknown;
             };
+        };
+        /** GuardrailDefinitionRequest */
+        GuardrailDefinitionRequest: {
+            /** Digest */
+            digest: string;
+            /** Gates */
+            gates: components["schemas"]["GateDefinitionRequest"][];
+        };
+        /** GuardrailDefinitionResponse */
+        GuardrailDefinitionResponse: {
+            /** Digest */
+            digest: string;
         };
         /**
          * GuardrailParameterSpec
@@ -12214,6 +12451,16 @@ export interface components {
             top_p?: number | null;
         };
         /**
+         * ModelArchitecture
+         * @description What a model reads and writes, in OpenRouter's ``architecture`` shape.
+         */
+        ModelArchitecture: {
+            /** Input Modalities */
+            input_modalities?: string[];
+            /** Output Modalities */
+            output_modalities?: string[];
+        };
+        /**
          * ModelListResponse
          * @description OpenAI-compatible model list response.
          */
@@ -12316,6 +12563,7 @@ export interface components {
          * @description OpenAI-compatible model object.
          */
         ModelObject: {
+            architecture?: components["schemas"]["ModelArchitecture"] | null;
             /** Context Window */
             context_window?: number | null;
             /** Created */
@@ -12329,6 +12577,8 @@ export interface components {
             id: string;
             /** Max Output Tokens */
             max_output_tokens?: number | null;
+            /** Name */
+            name?: string | null;
             /**
              * Object
              * @default model
@@ -12342,6 +12592,8 @@ export interface components {
              * @default none
              */
             pricing_source: string;
+            /** Supported Parameters */
+            supported_parameters?: string[] | null;
         };
         /**
          * ModelPricingInfo
@@ -14690,6 +14942,11 @@ export interface components {
             origin: string | null;
             /** Output Price Per Million */
             output_price_per_million: number;
+            /**
+             * Price Per Request
+             * @description USD for each request, for a rate in requests; null for any other unit.
+             */
+            price_per_request?: number | null;
             /** Pricing Tiers */
             pricing_tiers: components["schemas"]["PricingTier"][];
             /**
@@ -15069,6 +15326,11 @@ export interface components {
          */
         RateLimitRuleCreate: {
             /**
+             * Budgets
+             * @description The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.
+             */
+            budgets?: string[] | null;
+            /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
              * @default 900
@@ -15079,6 +15341,13 @@ export interface components {
              * @description Requests in flight at once.
              */
             max_concurrent?: number | null;
+            /**
+             * Mode
+             * @description 'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a limit can be watched before it is enforced.
+             * @default enforce
+             * @enum {string}
+             */
+            mode: "enforce" | "report";
             /**
              * Models
              * @description The models a `per: model` rule limits, each as instance:model (the provider instance the model is called through, then the model), each counted on its own. Required there and refused on any other rule.
@@ -15094,7 +15363,7 @@ export interface components {
              * @description What one count is shared by.
              * @enum {string}
              */
-            per: "deployment" | "key" | "user" | "model";
+            per: "deployment" | "key" | "user" | "model" | "budget";
             /**
              * Rpm
              * @description Requests per minute.
@@ -15119,6 +15388,11 @@ export interface components {
          */
         RateLimitRulePublic: {
             /**
+             * Budgets
+             * @description The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.
+             */
+            budgets?: string[] | null;
+            /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
              * @default 900
@@ -15129,6 +15403,13 @@ export interface components {
              * @description Requests in flight at once.
              */
             max_concurrent?: number | null;
+            /**
+             * Mode
+             * @description 'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a limit can be watched before it is enforced.
+             * @default enforce
+             * @enum {string}
+             */
+            mode: "enforce" | "report";
             /**
              * Models
              * @description The models a `per: model` rule limits, each as instance:model (the provider instance the model is called through, then the model), each counted on its own. Required there and refused on any other rule.
@@ -15144,7 +15425,7 @@ export interface components {
              * @description What one count is shared by.
              * @enum {string}
              */
-            per: "deployment" | "key" | "user" | "model";
+            per: "deployment" | "key" | "user" | "model" | "budget";
             /**
              * Rpm
              * @description Requests per minute.
@@ -15185,6 +15466,11 @@ export interface components {
          */
         RateLimitRuleUpdate: {
             /**
+             * Budgets
+             * @description The budget IDs a per: budget rule counts; null for every budget, and on any other rule.
+             */
+            budgets?: string[] | null;
+            /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most.
              */
@@ -15195,6 +15481,11 @@ export interface components {
              */
             max_concurrent?: number | null;
             /**
+             * Mode
+             * @description 'enforce' refuses a request over the rule; 'report' serves it and names the rule.
+             */
+            mode?: ("enforce" | "report") | null;
+            /**
              * Models
              * @description The instance:model names a per: model rule limits; null for any other rule.
              */
@@ -15203,7 +15494,7 @@ export interface components {
              * Per
              * @description What one count is shared by.
              */
-            per?: ("deployment" | "key" | "user" | "model") | null;
+            per?: ("deployment" | "key" | "user" | "model" | "budget") | null;
             /**
              * Rpm
              * @description Requests per minute.
@@ -15695,6 +15986,38 @@ export interface components {
              * Format: uuid
              */
             workspace_id: string;
+        };
+        /**
+         * SandboxCredentialPublic
+         * @description Where the key a hosted sandbox provider leases with comes from. Never the key itself.
+         */
+        SandboxCredentialPublic: {
+            /**
+             * Env Var
+             * @description The environment variable a deployment that stores no key is read from.
+             */
+            env_var: string;
+            /**
+             * Last4
+             * @description The key's last four characters, to tell keys apart.
+             */
+            last4?: string | null;
+            /**
+             * Source
+             * @description 'stored' for a key set here, which wins; 'environment' for the provider's own environment variable; null when there is neither and code execution fails until one is set.
+             */
+            source: ("stored" | "environment") | null;
+        };
+        /**
+         * SandboxCredentialRequest
+         * @description The key to lease hosted sandboxes with.
+         * @example {
+         *       "api_key": "e2b_0123456789abcdef"
+         *     }
+         */
+        SandboxCredentialRequest: {
+            /** Api Key */
+            api_key: string;
         };
         /**
          * SandboxProvider
@@ -16279,7 +16602,7 @@ export interface components {
              * Input Price Per Million
              * @description Price per 1M of the rate's unit: input tokens, requests or images
              */
-            input_price_per_million: number;
+            input_price_per_million?: number;
             /**
              * Kind
              * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
@@ -16294,7 +16617,12 @@ export interface components {
              * Output Price Per Million
              * @description Price per 1M output tokens; unused by a rate in requests or images
              */
-            output_price_per_million: number;
+            output_price_per_million?: number;
+            /**
+             * Price Per Request
+             * @description USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not combined with token prices.
+             */
+            price_per_request?: number | null;
             /**
              * Pricing Tiers
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
@@ -16348,7 +16676,7 @@ export interface components {
         };
         /**
          * SpanPublic
-         * @description One span of a session. Content is never part of a span.
+         * @description One span of a session. Its content is empty unless the deployment keeps content.
          */
         SpanPublic: {
             /**
@@ -16370,6 +16698,13 @@ export interface components {
              * @description Input tokens written to the prompt cache.
              */
             cache_write_tokens: number | null;
+            /**
+             * Content
+             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the deployment keeps content and the agent sent it. Empty otherwise.
+             */
+            content: {
+                [key: string]: string;
+            };
             /** Cost */
             cost: number | null;
             /** Duration Ms */
@@ -16412,7 +16747,7 @@ export interface components {
              * Outcome
              * @enum {string}
              */
-            outcome: "ok" | "error" | "unknown";
+            outcome: "ok" | "error" | "unknown" | "blocked";
             /** Output Tokens */
             output_tokens: number | null;
             /** Parent Span Id */
@@ -16654,6 +16989,56 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * ToolCostPublic
+         * @description An estimate of what one tool call cost, from the model requests either side of it.
+         */
+        ToolCostPublic: {
+            /**
+             * Calling
+             * @description Its share of the output of the request that called it.
+             */
+            calling: number;
+            /**
+             * Calls Sharing Request
+             * @description Tool calls the request that called it made, sharing its output.
+             */
+            calls_sharing_request: number;
+            /**
+             * Calls Sharing Result
+             * @description Tool calls whose results arrived together, sharing that growth.
+             */
+            calls_sharing_result: number;
+            /**
+             * Later Requests
+             * @description The later requests that read its result again.
+             */
+            later_requests: number;
+            /**
+             * Rereading
+             * @description Reading its result again in later requests, until the context was compacted.
+             */
+            rereading: number;
+            /**
+             * Result Tokens
+             * @description About how many tokens its result added to the context.
+             */
+            result_tokens: number;
+            /** Span Id */
+            span_id: string;
+            /**
+             * Subagent
+             * @description What a subagent the call ran cost, exactly.
+             */
+            subagent: number | null;
+            /** Total */
+            total: number;
+            /**
+             * Writing
+             * @description Writing its result into the context, on the next request.
+             */
+            writing: number;
+        };
+        /**
          * ToolMeter
          * @description One gateway-run tool's call counts on a request.
          *
@@ -16702,6 +17087,8 @@ export interface components {
         ToolSettingsResponse: {
             /** Fields */
             fields: components["schemas"]["ToolSettingField"][];
+            /** @description The key a hosted sandbox_provider leases with. Null for the protocol provider, which takes none, and for a reader who does not operate the deployment. */
+            sandbox_credential?: components["schemas"]["SandboxCredentialPublic"] | null;
             /** @description What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, not editable here. Null for a reader who does not operate the deployment. */
             sandbox_provider?: components["schemas"]["SandboxProvider"] | null;
         };
@@ -16728,12 +17115,12 @@ export interface components {
             bucket: string;
             /**
              * Failed
-             * @description Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.
+             * @description Sessions active in the bucket that hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.
              */
             failed: number;
             /**
              * Succeeded
-             * @description Sessions that started in the bucket and did not fail.
+             * @description Sessions active in the bucket that did not fail.
              */
             succeeded: number;
         };
@@ -16744,6 +17131,11 @@ export interface components {
         };
         /** TraceDetailPublic */
         TraceDetailPublic: {
+            /**
+             * Gates
+             * @description Each agent guardrail gate a coding agent's hook reported, the ones that did something first.
+             */
+            gates: components["schemas"]["GateSummaryPublic"][];
             /** Spans */
             spans: components["schemas"]["SpanPublic"][];
             /**
@@ -16752,6 +17144,11 @@ export interface components {
              */
             state: "active" | "idle";
             summary: components["schemas"]["TraceSummaryPublic"];
+            /**
+             * Tool Costs
+             * @description An estimate for each tool call between two priced model requests, in the order they were made.
+             */
+            tool_costs: components["schemas"]["ToolCostPublic"][];
             /**
              * Truncated
              * @description True when the session holds more spans than one read returns.
@@ -16773,7 +17170,7 @@ export interface components {
              * Bucket
              * @enum {string}
              */
-            bucket: "hour" | "day";
+            bucket: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
             /** Points */
             points: components["schemas"]["TraceBucketPublic"][];
         };
@@ -21069,6 +21466,39 @@ export interface operations {
             };
         };
     };
+    "hooks-record_guardrail_definition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GuardrailDefinitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuardrailDefinitionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "hosted-providers-list_hosted_providers": {
         parameters: {
             query?: {
@@ -23768,6 +24198,102 @@ export interface operations {
             };
         };
     };
+    "organization-keys-list_own_federation_rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FederationRulePublic"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-keys-create_own_federation_rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FederationRuleCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FederationRulePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-keys-delete_own_federation_rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "organization-keys-rotate_own_key": {
         parameters: {
             query?: never;
@@ -25122,9 +25648,9 @@ export interface operations {
                 order?: "asc" | "desc";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -25170,9 +25696,9 @@ export interface operations {
             query?: {
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -25247,12 +25773,12 @@ export interface operations {
     "organization-traces-trace_series": {
         parameters: {
             query?: {
-                bucket?: "hour" | "day";
+                bucket?: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -28213,6 +28739,59 @@ export interface operations {
             };
         };
     };
+    "tool-settings-set_sandbox_credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SandboxCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SandboxCredentialPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "tool-settings-clear_sandbox_credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SandboxCredentialPublic"];
+                };
+            };
+        };
+    };
     "tool-settings-test_service": {
         parameters: {
             query?: never;
@@ -28279,9 +28858,9 @@ export interface operations {
                 order?: "asc" | "desc";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -28327,9 +28906,9 @@ export interface operations {
             query?: {
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -28404,12 +28983,12 @@ export interface operations {
     "traces-trace_series": {
         parameters: {
             query?: {
-                bucket?: "hour" | "day";
+                bucket?: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -29878,6 +30457,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceMemberPublic"];
+                };
+            };
+            /** @description The workspace does not exist, or was deleted during the add. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationRefusal"];
+                };
+            };
+            /** @description The user is already a member of the workspace. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationRefusal"];
                 };
             };
             /** @description Validation Error */

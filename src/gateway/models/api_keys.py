@@ -152,6 +152,12 @@ class APIKeyFederationRule(Base):
     subject and verified email equal each of the rule's that is set, is that key.
     Issuer and audience alone are never enough, since anyone can mint a token
     for any audience at a public issuer, so a rule names a subject or an email.
+
+    An operator's rule names an issuer on ``federation_issuers`` and matches
+    wherever a token is presented. A member's rule (``member_managed``) names
+    any public issuer and matches only in the token exchange that names it by
+    id, so nothing it says is consulted when a bare identity token is looked up
+    across every key.
     """
 
     __tablename__ = "api_key_federation_rules"
@@ -170,6 +176,7 @@ class APIKeyFederationRule(Base):
     subject: Mapped[str | None] = mapped_column(String, default=None)
     # Stored lower case; compared with the token's email only when the token says it is verified.
     email: Mapped[str | None] = mapped_column(String, default=None)
+    member_managed: Mapped[bool] = mapped_column(default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
     )

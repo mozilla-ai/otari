@@ -2866,6 +2866,40 @@
               "raw": "{{baseUrl}}/api/v1/hooks/check"
             }
           }
+        },
+        {
+          "name": "Record Guardrail Definition",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"digest\": \"string\",\n  \"gates\": [\n    {\n      \"gate_id\": \"string\",\n      \"gate_type\": \"command\",\n      \"enforcement\": \"required\",\n      \"origin\": \"repo\",\n      \"runs\": [\n        \"pre_tool_use.edit_target\"\n      ],\n      \"message\": \"string\"\n    }\n  ]\n}"
+            },
+            "description": "Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.\n\n`otari hook` sends this once per version, the first time it reports a check\nagainst it. The fingerprint is recomputed from the gates, and one that does\nnot match the one sent is refused, so a version cannot be stored under\nanother's name. Sending a version again changes nothing. It is stored in the\nAPI key's workspace, beside that key's traces, and takes the same key a trace\nexport does: a budget-exempt API key, never the master key.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hooks",
+                "guardrails"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hooks/guardrails"
+            }
+          }
         }
       ],
       "name": "hooks"
@@ -4428,7 +4462,7 @@
               },
               "raw": "{\n  \"assertion\": \"<identity token>\",\n  \"federation_rule_id\": \"7d0c7a52-9a2e-4b55-8f3a-2f1f6c0d2a11\",\n  \"grant_type\": \"urn:ietf:params:oauth:grant-type:jwt-bearer\",\n  \"organization_id\": \"5b3f8e0e-1c2d-4e7f-9a8b-0c1d2e3f4a5b\"\n}"
             },
-            "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must verify against an issuer on ``federation_issuers`` and match the federation rule\n``federation_rule_id`` names. ``organization_id``, ``workspace_id`` and ``service_account_id``, where set, must\nbe the UUIDs of the rule's key's organization and workspace and the key's id. The access token authenticates as\nthat key until ``expires_in`` runs out, the rule is deleted or the key stops passing its checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
+            "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:\none on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,\nwhere set, must be the UUID of the rule's key's organization. ``workspace_id`` and ``service_account_id`` are\naccepted and ignored, so a client configured for Anthropic needs only its rule and organization changed. The\naccess token authenticates as that key until ``expires_in`` runs out, the rule is deleted or the key stops passing\nits checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
             "header": [
               {
                 "key": "Content-Type",
@@ -6363,6 +6397,116 @@
           }
         },
         {
+          "name": "List Own Federation Rules",
+          "request": {
+            "description": "List the identities that may authenticate as a key, oldest first.\n\nThe caller's own key, or for the deployment operator any key in their active organization. Includes any rule\nthe operator gave the key on ``/api/v1/keys``, which ``member_managed`` tells apart.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "keys",
+                ":key_id",
+                "federation-rules"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/keys/:key_id/federation-rules",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Own Federation Rule",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"audience\": \"https://otari.example.com\",\n  \"email\": \"hackbot-api@my-project.iam.gserviceaccount.com\",\n  \"issuer\": \"https://accounts.google.com\"\n}"
+            },
+            "description": "Let an OpenID Connect identity token stand in for a key, through the token exchange.\n\nNeeds ``federation_member_rules``, else 403, and an organization owner or admin acting on their own key, or the\ndeployment operator on any key in their active organization, else 403. The issuer may be any https URL; its\nsigning keys are fetched only from a public host. The rule matches only in ``POST /api/v1/oauth/token`` naming\nits id, never as a bare identity token, so it lets a workload act as this key and no other: a rule naming another\ntenant's workload gives that workload nothing it did not ask for. A rule this key already holds answers 409.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "keys",
+                ":key_id",
+                "federation-rules"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/keys/:key_id/federation-rules",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Own Federation Rule",
+          "request": {
+            "description": "Remove a federation rule from a key. Tokens it matched stop with the next request.\n\nThe caller's own key whatever their role, or for the deployment operator any key in their active organization.\nWorks whether or not ``federation_member_rules`` is on, so a rule can always be taken back.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "keys",
+                ":key_id",
+                "federation-rules",
+                ":rule_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/keys/:key_id/federation-rules/:rule_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "rule_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Rotate Own Key",
           "request": {
             "description": "Rotate the secret of one of the caller's own API keys, in place.\n\nSame contract as the operator's rotate: the row keeps its identity, the new\nraw key is returned once, and the previous secret stops authenticating\nimmediately with no grace window.",
@@ -7379,13 +7523,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -7457,13 +7601,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -7542,7 +7686,7 @@
         {
           "name": "Trace Series",
           "request": {
-            "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+            "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7571,13 +7715,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -8614,7 +8758,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"messages\": [\n    {}\n  ]\n}"
             },
-            "description": "Run one chat completion for the signed-in caller.\n\nStreaming and non-streaming both, identically to ``POST\n/api/v1/chat/completions``: this resolves the principal and then calls the\nvery same handler. The request is billed to the caller's own attribution\nuser in the workspace they named (or their organization's default), against\nthat user's budget, and writes the ordinary usage row with no ``api_key_id``,\nbecause there was no key.\n\nThe body is ``ChatCompletionRequest`` unchanged, so the page sends the same\nrequest an SDK would and a model, tool or parameter the gateway gains is\navailable here the day it lands. The workspace rides in the query string\nrather than in the body for that reason: a field added to the body would\nalso have to be added to the pipeline's strip list, and a gateway-internal\nfield that is not stripped is forwarded to the provider as a call kwarg.\n\n``user`` in the body is the one field the pipeline will not read here: spend\nbinds to the session's own attribution user, derived and never accepted.",
+            "description": "Run one chat completion for the signed-in caller.\n\nStreaming and non-streaming both, identically to ``POST\n/api/v1/chat/completions``: this resolves the principal and then calls the\nvery same handler. The request is billed to the caller's own attribution\nuser in the workspace they named (or their organization's default), against\nthat user's budget, and writes the ordinary usage row with no ``api_key_id``,\nbecause there was no key.\n\nThe body is ``ChatCompletionRequest`` unchanged, so the page sends the same\nrequest an SDK would and a model, tool or parameter the gateway gains is\navailable here the day it lands. The workspace rides in the query string\nrather than in the body for that reason: a field added to the body would\nalso have to be added to the pipeline's strip list, and a gateway-internal\nfield that is not stripped is forwarded to the provider as a call kwarg.\n\n``user`` and ``safety_identifier`` in the body are the fields the pipeline\nwill not read here: spend and the provider's end-user identifier both bind\nto the session's own attribution user, derived and never accepted.",
             "header": [
               {
                 "key": "Content-Type",
@@ -9158,7 +9302,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"model_key\": \"string\",\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0\n}"
+              "raw": "{\n  \"model_key\": \"string\"\n}"
             },
             "description": "Set or update pricing for a model.\n\nRejects an alias or a routing policy: pricing, budgets, and usage all key on\nthe model a request resolves to, so a row stored under either name would\nnever be read.",
             "header": [
@@ -10768,6 +10912,62 @@
           }
         },
         {
+          "name": "Set Sandbox Credential",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_key\": \"e2b_0123456789abcdef\"\n}"
+            },
+            "description": "Store the key this deployment's hosted sandbox provider leases sandboxes with.\n\nWins over the provider's environment variable (``E2B_API_KEY``), on this\nworker at once and on every other within 30 seconds, so a rotated key needs\nno redeploy. Refused for the ``protocol`` provider, which takes no key of\nits own. Operator-gated.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tool-settings",
+                "sandbox",
+                "credential"
+              ],
+              "raw": "{{baseUrl}}/api/v1/tool-settings/sandbox/credential"
+            }
+          }
+        },
+        {
+          "name": "Clear Sandbox Credential",
+          "request": {
+            "description": "Delete the stored sandbox key, so sandboxes are leased with the environment's key again.\n\nClearing a key that was never stored is not an error. Operator-gated.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tool-settings",
+                "sandbox",
+                "credential"
+              ],
+              "raw": "{{baseUrl}}/api/v1/tool-settings/sandbox/credential"
+            }
+          }
+        },
+        {
           "name": "Test Service",
           "request": {
             "body": {
@@ -10885,13 +11085,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -10961,13 +11161,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -11044,7 +11244,7 @@
         {
           "name": "Trace Series",
           "request": {
-            "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+            "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
             "header": [],
             "method": "GET",
             "url": {
@@ -11071,13 +11271,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -12266,7 +12466,7 @@
         {
           "name": "Add Workspace Member",
           "request": {
-            "description": "Add an existing organization member to a workspace.",
+            "description": "Add an existing organization member to a workspace.\n\nThe 404 for a workspace deleted during the add describes PostgreSQL. SQLite does not name the\nforeign key it enforced, so it surfaces that race as a 500.",
             "header": [],
             "method": "POST",
             "url": {

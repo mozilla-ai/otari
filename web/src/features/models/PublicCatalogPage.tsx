@@ -1,3 +1,6 @@
+import { useState } from "react"
+
+import { EMPTY_CATALOG_LIST } from "@/features/models/catalog"
 import { ModelCatalogView } from "@/features/models/ModelCatalogPage"
 import { ModelDetailView } from "@/features/models/ModelDetailPage"
 import { PublicCatalogBar } from "@/features/models/PublicCatalogBar"
@@ -13,6 +16,7 @@ import { publicCatalogHref } from "@/features/models/publicCatalog"
 // a form, and these pages are as wide as the dashboard's. It carries the site's
 // own navbar destinations; see `PublicCatalogBar`.
 export function PublicCatalogPage({ modelId }: { modelId?: string }) {
+  const [list, setList] = useState(EMPTY_CATALOG_LIST)
   return (
     <div className="flex min-h-full flex-col">
       <PublicCatalogBar onList={!modelId} />
@@ -21,6 +25,8 @@ export function PublicCatalogPage({ modelId }: { modelId?: string }) {
           <ModelDetailView modelId={modelId} publicView />
         ) : (
           <ModelCatalogView
+            list={list}
+            onListChange={setList}
             publicView
             onOpen={(id) => {
               window.location.hash = publicCatalogHref(id)

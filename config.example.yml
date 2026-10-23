@@ -86,10 +86,9 @@ providers:
 # OTARI_SECRET_KEY in the process environment.
 # Provider copies of attached files, on by default, require
 # OTARI_PROVIDER_ACCOUNT_PEPPER: its own random value of at least 32 characters.
-# Each provider call carries a per-end-user identifier, on by default. Set
+# Each provider call carries a per-end-user identifier. Set
 # OTARI_PROVIDER_USER_IDENTIFIER_KEY (32+ random characters) to key it. See
 # docs/configuration.md#end-user-identifiers.
-# provider_user_identifier_enabled: false
 
 # Optional email delivery. public_base_url is also used by passkeys and OAuth.
 # public_base_url: "https://otari.example.com"
@@ -121,6 +120,7 @@ providers:
 # files_url: "gcs://my-bucket/otari-files"
 # files_storage_options: { project: "my-project" }
 # files_max_bytes: 536870912
+# files_gemini_inline_max_bytes: 16777216
 # files_output_max_files: 20
 # files_output_max_bytes: 67108864
 # files_provider_copy_max_sec: 60

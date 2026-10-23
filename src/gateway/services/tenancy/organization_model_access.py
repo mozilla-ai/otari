@@ -90,6 +90,9 @@ class SessionCatalogScope:
     deployment where nobody has adopted any.
     """
 
+    hosted_keys: frozenset[str] = frozenset()
+    """Selectors the deployment's hosted providers switched on for this caller, listed like ``offered_keys``."""
+
 
 async def resolve_hosted_models(
     model_provider: ModelProviderPort | None, organization_id: uuid.UUID | None
@@ -387,6 +390,9 @@ async def resolve_session_catalog_scope(
         # key, which says the organization may reach everything that provider
         # serves and nothing about which of them to list.
         offered_keys=frozenset(entry for entry in byo_allowlist if not entry.endswith(":*")),
+        hosted_keys=frozenset(
+            entry for entry in hosted_allowlist_entries(hosted_models, reachable_hosted) if not entry.endswith(":*")
+        ),
     )
 
 

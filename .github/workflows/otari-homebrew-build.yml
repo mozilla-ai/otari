@@ -1,0 +1,105 @@
+name: Build the Otari Homebrew Assets
+
+# Called by otari-tag-release.yml between creating the tag with a draft Release
+# and publishing it: builds the agent-side CLI's sdist (cli/, distribution
+# otari-agent), exports its pinned closure, renders Formula/otari.rb from
+# packaging/homebrew/otari.rb.tmpl and the lock, smokes the light install, and
+# attaches the three files to the draft. Releases are immutable once
+# published, which is why this cannot run after publishing.
+# otari-homebrew.yml then installs the published formula on macOS and pushes it
+# to the tap.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag the draft Release is for (e.g. v0.9.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build the sdist and render the formula
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Resolve the release tag
+        id: ver
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[-a-zA-Z0-9.]+)?$'; then
+            echo "::error::'$TAG' is not a release tag (vX.Y.Z)"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.ver.outputs.tag }}
+          persist-credentials: false
+          # setuptools-scm reads the version off the tag, so the build needs
+          # the tags rather than the single commit a shallow checkout fetches.
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.14"
+
+      # setuptools-scm takes the version from the tag checked out above
+      # (RELEASE.md: the version comes from the tag) and writes it into the
+      # sdist, so there is nothing to stamp here. The lock records the member's
+      # version as dynamic, so that does not invalidate --frozen.
+      - name: Build the sdist and export its pinned closure
+        run: |
+          uv build --package otari-agent --sdist -o dist
+          uv export --frozen --package otari-agent --no-dev --no-emit-workspace -o dist/requirements.txt
+
+      # Globbed: setuptools normalizes the file name (1.2.3-alpha1 builds 1.2.3a1).
+      - name: Render the formula
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: >-
+          python scripts/homebrew_formula.py --version "$VERSION"
+          --sdist dist/otari_agent-*.tar.gz --output dist/otari.rb
+
+      # A clean venv holding only the exported closure plus the sdist: what a
+      # Homebrew install amounts to, minus Homebrew. Run from outside the
+      # checkout so `uv pip` does not pick up the workspace's constraints.
+      - name: Smoke the light install
+        run: |
+          DIST="$PWD/dist"
+          # The built file's own version, not the tag's: a prerelease tag
+          # normalizes on the way into the package (v1.2.3-alpha1 builds and
+          # reports 1.2.3a1, PEP 440), so comparing against the tag would fail
+          # the release for every prerelease. The tag still names the Release
+          # the formula downloads from, which is why VERSION stays above.
+          SDIST_VERSION="$(basename "$DIST"/otari_agent-*.tar.gz .tar.gz | sed 's/^otari_agent-//')"
+          cd "$(mktemp -d)"
+          uv venv light --python 3.14
+          uv pip install --python light/bin/python --require-hashes -r "$DIST/requirements.txt"
+          uv pip install --python light/bin/python --no-deps "$DIST"/otari_agent-*.tar.gz
+          test "$(light/bin/otari --version)" = "otari, version ${SDIST_VERSION}"
+          printf '{}' | light/bin/otari hook
+          light/bin/otari import claude-code --dry-run --projects-dir "$(mktemp -d)" | grep -q "Nothing to import"
+          ! light/bin/otari serve >/dev/null 2>&1
+          light/bin/python -c "import sys, otari_agent.cli; assert 'gateway' not in sys.modules"
+
+      # The Release is still a draft: once published it is immutable, so its
+      # assets cannot be added or replaced. --clobber only matters on a re-run.
+      - name: Attach the assets to the draft Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          draft="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$TAG\") | .draft")"
+          if [ "$draft" != "true" ]; then
+            echo "::error::$TAG has no draft Release to attach to (found: '${draft:-none}')"
+            exit 1
+          fi
+          gh release upload "$TAG" dist/otari_agent-*.tar.gz dist/requirements.txt dist/otari.rb --clobber

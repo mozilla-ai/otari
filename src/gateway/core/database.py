@@ -140,6 +140,22 @@ DATABASE_ERRORS: tuple[type[BaseException], ...] = (SQLAlchemyError, TimeoutErro
 DATA_ERRORS: tuple[type[BaseException], ...] = (IntegrityError, DataError)
 
 
+def database_refusal(exc: BaseException) -> tuple[str | None, str | None]:
+    """The SQLSTATE (or SQLite error name) and the constraint name a refused statement carries.
+
+    Read from the driver's own fields, never from the message, which carries the
+    statement's bound parameters. SQLite names no constraint, so the second value
+    is None there.
+    """
+    orig = getattr(exc, "orig", None)
+    # asyncpg's own exception, under SQLAlchemy's adapter, is the most specific.
+    driver = getattr(orig, "__cause__", None) or orig
+    diag = getattr(orig, "diag", None)  # psycopg
+    code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None) or getattr(orig, "sqlite_errorname", None)
+    constraint = getattr(driver, "constraint_name", None) or getattr(diag, "constraint_name", None)
+    return code, constraint
+
+
 def describe_database_error(exc: BaseException) -> str:
     """Name a database error by its classes, SQLSTATE and constraint, never its message.
 
@@ -150,16 +166,13 @@ def describe_database_error(exc: BaseException) -> str:
     connection, which is what an operator reading the log needs.
     """
     orig = getattr(exc, "orig", None)
-    # asyncpg's own exception, under SQLAlchemy's adapter, is the most specific.
     driver = getattr(orig, "__cause__", None) or orig
+    code, constraint = database_refusal(exc)
     parts = [type(exc).__name__]
     if driver is not None and type(driver).__name__ != type(exc).__name__:
         parts.append(type(driver).__name__)
-    code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None) or getattr(orig, "sqlite_errorname", None)
     if code:
         parts.append(f"sqlstate={code}")
-    diag = getattr(orig, "diag", None)  # psycopg
-    constraint = getattr(driver, "constraint_name", None) or getattr(diag, "constraint_name", None)
     if constraint:
         parts.append(f"constraint={constraint}")
     return " ".join(parts)

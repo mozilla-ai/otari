@@ -164,12 +164,10 @@ keep it current, and they cover different things:
   on every PR that changes the dashboard's dependencies and weekly, failing on a
   high or critical advisory, and keeps a tracking issue open while one remains.
   Run it locally with `pnpm --dir web audit`.
-- **`.github/workflows/otari-lock-refresh.yml`** re-resolves `uv.lock` weekly against
-  the newest versions the existing constraints already allow, which is the case
-  Dependabot does not open PRs for. A floored dependency can otherwise stay at
-  whatever version was current the day it was first locked.
 
-To do either by hand:
+Dependabot moves a direct dependency by raising its floor, and an indirect one only
+when an advisory names it. An indirect dependency with no advisory stays at the
+version it was first locked at until the lock is refreshed by hand:
 
 ```bash
 uv lock --upgrade --dry-run                    # what would move, and to where

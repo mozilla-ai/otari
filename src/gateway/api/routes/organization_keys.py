@@ -36,7 +36,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,7 +46,9 @@ from gateway.api.deps import (
     ApiKeyFormatPortDep,
     ApiKeyServiceDep,
     CurrentIdentity,
+    DeploymentUserServiceDep,
     GrowthSignalPortDep,
+    OrganizationServiceDep,
     get_config,
     get_db,
     verify_master_key,
@@ -67,6 +69,7 @@ from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.ports.growth_signal_port import GrowthActivationEvent
 from gateway.repositories.users_repository import get_or_create_attribution_user
+from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
     KEY_TOOLS_EXCEED_USER_DETAIL,
@@ -458,3 +461,114 @@ async def delete_own_key(
     except DATABASE_ERRORS as exc:
         await db.rollback()
         raise database_error("delete own key", exc) from None
+
+
+async def _federation_rule_key(
+    db: AsyncSession,
+    organizations: OrganizationService,
+    identity: TenancyUser,
+    key_id: str,
+    *,
+    operates: bool,
+    adding: bool,
+) -> APIKey:
+    """The key a federation rule route acts on, or 404.
+
+    The deployment operator may act on any key in their active organization, as on ``/api/v1/keys``; anyone else
+    only on their own. Adding a rule also takes an owner or admin of the organization (or the operator), since a
+    rule decides which workloads may act as the key; listing and deleting do not, so a caller whose role was lowered
+    can still see and take back what they set up.
+    """
+    organization = await organizations.get_active_organization_for_user(identity)
+    if operates:
+        return await _load_key_in_organization(db, key_id, organization.id)
+    if adding:
+        await organizations.require_active_organization_management_access(user=identity, organization=organization)
+    return await _load_key_in_organization(db, key_id, organization.id, owner_user_id=str(identity.id))
+
+
+@router.post("/{key_id}/federation-rules", status_code=status.HTTP_201_CREATED)
+async def create_own_federation_rule(
+    key_id: str,
+    request: FederationRuleCreate,
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    api_keys: ApiKeyServiceDep,
+    organizations: OrganizationServiceDep,
+    deployment_users: DeploymentUserServiceDep,
+) -> FederationRulePublic:
+    """Let an OpenID Connect identity token stand in for a key, through the token exchange.
+
+    Needs ``federation_member_rules``, else 403, and an organization owner or admin acting on their own key, or the
+    deployment operator on any key in their active organization, else 403. The issuer may be any https URL; its
+    signing keys are fetched only from a public host. The rule matches only in ``POST /api/v1/oauth/token`` naming
+    its id, never as a bare identity token, so it lets a workload act as this key and no other: a rule naming another
+    tenant's workload gives that workload nothing it did not ask for. A rule this key already holds answers 409.
+    """
+    if not config.federation_member_rules:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This deployment does not let organizations manage federation rules.",
+        )
+    key = await _federation_rule_key(
+        db,
+        organizations,
+        identity,
+        key_id,
+        operates=await deployment_users.has_administration_access(identity),
+        adding=True,
+    )
+    return await api_keys.add_federation_rule(key.id, request, allowed_issuers=(), member_managed=True)
+
+
+@router.get("/{key_id}/federation-rules")
+async def list_own_federation_rules(
+    key_id: str,
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_keys: ApiKeyServiceDep,
+    organizations: OrganizationServiceDep,
+    deployment_users: DeploymentUserServiceDep,
+) -> list[FederationRulePublic]:
+    """List the identities that may authenticate as a key, oldest first.
+
+    The caller's own key, or for the deployment operator any key in their active organization. Includes any rule
+    the operator gave the key on ``/api/v1/keys``, which ``member_managed`` tells apart.
+    """
+    key = await _federation_rule_key(
+        db,
+        organizations,
+        identity,
+        key_id,
+        operates=await deployment_users.has_administration_access(identity),
+        adding=False,
+    )
+    return await api_keys.list_federation_rules(key.id)
+
+
+@router.delete("/{key_id}/federation-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_own_federation_rule(
+    key_id: str,
+    rule_id: str,
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_keys: ApiKeyServiceDep,
+    organizations: OrganizationServiceDep,
+    deployment_users: DeploymentUserServiceDep,
+) -> Response:
+    """Remove a federation rule from a key. Tokens it matched stop with the next request.
+
+    The caller's own key whatever their role, or for the deployment operator any key in their active organization.
+    Works whether or not ``federation_member_rules`` is on, so a rule can always be taken back.
+    """
+    key = await _federation_rule_key(
+        db,
+        organizations,
+        identity,
+        key_id,
+        operates=await deployment_users.has_administration_access(identity),
+        adding=False,
+    )
+    await api_keys.delete_federation_rule(key.id, rule_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -206,6 +206,12 @@ class DeploymentBootstrap(BaseModel):
         )
     )
     feedback_enabled: bool = Field(description="Whether this deployment accepts deliberate feedback submissions.")
+    federation_member_rules: bool = Field(
+        description=(
+            "Whether an organization's owners and admins may give their own API keys federation rules (the "
+            "federation_member_rules setting), so the dashboard offers workload identity on their keys."
+        )
+    )
     mail_ready: bool = Field(
         description=(
             "Whether this deployment can deliver a message carrying a link back to itself "
@@ -249,6 +255,7 @@ async def get_bootstrap(
         passkeys_ready=config.webauthn_enabled,
         oauth_providers=list(config.oauth_providers),
         feedback_enabled=any(feature.name == "feedback" for feature in enabled_features),
+        federation_member_rules=config.federation_member_rules,
         mail_ready=config.mail_ready,
         # Gated on mail as well as on the setting, and not only because the
         # route refuses without it: an operator who turned open signup on and

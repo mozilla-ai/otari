@@ -59,6 +59,7 @@ import {
   useRotateKey,
   useUpdateKey,
 } from "@/shared/api/apiKeys"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { useUsers } from "@/shared/api/users"
 import { formatDate } from "@/shared/helpers/format"
 import {
@@ -72,7 +73,9 @@ import {
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 import { ExpiryFields } from "./ExpiryFields"
+import { FederationRulesDialog } from "./FederationRulesDialog"
 import { KeyActionsMenu } from "./KeyActionsMenu"
 import {
   type CappingBudget,
@@ -1286,6 +1289,15 @@ export function KeysPage() {
   }
 
   const [pendingRegenerate, setPendingRegenerate] = useState<ApiKey>()
+  const [federating, setFederating] = useState<ApiKey>()
+  // Organization owners and admins on their own keys, which are all this
+  // surface lists to them, and the operator on any key in the organization.
+  // The server enforces the same; this only keeps a member from being offered
+  // a form that would answer 403.
+  const role = useOrganizationContext().data?.role
+  const canFederate =
+    useDeployment().federation_member_rules &&
+    (isDeploymentWide || role === "owner" || role === "admin")
   const [pendingDelete, setPendingDelete] = useState<ApiKey>()
   const [lastAction, setLastAction] = useState<string>()
   // Still load-bearing, though `confirmRef` goes unused: a menu closes on choice,
@@ -1355,6 +1367,9 @@ export function KeysPage() {
         }}
         onRegenerate={() => setPendingRegenerate(apiKey)}
         onDelete={() => setPendingDelete(apiKey)}
+        onWorkloadIdentity={
+          canFederate ? () => setFederating(apiKey) : undefined
+        }
       />
     ),
     [
@@ -1366,6 +1381,7 @@ export function KeysPage() {
       updateKey.isPending,
       rotateKey.isPending,
       setActive,
+      canFederate,
     ],
   )
   // Memoized on what the cells read, so DataTable's per-row cache holds across
@@ -1617,6 +1633,13 @@ export function KeysPage() {
             rotateKey.reset()
             createButtonRef.current?.focus()
           }}
+        />
+      ) : null}
+
+      {federating ? (
+        <FederationRulesDialog
+          apiKey={federating}
+          onClose={() => setFederating(undefined)}
         />
       ) : null}
 

@@ -64,6 +64,7 @@ from gateway.services.providers import HostedProviderService
 from gateway.services.tenancy import forget_unproven_access
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tools import sandbox_api_key
 
 T = TypeVar("T")
 
@@ -377,7 +378,8 @@ def _code_execution_adapter_factory(config: GatewayConfig | None) -> PortFactory
         if config is None:
             msg = "CodeExecutionPort needs the deployment config; build the container with it"
             raise ContainerError(msg)
-        return build_code_execution_port(config)
+        provider = config.effective_sandbox_provider()
+        return build_code_execution_port(config, hosted_api_key=lambda: sandbox_api_key(provider))
 
     return factory
 

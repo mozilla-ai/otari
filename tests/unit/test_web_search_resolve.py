@@ -442,6 +442,20 @@ def test_a_result_says_whether_a_credential_or_an_instance_serves_it() -> None:
     assert not on_instance.on_credential
 
 
+@pytest.mark.parametrize(("api_base", "tenant_endpoint"), [(None, False), ("  ", False), ("https://1.1.1.1/v1", True)])
+def test_a_result_says_whether_a_credential_names_its_own_endpoint(api_base: str | None, tenant_endpoint: bool) -> None:
+    config = GatewayConfig(search_tools={"exa": {"api_key": "k", "api_base": "https://1.1.1.1/exa"}})
+    search = WebSearchCredential(provider="exa", source=_ORG, api_key="org-key", api_base=api_base)
+    fetch = WebFetchCredential(provider="tabstack", source=_ORG, api_key="org-key", api_base=api_base)
+
+    on_search = resolve_search(config, None, requested="exa", request_options=None, direct_credential=search)
+    on_fetch = _resolve._fetch_on_credential(fetch)
+
+    assert on_search is not None and on_search.on_credential and on_search.tenant_endpoint is tenant_endpoint
+    assert on_fetch is not None and on_fetch.tenant_endpoint is tenant_endpoint
+    assert not _named(config, "exa").tenant_endpoint
+
+
 def test_a_credential_for_a_provider_this_gateway_cannot_call_is_ignored(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.WARNING, logger="gateway")
     credential = WebSearchCredential(provider="unheard-of", source=_ORG, api_key="key-of-the-org")

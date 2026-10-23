@@ -17,17 +17,22 @@ function Metrics({
   durationMs,
   cost,
   tokens,
+  estimate,
 }: {
   durationMs: number
   cost: number
   tokens: number
+  /** An estimated cost, marked as one. */
+  estimate?: number
 }) {
-  if (durationMs <= 0 && !cost && !tokens) return null
+  if (durationMs <= 0 && !cost && !tokens && !estimate) return null
   return (
     <span className="flex items-center gap-x-3 truncate text-mono-caption whitespace-nowrap text-muted">
       {durationMs > 0 ? <span>{formatDuration(durationMs)}</span> : null}
       {cost ? (
         <span>{formatCost(cost)}</span>
+      ) : estimate ? (
+        <span>≈ {formatCost(estimate)}</span>
       ) : tokens ? (
         <span>{formatNumber(tokens)} tokens</span>
       ) : null}
@@ -126,12 +131,13 @@ function TreeRow({
         <span className={TEXT}>
           <span className="flex min-w-0 items-center gap-2">
             <span className="truncate text-body">{obs.name}</span>
-            <LevelChip level={obs.level} />
+            <LevelChip level={obs.level} returnedError={obs.returnedError} />
           </span>
           <Metrics
             durationMs={obs.endMs - obs.startMs}
             cost={obs.cost ?? 0}
             tokens={tokens}
+            estimate={obs.estimate?.total}
           />
         </span>
       </button>
@@ -188,7 +194,7 @@ function SearchRow({
         <span className="flex min-w-0 flex-1 flex-col py-0.5 pl-2">
           <span className="flex min-w-0 items-center gap-2">
             <span className="truncate text-body">{obs.name}</span>
-            <LevelChip level={obs.level} />
+            <LevelChip level={obs.level} returnedError={obs.returnedError} />
           </span>
           <Metrics
             durationMs={obs.endMs - obs.startMs}

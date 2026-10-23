@@ -42,6 +42,7 @@ from gateway.core.config import (
     REQUEST_ID_HEADER,
     RESPONSE_DURATION_HEADER,
     ROUTER_TASK_HEADER,
+    SERVER_TIMING_HEADER,
     TAGS_HEADER,
     GatewayConfig,
 )
@@ -150,6 +151,8 @@ def test_retry_replays_the_original_response_without_billing_again(
     # The original's duration would misdescribe a replay, which never reached a provider.
     assert RESPONSE_DURATION_HEADER in first.headers
     assert RESPONSE_DURATION_HEADER not in second.headers
+    assert SERVER_TIMING_HEADER in first.headers
+    assert SERVER_TIMING_HEADER not in second.headers
     assert second.headers[IDEMPOTENT_REPLAYED_HEADER] == "true"
     assert IDEMPOTENT_REPLAYED_HEADER not in first.headers
     assert _usage_rows(db_session_factory) == 1

@@ -6,6 +6,7 @@ import type { RefObject } from "react"
 import { WalletNavSlot } from "@/app/nav/overlayWalletSlot"
 import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
 import { useNavVisibility } from "@/app/nav/useNavVisibility"
+import { OTARI_COMMUNITY_URL } from "@/shared/helpers/community"
 import { documentationHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -47,7 +48,7 @@ export function TopBarActions({
       >
         Documentation
       </a>
-      {/* A button beside two links, so it takes their class and the pointer a
+      {/* A button beside the links, so it takes their class and the pointer a
           link gets for free. */}
       {feedback_enabled && onOpenFeedback ? (
         <button
@@ -59,6 +60,14 @@ export function TopBarActions({
           Feedback
         </button>
       ) : null}
+      <a
+        href={OTARI_COMMUNITY_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={ACTION}
+      >
+        Community
+      </a>
       <WalletNavSlot />
     </div>
   )

@@ -43,6 +43,7 @@ describe("normalizeBootstrap", () => {
       omitting(
         "mail_ready",
         "feedback_enabled",
+        "federation_member_rules",
         "passkeys_ready",
         "maintenance_mode",
         "docs_url",
@@ -52,6 +53,7 @@ describe("normalizeBootstrap", () => {
     )
 
     expect(completed.feedback_enabled).toBe(false)
+    expect(completed.federation_member_rules).toBe(false)
     expect(completed.mail_ready).toBe(false)
     expect(completed.passkeys_ready).toBe(false)
     expect(completed.maintenance_mode).toBe(false)

@@ -19,6 +19,11 @@ gated, mirroring the other management routers.
   and applies them to the running worker.
 * ``POST /api/v1/tool-settings/{service}/test`` structurally validates a (typically
   unsaved) URL and probes it for reachability, returning ``{ok, reason}``.
+* ``PUT`` and ``DELETE /api/v1/tool-settings/sandbox/credential`` store and clear
+  the key a hosted sandbox provider (``sandbox_provider: e2b``) leases with. A
+  stored key wins over the provider's environment variable and reaches every
+  worker without a restart, so rotating it needs no redeploy. The key is never
+  returned: the GET reports only where it comes from and its last four characters.
 * ``GET /api/v1/tool-settings/guardrails/profiles`` reads the guardrail catalog off
   the service ``guardrails_url`` names. It sits here because that field is the
   only input it takes, and on the reader router for the reason the GET above is:
@@ -39,6 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    UnitOfWorkDep,
     get_config,
     get_db,
     get_session_identity,
@@ -53,6 +59,7 @@ from gateway.core.settings.tools import validate_default_tool
 from gateway.log_config import logger
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tools import SandboxProvider
+from gateway.schemas.tools import SandboxCredentialPublic, SandboxCredentialRequest
 from gateway.services.guardrail_catalog import (
     BuiltInGuardrailCatalog,
     GuardrailCatalog,
@@ -76,6 +83,13 @@ from gateway.services.tool_settings_service import (
     get_field_options,
     stage_override,
     validate_url,
+)
+from gateway.services.tools import (
+    SANDBOX_KEY_ENV,
+    SandboxCredentialStatus,
+    clear_sandbox_api_key,
+    sandbox_credential_status,
+    store_sandbox_api_key,
 )
 from gateway.services.url_safety import redact_url_secrets
 
@@ -139,6 +153,13 @@ class ToolSettingsResponse(BaseModel):
         description=(
             "What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, "
             "not editable here. Null for a reader who does not operate the deployment."
+        ),
+    )
+    sandbox_credential: SandboxCredentialPublic | None = Field(
+        default=None,
+        description=(
+            "The key a hosted sandbox_provider leases with. Null for the protocol provider, which takes "
+            "none, and for a reader who does not operate the deployment."
         ),
     )
 
@@ -215,7 +236,16 @@ def _current_fields(config: GatewayConfig, *, include_urls: bool = True) -> Tool
         for key in keys
     ]
     provider = config.effective_sandbox_provider() if include_urls else None
-    return ToolSettingsResponse(fields=fields, sandbox_provider=provider)
+    credential = _sandbox_credential(provider, sandbox_credential_status(provider)) if provider else None
+    return ToolSettingsResponse(fields=fields, sandbox_provider=provider, sandbox_credential=credential)
+
+
+def _sandbox_credential(provider: SandboxProvider, status: SandboxCredentialStatus) -> SandboxCredentialPublic | None:
+    """What the dashboard shows of the key ``provider`` leases with, or ``None`` where it takes none."""
+    env_var = SANDBOX_KEY_ENV.get(provider)
+    if env_var is None:
+        return None
+    return SandboxCredentialPublic(source=status.source, last4=status.last4, env_var=env_var)
 
 
 @reader_router.get("")
@@ -348,6 +378,38 @@ async def update_tool_settings(
             logger.info("Tool setting changed via dashboard: %s", key)
 
     return _current_fields(config)
+
+
+@operator_router.put("/sandbox/credential")
+async def set_sandbox_credential(
+    request: SandboxCredentialRequest,
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> SandboxCredentialPublic:
+    """Store the key this deployment's hosted sandbox provider leases sandboxes with.
+
+    Wins over the provider's environment variable (``E2B_API_KEY``), on this
+    worker at once and on every other within 30 seconds, so a rotated key needs
+    no redeploy. Refused for the ``protocol`` provider, which takes no key of
+    its own. Operator-gated.
+    """
+    provider = config.effective_sandbox_provider()
+    status_ = await store_sandbox_api_key(uow, provider, request.api_key)
+    return cast(SandboxCredentialPublic, _sandbox_credential(provider, status_))
+
+
+@operator_router.delete("/sandbox/credential")
+async def clear_sandbox_credential(
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> SandboxCredentialPublic:
+    """Delete the stored sandbox key, so sandboxes are leased with the environment's key again.
+
+    Clearing a key that was never stored is not an error. Operator-gated.
+    """
+    provider = config.effective_sandbox_provider()
+    status_ = await clear_sandbox_api_key(uow, provider)
+    return cast(SandboxCredentialPublic, _sandbox_credential(provider, status_))
 
 
 @operator_router.post("/{service}/test")

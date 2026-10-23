@@ -39,6 +39,7 @@ jobs:
   open-release-pr:
     name: Open release PR
     runs-on: ubuntu-latest
+    environment: release
     env:
       VERSION: ${{ github.event.inputs.version }}
     steps:

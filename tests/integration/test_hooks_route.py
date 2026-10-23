@@ -5,11 +5,16 @@ Covers auth, the pass/fail/blocked shapes, and the parser's strictness
 """
 
 import time
+from collections.abc import Callable
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
+from gateway.models.traces import TraceGuardrailDefinition
+from otari_agent.domain.definitions import GateDefinition, definition_body, definition_digest, gates_from_body
 from otari_agent.domain.evaluators import _command_segments, _contains_subsequence
 
 _VALID_POLICY = """\
@@ -1479,3 +1484,81 @@ def test_read_evidence_leaves_a_write_only_policy_alone(client: TestClient, mast
     body = response.json()
     assert body["blocked"] is False
     assert all(result["outcome"] == "not_applicable" for result in body["results"])
+
+
+def _definition(**overrides: object) -> dict[str, object]:
+    gate = GateDefinition(
+        gate_id="no-changelog",
+        gate_type="path",
+        enforcement="required",
+        origin="repo",
+        runs=("pre_tool_use.edit_target",),
+        message="CHANGELOG.md is generated.",
+    )
+    return {**definition_body((gate,)), **overrides}
+
+
+def _exempt_key(client: TestClient, master_key_header: dict[str, str], *, exempt: bool = True) -> dict[str, str]:
+    client.post(f"{API_ROOT}/users", json={"user_id": "alice"}, headers=master_key_header)
+    response = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "hook", "user_id": "alice", "exclude_from_budget": exempt},
+        headers=master_key_header,
+    )
+    return {"Otari-Key": f"Bearer {response.json()['key']}"}
+
+
+def test_a_guardrail_definition_is_kept_once_under_its_fingerprint(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    api_key_header = _exempt_key(client, master_key_header)
+    body = _definition()
+
+    first = client.post(f"{API_ROOT}/hooks/guardrails", json=body, headers=api_key_header)
+    again = client.post(f"{API_ROOT}/hooks/guardrails", json=body, headers=api_key_header)
+
+    assert (first.status_code, again.status_code) == (200, 200)
+    assert first.json() == {"digest": body["digest"]}
+    with db_session_factory() as session:
+        [stored] = session.scalars(select(TraceGuardrailDefinition)).all()
+    assert stored.digest == body["digest"]
+    assert stored.gates[0]["message"] == "CHANGELOG.md is generated."
+
+
+def test_a_definition_whose_fingerprint_does_not_match_its_gates_is_refused(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    api_key_header = _exempt_key(client, master_key_header)
+    response = client.post(f"{API_ROOT}/hooks/guardrails", json=_definition(digest="0" * 64), headers=api_key_header)
+
+    assert response.status_code == 422
+    assert "does not match these gates" in response.text
+
+
+def test_the_master_key_cannot_store_a_definition(client: TestClient, master_key_header: dict[str, str]) -> None:
+    response = client.post(f"{API_ROOT}/hooks/guardrails", json=_definition(), headers=master_key_header)
+
+    assert response.status_code == 403
+
+
+def test_a_key_that_may_not_export_traces_cannot_store_a_definition(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/guardrails",
+        json=_definition(),
+        headers=_exempt_key(client, master_key_header, exempt=False),
+    )
+
+    assert response.status_code == 403
+
+
+def test_a_definition_naming_one_gate_twice_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
+    body = _definition()
+    body["gates"] = [*body["gates"], *body["gates"]]  # type: ignore[misc]
+    body["digest"] = definition_digest(gates_from_body(body["gates"]))  # type: ignore[arg-type]
+
+    response = client.post(f"{API_ROOT}/hooks/guardrails", json=body, headers=_exempt_key(client, master_key_header))
+
+    assert response.status_code == 422
+    assert "each gate_id may appear once" in response.text

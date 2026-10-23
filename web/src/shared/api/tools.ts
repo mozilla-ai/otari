@@ -7,6 +7,8 @@ import type {
   GuardrailCatalog,
   OrganizationGuardrail,
   OrganizationGuardrailTestResult,
+  SandboxCredentialPublic,
+  SandboxCredentialRequest,
   SearchProviderInfo,
   SearchToolsResponse,
   StoredSearchTool,
@@ -82,6 +84,39 @@ export function useUpdateToolSettings() {
       void queryClient.invalidateQueries({ queryKey: [GUARDRAIL_PROFILES] })
     },
   })
+}
+
+// The key a hosted sandbox provider leases with. Never read back: the answer is
+// where it comes from and its last four, which the settings query carries.
+function useSandboxCredentialWrite<TVariables>(
+  request: (variables: TVariables) => Promise<SandboxCredentialPublic>,
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: request,
+    onSuccess: (credential) => {
+      queryClient.setQueryData<ToolSettingsResponse>([TOOL_SETTINGS], (old) =>
+        old ? { ...old, sandbox_credential: credential } : old,
+      )
+    },
+  })
+}
+
+export function useSetSandboxCredential() {
+  return useSandboxCredentialWrite((body: SandboxCredentialRequest) =>
+    apiFetch<SandboxCredentialPublic>("/tool-settings/sandbox/credential", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  )
+}
+
+export function useClearSandboxCredential() {
+  return useSandboxCredentialWrite(() =>
+    apiFetch<SandboxCredentialPublic>("/tool-settings/sandbox/credential", {
+      method: "DELETE",
+    }),
+  )
 }
 
 // Search tools served by POST /v1/search: the editable rows plus the read-only

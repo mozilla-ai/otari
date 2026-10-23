@@ -3941,6 +3941,18 @@
             ],
             "title": "Response Format"
           },
+          "safety_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A stable identifier for the end user behind the request, used as the tag the provider's end-user identifier is derived from. Wins over `user` for that, and is never sent upstream. The dashboard's Playground ignores it.",
+            "title": "Safety Identifier"
+          },
           "seed": {
             "anyOf": [
               {
@@ -5925,6 +5937,11 @@
             "description": "Where this deployment's documentation lives, when it is not docs.otari.ai. Set, the dashboard's Documentation links open it in a new tab; null, they open https://docs.otari.ai/. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.",
             "title": "Docs Url"
           },
+          "federation_member_rules": {
+            "description": "Whether an organization's owners and admins may give their own API keys federation rules (the federation_member_rules setting), so the dashboard offers workload identity on their keys.",
+            "title": "Federation Member Rules",
+            "type": "boolean"
+          },
           "feedback_enabled": {
             "description": "Whether this deployment accepts deliberate feedback submissions.",
             "title": "Feedback Enabled",
@@ -6040,6 +6057,7 @@
           "oauth_providers",
           "open_signup",
           "feedback_enabled",
+          "federation_member_rules",
           "mail_ready"
         ],
         "title": "DeploymentBootstrap",
@@ -7433,7 +7451,7 @@
             "title": "Email"
           },
           "issuer": {
-            "description": "The token's 'iss', one of the deployment's federation_issuers.",
+            "description": "The token's 'iss'. On an operator's rule, one of the deployment's federation_issuers; on a member's own key, any https issuer, whose discovery document and signing keys are fetched only from a public host.",
             "maxLength": 512,
             "minLength": 1,
             "title": "Issuer",
@@ -7496,6 +7514,11 @@
             "title": "Issuer",
             "type": "string"
           },
+          "member_managed": {
+            "description": "Whether a member gave the rule to their own key: it then matches only in the token exchange.",
+            "title": "Member Managed",
+            "type": "boolean"
+          },
           "subject": {
             "anyOf": [
               {
@@ -7515,6 +7538,7 @@
           "audience",
           "subject",
           "email",
+          "member_managed",
           "created_at"
         ],
         "title": "FederationRulePublic",
@@ -7586,7 +7610,7 @@
                 "type": "null"
               }
             ],
-            "description": "When set, the id of the rule's key.",
+            "description": "Ignored. Accepted so that a client configured for Anthropic's service account id is not refused.",
             "title": "Service Account Id"
           },
           "workspace_id": {
@@ -7598,7 +7622,7 @@
                 "type": "null"
               }
             ],
-            "description": "When set, the UUID of the rule's key's workspace.",
+            "description": "Ignored. Accepted so that a client configured for Anthropic's workspace id is not refused.",
             "title": "Workspace Id"
           }
         },
@@ -7628,6 +7652,76 @@
           "expires_in"
         ],
         "title": "FederationTokenResponse",
+        "type": "object"
+      },
+      "GateDefinitionRequest": {
+        "additionalProperties": false,
+        "description": "One gate of a guardrail version: what it is, when it runs, and what it says when it fails.",
+        "properties": {
+          "enforcement": {
+            "enum": [
+              "required",
+              "advisory"
+            ],
+            "title": "Enforcement",
+            "type": "string"
+          },
+          "gate_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Gate Id",
+            "type": "string"
+          },
+          "gate_type": {
+            "enum": [
+              "command",
+              "command_if_changed",
+              "judge",
+              "path",
+              "verifier"
+            ],
+            "title": "Gate Type",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 4096,
+            "title": "Message",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "repo",
+              "user"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "runs": {
+            "items": {
+              "enum": [
+                "pre_tool_use.edit_target",
+                "pre_tool_use.read_target",
+                "pre_tool_use.command",
+                "stop.working_tree",
+                "stop.session",
+                "stop.verifier"
+              ],
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "gate_id",
+          "gate_type",
+          "enforcement",
+          "origin",
+          "runs",
+          "message"
+        ],
+        "title": "GateDefinitionRequest",
         "type": "object"
       },
       "GateResultResponse": {
@@ -7667,6 +7761,130 @@
           "message"
         ],
         "title": "GateResultResponse",
+        "type": "object"
+      },
+      "GateSummaryPublic": {
+        "description": "How often one agent guardrail gate ran in a session, by what it decided.",
+        "properties": {
+          "blocked": {
+            "description": "Checks where the gate stopped the agent.",
+            "title": "Blocked",
+            "type": "integer"
+          },
+          "enforcement": {
+            "anyOf": [
+              {
+                "enum": [
+                  "required",
+                  "advisory"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enforcement"
+          },
+          "flagged": {
+            "description": "Checks an advisory gate failed; the agent went ahead.",
+            "title": "Flagged",
+            "type": "integer"
+          },
+          "gate_id": {
+            "title": "Gate Id",
+            "type": "string"
+          },
+          "gate_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "From the guardrail's definition, when it was sent.",
+            "title": "Gate Type"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the gate says when it fails, from the guardrail's definition.",
+            "title": "Message"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "enum": [
+                  "repo",
+                  "user"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the gate is the repository's (.otari/) or the user's own (~/.otari/).",
+            "title": "Origin"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "integer"
+          },
+          "refused": {
+            "description": "Checks where the gate could not decide and held the agent anyway.",
+            "title": "Refused",
+            "type": "integer"
+          },
+          "runs": {
+            "description": "The moments the gate runs at (pre_tool_use.edit_target, stop.session, ...).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The check to open first: the earliest that did anything but pass. Null for a gate that never ran.",
+            "title": "Span Id"
+          },
+          "undecided": {
+            "description": "Checks where the gate could not decide; the agent went ahead unchecked.",
+            "title": "Undecided",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "gate_id",
+          "passed",
+          "blocked",
+          "flagged",
+          "refused",
+          "undecided",
+          "span_id",
+          "gate_type",
+          "enforcement",
+          "message",
+          "runs",
+          "origin"
+        ],
+        "title": "GateSummaryPublic",
         "type": "object"
       },
       "GatewaySettings": {
@@ -7832,6 +8050,44 @@
           "profile"
         ],
         "title": "GuardrailConfig",
+        "type": "object"
+      },
+      "GuardrailDefinitionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Digest",
+            "type": "string"
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/GateDefinitionRequest"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Gates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "digest",
+          "gates"
+        ],
+        "title": "GuardrailDefinitionRequest",
+        "type": "object"
+      },
+      "GuardrailDefinitionResponse": {
+        "properties": {
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest"
+        ],
+        "title": "GuardrailDefinitionResponse",
         "type": "object"
       },
       "GuardrailParameterSpec": {
@@ -11067,6 +11323,27 @@
         "title": "MessagesRequest",
         "type": "object"
       },
+      "ModelArchitecture": {
+        "description": "What a model reads and writes, in OpenRouter's ``architecture`` shape.",
+        "properties": {
+          "input_modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Input Modalities",
+            "type": "array"
+          },
+          "output_modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Output Modalities",
+            "type": "array"
+          }
+        },
+        "title": "ModelArchitecture",
+        "type": "object"
+      },
       "ModelListResponse": {
         "description": "OpenAI-compatible model list response.",
         "properties": {
@@ -11285,6 +11562,16 @@
       "ModelObject": {
         "description": "OpenAI-compatible model object.",
         "properties": {
+          "architecture": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelArchitecture"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "context_window": {
             "anyOf": [
               {
@@ -11320,6 +11607,17 @@
             ],
             "title": "Max Output Tokens"
           },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
           "object": {
             "default": "model",
             "title": "Object",
@@ -11343,6 +11641,20 @@
             "default": "none",
             "title": "Pricing Source",
             "type": "string"
+          },
+          "supported_parameters": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supported Parameters"
           }
         },
         "required": [
@@ -15975,6 +16287,18 @@
             "title": "Output Price Per Million",
             "type": "number"
           },
+          "price_per_request": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD for each request, for a rate in requests; null for any other unit.",
+            "title": "Price Per Request"
+          },
           "pricing_tiers": {
             "items": {
               "$ref": "#/components/schemas/PricingTier"
@@ -16755,6 +17079,21 @@
           "tpm": 200000
         },
         "properties": {
+          "budgets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.",
+            "title": "Budgets"
+          },
           "lease_sec": {
             "default": 900.0,
             "description": "How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.",
@@ -16774,6 +17113,16 @@
             ],
             "description": "Requests in flight at once.",
             "title": "Max Concurrent"
+          },
+          "mode": {
+            "default": "enforce",
+            "description": "'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a limit can be watched before it is enforced.",
+            "enum": [
+              "enforce",
+              "report"
+            ],
+            "title": "Mode",
+            "type": "string"
           },
           "models": {
             "anyOf": [
@@ -16802,7 +17151,8 @@
               "deployment",
               "key",
               "user",
-              "model"
+              "model",
+              "budget"
             ],
             "title": "Per",
             "type": "string"
@@ -16855,6 +17205,21 @@
         "additionalProperties": false,
         "description": "One rule in effect, and where it is defined.",
         "properties": {
+          "budgets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.",
+            "title": "Budgets"
+          },
           "lease_sec": {
             "default": 900.0,
             "description": "How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.",
@@ -16874,6 +17239,16 @@
             ],
             "description": "Requests in flight at once.",
             "title": "Max Concurrent"
+          },
+          "mode": {
+            "default": "enforce",
+            "description": "'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a limit can be watched before it is enforced.",
+            "enum": [
+              "enforce",
+              "report"
+            ],
+            "title": "Mode",
+            "type": "string"
           },
           "models": {
             "anyOf": [
@@ -16902,7 +17277,8 @@
               "deployment",
               "key",
               "user",
-              "model"
+              "model",
+              "budget"
             ],
             "title": "Per",
             "type": "string"
@@ -16981,6 +17357,21 @@
           "rpm": 1200
         },
         "properties": {
+          "budgets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The budget IDs a per: budget rule counts; null for every budget, and on any other rule.",
+            "title": "Budgets"
+          },
           "lease_sec": {
             "anyOf": [
               {
@@ -17007,6 +17398,22 @@
             "description": "Requests in flight at once.",
             "title": "Max Concurrent"
           },
+          "mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "enforce",
+                  "report"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "'enforce' refuses a request over the rule; 'report' serves it and names the rule.",
+            "title": "Mode"
+          },
           "models": {
             "anyOf": [
               {
@@ -17029,7 +17436,8 @@
                   "deployment",
                   "key",
                   "user",
-                  "model"
+                  "model",
+                  "budget"
                 ],
                 "type": "string"
               },
@@ -18229,6 +18637,68 @@
         "title": "RouterStatus",
         "type": "object"
       },
+      "SandboxCredentialPublic": {
+        "description": "Where the key a hosted sandbox provider leases with comes from. Never the key itself.",
+        "properties": {
+          "env_var": {
+            "description": "The environment variable a deployment that stores no key is read from.",
+            "title": "Env Var",
+            "type": "string"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key's last four characters, to tell keys apart.",
+            "title": "Last4"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "stored",
+                  "environment"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "'stored' for a key set here, which wins; 'environment' for the provider's own environment variable; null when there is neither and code execution fails until one is set.",
+            "title": "Source"
+          }
+        },
+        "required": [
+          "source",
+          "env_var"
+        ],
+        "title": "SandboxCredentialPublic",
+        "type": "object"
+      },
+      "SandboxCredentialRequest": {
+        "description": "The key to lease hosted sandboxes with.",
+        "example": {
+          "api_key": "e2b_0123456789abcdef"
+        },
+        "properties": {
+          "api_key": {
+            "minLength": 1,
+            "title": "Api Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_key"
+        ],
+        "title": "SandboxCredentialRequest",
+        "type": "object"
+      },
       "SandboxProvider": {
         "description": "What runs the code a code-execution tool call asks for, chosen per deployment.\n\nValues are read without regard to case or surrounding whitespace.",
         "enum": [
@@ -19404,6 +19874,19 @@
             "title": "Output Price Per Million",
             "type": "number"
           },
+          "price_per_request": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not combined with token prices.",
+            "title": "Price Per Request"
+          },
           "pricing_tiers": {
             "anyOf": [
               {
@@ -19432,9 +19915,7 @@
           }
         },
         "required": [
-          "model_key",
-          "input_price_per_million",
-          "output_price_per_million"
+          "model_key"
         ],
         "title": "SetPricingRequest",
         "type": "object"
@@ -19498,7 +19979,7 @@
         "type": "object"
       },
       "SpanPublic": {
-        "description": "One span of a session. Content is never part of a span.",
+        "description": "One span of a session. Its content is empty unless the deployment keeps content.",
         "properties": {
           "approximate": {
             "description": "True when the start was inferred rather than measured.",
@@ -19548,6 +20029,14 @@
             ],
             "description": "Input tokens written to the prompt cache.",
             "title": "Cache Write Tokens"
+          },
+          "content": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the deployment keeps content and the agent sent it. Empty otherwise.",
+            "title": "Content",
+            "type": "object"
           },
           "cost": {
             "anyOf": [
@@ -19676,7 +20165,8 @@
             "enum": [
               "ok",
               "error",
-              "unknown"
+              "unknown",
+              "blocked"
             ],
             "title": "Outcome",
             "type": "string"
@@ -19820,7 +20310,8 @@
           "request_id",
           "otel_trace_id",
           "otel_span_id",
-          "attributes"
+          "attributes",
+          "content"
         ],
         "title": "SpanPublic",
         "type": "object"
@@ -20216,6 +20707,80 @@
         "title": "ToolChargeLine",
         "type": "object"
       },
+      "ToolCostPublic": {
+        "description": "An estimate of what one tool call cost, from the model requests either side of it.",
+        "properties": {
+          "calling": {
+            "description": "Its share of the output of the request that called it.",
+            "title": "Calling",
+            "type": "number"
+          },
+          "calls_sharing_request": {
+            "description": "Tool calls the request that called it made, sharing its output.",
+            "title": "Calls Sharing Request",
+            "type": "integer"
+          },
+          "calls_sharing_result": {
+            "description": "Tool calls whose results arrived together, sharing that growth.",
+            "title": "Calls Sharing Result",
+            "type": "integer"
+          },
+          "later_requests": {
+            "description": "The later requests that read its result again.",
+            "title": "Later Requests",
+            "type": "integer"
+          },
+          "rereading": {
+            "description": "Reading its result again in later requests, until the context was compacted.",
+            "title": "Rereading",
+            "type": "number"
+          },
+          "result_tokens": {
+            "description": "About how many tokens its result added to the context.",
+            "title": "Result Tokens",
+            "type": "integer"
+          },
+          "span_id": {
+            "title": "Span Id",
+            "type": "string"
+          },
+          "subagent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What a subagent the call ran cost, exactly.",
+            "title": "Subagent"
+          },
+          "total": {
+            "title": "Total",
+            "type": "number"
+          },
+          "writing": {
+            "description": "Writing its result into the context, on the next request.",
+            "title": "Writing",
+            "type": "number"
+          }
+        },
+        "required": [
+          "span_id",
+          "total",
+          "calling",
+          "writing",
+          "rereading",
+          "result_tokens",
+          "later_requests",
+          "calls_sharing_request",
+          "calls_sharing_result",
+          "subagent"
+        ],
+        "title": "ToolCostPublic",
+        "type": "object"
+      },
       "ToolMeter": {
         "additionalProperties": true,
         "description": "One gateway-run tool's call counts on a request.\n\nA TypedDict rather than a model, and every key optional, so a stored entry\nserializes back as it was written: a model with defaults would put\n``\"unit_rate\": null`` on every tool that has never been priced.",
@@ -20331,6 +20896,17 @@
             "title": "Fields",
             "type": "array"
           },
+          "sandbox_credential": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SandboxCredentialPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key a hosted sandbox_provider leases with. Null for the protocol provider, which takes none, and for a reader who does not operate the deployment."
+          },
           "sandbox_provider": {
             "anyOf": [
               {
@@ -20380,12 +20956,12 @@
             "type": "string"
           },
           "failed": {
-            "description": "Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.",
+            "description": "Sessions active in the bucket that hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.",
             "title": "Failed",
             "type": "integer"
           },
           "succeeded": {
-            "description": "Sessions that started in the bucket and did not fail.",
+            "description": "Sessions active in the bucket that did not fail.",
             "title": "Succeeded",
             "type": "integer"
           }
@@ -20413,6 +20989,14 @@
       },
       "TraceDetailPublic": {
         "properties": {
+          "gates": {
+            "description": "Each agent guardrail gate a coding agent's hook reported, the ones that did something first.",
+            "items": {
+              "$ref": "#/components/schemas/GateSummaryPublic"
+            },
+            "title": "Gates",
+            "type": "array"
+          },
           "spans": {
             "items": {
               "$ref": "#/components/schemas/SpanPublic"
@@ -20430,6 +21014,14 @@
           },
           "summary": {
             "$ref": "#/components/schemas/TraceSummaryPublic"
+          },
+          "tool_costs": {
+            "description": "An estimate for each tool call between two priced model requests, in the order they were made.",
+            "items": {
+              "$ref": "#/components/schemas/ToolCostPublic"
+            },
+            "title": "Tool Costs",
+            "type": "array"
           },
           "truncated": {
             "description": "True when the session holds more spans than one read returns.",
@@ -20449,7 +21041,9 @@
           "state",
           "turns",
           "spans",
-          "truncated"
+          "truncated",
+          "gates",
+          "tool_costs"
         ],
         "title": "TraceDetailPublic",
         "type": "object"
@@ -20479,7 +21073,11 @@
         "properties": {
           "bucket": {
             "enum": [
+              "1m",
+              "5m",
+              "30m",
               "hour",
+              "6h",
               "day"
             ],
             "title": "Bucket",
@@ -30058,6 +30656,56 @@
         ]
       }
     },
+    "/api/v1/hooks/guardrails": {
+      "post": {
+        "description": "Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.\n\n`otari hook` sends this once per version, the first time it reports a check\nagainst it. The fingerprint is recomputed from the gates, and one that does\nnot match the one sent is refused, so a version cannot be stored under\nanother's name. Sending a version again changes nothing. It is stored in the\nAPI key's workspace, beside that key's traces, and takes the same key a trace\nexport does: a budget-exempt API key, never the master key.",
+        "operationId": "hooks-record_guardrail_definition",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailDefinitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailDefinitionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Record Guardrail Definition",
+        "tags": [
+          "hooks"
+        ]
+      }
+    },
     "/api/v1/hosted-providers": {
       "get": {
         "description": "List the providers this deployment serves hosted inference on.\n\nStored providers and those defined in the configuration's\n``hosted_providers:`` block alike, each marked with its ``source``.",
@@ -32771,7 +33419,7 @@
     },
     "/api/v1/oauth/token": {
       "post": {
-        "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must verify against an issuer on ``federation_issuers`` and match the federation rule\n``federation_rule_id`` names. ``organization_id``, ``workspace_id`` and ``service_account_id``, where set, must\nbe the UUIDs of the rule's key's organization and workspace and the key's id. The access token authenticates as\nthat key until ``expires_in`` runs out, the rule is deleted or the key stops passing its checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
+        "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:\none on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,\nwhere set, must be the UUID of the rule's key's organization. ``workspace_id`` and ``service_account_id`` are\naccepted and ignored, so a client configured for Anthropic needs only its rule and organization changed. The\naccess token authenticates as that key until ``expires_in`` runs out, the rule is deleted or the key stops passing\nits checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
         "operationId": "oauth-exchange_token",
         "requestBody": {
           "content": {
@@ -34560,6 +35208,173 @@
           }
         ],
         "summary": "Update Own Key",
+        "tags": [
+          "organization-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/keys/{key_id}/federation-rules": {
+      "get": {
+        "description": "List the identities that may authenticate as a key, oldest first.\n\nThe caller's own key, or for the deployment operator any key in their active organization. Includes any rule\nthe operator gave the key on ``/api/v1/keys``, which ``member_managed`` tells apart.",
+        "operationId": "organization-keys-list_own_federation_rules",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FederationRulePublic"
+                  },
+                  "title": "Response Organization-Keys-List Own Federation Rules",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Own Federation Rules",
+        "tags": [
+          "organization-keys"
+        ]
+      },
+      "post": {
+        "description": "Let an OpenID Connect identity token stand in for a key, through the token exchange.\n\nNeeds ``federation_member_rules``, else 403, and an organization owner or admin acting on their own key, or the\ndeployment operator on any key in their active organization, else 403. The issuer may be any https URL; its\nsigning keys are fetched only from a public host. The rule matches only in ``POST /api/v1/oauth/token`` naming\nits id, never as a bare identity token, so it lets a workload act as this key and no other: a rule naming another\ntenant's workload gives that workload nothing it did not ask for. A rule this key already holds answers 409.",
+        "operationId": "organization-keys-create_own_federation_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FederationRuleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FederationRulePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Own Federation Rule",
+        "tags": [
+          "organization-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/keys/{key_id}/federation-rules/{rule_id}": {
+      "delete": {
+        "description": "Remove a federation rule from a key. Tokens it matched stop with the next request.\n\nThe caller's own key whatever their role, or for the deployment operator any key in their active organization.\nWorks whether or not ``federation_member_rules`` is on, so a rule can always be taken back.",
+        "operationId": "organization-keys-delete_own_federation_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Own Federation Rule",
         "tags": [
           "organization-keys"
         ]
@@ -37009,7 +37824,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -37023,12 +37838,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -37042,7 +37857,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -37239,7 +38054,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -37253,12 +38068,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -37272,7 +38087,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -37497,7 +38312,7 @@
     },
     "/api/v1/organizations/me/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+        "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
         "operationId": "organization-traces-trace_series",
         "parameters": [
           {
@@ -37507,7 +38322,11 @@
             "schema": {
               "default": "hour",
               "enum": [
+                "1m",
+                "5m",
+                "30m",
                 "hour",
+                "6h",
                 "day"
               ],
               "title": "Bucket",
@@ -37534,7 +38353,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -37548,12 +38367,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -37567,7 +38386,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -39855,7 +40674,7 @@
     },
     "/api/v1/playground/chat/completions": {
       "post": {
-        "description": "Run one chat completion for the signed-in caller.\n\nStreaming and non-streaming both, identically to ``POST\n/api/v1/chat/completions``: this resolves the principal and then calls the\nvery same handler. The request is billed to the caller's own attribution\nuser in the workspace they named (or their organization's default), against\nthat user's budget, and writes the ordinary usage row with no ``api_key_id``,\nbecause there was no key.\n\nThe body is ``ChatCompletionRequest`` unchanged, so the page sends the same\nrequest an SDK would and a model, tool or parameter the gateway gains is\navailable here the day it lands. The workspace rides in the query string\nrather than in the body for that reason: a field added to the body would\nalso have to be added to the pipeline's strip list, and a gateway-internal\nfield that is not stripped is forwarded to the provider as a call kwarg.\n\n``user`` in the body is the one field the pipeline will not read here: spend\nbinds to the session's own attribution user, derived and never accepted.",
+        "description": "Run one chat completion for the signed-in caller.\n\nStreaming and non-streaming both, identically to ``POST\n/api/v1/chat/completions``: this resolves the principal and then calls the\nvery same handler. The request is billed to the caller's own attribution\nuser in the workspace they named (or their organization's default), against\nthat user's budget, and writes the ordinary usage row with no ``api_key_id``,\nbecause there was no key.\n\nThe body is ``ChatCompletionRequest`` unchanged, so the page sends the same\nrequest an SDK would and a model, tool or parameter the gateway gains is\navailable here the day it lands. The workspace rides in the query string\nrather than in the body for that reason: a field added to the body would\nalso have to be added to the pipeline's strip list, and a gateway-internal\nfield that is not stripped is forwarded to the provider as a call kwarg.\n\n``user`` and ``safety_identifier`` in the body are the fields the pipeline\nwill not read here: spend and the provider's end-user identifier both bind\nto the session's own attribution user, derived and never accepted.",
         "operationId": "playground-playground_chat_completions",
         "parameters": [
           {
@@ -43990,6 +44809,84 @@
         ]
       }
     },
+    "/api/v1/tool-settings/sandbox/credential": {
+      "delete": {
+        "description": "Delete the stored sandbox key, so sandboxes are leased with the environment's key again.\n\nClearing a key that was never stored is not an error. Operator-gated.",
+        "operationId": "tool-settings-clear_sandbox_credential",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxCredentialPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Clear Sandbox Credential",
+        "tags": [
+          "tool-settings"
+        ]
+      },
+      "put": {
+        "description": "Store the key this deployment's hosted sandbox provider leases sandboxes with.\n\nWins over the provider's environment variable (``E2B_API_KEY``), on this\nworker at once and on every other within 30 seconds, so a rotated key needs\nno redeploy. Refused for the ``protocol`` provider, which takes no key of\nits own. Operator-gated.",
+        "operationId": "tool-settings-set_sandbox_credential",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxCredentialPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Sandbox Credential",
+        "tags": [
+          "tool-settings"
+        ]
+      }
+    },
     "/api/v1/tool-settings/{service}/test": {
       "post": {
         "description": "Structurally validate a URL and probe it for reachability.\n\nTests the URL in the request body (typically unsaved), so an operator can\nverify before saving. The probe is a plain HTTP GET with a short timeout: any\nHTTP response means the host is reachable; a connection/timeout/DNS error means\nit is not. The operator is trusted (master key), so no SSRF deny-list applies;\nonly the structural check (http/https + host) runs first.",
@@ -44164,7 +45061,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -44178,12 +45075,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -44197,7 +45094,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -44394,7 +45291,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -44408,12 +45305,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -44427,7 +45324,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -44652,7 +45549,7 @@
     },
     "/api/v1/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+        "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
         "operationId": "traces-trace_series",
         "parameters": [
           {
@@ -44662,7 +45559,11 @@
             "schema": {
               "default": "hour",
               "enum": [
+                "1m",
+                "5m",
+                "30m",
                 "hour",
+                "6h",
                 "day"
               ],
               "title": "Bucket",
@@ -44689,7 +45590,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -44703,12 +45604,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -44722,7 +45623,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -48688,7 +49589,7 @@
         ]
       },
       "post": {
-        "description": "Add an existing organization member to a workspace.",
+        "description": "Add an existing organization member to a workspace.\n\nThe 404 for a workspace deleted during the add describes PostgreSQL. SQLite does not name the\nforeign key it enforced, so it surfaces that race as a 500.",
         "operationId": "workspaces-add_workspace_member",
         "parameters": [
           {
@@ -48740,6 +49641,26 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRefusal"
+                }
+              }
+            },
+            "description": "The workspace does not exist, or was deleted during the add."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRefusal"
+                }
+              }
+            },
+            "description": "The user is already a member of the workspace."
           },
           "422": {
             "content": {

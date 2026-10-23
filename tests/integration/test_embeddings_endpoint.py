@@ -206,6 +206,35 @@ def test_embeddings_logs_error_on_failure(
     assert "provider down" in error_logs[0]["error_message"]
 
 
+def test_embeddings_error_message_is_redacted_before_it_is_stored(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """Every workspace member reads the row, so a credential the provider echoes back never reaches it."""
+    github_token = "gho_" + "A1b2" * 9
+    with patch(
+        "gateway.api.routes.embeddings.aembedding",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError(f"provider down: input echoed {github_token} api_key=sk-live-123456789"),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 502
+
+    logs = client.get(f"{API_ROOT}/users/{api_key_obj['user_id']}/usage", headers=master_key_header).json()
+    stored = next(
+        log["error_message"] for log in logs if log["endpoint"] == "/v1/embeddings" and log["status"] == "error"
+    )
+    assert "provider down" in stored
+    assert github_token not in stored
+    assert "sk-live-123456789" not in stored
+
+
 @pytest.mark.parametrize("extra_field", ["encoding_format", "dimensions"])
 def test_embeddings_optional_fields(
     client: TestClient,

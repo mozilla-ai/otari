@@ -97,10 +97,10 @@ the corresponding startup value after the database is available.
 | `budgets` | Budgets declared by id and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `api_keys` | API keys, service keys among them, declared with a secret you choose and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `federation_issuers` | OpenID Connect issuers whose identity tokens may authenticate as an API key in place of its secret. Empty, the default, turns it off. Setting it requires `OTARI_SECRET_KEY`, or the gateway refuses to start. See [Workload identity](workload-identity.md). |
+| `federation_member_rules` | Let an organization's owners and admins give their own API keys federation rules naming any public https issuer, matched only in the token exchange that names them. Defaults to `false`. Setting it requires `OTARI_SECRET_KEY`. See [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key). |
 | `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
 | `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
-| `provider_user_identifier_enabled` | Send each provider call an opaque, per-end-user identifier, so a provider's policy block lands on one user rather than the whole account. Defaults to `true`. See [End-user identifiers](#end-user-identifiers). |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
 | `streaming_first_chunk_hold_ms` | How long the gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
@@ -188,6 +188,11 @@ rate_limits:
     per: model
     models: ["vertex:gemini-2.5-flash"]
     rpm: 100
+  - name: feature       # every user on one budget together, each budget listed on its own
+    per: budget
+    budgets: ["<budget_id>", "<budget_id>"]
+    rpm: 600
+    mode: report        # served anyway, and named in Otari-Rate-Limit-Exceeded
 ```
 
 - `rpm`: requests per minute.
@@ -228,11 +233,31 @@ A candidate that fails before responding gives back its tokens and its slot but
 keeps its request counted, since the provider was sent it.
 A search tool is limited the same way, named as `provider:tool` (`exa:exa-search`).
 
+`per: budget` keeps one count for every user on the same budget, such as all of
+a service key's end users on one feature's budget, so it limits a feature as a
+whole where `per: user` limits each user in it. `budgets` narrows it to the
+budgets listed by `budget_id` (as `GET /api/v1/budgets` returns it), each still
+counted on its own; unset, it counts every budget. A user on no budget is not
+counted by it, and neither is a request from a key with `exclude_from_budget`
+or any request while `budget_strategy` is `disabled`. Like `per: deployment`, it is counted
+after the rules that count the caller alone, so a request over its own limit
+takes no place in a count other users share.
+
+`mode: report` counts a rule the same way and refuses nothing: a request over it
+is served, routing still picks the same candidate, and the response carries
+`Otari-Rate-Limit-Exceeded` naming every report rule it was over (comma-separated).
+The gateway also logs it and counts it in `gateway_rate_limit_reported_total`
+by rule. A request something else refuses is not reported. A reported request is not counted in the window it was over, as a
+refused one is not, so the count is the one the rule would keep if it were
+enforced. Use it to watch a limit before enforcing it, or to see when traffic
+borrows beyond a share without refusing anyone; `mode: enforce` is the default.
+
 Rules can also be added, changed and removed from the dashboard (Settings, Rate
 limit rules) or through `/api/v1/rate-limits`. A change applies at once on the
 replica that served it and on every other replica within 30 seconds; a changed
 rule keeps the requests it already counted. Choose "Each model" to add a
-`per: model` rule and pick its models. The rules in config.yml are listed there read-only, and a stored rule cannot take the name of one. A stored rule
+`per: model` rule and pick its models. `per: budget`, `budgets` and `mode` are
+set through the API. The rules in config.yml are listed there read-only, and a stored rule cannot take the name of one. A stored rule
 whose name config.yml later declares is skipped with a warning at startup and
 left out of the list; `DELETE /api/v1/rate-limits/{name}` still removes it.
 
@@ -691,20 +716,33 @@ provider that enforces its usage policy per end user needs an identifier for
 each one, or a block meant for one person lands on the account, and every user
 and workspace on the deployment loses that provider.
 
-So while `provider_user_identifier_enabled` is on, which it is by default, Otari
-sends each provider call a digest of the workspace and the user tag the caller
-sent Otari (`user` on chat completions and Responses, `metadata.user_id` on
-Messages), or of the workspace and the resolved user when the caller sent no
-tag. The table below names the field each provider receives it in. The
-provider never sees the tag, which may be personal data, or an Otari id. The
-same user in the same workspace always gets the same identifier, which is what
-a provider scopes enforcement by. The dashboard's Playground ignores a `user`
-sent in its request body, so the identifier its calls carry is always the
-signed-in member's.
+So Otari sends each provider call a digest of the workspace and the resolved
+user, and of the user tag the caller sent Otari when there is one. On chat
+completions and Responses the tag is `safety_identifier`, or `user` when the
+request has none; on Messages it is `metadata.user_id`. A tag equal to the
+resolved user counts as none. The table below names the field each provider
+receives it in. The provider never sees the tag, which may be personal data, or
+an Otari id. The same tag from the same user in the same workspace always gets
+the same identifier, which is what a provider scopes enforcement by. Because the
+resolved user is always in the digest, a tag only tells apart the end users
+behind one user: tagging a request with another user's id never gives it that
+user's identifier. The dashboard's Playground ignores a `user` or
+`safety_identifier` sent in its request body, so the identifier its calls carry
+is always the signed-in member's.
+
+`user` has a second job: on a service key it names the billed end user, and on
+any other key it must match the key's user unless `reject_user_mismatch` is
+off. `safety_identifier` names nobody billed and nothing checks it, so one
+request can bill one user and tag another. Send it when one key serves several
+end users that `user` does not tell apart: a request with neither tag gets the
+key holder's identifier, so a block meant for one lands on all of them. The
+caller chooses the tag, so a caller that sends a new one on each request gets a
+new identifier each time and no block lands on anyone. Otari cannot detect
+that; the answer is to block that customer.
 
 | Provider | Field |
 | --- | --- |
-| OpenAI, Azure OpenAI | `user` on chat completions, `safety_identifier` on Responses |
+| OpenAI, Azure OpenAI | `safety_identifier` |
 | Cerebras, DeepSeek, Fireworks, Groq, OpenRouter, xAI | `user` on chat completions (DeepSeek's `user_id`) |
 | Anthropic, including Azure and Vertex AI | `metadata.user_id` |
 | Bedrock | `requestMetadata.otari_user`, except `metadata.user_id` on Messages to a Claude model that sets no `output_format` |
@@ -718,14 +756,49 @@ invocation logs, which is where the prompt ids in an AWS abuse report are traced
 back to a user. Every other provider gets nothing: some have no such field
 (Vertex AI, whose labels are for billing only, and Mistral), some run your own
 models, and for the rest an unknown field can fail the call. A Responses or
-Messages request served as a chat completion gets that provider's chat field.
+Messages request served as a chat completion gets that provider's chat field. The
+call that describes an image for a text-only model (`vision_describe_model`)
+carries the request's identifier too, in the field the vision model's provider
+reads.
+
+Nothing turns the identifier off. OpenAI's partner program for gateways requires
+one on every request, and a provider that cannot take one already gets nothing.
 
 Set `OTARI_PROVIDER_USER_IDENTIFIER_KEY` to a random value of at least 32
 characters (`openssl rand -base64 32`) to key the digest. Without it the digest
 is unkeyed, so the same workspace id and user give the same identifier on any
 deployment, and Otari logs a warning at startup. Otari refuses to start when the
 key equals the master key or an `OTARI_SECRET_KEY` key. Rotating it gives every
-user a new identifier.
+user a new identifier: a block a provider placed on an old identifier stops
+landing, and the provider's history for that user starts again. Rotate it only
+when the key has leaked.
+
+#### Tracing an identifier back
+
+A provider that reports abuse names the identifier, and it is a one-way digest.
+Each usage row stores the identifier its request's provider calls carry, in the
+indexed `usage_logs.safety_identifier` column, so the database answers who it
+was:
+
+```sql
+SELECT workspace_id, user_id, api_key_id,
+       MIN(timestamp) AS first_seen, MAX(timestamp) AS last_seen,
+       COUNT(DISTINCT request_group_id) AS requests
+FROM usage_logs
+WHERE safety_identifier = '<identifier>'
+GROUP BY workspace_id, user_id, api_key_id;
+```
+
+The rows keep an identifier after a key rotation, so an old one still traces.
+For a Gemini label, which is cut to 63 characters, match the prefix:
+`WHERE safety_identifier LIKE '<label>%'`.
+
+The rows hold the user behind the key, not the tag the caller sent. When the
+identifier came from a tag, the customer that owns the workspace maps it to their
+own end user. A row has no identifier where its request had none: usage imported
+from outside, the pass-through endpoints (embeddings, images, audio,
+moderations, batches), a request refused before Otari resolved its user, and
+every row written before Otari stored it.
 
 ## Pricing
 
@@ -960,17 +1033,23 @@ model needs its own pricing row, for example `cohere:rerank-v3.5` at
 A model served over chat completions, the Responses API, or Messages can be
 priced the same way, for an upstream that bills per call and reports little or
 no token usage, such as an answer endpoint served through an OpenAI-compatible
-provider instance named `exa`. Give its pricing `unit: requests`:
+provider instance named `exa`. Give its pricing a `price_per_request` in USD:
 
 ```yaml
 pricing:
   exa:exa:
-    input_price_per_million: 5000   # $0.005 per request
-    output_price_per_million: 0
-    unit: requests
+    price_per_request: 0.005
 ```
 
-Such a model is charged `input_price_per_million / 1,000,000` for each
+`price_per_request` is the readable form of `unit: requests`: Otari stores it as
+`unit: requests` with `input_price_per_million` a million times the price
+(`5000` here), and `GET /api/v1/pricing` reports both. `POST /api/v1/pricing`
+takes it too. It replaces the token prices rather than adding to them, so it
+is refused beside an `input_price_per_million` that differs, an
+`output_price_per_million`, a cache price, `pricing_tiers` or another `unit`.
+Writing the rate in full as `unit: requests` still works.
+
+Such a model is charged its price per request for each
 successful call, streamed or not, whatever tokens it reports. The token counts
 are still recorded on the usage row, and still count toward a token budget, but
 they are not priced. A failed call, including a stream that errors or that the

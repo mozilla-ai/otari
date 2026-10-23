@@ -280,6 +280,10 @@ class DeclaredCodeExecution:
                 # An explicit type beside it is folded in and adds only its hint.
                 claimed, tools_after_sandbox = extract_code_execution_tool(tools_after_sandbox, intercept=True)
                 assert claimed is not None  # ``provider_code_entry`` was found in the same list
+                # A further keyword left in ``tools`` would have the provider run code that ``otari`` keeps here.
+                extra, tools_after_sandbox = extract_code_execution_tool(tools_after_sandbox, intercept=True)
+                while extra is not None:
+                    extra, tools_after_sandbox = extract_code_execution_tool(tools_after_sandbox, intercept=True)
                 # A copy, since a provider's attempt of the same request forwards the caller's own entry.
                 claimed = dict(claimed)
                 if sandbox_tool_entry is not None and not claimed.get("purpose_hint"):

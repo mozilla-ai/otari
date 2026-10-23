@@ -1,7 +1,13 @@
 import { Button } from "@heroui/react"
-import { Link, useNavigate } from "@tanstack/react-router"
+import {
+  type HistoryState,
+  Link,
+  useNavigate,
+  useRouter,
+  useSearch,
+} from "@tanstack/react-router"
 import type { ReactNode } from "react"
-import { useEffect, useState } from "react"
+import { useEffect, useEffectEvent, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 import { FiChevronDown } from "react-icons/fi"
 
@@ -21,10 +27,14 @@ import { Segmented } from "@/design-system/navigation/Segmented"
 import {
   activeFilterCount,
   CAPABILITY_FILTERS,
+  CATALOG_URL_DEFAULTS,
   type CatalogFilters,
+  type CatalogListState,
   type CatalogSortColumn,
   CONTEXT_OPTIONS,
+  catalogListFromUrl,
   catalogRequest,
+  catalogUrlChanges,
   EMPTY_FILTERS,
   MODALITIES,
   MODALITY_LABELS,
@@ -33,6 +43,7 @@ import {
   PRICING_OPTIONS,
   providerOptions,
   RELEASE_OPTIONS,
+  SEARCH_MAX_LENGTH,
   SORT_OPTIONS,
   SOURCE_OPTIONS,
   vendorOptions,
@@ -51,7 +62,8 @@ import {
   formatRate,
   formatReleaseDate,
 } from "@/shared/helpers/format"
-import { useUrlValue } from "@/shared/helpers/urlState"
+import type { DashboardSearch } from "@/shared/helpers/search"
+import { useUrlState } from "@/shared/helpers/urlState"
 import { useDebounced } from "@/shared/hooks/useDebounced"
 
 // The catalog, grouped by model: a rail of filters on the left, and on the
@@ -68,8 +80,6 @@ import { useDebounced } from "@/shared/hooks/useDebounced"
 // session as the public catalog (`PublicCatalogPage`), where there is no
 // router to link through and no organization to ask about.
 
-const DEFAULT_PAGE_SIZE = 25
-
 function SearchInput({
   value,
   onChange,
@@ -77,12 +87,21 @@ function SearchInput({
   value: string
   onChange: (value: string) => void
 }) {
+  // While focused, the field shows its own draft: the router commits the URL
+  // after the keystroke's event, so a field bound to it straight reverts for a
+  // moment and puts the caret at the end.
+  const [draft, setDraft] = useState<string | null>(null)
   return (
     <input
       type="search"
-      maxLength={200}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
+      maxLength={SEARCH_MAX_LENGTH}
+      value={draft ?? value}
+      onFocus={() => setDraft(value)}
+      onBlur={() => setDraft(null)}
+      onChange={(event) => {
+        setDraft(event.target.value)
+        onChange(event.target.value)
+      }}
       placeholder="Search models…"
       aria-label="Search models"
       className={`w-full min-w-0 ${INPUT_CLASS}`}
@@ -361,9 +380,11 @@ function Sep() {
 function ModelCard({
   model,
   publicView,
+  openState,
 }: {
   model: CatalogModelSummary
   publicView: boolean
+  openState?: HistoryState
 }) {
   const title = model.vendor ? `${model.vendor}: ${model.name}` : model.name
   const makerKey = makerKeyOf(model)
@@ -438,6 +459,7 @@ function ModelCard({
         <Link
           to="/models/$"
           params={{ _splat: model.id }}
+          state={openState}
           aria-label={title}
           className={cardClass}
         >
@@ -554,32 +576,34 @@ function readStoredView(): CatalogView {
 }
 
 export function ModelCatalogView({
+  list,
+  onListChange,
   onOpen,
+  openState,
   publicView = false,
-  initialProvider = "",
 }: {
+  list: CatalogListState
+  onListChange: (next: CatalogListState) => void
   /** Where a pressed card goes. */
   onOpen: (modelId: string) => void
+  /** History state a card's link carries to the model's page. */
+  openState?: HistoryState
   /**
    * Ahead of a session: no organization to price for, and plain hash links
    * because there is no router to link through.
    */
   publicView?: boolean
-  /** A provider instance to start filtered on. */
-  initialProvider?: string
 }) {
-  const [filters, setFilters] = useState<CatalogFilters>({
-    ...EMPTY_FILTERS,
-    providers: initialProvider ? [initialProvider] : [],
-  })
-  const [sort, setSort] = useState("newest")
+  const { filters, sort, tableSort, page, pageSize } = list
+  const update = (changes: Partial<CatalogListState>) =>
+    onListChange({ ...list, ...changes })
   const [view, setView] = useState<CatalogView>(readStoredView)
   // `Segmented` hands back a plain string, so the union is re-established here,
   // on the same default a stored value nobody recognizes falls to.
   const changeView = (next: string) => {
     const chosen = isCatalogView(next) ? next : "list"
     setView(chosen)
-    setPage(0)
+    update({ page: 0 })
     try {
       window.localStorage.setItem(VIEW_STORAGE_KEY, chosen)
     } catch {
@@ -587,12 +611,6 @@ export function ModelCatalogView({
     }
   }
   const [railOpen, setRailOpen] = useState(false)
-  const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const [tableSort, setTableSort] = useState<{
-    column: CatalogSortColumn
-    direction: "asc" | "desc"
-  }>({ column: "name", direction: "asc" })
 
   const sortChoice =
     SORT_OPTIONS.find((option) => option.value === sort) ?? SORT_OPTIONS[0]
@@ -614,29 +632,31 @@ export function ModelCatalogView({
   const providerCount = facets?.providers.length
   const hasModels = totalCount > 0
 
+  const clampPage = useEffectEvent((lastPage: number) =>
+    update({ page: lastPage }),
+  )
   useEffect(() => {
     if (!catalog.data || catalog.isPlaceholderData) return
     const lastPage = Math.max(0, Math.ceil(catalog.data.count / pageSize) - 1)
-    if (page > lastPage) setPage(lastPage)
+    if (page > lastPage) clampPage(lastPage)
   }, [catalog.data, catalog.isPlaceholderData, page, pageSize])
   const activeCount = activeFilterCount(filters)
 
-  const updateFilters = (next: CatalogFilters) => {
-    setFilters(next)
-    setPage(0)
-  }
+  const updateFilters = (next: CatalogFilters) =>
+    update({ filters: next, page: 0 })
 
   const sortDescriptor: SortDescriptor = {
     column: tableSort.column,
     direction: tableSort.direction === "asc" ? "ascending" : "descending",
   }
-  const onSortChange = (descriptor: SortDescriptor) => {
-    setTableSort({
-      column: String(descriptor.column) as CatalogSortColumn,
-      direction: descriptor.direction === "ascending" ? "asc" : "desc",
+  const onSortChange = (descriptor: SortDescriptor) =>
+    update({
+      tableSort: {
+        column: String(descriptor.column) as CatalogSortColumn,
+        direction: descriptor.direction === "ascending" ? "asc" : "desc",
+      },
+      page: 0,
     })
-    setPage(0)
-  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -705,10 +725,7 @@ export function ModelCatalogView({
               <FilterSelect
                 ariaLabel="Sort models"
                 value={sort}
-                onChange={(value) => {
-                  setSort(value)
-                  setPage(0)
-                }}
+                onChange={(value) => update({ sort: value, page: 0 })}
                 options={SORT_OPTIONS.map(({ value, label }) => ({
                   value,
                   label,
@@ -779,7 +796,11 @@ export function ModelCatalogView({
             <ul aria-label="Models" className="flex flex-col gap-3">
               {pageRows.map((model) => (
                 <li key={model.id}>
-                  <ModelCard model={model} publicView={publicView} />
+                  <ModelCard
+                    model={model}
+                    publicView={publicView}
+                    openState={openState}
+                  />
                 </li>
               ))}
             </ul>
@@ -789,11 +810,8 @@ export function ModelCatalogView({
             pageSize={pageSize}
             total={count}
             rowsOnPage={pageRows.length}
-            onPageChange={setPage}
-            onPageSizeChange={(size) => {
-              setPageSize(size)
-              setPage(0)
-            }}
+            onPageChange={(next) => update({ page: next })}
+            onPageSizeChange={(size) => update({ pageSize: size, page: 0 })}
           />
         </div>
       </div>
@@ -804,17 +822,31 @@ export function ModelCatalogView({
 /** The catalog on the router: a pressed card navigates to the model's page. */
 export function ModelCatalogPage() {
   const navigate = useNavigate()
-  // A provider clicked on the Providers page arrives as ?provider=<instance>,
-  // pre-selecting that provider's filter so the list shows only its models.
-  // The key remounts the view when that param changes, since the filter it
-  // seeds is state the reader edits from there on.
-  const providerParam = useUrlValue("provider")
+  const router = useRouter()
+  // The list lives in the URL, so Back and a model page's link back return to
+  // it as it was left.
+  const url = useUrlState(CATALOG_URL_DEFAULTS)
+  const list = catalogListFromUrl(url)
+  const openState = { catalogSearch: useSearch({ strict: false }) }
   return (
     <ModelCatalogView
-      key={providerParam}
-      initialProvider={providerParam}
+      list={list}
+      onListChange={(next) =>
+        url.patch(
+          catalogUrlChanges(
+            list,
+            next,
+            router.latestLocation.search as DashboardSearch,
+          ),
+        )
+      }
+      openState={openState}
       onOpen={(id) => {
-        void navigate({ to: "/models/$", params: { _splat: id } })
+        void navigate({
+          to: "/models/$",
+          params: { _splat: id },
+          state: openState,
+        })
       }}
     />
   )

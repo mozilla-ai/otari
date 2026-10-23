@@ -8,6 +8,7 @@ from gateway.services.secret_box import (
     decrypt_secret,
     encrypt_secret,
     generate_secret_key,
+    get_secret_box,
     secret_box_configured,
     validate_secret_key,
 )
@@ -18,6 +19,14 @@ def test_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
     token = encrypt_secret("sk-super-secret")
     assert token != "sk-super-secret"
     assert decrypt_secret(token) == "sk-super-secret"
+
+
+def test_the_box_is_built_once_per_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    box = get_secret_box()
+    assert get_secret_box() is box
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    assert get_secret_box() is not box
 
 
 def test_unset_key_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:

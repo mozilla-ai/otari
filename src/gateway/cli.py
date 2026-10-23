@@ -10,7 +10,7 @@ import uvicorn
 from uvicorn.config import logger
 
 from gateway.core.config import API_ROOT, load_config
-from gateway.log_config import setup_logger
+from gateway.log_config import setup_logger, uvicorn_log_config
 from gateway.services.url_safety import redact_url_secrets
 
 _LOG_LEVEL_NAMES: dict[str, int] = {
@@ -134,6 +134,7 @@ def serve(
             host=gateway_config.host,
             port=gateway_config.port,
             forwarded_allow_ips=gateway_config.forwarded_allow_ips,
+            log_config=uvicorn_log_config(),
         )
     except KeyboardInterrupt:
         logger.info("\nShutting down Otari...")

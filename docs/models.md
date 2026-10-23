@@ -150,6 +150,17 @@ instance declared `openai-compatible` is looked up under OpenAI, so a model it
 serves under another name usually has no models.dev entry. With
 `models_dev_metadata: false`, the context window comes from the pricing snapshot alone.
 
+Each model also says what it accepts, in the fields OpenRouter's model listing
+uses, so a client built for that shape reads them unchanged. `name` is models.dev's
+display name. `supported_parameters` lists `tools` and `tool_choice` for a model
+that calls tools, `response_format` for one with structured output, and
+`reasoning` for a reasoning model; it names only the parameters models.dev records
+a flag for, not every parameter the model takes. `architecture` carries
+`input_modalities` and `output_modalities`, such as `["text", "image"]`. All three
+are `null` for a model models.dev does not describe, which means unknown rather
+than unsupported. An alias reports its target's capabilities but no `name`,
+because the target's name would say what the alias points at.
+
 Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's
 `models` list.
@@ -214,6 +225,23 @@ model_capabilities:
 
 File handling uses these values to decide whether to pass an attachment through
 or normalize it for a text-only model. See [Files](files.md).
+
+## Prompt caching
+
+Mark the prompt prefix to cache the way Anthropic does, with `cache_control`
+(`{"type": "ephemeral"}`, optionally `"ttl": "1h"`): on a system block or content
+block on `/api/v1/messages`, or on a message or content part on
+`/api/v1/chat/completions`. Anthropic models read it natively. For Gemini, any-llm
+turns the last breakpoint into a Gemini context cache holding everything up to
+it, reuses that cache while it lives (5 minutes, or 1 hour with `"ttl": "1h"`),
+and falls back to an uncached request when Gemini refuses a prefix below its
+minimum size. Gemini 2.5 and later models also cache repeated prefixes on their
+own, with nothing marked.
+
+Either way, the usage reports the tokens written to and read from the cache, and
+Otari bills them at the model's `cache_write_price_per_million` and
+`cache_read_price_per_million` when the pricing sets them, and at the input price
+otherwise. The time a Gemini cache is stored is not billed separately.
 
 ## Model aliases
 

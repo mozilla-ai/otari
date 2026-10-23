@@ -128,7 +128,7 @@ def _post(client: TestClient, headers: dict[str, str], body: dict[str, Any], por
         return _text_response()
 
     with (
-        patch("gateway.container.build_code_execution_port", new=lambda _config: port),
+        patch("gateway.container.build_code_execution_port", new=lambda _config, **_kwargs: port),
         patch("gateway.services.mcp_loop_messages.amessages", new=fake_amessages),
         # The route's own call, for a body with no tool loop to run.
         patch("gateway.api.routes.messages.amessages", new=fake_amessages),

@@ -111,7 +111,8 @@ class _Resolved:
     meaning none. ``options`` are the layered options without the count, for
     the caller to apply as its door does. ``label`` and
     ``rate_keys`` are what billing records. ``on_credential`` says
-    a credential serves the call rather than an instance.
+    a credential serves the call rather than an instance, and ``tenant_endpoint``
+    that the credential names its own ``api_base``, which a tenant chose.
     """
 
     name: str | None
@@ -124,6 +125,7 @@ class _Resolved:
     label: str | None
     rate_keys: tuple[RateKey, ...]
     on_credential: bool = False
+    tenant_endpoint: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -406,6 +408,7 @@ def _search_on_credential(
         label=label,
         rate_keys=rate_keys,
         on_credential=True,
+        tenant_endpoint=_base(credential.api_base) != "",
     )
 
 
@@ -478,6 +481,7 @@ def _fetch_on_credential(credential: WebFetchCredential) -> ResolvedFetch | None
         label=label,
         rate_keys=rate_keys,
         on_credential=True,
+        tenant_endpoint=_base(credential.api_base) != "",
     )
 
 

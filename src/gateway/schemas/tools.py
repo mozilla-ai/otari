@@ -569,3 +569,24 @@ class OtariToolCall(pydantic.BaseModel):
         default=None, description="A completed search's results; empty when it found none."
     )
     error: OtariToolCallError | None = pydantic.Field(default=None, description="Why a failed call failed, when known.")
+
+
+class SandboxCredentialPublic(pydantic.BaseModel):
+    """Where the key a hosted sandbox provider leases with comes from. Never the key itself."""
+
+    source: Literal["stored", "environment"] | None = pydantic.Field(
+        description=(
+            "'stored' for a key set here, which wins; 'environment' for the provider's own environment "
+            "variable; null when there is neither and code execution fails until one is set."
+        )
+    )
+    last4: str | None = pydantic.Field(default=None, description="The key's last four characters, to tell keys apart.")
+    env_var: str = pydantic.Field(description="The environment variable a deployment that stores no key is read from.")
+
+
+class SandboxCredentialRequest(pydantic.BaseModel):
+    """The key to lease hosted sandboxes with."""
+
+    model_config = pydantic.ConfigDict(json_schema_extra={"example": {"api_key": "e2b_0123456789abcdef"}})
+
+    api_key: str = pydantic.Field(min_length=1)

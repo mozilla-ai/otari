@@ -31,6 +31,8 @@ def rule_of(row: StoredRateLimitRule) -> RateLimitRule:
         name=row.name,
         per=row.per,  # type: ignore[arg-type]  # the check constraint holds it to the Literal
         models=row.models,
+        budgets=row.budgets,
+        mode=row.mode,  # type: ignore[arg-type]  # written from the Literal
         rpm=row.rpm,
         tpm=row.tpm,
         tpm_admission=row.tpm_admission,  # type: ignore[arg-type]  # written from the Literal

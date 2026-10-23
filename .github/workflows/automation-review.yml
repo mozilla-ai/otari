@@ -14,14 +14,11 @@ on:
         description: "Path of the task's prompt file"
         required: true
         type: string
-    secrets:
-      CLAUDE_CODE_OAUTH_TOKEN:
-        required: true
 
 jobs:
   review:
-    # Restricted to main. Its CLAUDE_CODE_OAUTH_TOKEN, shared with review-pr.yml,
-    # takes precedence over the repository copy the caller passes in.
+    # Restricted to main. CLAUDE_CODE_OAUTH_TOKEN, shared with review-pr.yml,
+    # comes from this environment; callers pass no secret.
     environment: pr-review
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -79,7 +76,7 @@ jobs:
 
       - name: Run agent
         id: claude
-        uses: anthropics/claude-code-action@5eb090f3c3afd701a0672cd32981197ca27688f6 # v1.0.253
+        uses: anthropics/claude-code-action@e4a6faad497d33dbc7144135c75e41f82f0bf6c0 # v1.0.255
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # A `prompt` input puts the action in automation mode, so the run

@@ -368,14 +368,12 @@ class WorkspaceService:
         # member gets neither.
         await self.workspaces.lock(workspace.id)
 
-        # As in create_workspace: the pre-check races the insert, and the unique
-        # constraint is what actually decides.
-        try:
-            async with self._uow:
-                member = await self.members.create(workspace_id=workspace.id, user_id=user_id, role=role)
-                await self._membership_listener.member_joined(member)
-        except IntegrityError:
-            raise WorkspaceMemberAlreadyExistsError(user_id) from None
+        # As in create_workspace: the pre-check races the insert, and the database
+        # is what actually decides. ``add`` reports a concurrent add as a duplicate
+        # and a concurrent delete as a missing workspace.
+        async with self._uow:
+            member = await self.members.add(workspace_id=workspace.id, user_id=user_id, role=role)
+            await self._membership_listener.member_joined(member)
         return WorkspaceMemberPublic.model_validate(member)
 
     async def update_member_role(

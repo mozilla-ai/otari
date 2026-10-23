@@ -234,11 +234,94 @@ one with the model it ran on and its token counts. When Otari does not
 answer, the subagent starts on the model it would have had anyway, and the
 line says so.
 
+## Send Claude Code sessions to Otari
+
+Otari can record each Claude Code session without its model traffic going
+through Otari: every prompt as a turn, with its model requests, tool calls and
+their cost, and each [agent guardrail](agent-guardrails.md) check the hook made
+on the way. Claude Code exports its own spans and usage over OpenTelemetry, and
+`otari hook` reports its checks to the same session.
+
+You need:
+
+- an Otari deployment that records traces (`OTARI_TRACE_CAPTURE_ENABLED`, on by
+  default);
+- an API key created with `exclude_from_budget: true`, since what Claude Code
+  reports is imported, never charged;
+- for the guardrail checks, the hook registered (`otari hook setup`, or once in
+  `~/.claude/settings.json` for every repository; see
+  [Agent guardrails](agent-guardrails.md)).
+
+Put the variables in the `env` block of `~/.claude/settings.json`, so they apply
+to every session and reach the hook:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA": "1",
+    "OTEL_TRACES_EXPORTER": "otlp",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otari.example.com/otlp",
+    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer tk-your-import-key",
+    "OTARI_URL": "https://otari.example.com",
+    "OTARI_API_KEY": "tk-your-import-key"
+  }
+}
+```
+
+Each does one part:
+
+| Variables | What they send |
+| --- | --- |
+| `CLAUDE_CODE_ENABLE_TELEMETRY`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA`, `OTEL_TRACES_EXPORTER` | The session's turns, model requests and tool calls. Span export is a Claude Code beta. |
+| `OTEL_LOGS_EXPORTER` | Each model request's usage, which is what prices the session. Without it a session has tokens but no cost. |
+| `OTEL_EXPORTER_OTLP_*` | Where both go: the Otari origin plus `/otlp`, over HTTP, with the key. Otari does not accept OTLP over gRPC. |
+| `OTARI_URL`, `OTARI_API_KEY` | The hook's guardrail checks. Claude Code passes no `OTEL_*` variable to its hooks, so the hook cannot use the settings above. |
+
+The key sits in the settings file in plaintext, twice. A script that prints the
+header (`otelHeadersHelper`; see Claude Code's
+[monitoring docs](https://code.claude.com/docs/en/monitoring-usage)) replaces
+only `OTEL_EXPORTER_OTLP_HEADERS`; the hook still needs `OTARI_API_KEY`. To keep
+that out of the file too, leave it out of the `env` block and export it in the
+shell that starts Claude Code, since a hook inherits Claude Code's environment.
+On macOS, for example:
+
+```sh
+export OTARI_API_KEY="$(security find-generic-password -s otari-import-key -w)"
+```
+
+To check it works, run Claude Code, ask for something that uses a tool or two,
+and open **Sessions** in the dashboard: the session shows its turns, model
+requests and tools, and At a glance where its time and money went. A gate that
+ran shows under the tool call it checked. A short `claude -p` run can exit
+before its last spans are sent.
+
+By default nothing says what a span was about: no prompt, command or file path.
+To keep them, the deployment needs `OTARI_TRACE_CONTENT_ENABLED=true` and
+`OTARI_SECRET_KEY`, and Claude Code and the hook have to send them:
+
+```json
+{
+  "env": {
+    "OTEL_LOG_USER_PROMPTS": "1",
+    "OTEL_LOG_TOOL_DETAILS": "1",
+    "OTARI_HOOK_REPORT_CONTENT": "1"
+  }
+}
+```
+
+See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about).
+Do not both [route](#route-claude-code-through-otari) and export one session,
+or its cost appears twice.
+
 ## Import Claude Code usage without routing
 
 Claude Code can send subscription usage to Otari over OpenTelemetry. This is for
-sessions that do not already route through Otari. Send it to any Otari
-deployment.
+sessions that do not already route through Otari. It is the usage part of
+[sending sessions to Otari](#send-claude-code-sessions-to-otari), without the
+session's turns and tools. Send it to any Otari deployment.
 
 Create a dedicated API key with `exclude_from_budget: true`, then configure the
 logs exporter. The optional metrics exporter adds content-free outcome counters.

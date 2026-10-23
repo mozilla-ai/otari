@@ -8,6 +8,8 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
+from any_llm import LLMProvider
+
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.unit_of_work import UnitOfWork
@@ -23,6 +25,7 @@ from gateway.models.files import FileObject, new_file_id
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.repositories.files import FilePageQuery, FileRepositories
+from gateway.services.files._attachment_uploads import upload_attachment
 from gateway.services.files._file_ids import file_id_in, page_token
 from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._provider_uploads import ProviderCopies
@@ -175,6 +178,7 @@ class FileService:
         self._files = repositories.files
         self._copies = repositories.provider_copies
         self._file_store = backends.storage
+        self._provider_files = backends.provider_files
         self._config = config
         self._default_workspace = default_workspace
         self._provider_copies = ProviderCopies(uow, repositories.provider_copies, backends, config)
@@ -361,6 +365,34 @@ class FileService:
             ProviderUploadFailedError: a copy could not be made or recorded.
         """
         return await self._provider_copies.file_ids_for(files, account, credential)
+
+    async def attachment_uri(
+        self,
+        data: bytes,
+        *,
+        provider: LLMProvider,
+        credential: ResolvedCredential,
+        workspace_id: uuid.UUID | None,
+        mime_type: str,
+        filename: str,
+    ) -> str:
+        """The URI an attachment too large to send inline is referenced by in ``provider``'s own storage.
+
+        Uploaded with ``credential``, the one the request dispatches with, and
+        remembered for as long as the provider keeps the file.
+
+        Raises:
+            ProviderUploadFailedError: the provider refused the file or never made it usable.
+        """
+        return await upload_attachment(
+            self._provider_files,
+            provider=provider,
+            credential=credential,
+            workspace_id=workspace_id,
+            data=data,
+            mime_type=mime_type,
+            filename=filename,
+        )
 
     async def sweep(self, *, batch_size: int, after: tuple[datetime, str] | None = None) -> SweepBatch:
         """Delete expired, revoked and abandoned bytes between short database transactions."""

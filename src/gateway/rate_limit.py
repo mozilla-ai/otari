@@ -11,19 +11,26 @@ from typing import TYPE_CHECKING
 from fastapi import HTTPException, Request, status
 
 from gateway.core.config import RateLimitRule
-from gateway.core.error_codes import RATE_LIMITED, error_headers
+from gateway.core.error_codes import RATE_LIMIT_EXCEEDED_HEADER, RATE_LIMITED, error_headers
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.ports.rate_limit_store_port import RateLimitStorePort, RateLimitWindow
 
 if TYPE_CHECKING:
-    from starlette.types import ASGIApp, Receive, Scope, Send
+    from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
     from gateway.core.config import GatewayConfig
 
 RATE_LIMIT_HITS = Counter(
     "gateway_rate_limit_hits",
     "Total number of rate limit hits",
+    registry=REGISTRY,
+)
+# Bounded by the rule names in config.
+RATE_LIMIT_REPORTED = Counter(
+    "gateway_rate_limit_reported",
+    "Requests a mode: report rule would have refused, served anyway",
+    ["rule"],
     registry=REGISTRY,
 )
 # Bounded by the models the per: model rules name, which is config, not traffic.
@@ -219,6 +226,8 @@ class _Hold:
         self.entries: list[tuple[str, str]] = []
         self.estimates: list[tuple[str, str]] = []
         self.leases: list[tuple[str, str]] = []
+        # The ``mode: report`` rules the request was over, which refused nothing.
+        self.reported: list[str] = []
 
 
 class ModelHold:
@@ -266,6 +275,11 @@ class RateLimitGrant:
     def hand_over(self) -> None:
         """Mark the request dispatched, so its own paths settle the estimates from here."""
         self.handed_over = True
+
+    @property
+    def reported_rules(self) -> list[str]:
+        """The ``mode: report`` rules the request was over, each once, in the order they were counted."""
+        return list(dict.fromkeys(rule for hold in self._holds for rule in hold.reported))
 
     async def settle(self, tokens: int) -> None:
         """Charge every token estimate ``tokens`` instead. Only the first call counts."""
@@ -352,12 +366,14 @@ async def _count_rule(
     if rule.rpm is not None:
         window = await store.hit(f"{base}:rpm", rule.rpm, _RULE_WINDOW_SEC)
         if window.handle is None:
-            raise _refused(
+            _over(
+                rule,
+                hold,
                 f"Rate limit '{rule.name}'{label} exceeded: {_count(rule.rpm, 'request')} per minute",
                 window.reset_after,
-                rule.name,
             )
-        hold.entries.append((f"{base}:rpm", window.handle))
+        else:
+            hold.entries.append((f"{base}:rpm", window.handle))
     if rule.tpm is not None:
         # At least one token, so a request estimating none is still refused by a full window.
         cost = 1 if rule.tpm_admission == "used" else max(estimated_tokens, 1)
@@ -366,25 +382,47 @@ async def _count_rule(
                 f"Request needs an estimated {_count(cost, 'token')}; "
                 f"rate limit '{rule.name}'{label} allows {rule.tpm:,} per minute"
             )
-            raise _refused(msg, None, rule.name)
-        window = await store.hit(f"{base}:tpm", rule.tpm, _RULE_WINDOW_SEC, cost=cost)
-        if window.handle is None:
-            raise _refused(
-                f"Rate limit '{rule.name}'{label} exceeded: {_count(rule.tpm, 'token')} per minute",
-                window.reset_after,
-                rule.name,
-            )
-        hold.entries.append((f"{base}:tpm", window.handle))
-        hold.estimates.append((f"{base}:tpm", window.handle))
+            _over(rule, hold, msg, None)
+        else:
+            window = await store.hit(f"{base}:tpm", rule.tpm, _RULE_WINDOW_SEC, cost=cost)
+            if window.handle is None:
+                _over(
+                    rule,
+                    hold,
+                    f"Rate limit '{rule.name}'{label} exceeded: {_count(rule.tpm, 'token')} per minute",
+                    window.reset_after,
+                )
+            else:
+                hold.entries.append((f"{base}:tpm", window.handle))
+                hold.estimates.append((f"{base}:tpm", window.handle))
     if rule.max_concurrent is not None:
         lease = await store.acquire(f"{base}:concurrent", rule.max_concurrent, rule.lease_sec)
         if lease is None:
-            raise _refused(
+            _over(
+                rule,
+                hold,
                 f"Rate limit '{rule.name}'{label} exceeded: {_count(rule.max_concurrent, 'request')} in flight",
                 _CONCURRENCY_RETRY_AFTER_SEC,
-                rule.name,
             )
-        hold.leases.append((f"{base}:concurrent", lease))
+        else:
+            hold.leases.append((f"{base}:concurrent", lease))
+
+
+def _over(rule: "RateLimitRule", hold: _Hold, detail: str, retry_after: float | None) -> None:
+    """Refuse a request over ``rule``, or, for a ``mode: report`` rule, note it on ``hold`` and let it through.
+
+    The middleware reports it once the response starts, so a request another
+    rule then refuses reports nothing. A reported request is not counted in the window it was over, as a refused one
+    is not, so the count stays the one an enforced rule would keep.
+
+    Raises:
+        HTTPException: 429 for an enforced rule.
+
+    """
+    if rule.mode != "report":
+        raise _refused(detail, retry_after, rule.name)
+    if rule.name not in hold.reported:
+        hold.reported.append(rule.name)
 
 
 async def _undo(store: RateLimitStorePort, hold: _Hold) -> None:
@@ -397,13 +435,22 @@ async def _undo(store: RateLimitStorePort, hold: _Hold) -> None:
     )
 
 
+# The scopes one count of which many users share.
+_SHARED_PER = frozenset({"deployment", "budget"})
+
+
 @dataclass(frozen=True)
 class BudgetMinuteLimits:
-    """The per-minute limits of the budget a request's user is on."""
+    """The budget a request's user is on, and its per-minute limits, either of which may be unset."""
 
     budget_id: str
     rpm: int | None
     tpm: int | None
+
+    @property
+    def limits_anything(self) -> bool:
+        """Whether the budget sets a per-minute limit of its own."""
+        return self.rpm is not None or self.tpm is not None
 
 
 class RateLimitRules:
@@ -444,21 +491,23 @@ class RateLimitRules:
         grant = RateLimitGrant(self._store, self._config, estimated_tokens)
         # Before any slot is taken, so a request that dies here still gives them back.
         setattr(request.state, _GRANT_STATE, grant)
-        subjects = {"deployment": "all", "key": key_id, "user": user_id}
+        budget_id = budget_limits.budget_id if budget_limits is not None else None
+        subjects = {"deployment": "all", "key": key_id, "user": user_id, "budget": budget_id}
         counted = [
             (rule, subject)
             for rule in tuple(self._config.rate_limits)
             if (subject := subjects.get(rule.per)) is not None
+            and (rule.per != "budget" or rule.budgets is None or subject in rule.budgets)
         ]
-        if budget_limits is not None and user_id is not None:
+        if budget_limits is not None and user_id is not None and budget_limits.limits_anything:
             counted.append((_budget_rule(budget_limits), f"{budget_limits.budget_id}:{user_id}"))
         # The rules of one phase are counted at once, one store round trip rather
         # than one per rule; a refusal by any gives back what all of them took, as
         # stopping at the first refusal did, and names the first rule in order.
         # The caller's own rules come first, so a request over its key's or user's
-        # limit never takes a deployment-wide slot another tenant could have had.
-        own = [(rule, subject) for rule, subject in counted if rule.per != "deployment"]
-        shared = [(rule, subject) for rule, subject in counted if rule.per == "deployment"]
+        # limit never takes a deployment-wide or budget-wide slot another user could have had.
+        own = [(rule, subject) for rule, subject in counted if rule.per not in _SHARED_PER]
+        shared = [(rule, subject) for rule, subject in counted if rule.per in _SHARED_PER]
         holds: list[_Hold] = []
         for phase in (own, shared):
             if phase:
@@ -511,7 +560,7 @@ async def admit_rate_limit_rules(
 ) -> RateLimitGrant | None:
     """Count a request against ``rate_limits`` and its user's budget, or ``None`` when neither limits it."""
     rules: RateLimitRules | None = getattr(request.app.state, "rate_limit_rules", None)
-    if rules is None or (not rules.active and budget_limits is None):
+    if rules is None or (not rules.active and (budget_limits is None or not budget_limits.limits_anything)):
         return None
     return await rules.admit(
         request, key_id=key_id, user_id=user_id, estimated_tokens=estimated_tokens, budget_limits=budget_limits
@@ -525,7 +574,7 @@ async def _close_grant(grant: RateLimitGrant) -> None:
 
 
 class RateLimitGrantMiddleware:
-    """Gives back a request's concurrency slots once its response has ended.
+    """Gives back a request's concurrency slots once its response has ended, and names the rules it was reported over.
 
     The ASGI call returns only after a response's last byte is sent or its
     client has gone, so this one ``finally`` covers a streamed body that
@@ -537,8 +586,22 @@ class RateLimitGrantMiddleware:
         self.app = app
 
     async def __call__(self, scope: "Scope", receive: "Receive", send: "Send") -> None:
+        async def send_wrapper(message: "Message") -> None:
+            if message["type"] == "http.response.start":
+                grant: RateLimitGrant | None = scope.get("state", {}).get(_GRANT_STATE)
+                reported = grant.reported_rules if grant is not None else []
+                # An error response was not served over the limit, whatever refused it.
+                if reported and message["status"] < 400:
+                    headers = list(message.get("headers") or [])
+                    headers.append((RATE_LIMIT_EXCEEDED_HEADER.lower().encode(), ", ".join(reported).encode()))
+                    message = {**message, "headers": headers}
+                    for rule in reported:
+                        RATE_LIMIT_REPORTED.labels(rule=rule).inc()
+                    logger.info("Served over mode: report rate limits: %s", ", ".join(reported))
+            await send(message)
+
         try:
-            await self.app(scope, receive, send)
+            await self.app(scope, receive, send_wrapper)
         finally:
             grant: RateLimitGrant | None = scope.get("state", {}).get(_GRANT_STATE)
             if grant is not None:

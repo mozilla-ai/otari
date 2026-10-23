@@ -84,7 +84,7 @@ describe("TopBarActions", () => {
     // none, so the seam is mounted and empty. Asserting the cluster's whole
     // membership rather than the absence of one chip is what would catch a
     // placeholder growing here later.
-    expect((await settledCluster())?.children).toHaveLength(2)
+    expect((await settledCluster())?.children).toHaveLength(3)
   })
 
   it("renders the slot module's own empty default", () => {
@@ -93,6 +93,14 @@ describe("TopBarActions", () => {
     const { container } = render(<WalletNavSlot />)
 
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it("points Community at the Discord server in a new tab", async () => {
+    await renderActions()
+
+    const link = await screen.findByRole("link", { name: "Community" })
+    expect(link).toHaveAttribute("href", "https://discord.gg/TqvzGH9mwz")
+    expect(link).toHaveAttribute("target", "_blank")
   })
 
   it("points Documentation at docs.otari.ai when no docs site is configured", async () => {

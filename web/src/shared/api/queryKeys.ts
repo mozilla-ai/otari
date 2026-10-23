@@ -60,6 +60,10 @@ export const HEALTH_CHECKS = "health-checks"
 export const HEALTH_CHECKS_POLL_MS = 15_000
 export const BUILD = "build"
 export const KEYS = "keys"
+// One key's federation rules. Its own root rather than a child of KEYS: a key
+// edit invalidates KEYS, and that changes nothing about which identities may
+// stand in for the key.
+export const FEDERATION_RULES = "federation-rules"
 export const BUDGETS = "budgets"
 export const SCOPED_BUDGETS = "scoped-budgets"
 export const USERS = "users"

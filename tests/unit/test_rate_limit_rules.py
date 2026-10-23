@@ -14,6 +14,7 @@ from gateway.adapters.rate_limit_store_adapter import InMemoryRateLimitStore
 from gateway.core.config import GatewayConfig, RateLimitRule
 from gateway.rate_limit import (
     RATE_LIMIT_HITS,
+    RATE_LIMIT_REPORTED,
     BudgetMinuteLimits,
     RateLimitGrantMiddleware,
     RateLimitRules,
@@ -578,3 +579,142 @@ async def test_admission_is_skipped_on_an_app_that_holds_no_rules() -> None:
         )
         is None
     )
+
+
+def test_only_a_per_budget_rule_names_budgets() -> None:
+    with pytest.raises(ValidationError, match="only a per: budget rule reads"):
+        RateLimitRule(name="feature", per="user", budgets=["b-ai"], rpm=1)
+
+
+@pytest.mark.asyncio
+async def test_per_budget_is_one_count_for_every_user_on_the_budget() -> None:
+    """MLPA's per-feature limit: every end user on one feature's budget shares the count."""
+    rules = _rules(InMemoryRateLimitStore(), {"name": "feature", "per": "budget", "rpm": 2})
+    ai = BudgetMinuteLimits(budget_id="b-ai", rpm=None, tpm=None)
+    memories = BudgetMinuteLimits(budget_id="b-memories", rpm=None, tpm=None)
+
+    await rules.admit(_request(), key_id="k", user_id="u1", estimated_tokens=10, budget_limits=ai)
+    await rules.admit(_request(), key_id="k", user_id="u2", estimated_tokens=10, budget_limits=ai)
+    with pytest.raises(HTTPException) as exc_info:
+        await rules.admit(_request(), key_id="k", user_id="u3", estimated_tokens=10, budget_limits=ai)
+    await rules.admit(_request(), key_id="k", user_id="u1", estimated_tokens=10, budget_limits=memories)
+    # A user on no budget is not counted by it.
+    await rules.admit(_request(), key_id="k", user_id="u4", estimated_tokens=10)
+
+    assert exc_info.value.headers is not None
+    assert exc_info.value.headers["Otari-Rate-Limit-Rule"] == "feature"
+
+
+@pytest.mark.asyncio
+async def test_a_per_budget_rule_counts_only_the_budgets_it_names() -> None:
+    rules = _rules(InMemoryRateLimitStore(), {"name": "ai-only", "per": "budget", "budgets": ["b-ai"], "rpm": 1})
+    ai = BudgetMinuteLimits(budget_id="b-ai", rpm=None, tpm=None)
+    other = BudgetMinuteLimits(budget_id="b-other", rpm=None, tpm=None)
+
+    await rules.admit(_request(), key_id="k", user_id="u1", estimated_tokens=10, budget_limits=other)
+    await rules.admit(_request(), key_id="k", user_id="u1", estimated_tokens=10, budget_limits=other)
+    await rules.admit(_request(), key_id="k", user_id="u1", estimated_tokens=10, budget_limits=ai)
+    with pytest.raises(HTTPException):
+        await rules.admit(_request(), key_id="k", user_id="u2", estimated_tokens=10, budget_limits=ai)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "limit",
+    [{"rpm": 1}, {"tpm": 5, "tpm_admission": "estimate"}, {"max_concurrent": 1}],
+    ids=["rpm", "tpm", "concurrent"],
+)
+async def test_a_report_rule_serves_a_request_over_it_and_names_itself(limit: dict[str, Any]) -> None:
+    rules = _rules(InMemoryRateLimitStore(), {"name": "watch", "per": "deployment", "mode": "report", **limit})
+
+    first = await _admit(rules, tokens=4)
+    second = await _admit(rules, tokens=4)
+
+    assert first.reported_rules == []
+    assert second.reported_rules == ["watch"]
+
+
+@pytest.mark.asyncio
+async def test_a_report_rule_does_not_stop_an_enforced_one() -> None:
+    rules = _rules(
+        InMemoryRateLimitStore(),
+        {"name": "watch", "per": "deployment", "mode": "report", "rpm": 1},
+        {"name": "hard", "per": "key", "rpm": 2},
+    )
+
+    await _admit(rules)
+    reported = await _admit(rules)
+    with pytest.raises(HTTPException) as exc_info:
+        await _admit(rules)
+
+    assert reported.reported_rules == ["watch"]
+    assert exc_info.value.headers is not None
+    assert exc_info.value.headers["Otari-Rate-Limit-Rule"] == "hard"
+
+
+@pytest.mark.asyncio
+async def test_a_report_rule_on_a_model_never_moves_routing_on() -> None:
+    rules = _rules(
+        InMemoryRateLimitStore(),
+        {"name": "watch-model", "per": "model", "models": ["openai:gpt-4o"], "mode": "report", "rpm": 1},
+    )
+
+    await (await _admit(rules)).admit_model("openai", "gpt-4o")
+    grant = await _admit(rules)
+    held = await grant.admit_model("openai", "gpt-4o")
+
+    assert held is not None
+    assert grant.reported_rules == ["watch-model"]
+
+
+@pytest.mark.asyncio
+async def test_the_middleware_names_the_reported_rules_on_the_response() -> None:
+    rules = _rules(InMemoryRateLimitStore(), {"name": "watch", "per": "deployment", "mode": "report", "rpm": 1})
+    sent: list[Message] = []
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        await rules.admit(Request(scope), key_id=None, user_id=None, estimated_tokens=1)
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def capture(message: Message) -> None:
+        sent.append(message)
+
+    await RateLimitGrantMiddleware(app)({"type": "http", "headers": []}, _receive, capture)
+    first_headers = dict(sent[0]["headers"])
+    sent.clear()
+    await RateLimitGrantMiddleware(app)({"type": "http", "headers": []}, _receive, capture)
+
+    assert b"otari-rate-limit-exceeded" not in first_headers
+    assert dict(sent[0]["headers"])[b"otari-rate-limit-exceeded"] == b"watch"
+
+
+@pytest.mark.asyncio
+async def test_the_middleware_reports_nothing_on_a_refused_response() -> None:
+    rules = _rules(
+        InMemoryRateLimitStore(),
+        {"name": "watch", "per": "key", "mode": "report", "rpm": 1},
+        {"name": "hard", "per": "deployment", "rpm": 1},
+    )
+    sent: list[Message] = []
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await rules.admit(Request(scope), key_id="k", user_id=None, estimated_tokens=1)
+            status = 200
+        except HTTPException:
+            status = 429
+        await send({"type": "http.response.start", "status": status, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def capture(message: Message) -> None:
+        sent.append(message)
+
+    await RateLimitGrantMiddleware(app)({"type": "http", "headers": []}, _receive, capture)
+    sent.clear()
+    before = RATE_LIMIT_REPORTED.labels(rule="watch")._value.get()
+    await RateLimitGrantMiddleware(app)({"type": "http", "headers": []}, _receive, capture)
+
+    assert sent[0]["status"] == 429
+    assert b"otari-rate-limit-exceeded" not in dict(sent[0]["headers"])
+    assert RATE_LIMIT_REPORTED.labels(rule="watch")._value.get() == before

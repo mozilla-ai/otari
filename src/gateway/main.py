@@ -127,7 +127,7 @@ from gateway.services.search_tool_store_service import (
     reset_search_tool_cache,
     run_search_tool_refresher,
 )
-from gateway.services.secret_box import shares_secret_key, validate_secret_key
+from gateway.services.secret_box import secret_box_configured, shares_secret_key, validate_secret_key
 from gateway.services.selector_index_service import run_selector_index_refresher
 from gateway.services.tenancy.org_provider_key_service import (
     load_org_provider_keys_at_startup,
@@ -140,7 +140,15 @@ from gateway.services.tenancy.organization_guardrail_runner import (
     run_guardrail_runner_refresher,
 )
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
-from gateway.services.tools import build_web_provider_client, register_builtin_fetcher, warn_about_tool_instances
+from gateway.services.tools import (
+    SANDBOX_KEY_ENV,
+    build_web_provider_client,
+    load_sandbox_credentials_at_startup,
+    register_builtin_fetcher,
+    reset_sandbox_credential_cache,
+    run_sandbox_credential_refresher,
+    warn_about_tool_instances,
+)
 from gateway.services.traces import RequestTraces, TraceWriter, stored_by
 from gateway.services.workspace_scope import default_workspace_id
 from gateway.version import __version__
@@ -198,6 +206,27 @@ _UNAUTHENTICATED_PATHS = frozenset(
         f"{API_ROOT}/auth/oauth/{{provider}}/authorize",
         f"{API_ROOT}/auth/oauth/{{provider}}/callback",
     }
+)
+# Headers the official OpenAI and Anthropic JS SDKs add to every request, so a
+# browser app built on either (dangerouslyAllowBrowser) passes the preflight.
+# Named one by one rather than allowing every header, which would let a browser
+# send the trace-context headers too (see accept_incoming_trace_context).
+_SDK_CORS_HEADERS = (
+    "anthropic-beta",
+    "anthropic-dangerous-direct-browser-access",
+    "anthropic-version",
+    "x-stainless-arch",
+    "x-stainless-custom-poll-interval",
+    "x-stainless-helper",
+    "x-stainless-helper-method",
+    "x-stainless-lang",
+    "x-stainless-os",
+    "x-stainless-package-version",
+    "x-stainless-poll-helper",
+    "x-stainless-retry-count",
+    "x-stainless-runtime",
+    "x-stainless-runtime-version",
+    "x-stainless-timeout",
 )
 
 
@@ -448,6 +477,11 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker(
         "search tool", lambda config, _container: run_search_tool_refresher(config), reset_search_tool_cache
     ),
+    _LifespanWorker(
+        "sandbox credential",
+        lambda _config, _container: run_sandbox_credential_refresher(),
+        reset_sandbox_credential_cache,
+    ),
     # No reset: the stored rules live on the config, which the startup load rebuilds.
     _LifespanWorker("rate limit rule", lambda config, _container: run_rate_limit_refresher(config)),
     _LifespanWorker("price snapshot", lambda _config, _container: run_price_snapshot_refresher()),
@@ -683,16 +717,15 @@ def _validate_provider_user_identifier_key(config: GatewayConfig) -> None:
     """Refuse an end-user identifier key that shares a value with another secret.
 
     A missing key only warns: refusing to start would take down every deployment
-    that upgrades with the identifier on, which is the default.
+    that upgrades without one.
     """
     key = config.provider_user_identifier_key
     if key is None:
-        if config.provider_user_identifier_enabled:
-            logger.warning(
-                "provider_user_identifier_enabled is on with no OTARI_PROVIDER_USER_IDENTIFIER_KEY, so the "
-                "end-user identifier sent to providers is an unkeyed digest: anyone who knows a workspace id "
-                "can test a guessed user tag against it. Set the key to a random value of at least 32 characters."
-            )
+        logger.warning(
+            "OTARI_PROVIDER_USER_IDENTIFIER_KEY is unset, so the end-user identifier sent to providers is an "
+            "unkeyed digest: anyone who knows a workspace id can test a guessed user tag against it. Set the "
+            "key to a random value of at least 32 characters."
+        )
         return
     _refuse_shared_secret("OTARI_PROVIDER_USER_IDENTIFIER_KEY", key, config)
 
@@ -881,6 +914,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # vendor handshake.
         await load_guardrail_runner_at_startup()
         await load_provider_endpoints_at_startup()
+        if config.effective_sandbox_provider() in SANDBOX_KEY_ENV:
+            await load_sandbox_credentials_at_startup(config.effective_sandbox_provider())
         await _move_deployment_providers(config)
         await _import_configured_providers(config)
         await load_hosted_names_at_startup(config)
@@ -1065,6 +1100,8 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()
+    if config.trace_content_enabled and not secret_box_configured():
+        logger.warning("OTARI_TRACE_CONTENT_ENABLED is on but OTARI_SECRET_KEY is not set, so no trace content is kept")
     set_config(config)
     # The search and fetch libraries leave their log filters to the host, so a
     # provider URL carrying a query or a key never reaches httpx's own logging.
@@ -1261,6 +1298,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 API_KEY_HEADER,
                 X_API_KEY_HEADER,
                 TAGS_HEADER,
+                *_SDK_CORS_HEADERS,
             ],
         )
 
