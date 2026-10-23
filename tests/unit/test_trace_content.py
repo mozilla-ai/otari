@@ -29,7 +29,7 @@ from gateway.core.config import GatewayConfig
 from gateway.ports.content_key_port import ContentKeyError, DataKey
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.traces import _content
-from gateway.services.traces._content import UNOPENED, UNSEALED, SpanContent
+from gateway.services.traces._content import UNOPENED, UNSEALED, SealItem, SpanContent
 
 pytestmark = pytest.mark.asyncio
 
@@ -534,3 +534,93 @@ async def test_the_write_cache_is_bounded(key: str, monkeypatch: pytest.MonkeyPa
         await content.seal(_CONTENT, workspace_id=uuid.uuid4(), trace_id=_TRACE, span_id=f"tool-{n}")
 
     assert len(content._write_keys) == 2
+
+
+# Batches, separate pauses, and the KMS key list.
+
+
+async def test_a_batch_fetches_its_keys_together_under_one_deadline(key: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_content, "_KEY_SOURCE_BUDGET_S", 0.5)
+    keys = _FlakyKeys()
+    keys.delay = 0.2
+    items = [SealItem(_CONTENT, uuid.uuid4(), _TRACE, f"tool-{n}") for n in range(5)]
+
+    started = asyncio.get_running_loop().time()
+    sealed = await SpanContent(keys).seal_many(items)
+
+    # Five workspaces at 0.2s each, fetched one after another, would take a second.
+    assert asyncio.get_running_loop().time() - started < 0.45
+    assert all(value is not None for value in sealed) and keys.made == 5
+
+
+async def test_a_slow_source_costs_a_wide_batch_its_content_within_the_deadline(
+    key: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_content, "_KEY_SOURCE_BUDGET_S", 0.05)
+    keys = _FlakyKeys()
+    keys.delay = 1.0
+    items = [SealItem(_CONTENT, uuid.uuid4(), _TRACE, f"tool-{n}") for n in range(5)]
+
+    started = asyncio.get_running_loop().time()
+    sealed = await SpanContent(keys).seal_many(items)
+
+    assert asyncio.get_running_loop().time() - started < 0.5
+    assert sealed == [None] * 5
+
+
+async def test_a_failed_read_does_not_stop_capture(key: str) -> None:
+    keys = _FlakyKeys()
+    sealed = await SpanContent(keys).seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
+    content = SpanContent(keys)
+    keys.down = True
+    assert await content.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == {}
+    keys.down = False
+
+    assert await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2") is not None
+
+
+async def test_a_wrapper_no_longer_configured_is_rejected_and_pauses_nothing(kms: Any, key: str) -> None:
+    sealed = await SpanContent(_kms_keyring(kms, _new_kms_key(kms))).seal(
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
+    )
+    content = _secret_key_content()
+    before = _count(UNOPENED, "rejected")
+
+    assert await content.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == {}
+    assert _count(UNOPENED, "rejected") == before + 1
+    assert await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2") is not None
+
+
+async def test_a_listed_key_that_cannot_be_described_is_skipped(kms: Any) -> None:
+    current = _new_kms_key(kms)
+    sealed = await SpanContent(_kms_keyring(kms, current)).seal(
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
+    )
+
+    reader = SpanContent(_kms_keyring(kms, current, previous=("alias/gone",)))
+
+    assert await reader.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
+
+
+async def test_an_alias_pointed_at_a_new_key_is_followed_without_a_restart(
+    kms: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gateway.adapters import content_key_adapter
+
+    now = [1_000.0]
+    monkeypatch.setattr(content_key_adapter, "monotonic", lambda: now[0])
+    old, new = _new_kms_key(kms), _new_kms_key(kms)
+    kms.create_alias(AliasName="alias/otari-trace-content", TargetKeyId=old)
+    keyring = _kms_keyring(kms, "alias/otari-trace-content")
+    writer = SpanContent(keyring)
+    first = await writer.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-0")
+    # Opening resolves the alias, which is what a retarget has to outlive.
+    assert await SpanContent(keyring).open(first, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-0")
+
+    kms.update_alias(AliasName="alias/otari-trace-content", TargetKeyId=new)
+    other = uuid.uuid4()
+    resealed = await writer.seal(_CONTENT, workspace_id=other, trace_id=_TRACE, span_id="tool-1")
+    assert await SpanContent(keyring).open(resealed, workspace_id=other, trace_id=_TRACE, span_id="tool-1") == {}
+    now[0] += content_key_adapter._ALLOWED_KEYS_TTL_S
+
+    assert await SpanContent(keyring).open(resealed, workspace_id=other, trace_id=_TRACE, span_id="tool-1") == _CONTENT

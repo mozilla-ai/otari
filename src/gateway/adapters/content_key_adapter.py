@@ -17,8 +17,10 @@ import binascii
 import json
 import re
 import secrets
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
+from gateway.log_config import logger
 from gateway.ports.content_key_port import ContentKeyError, ContentKeyFailure, ContentKeyPort, DataKey, DataKeySource
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
@@ -32,6 +34,8 @@ if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
 
 DATA_KEY_BYTES = 32
+# How long the key ARNs a deployment's ids resolve to are trusted before they are resolved again.
+_ALLOWED_KEYS_TTL_S = 300.0
 
 SECRET_KEY_WRAPPER = "sk"
 KMS_WRAPPER = "kms"
@@ -116,6 +120,7 @@ class AwsKmsContentKeys(DataKeySource):
         self._key_id = key_id
         self._key_ids = (key_id, *previous_key_ids)
         self._allowed_arns: frozenset[str] | None = None
+        self._allowed_at = 0.0
 
     async def new_data_key(self, context: dict[str, str]) -> DataKey:
         response = await self._call(
@@ -136,12 +141,29 @@ class AwsKmsContentKeys(DataKeySource):
         return plaintext
 
     async def _allowed(self) -> frozenset[str]:
-        if self._allowed_arns is None:
-            arns = []
-            for key_id in self._key_ids:
+        """The key ARNs content may open under, resolved from the configured ids every few minutes.
+
+        Each id is resolved on its own, so a listed key that is gone or not
+        describable costs only what it sealed, and an alias pointed at a new key is
+        followed without a restart.
+        """
+        now = monotonic()
+        if self._allowed_arns is not None and now - self._allowed_at < _ALLOWED_KEYS_TTL_S:
+            return self._allowed_arns
+        arns: set[str] = set()
+        failure: ContentKeyError | None = None
+        for key_id in self._key_ids:
+            try:
                 described = await self._call("DescribeKey", self._client.describe_key, KeyId=key_id)
-                arns.append(described["KeyMetadata"]["Arn"])
-            self._allowed_arns = frozenset(arns)
+            except ContentKeyError as exc:
+                failure = failure or exc
+                continue
+            arns.add(described["KeyMetadata"]["Arn"])
+        if not arns:
+            raise failure or ContentKeyError("unavailable", "no configured KMS key could be described")
+        if failure is not None:
+            logger.warning("A configured trace content KMS key could not be described and is skipped (%s)", failure)
+        self._allowed_arns, self._allowed_at = frozenset(arns), now
         return self._allowed_arns
 
     @staticmethod
@@ -183,7 +205,8 @@ class ContentKeyring(ContentKeyPort):
     async def open_data_key(self, wrapper: str, wrapped: bytes, context: dict[str, str]) -> bytes:
         source = self._wrappers.get(wrapper)
         if source is None:
-            raise ContentKeyError("unavailable", "the wrapper this data key names is not configured")
+            # The row's fault, not the source's: it names a wrapper this deployment no longer configures.
+            raise ContentKeyError("rejected", "the wrapper this data key names is not configured")
         return await source.open_data_key(wrapped, context)
 
 
