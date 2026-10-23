@@ -6,7 +6,8 @@ LLM call, routing attempt, guardrail check, MCP connection and tool call, with
 their timing and cost. An LLM call is one kind of span among several, so a trace
 answers what an agent run did and cost, not only what one call did.
 
-No prompt, model output or tool content is recorded. A trace holds names, ids,
+No prompt, model output or tool content is recorded, unless a workspace keeps
+what its sessions were about ([Keeping what a span was about](#keeping-what-a-span-was-about)). A trace holds names, ids,
 timings, token counts, outcomes and costs.
 
 An LLM call's input tokens are its whole prompt, cached tokens included,
@@ -407,9 +408,9 @@ plus `kms:DescribeKey` on the key and on each previous key listed, which the
 gateway calls every few minutes to learn which keys it may open, so an alias
 pointed at a new key is followed without a restart. Every `GenerateDataKey` and `Decrypt` lands in CloudTrail with
 the workspace it was for. Those record each data key fetched, not each span
-opened: the gateway opens a workspace's content with a cached key for five
+opened: the gateway opens a session's content with a cached key for five
 minutes without asking KMS again, so CloudTrail shows when content was opened
-for a workspace, and the share read records show who read which session.
+for a session, and the share read records show who read which session.
 
 Before relying on a key, check it from a development account with
 `uv run python scripts/check_trace_content_kms.py --profile <profile> --region <region> --account <account id>`.

@@ -324,6 +324,7 @@ function ShareDialog({
   workspaceId: string
   onClose: () => void
 }) {
+  const platformBreakGlass = useDeployment().trace_platform_break_glass
   const share = useShareTrace()
   const [audience, setAudience] = useState<TraceShareAudience>(
     "organization_admins",
@@ -354,7 +355,7 @@ function ShareDialog({
         if (!open) onClose()
       }}
       title="Share this session"
-      description="Otari shows this session's content only to you, apart from recorded break-glass openings by your organization's owners. Whoever you share it with can read its prompts, commands and file paths until the share ends, you stop it, or you leave this workspace or the organization. Their reads are recorded, at most once an hour each, and listed here."
+      description={`Otari shows this session's content only to you. ${exceptionalAccess(platformBreakGlass)} Whoever you share it with can read its prompts, commands and file paths until the share ends, you stop it, or you leave this workspace or the organization. Their reads are recorded, at most once an hour each, and listed here.`}
       submitLabel="Share"
       onSubmit={submit}
       isPending={share.isPending}
