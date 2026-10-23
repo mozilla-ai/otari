@@ -16,10 +16,14 @@ from fastapi import APIRouter, Depends, Query, status
 
 from gateway.api.deps import (
     NoSessionOwners,
+    OrganizationBreakGlass,
+    PlatformBreakGlass,
     TraceServiceDep,
     build_trace_service,
     get_deployment_trace_scope,
+    get_organization_break_glass,
     get_organization_trace_scope,
+    get_platform_break_glass,
     require_deployment_operator,
     verify_master_key,
 )
@@ -27,15 +31,19 @@ from gateway.core.config import GatewayConfig
 from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
 from gateway.schemas.traces import (
+    BreakGlassCreate,
+    BreakGlassReadListPublic,
     ContentReadListPublic,
     ContentShareCreate,
     ContentShareListPublic,
     ContentSharePublic,
+    PlatformBreakGlassCreate,
     TraceCountPublic,
     TraceDetailPublic,
     TraceListPublic,
     TraceSeriesPublic,
     TraceSummaryPublic,
+    break_glass_read_public,
     detail_public,
     list_public,
     read_public,
@@ -44,7 +52,14 @@ from gateway.schemas.traces import (
     summary_public,
 )
 from gateway.services.traces import SpanContent, run_trace_retention
-from gateway.types.traces import TraceBucketGrain, TraceFilter, TraceScope, TraceSort, TraceSortKey
+from gateway.types.traces import (
+    BreakGlass,
+    TraceBucketGrain,
+    TraceFilter,
+    TraceScope,
+    TraceSort,
+    TraceSortKey,
+)
 
 MAX_PAGE_SIZE = 100
 MAX_SHARE_PAGE = 50
@@ -171,6 +186,46 @@ router = build_trace_router(
     get_deployment_trace_scope,
 )
 
+
+@router.post("/{trace_id}/break-glass", response_model=TraceDetailPublic)
+async def platform_break_glass(
+    traces: TraceServiceDep,
+    operator: Annotated[PlatformBreakGlass, Depends(get_platform_break_glass)],
+    trace_id: str,
+    body: PlatformBreakGlassCreate,
+) -> TraceDetailPublic:
+    """Open a session's content in any organization without its owner's share, as the deployment's operator.
+
+    Only where ``trace_platform_break_glass_enabled`` is on; a 404 otherwise. The
+    opening is recorded with its reason and reference before anything opens, and
+    listed at ``GET /traces/audit/break-glass``.
+    """
+    break_glass = BreakGlass(
+        kind="deployment",
+        organization_id=operator.organization_id,
+        reader_user_id=operator.reader.user_id,
+        reader_email=operator.reader.email,
+        reason=body.reason,
+        reference=body.reference,
+    )
+    return detail_public(
+        await traces.break_glass_detail(
+            TraceScope.deployment(), trace_id, break_glass=break_glass, workspace_id=operator.workspace_id
+        )
+    )
+
+
+@router.get("/audit/break-glass", response_model=BreakGlassReadListPublic)
+async def list_break_glass_reads(
+    traces: TraceServiceDep,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 50,
+) -> BreakGlassReadListPublic:
+    """Every recorded break-glass opening on the deployment, by owners and the operator alike, newest first."""
+    reads, has_more = await traces.break_glass_reads(organization_id=None, kind=None, limit=limit, offset=skip)
+    return BreakGlassReadListPublic(items=[break_glass_read_public(read) for read in reads], has_more=has_more)
+
+
 # Authentication only, like the rest of ``/organizations/me``: the scope dependency
 # is what confines each read, from the caller's own memberships.
 organization_router = build_trace_router(
@@ -184,6 +239,47 @@ OrganizationScopeDep = Annotated[TraceScope, Depends(get_organization_trace_scop
 WorkspaceQuery = Annotated[
     uuid.UUID | None, Query(description="The workspace the trace is in, as its list entry names it.")
 ]
+
+
+@organization_router.post("/{trace_id}/break-glass", response_model=TraceDetailPublic)
+async def organization_break_glass(
+    traces: TraceServiceDep,
+    owner: Annotated[OrganizationBreakGlass, Depends(get_organization_break_glass)],
+    trace_id: str,
+    body: BreakGlassCreate,
+    workspace_id: WorkspaceQuery = None,
+) -> TraceDetailPublic:
+    """Open a session's content without its owner's share, as an owner of the organization.
+
+    For an investigation the session's owner cannot be asked to share for, a member
+    who left included. The opening is recorded with its reason before anything
+    opens, and listed for every owner at ``GET .../audit/break-glass``. The
+    session's owner is not told.
+    """
+    break_glass = BreakGlass(
+        kind="organization",
+        organization_id=owner.organization_id,
+        reader_user_id=owner.reader.user_id,
+        reader_email=owner.reader.email,
+        reason=body.reason,
+    )
+    return detail_public(
+        await traces.break_glass_detail(owner.scope, trace_id, break_glass=break_glass, workspace_id=workspace_id)
+    )
+
+
+@organization_router.get("/audit/break-glass", response_model=BreakGlassReadListPublic)
+async def list_organization_break_glass_reads(
+    traces: TraceServiceDep,
+    owner: Annotated[OrganizationBreakGlass, Depends(get_organization_break_glass)],
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 50,
+) -> BreakGlassReadListPublic:
+    """The organization's owners' break-glass openings, newest first. Owners only."""
+    reads, has_more = await traces.break_glass_reads(
+        organization_id=owner.organization_id, kind="organization", limit=limit, offset=skip
+    )
+    return BreakGlassReadListPublic(items=[break_glass_read_public(read) for read in reads], has_more=has_more)
 
 
 @organization_router.post("/{trace_id}/shares", response_model=ContentSharePublic, status_code=status.HTTP_201_CREATED)
@@ -256,6 +352,7 @@ async def _retention(config: GatewayConfig) -> None:
         lambda uow: build_trace_service(uow, SpanContent.disabled(), NoSessionOwners()),
         retention_days=config.trace_retention_days,
         max_age_days=config.trace_session_max_age_days,
+        break_glass_retention_days=config.trace_break_glass_retention_days,
         interval=_RETENTION_INTERVAL_S,
     )
 

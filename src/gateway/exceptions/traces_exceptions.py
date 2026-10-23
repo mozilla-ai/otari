@@ -55,3 +55,10 @@ class TraceContentShareNotFoundError(TenancyNotFoundError):
 
     def __init__(self, share_id: str):
         super().__init__(f"Share '{share_id}' not found")
+
+
+class TraceBreakGlassForbiddenError(TenancyForbiddenError):
+    """Only an organization's owners open its sessions' content without a share."""
+
+    def __init__(self) -> None:
+        super().__init__("Only an owner of the organization can open a session's content this way")

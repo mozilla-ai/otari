@@ -3,6 +3,7 @@ from typing import Self
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.repositories.traces.barrier_repository import ContentBarrierRepository, UserBarrierRepository
+from gateway.repositories.traces.break_glass_repository import BreakGlassRepository
 from gateway.repositories.traces.definition_repository import GuardrailDefinitionRepository
 from gateway.repositories.traces.share_repository import ContentShareRepository
 from gateway.repositories.traces.span_repository import SpanRepository
@@ -19,6 +20,7 @@ class TracesRepositories:
     shares: ContentShareRepository
     barriers: ContentBarrierRepository
     erasures: UserBarrierRepository
+    break_glass: BreakGlassRepository
 
     @classmethod
     def on(cls, uow: UnitOfWork) -> Self:
@@ -30,4 +32,5 @@ class TracesRepositories:
             shares=ContentShareRepository(uow),
             barriers=ContentBarrierRepository(uow),
             erasures=UserBarrierRepository(uow),
+            break_glass=BreakGlassRepository(uow),
         )

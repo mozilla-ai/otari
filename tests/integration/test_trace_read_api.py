@@ -35,6 +35,7 @@ from gateway.models.traces import (
     TraceSpan,
 )
 from gateway.models.users import User as BillingUser
+from gateway.repositories.traces.break_glass_repository import BreakGlassRepository
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.traces import SpanContent
@@ -645,7 +646,7 @@ def test_a_share_ends_for_good_once_its_owner_leaves_the_workspace(
         stored = session.get(TraceContentShare, uuid.UUID(share["id"]))
         assert stored is not None and stored.revoked_at is not None
         member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
-        workspace_id = session.scalars(select(Workspace.id).where(col(Workspace.name) == "One")).one()
+        workspace_id = session.scalars(select(col(Workspace.id)).where(col(Workspace.name) == "One")).one()
         session.add(WorkspaceMember(workspace_id=workspace_id, user_id=member.id, role="member", status="active"))
         session.commit()
     # Back in the workspace, the ended share stays ended.
@@ -744,7 +745,7 @@ def test_an_expired_share_opens_nothing(
 
 def _workspace_id(db_session_factory: Callable[[], Session], name: str) -> uuid.UUID:
     with db_session_factory() as session:
-        workspace_id: uuid.UUID = session.scalars(select(Workspace.id).where(col(Workspace.name) == name)).one()
+        workspace_id: uuid.UUID = session.scalars(select(col(Workspace.id)).where(col(Workspace.name) == name)).one()
         return workspace_id
 
 
@@ -931,3 +932,123 @@ def test_a_running_share_is_on_the_first_page_however_many_ended_ones_follow_it(
 
     assert page["items"][0]["id"] == running["id"] and page["items"][0]["active"] is True
     assert len(page["items"]) == 20 and page["has_more"] is True
+
+
+_REASON = "HR investigation 2026-17, approved by legal"
+
+
+def test_an_owner_opens_a_private_session_by_break_glass_and_it_is_recorded_first(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    path = "/organizations/me/traces/s-one/break-glass"
+
+    # Admins and members are not owners, and a reason has to say something.
+    assert _as(client, world["admin"], "POST", path, json={"reason": _REASON}).status_code == 403
+    assert _as(client, world["member"], "POST", path, json={"reason": _REASON}).status_code == 403
+    assert _as(client, world["operator"], "POST", path, json={"reason": "why"}).status_code == 422
+
+    opened = _as(client, world["operator"], "POST", path, json={"reason": _REASON})
+    assert opened.status_code == status.HTTP_200_OK, opened.text
+    assert opened.json()["content_access"] == "break_glass"
+    assert _tool_call(opened.json())["content"] == {"command": "pytest -x"}
+
+    log = _as(client, world["operator"], "GET", "/organizations/me/traces/audit/break-glass").json()
+    [entry] = log["items"]
+    assert (entry["kind"], entry["trace_id"], entry["reason"], entry["reader_email"]) == (
+        "organization",
+        "s-one",
+        _REASON,
+        "op@a.test",
+    )
+    assert _as(client, world["admin"], "GET", "/organizations/me/traces/audit/break-glass").status_code == 403
+    # The session's owner is not told: their own view of the session is unchanged.
+    assert _detail(client, world["member"])["content_access"] == "owner"
+
+
+def test_break_glass_opens_a_departed_members_session(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    with db_session_factory() as session:
+        member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+        for row in session.scalars(select(WorkspaceMember).where(col(WorkspaceMember.user_id) == member.id)):
+            session.delete(row)
+        session.commit()
+
+    opened = _as(
+        client, world["operator"], "POST", "/organizations/me/traces/s-one/break-glass", json={"reason": _REASON}
+    )
+
+    assert _tool_call(opened.json())["content"] == {"command": "pytest -x"}
+
+
+def test_nothing_opens_when_the_break_glass_record_cannot_be_written(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    opened: list[str] = []
+    real_open = SpanContent.open
+
+    async def tracked_open(self: SpanContent, *args: Any, **kwargs: Any) -> dict[str, str]:
+        opened.append("opened")
+        return await real_open(self, *args, **kwargs)
+
+    async def refuse(self: Any, **values: object) -> None:
+        raise RuntimeError("the audit table is unavailable")
+
+    monkeypatch.setattr(SpanContent, "open", tracked_open)
+    monkeypatch.setattr(BreakGlassRepository, "record", refuse)
+
+    with pytest.raises(RuntimeError):
+        _as(client, world["operator"], "POST", "/organizations/me/traces/s-one/break-glass", json={"reason": _REASON})
+    assert opened == []
+
+
+def test_platform_break_glass_is_off_by_default_and_reaches_any_organization_when_on(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    with db_session_factory() as session:
+        span = session.scalars(select(TraceSpan).where(col(TraceSpan.trace_id) == "s-theirs")).first()
+        assert span is not None
+        span.content_sealed = _sealed(
+            {"command": "make deploy"}, workspace_id=span.workspace_id, trace_id=span.trace_id, span_id=span.span_id
+        )
+        theirs = span.workspace_id
+        session.commit()
+    body = {"reason": "Court order 4411 from the Dublin District Court", "reference": "LEGAL-4411"}
+    path = f"/traces/s-theirs/break-glass?workspace_id={theirs}"
+
+    assert _as(client, world["operator"], "POST", path, json=body).status_code == status.HTTP_404_NOT_FOUND
+
+    monkeypatch.setattr(cast(FastAPI, client.app).state.config, "trace_platform_break_glass_enabled", True)
+    assert _as(client, world["operator"], "POST", path, json={"reason": body["reason"]}).status_code == 422
+    opened = _as(client, world["operator"], "POST", path, json=body)
+    assert opened.status_code == status.HTTP_200_OK, opened.text
+    contents = [span["content"] for span in opened.json()["spans"] if span["content"]]
+    assert contents == [{"command": "make deploy"}]
+
+    [entry] = _operator_get(client, world, "/traces/audit/break-glass").json()["items"]
+    assert (entry["kind"], entry["reference"]) == ("deployment", "LEGAL-4411")
+    # Not on the organization owners' own log: theirs lists owners' openings.
+    assert _as(client, world["outsider"], "GET", "/organizations/me/traces/audit/break-glass").json()["items"] == []
+    assert _as(client, world["admin"], "POST", path, json=body).status_code == status.HTTP_403_FORBIDDEN

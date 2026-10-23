@@ -218,6 +218,12 @@ class DeploymentBootstrap(BaseModel):
             "keeps it only once its managers turn it on as well."
         )
     )
+    trace_platform_break_glass: bool = Field(
+        description=(
+            "Whether the deployment's operator may open any organization's session content without its owner's "
+            "share, recorded with a reason and a reference."
+        )
+    )
     trace_retention_days: int = Field(
         description=(
             "Days after its last activity that a session, with what it was about, its shares and their reads, is "
@@ -273,6 +279,7 @@ async def get_bootstrap(
         federation_member_rules=config.federation_member_rules,
         mail_ready=config.mail_ready,
         trace_content_available=config.trace_capture_enabled and config.trace_content_enabled,
+        trace_platform_break_glass=config.trace_platform_break_glass_enabled,
         trace_retention_days=config.trace_retention_days,
         trace_session_max_age_days=config.trace_session_max_age_days,
         # Gated on mail as well as on the setting, and not only because the
