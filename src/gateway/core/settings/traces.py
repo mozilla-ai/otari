@@ -39,6 +39,19 @@ class TraceSettings(BaseModel):
             "Off by default."
         ),
     )
+    trace_platform_break_glass_enabled: Annotated[bool, OMITTED] = Field(
+        default=False,
+        description=(
+            "Let the deployment's operator open any organization's session content without its owner's share, "
+            "giving a reason and a reference (a legal request, a ticket). Every opening is recorded. An "
+            "organization's owners can do the same within their organization whatever this says. Off by default."
+        ),
+    )
+    trace_break_glass_retention_days: Annotated[int, OMITTED] = Field(
+        default=365,
+        gt=0,
+        description="Delete the record of a break-glass opening this many days after it.",
+    )
     trace_content_key_backend: Annotated[Literal["secret_key", "aws_kms"], OMITTED] = Field(
         default="secret_key",
         description=(

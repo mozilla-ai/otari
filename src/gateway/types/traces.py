@@ -144,6 +144,10 @@ SPAN_CONTENT_MAX_LENGTH = 4_000
 SHARE_DEFAULT_DAYS = 30
 SHARE_MAX_DAYS = 90
 SHARE_NOTE_MAX_LENGTH = 500
+# What opening a session's content without its owner's share has to say for itself.
+BREAK_GLASS_REASON_MIN_LENGTH = 10
+BREAK_GLASS_REASON_MAX_LENGTH = 1_000
+BREAK_GLASS_REFERENCE_MAX_LENGTH = 200
 
 
 class InvalidSpanError(ValueError):
@@ -334,8 +338,10 @@ class WriteResult:
 
 ShareAudience = Literal["organization_admins", "deployment_operator"]
 SHARE_AUDIENCES: tuple[ShareAudience, ...] = ("organization_admins", "deployment_operator")
-# How a read reached a session's content: as its owner, through a share, or not at all.
-ContentAccess = Literal["owner", "share", "none"]
+# How a read reached a session's content: as its owner, through a share, by
+# break-glass (an organization owner or the deployment's operator, recorded), or not at all.
+ContentAccess = Literal["owner", "share", "break_glass", "none"]
+BreakGlassKind = Literal["organization", "deployment"]
 
 
 @dataclass(frozen=True)
@@ -513,6 +519,35 @@ class TraceDetail:
     content_access: ContentAccess = "none"
     content_share: "ContentShare | None" = None
     """The share the content was read through, where it was."""
+
+
+@dataclass(frozen=True)
+class BreakGlass:
+    """Why a session's content is being opened without its owner's share, and by whom."""
+
+    kind: BreakGlassKind
+    organization_id: uuid.UUID
+    reader_user_id: uuid.UUID | None
+    reader_email: str
+    reason: str
+    reference: str | None = None
+
+
+@dataclass(frozen=True)
+class BreakGlassRead:
+    """One recorded break-glass opening of a session's content."""
+
+    id: uuid.UUID
+    kind: BreakGlassKind
+    organization_id: uuid.UUID
+    workspace_id: uuid.UUID
+    trace_id: str
+    session_user_id: str | None
+    reader_user_id: uuid.UUID | None
+    reader_email: str
+    reason: str
+    reference: str | None
+    read_at: datetime
 
 
 @dataclass(frozen=True)

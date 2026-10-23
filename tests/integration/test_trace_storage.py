@@ -26,6 +26,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import dispose_db, init_db
 from gateway.core.unit_of_work import create_unit_of_work
 from gateway.exceptions.traces_exceptions import TraceAmbiguousError
+from gateway.models.tenancy import Workspace
 from gateway.models.traces import TraceSpan
 from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
@@ -35,7 +36,7 @@ from gateway.services.secret_box import generate_secret_key
 from gateway.services.traces import SpanContent, TraceService
 from gateway.services.traces import _service as trace_service_module
 from gateway.services.traces._collector import call_id_digest
-from gateway.types.traces import SpanRecord, TraceFilter, TraceScope, TraceWrite
+from gateway.types.traces import BreakGlass, SpanRecord, TraceFilter, TraceScope, TraceWrite
 
 pytestmark = pytest.mark.asyncio
 
@@ -827,3 +828,27 @@ async def test_a_batch_another_replica_held_from_before_an_erasure_is_never_stor
     # Someone else's spans are stored as ever.
     bob = await store.write((_write(workspace, "s-bob", _span("step-0"), user_id="bob"),))
     assert bob.accepted == 1
+
+
+async def test_break_glass_records_go_once_past_their_retention(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession
+) -> None:
+    workspace, _ = tenants
+    await store.write((_write(workspace, "s-1", _span("step-0")),))
+    organization_id = (
+        await async_db.execute(select(col(Workspace.organization_id)).where(col(Workspace.id) == workspace))
+    ).scalar_one()
+    break_glass = BreakGlass(
+        kind="organization",
+        organization_id=organization_id,
+        reader_user_id=None,
+        reader_email="owner@example.test",
+        reason="An investigation the owner cannot be asked about",
+    )
+
+    await store.break_glass_detail(TraceScope.deployment(), "s-1", break_glass=break_glass, workspace_id=workspace)
+    reads, _ = await store.break_glass_reads(organization_id=organization_id, kind=None, limit=10)
+    assert len(reads) == 1
+
+    assert await store.expire_break_glass(before=datetime.now(UTC) - timedelta(days=1)) == 0
+    assert await store.expire_break_glass(before=datetime.now(UTC) + timedelta(seconds=1)) == 1
