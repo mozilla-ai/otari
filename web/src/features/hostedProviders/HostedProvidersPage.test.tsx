@@ -43,6 +43,7 @@ function hostedProvider(
     enabled: true,
     restricted_to_organization_id: null,
     serves_unlisted_models: false,
+    supported_countries: null,
     created_at: "2026-10-01T00:00:00Z",
     updated_at: null,
     ...overrides,
@@ -539,6 +540,137 @@ describe("HostedProvidersPage", () => {
       api_base: "",
       serves_unlisted_models: false,
     })
+  })
+
+  it("adds a provider that serves only some countries", async () => {
+    const requests = mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(within(dialog).getByLabelText("API key"), "sk-ant-secret")
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Supported countries" }),
+      "us, de",
+    )
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add provider" }),
+    )
+
+    await waitFor(() =>
+      expect(hostedRequests(requests, "POST")).toHaveLength(1),
+    )
+    expect(hostedRequests(requests, "POST")[0].body).toMatchObject({
+      supported_countries: ["US", "DE"],
+    })
+  })
+
+  it("holds back a country that is not a two-letter code", async () => {
+    mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(within(dialog).getByLabelText("API key"), "sk-ant-secret")
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Supported countries" }),
+      "US, USA",
+    )
+
+    expect(
+      within(dialog).getByText("Not a two-letter country code: USA"),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole("button", { name: "Add provider" }),
+    ).toBeDisabled()
+  })
+
+  it("changes and clears the countries from the edit dialog", async () => {
+    const requests = mockApi({
+      providers: [hostedProvider({ supported_countries: ["US"] })],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Edit openai" }))
+    let dialog = await screen.findByRole("dialog")
+    let countries = within(dialog).getByRole("textbox", {
+      name: "Supported countries",
+    })
+    expect(countries).toHaveValue("US")
+    await user.clear(countries)
+    await user.type(countries, "gb")
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(hostedRequests(requests, "PATCH")).toHaveLength(1),
+    )
+    expect(hostedRequests(requests, "PATCH")[0].body).toEqual({
+      api_base: "",
+      supported_countries: ["GB"],
+    })
+
+    await user.click(await screen.findByRole("button", { name: "Edit openai" }))
+    dialog = await screen.findByRole("dialog")
+    countries = within(dialog).getByRole("textbox", {
+      name: "Supported countries",
+    })
+    await user.clear(countries)
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(hostedRequests(requests, "PATCH")).toHaveLength(2),
+    )
+    expect(hostedRequests(requests, "PATCH")[1].body).toEqual({
+      api_base: "",
+      supported_countries: null,
+    })
+  })
+
+  it("edits a provider without resending its countries", async () => {
+    const requests = mockApi({
+      providers: [hostedProvider({ supported_countries: ["US", "DE"] })],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Edit openai" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(
+      within(dialog).getByRole("checkbox", {
+        name: "Serve models not on its list",
+      }),
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(hostedRequests(requests, "PATCH")).toHaveLength(1),
+    )
+    expect(hostedRequests(requests, "PATCH")[0].body).toEqual({
+      api_base: "",
+      serves_unlisted_models: true,
+    })
+  })
+
+  it("lists the countries each provider serves", async () => {
+    mockApi({
+      providers: [
+        hostedProvider({ supported_countries: ["US", "DE"] }),
+        hostedProvider({ name: "anthropic", provider: "anthropic" }),
+      ],
+    })
+    await renderPage()
+
+    expect(await screen.findByText("US, DE")).toBeInTheDocument()
+    expect(screen.getByText("Every country")).toBeInTheDocument()
   })
 
   it("adds a provider with its key, leaving a blank endpoint out", async () => {
@@ -1394,6 +1526,8 @@ describe("HostedProvidersPage, named providers and the move", () => {
     const row = header.parentElement as HTMLElement
     expect(within(row).getByText("config.yml")).toBeInTheDocument()
     expect(within(row).getByText("Edit in config.yml")).toBeInTheDocument()
+    // Its endpoint and its countries.
+    expect(within(row).getAllByText("Set in config.yml")).toHaveLength(2)
     expect(within(row).queryByRole("button")).toBeNull()
     expect(within(row).queryByRole("switch")).toBeNull()
     expect(

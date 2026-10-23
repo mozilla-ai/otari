@@ -57,6 +57,7 @@ import {
   modelsPreviewOutcome,
   pricePreviewOutcome,
 } from "./refreshOutcome"
+import { formatCountries } from "./supportedCountries"
 
 // The providers this deployment serves inference on with its own keys, for a
 // request that brings no credential of its own. Deployment-scoped, which is
@@ -486,6 +487,20 @@ export function HostedProvidersPage() {
         ),
     },
     {
+      id: "countries",
+      header: "Countries",
+      cell: (row) =>
+        row.supported_countries == null ? (
+          <span className="text-muted">Every country</span>
+        ) : row.supported_countries.length === 0 ? (
+          <span className="text-body">None</span>
+        ) : (
+          <span className="text-body">
+            {formatCountries(row.supported_countries)}
+          </span>
+        ),
+    },
+    {
       id: "enabled",
       header: "Serving",
       cell: (row) => (
@@ -550,6 +565,7 @@ export function HostedProvidersPage() {
     health: (row) => <HealthPill health={healthByName.get(row.instance)} />,
     api_base: () => <span className="text-muted">Set in config.yml</span>,
     scope: () => <span className="text-muted">Every organization</span>,
+    countries: () => <span className="text-muted">Set in config.yml</span>,
     enabled: () => <span className="text-caption">Always</span>,
     actions: () => <span className="text-caption">Edit in config.yml</span>,
   }
