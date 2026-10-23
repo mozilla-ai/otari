@@ -788,7 +788,7 @@ def test_a_workspace_keeps_no_content_until_its_managers_turn_it_on(
     assert turned_off.status_code == status.HTTP_200_OK, turned_off.text
     with db_session_factory() as session:
         barrier = session.get(TraceContentBarrier, workspace_id)
-        assert barrier is not None and barrier.generation == 1
+        assert barrier is not None and barrier.generation == 2
 
 
 def test_a_workspaces_managers_delete_its_stored_content_and_keep_its_sessions(
