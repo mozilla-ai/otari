@@ -27,11 +27,7 @@ import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
 import { useNavVisibility } from "@/app/nav/useNavVisibility"
 import type { OrganizationContext } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
-import { useProfile } from "@/shared/api/auth"
-import {
-  isNoOrganizationError,
-  useOrganizationContext,
-} from "@/shared/api/organizations"
+import { useSessionCaller } from "@/shared/api/auth"
 import { OTARI_COMMUNITY_URL } from "@/shared/helpers/community"
 import { documentationHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -335,12 +331,8 @@ export function AccountMenu({
   const { logout } = useAuth()
   const { docs_url, terms_url, privacy_url, feedback_enabled } = useDeployment()
   const isNavVisible = useNavVisibility()
-  const organization = useOrganizationContext()
-  // A caller with no organization has no context to read a name from, so the
-  // profile names them instead; everyone else needs no second request.
-  const profile = useProfile(isNoOrganizationError(organization.error))
   const [open, setOpen] = useState(false)
-  const identity = sessionIdentity(organization.data?.caller ?? profile.data)
+  const identity = sessionIdentity(useSessionCaller())
   const badgeLabel = useAccountBadgeLabel()
   const triggerLabel = badgeLabel
     ? `Account: ${identity.name}, ${badgeLabel}`

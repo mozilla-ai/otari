@@ -21797,6 +21797,12 @@ export interface operations {
                 "application/json": {
                     /** Message */
                     message: string;
+                    /**
+                     * Share Email
+                     * @description Send the signed-in account's email with the message so the Otari team can reply. Refused when the caller has no email the team can reply to.
+                     * @default false
+                     */
+                    share_email?: boolean;
                 };
             };
         };

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.api import deps
+from gateway.api.routes.feedback import UNSHAREABLE_EMAIL
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.tenancy import DashboardSession, User
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
@@ -82,6 +83,85 @@ def test_ordinary_member_can_submit(
     assert len(deliveries) == 1
 
 
+def _sign_in_member(client: TestClient, db_session: Session, master_key_header: dict[str, str]) -> User:
+    added = client.post(
+        f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=master_key_header
+    )
+    assert added.status_code == 201, added.text
+    user = db_session.scalars(select(User).where(col(User.email) == "member@example.com")).one()
+    token = "feedback-member"
+    db_session.add(
+        DashboardSession(
+            token_hash=hash_session_token(token),
+            user_id=user.id,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+    )
+    db_session.commit()
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    return user
+
+
+def test_a_member_who_shares_their_email_sends_the_session_address(
+    client: TestClient, db_session: Session, deliveries: list[httpx.Request], master_key_header: dict[str, str]
+) -> None:
+    user = _sign_in_member(client, db_session, master_key_header)
+    # Adding a member lower-cases the address; an identity from another sign-in
+    # path keeps its own, and a local part can be case-sensitive.
+    user.email = "Member@Example.com"
+    db_session.commit()
+    assert (
+        client.post(f"{API_ROOT}/feedback", json={"message": "Reply, please", "share_email": True}).status_code == 204
+    )
+    assert client.post(f"{API_ROOT}/feedback", json={"message": "Anonymous", "share_email": False}).status_code == 204
+    assert [json.loads(request.content) for request in deliveries] == [
+        {"message": "Reply, please", "reply_to": "Member@Example.com"},
+        {"message": "Anonymous"},
+    ]
+
+
+def test_sharing_an_email_the_caller_does_not_have_is_refused(
+    client: TestClient, test_config: GatewayConfig, master_key_header: dict[str, str], deliveries: list[httpx.Request]
+) -> None:
+    body = {"message": "Idea", "share_email": True}
+    by_key = client.post(f"{API_ROOT}/feedback", json=body, headers=master_key_header)
+    assert by_key.status_code == 422
+    assert by_key.json()["detail"] == UNSHAREABLE_EMAIL
+    # The operator's own identity is provisioned without an address.
+    assert client.post(f"{API_ROOT}/auth/session", json={"master_key": test_config.master_key}).status_code == 200
+    assert client.post(f"{API_ROOT}/feedback", json=body).status_code == 422
+    assert not deliveries
+
+
+def test_an_email_the_receiver_would_refuse_is_never_sent(
+    client: TestClient, db_session: Session, deliveries: list[httpx.Request], master_key_header: dict[str, str]
+) -> None:
+    user = _sign_in_member(client, db_session, master_key_header)
+    # Within this gateway's 255, one past the receiver's 254.
+    user.email = "a" * 243 + "@example.com"
+    db_session.commit()
+    refused = client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": True})
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == UNSHAREABLE_EMAIL
+    assert not deliveries
+
+
+def test_a_receiver_that_refuses_the_address_is_explained(
+    client: TestClient, db_session: Session, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A receiver from before `reply_to`, which refuses any field it does not know.
+    def receive(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422 if "reply_to" in json.loads(request.content) else 204)
+
+    monkeypatch.setattr(deps, "FeedbackService", partial(FeedbackService, transport=httpx.MockTransport(receive)))
+    _sign_in_member(client, db_session, master_key_header)
+    ticked = client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": True})
+    assert ticked.status_code == 422
+    assert ticked.json()["detail"] == UNSHAREABLE_EMAIL
+    assert client.post(f"{API_ROOT}/feedback", json={"message": "Idea"}).status_code == 204
+
+
 def test_unauthenticated_and_api_key_callers_are_refused(
     client: TestClient, api_key_header: dict[str, str], deliveries: list[httpx.Request]
 ) -> None:
@@ -97,6 +177,8 @@ def test_unauthenticated_and_api_key_callers_are_refused(
         {"message": "a" * 4001},
         {"message": "ok", "url": "private"},
         {"message": "ok", "email": "private@example.com"},
+        {"message": "ok", "reply_to": "private@example.com"},
+        {"message": "ok", "share_email": "true"},
         {"message": "\ud800"},
     ],
 )

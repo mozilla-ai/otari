@@ -26,14 +26,18 @@ class FeedbackService:
     def __init__(self, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._transport = transport
 
-    async def submit(self, body: FeedbackSubmission) -> None:
+    async def submit(self, body: FeedbackSubmission, reply_to: str | None = None) -> None:
+        # Named field by field: the receiver refuses any field it does not know.
+        payload = {"message": body.message}
+        if reply_to is not None:
+            payload["reply_to"] = reply_to
         try:
             async with (
                 asyncio.timeout(10),
                 httpx.AsyncClient(
                     timeout=10, follow_redirects=False, trust_env=False, transport=self._transport
                 ) as client,
-                client.stream("POST", FEEDBACK_RECEIVER, json=body.model_dump()) as response,
+                client.stream("POST", FEEDBACK_RECEIVER, json=payload) as response,
             ):
                 if response.status_code == 204:
                     return

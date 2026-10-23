@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from starlette.requests import ClientDisconnect
 
 from gateway.api.deps import get_feedback_service, get_session_identity, verify_master_key
+from gateway.core.addresses import normalized_address
 from gateway.core.feature import CoreFeature
 from gateway.exceptions.feedback_exceptions import FeedbackDeliveryError
 from gateway.models.tenancy import User
@@ -16,6 +17,17 @@ from gateway.services.feedback import FeedbackService
 
 router = APIRouter(prefix="/feedback", tags=["feedback"], dependencies=[Depends(verify_master_key)])
 MAX_BODY_BYTES = 32 * 1024
+# The receiver's own cap on `reply_to`; keep the two together.
+MAX_REPLY_TO_LENGTH = 254
+UNSHAREABLE_EMAIL = "Your email could not be attached. Untick it to send without it."
+
+
+def _reply_to(identity: User | None) -> str | None:
+    """The caller's email as the receiver will accept it, or None if it would refuse it."""
+    email = identity.email.strip() if identity and identity.email else ""
+    if len(email) > MAX_REPLY_TO_LENGTH or not email.isprintable() or normalized_address(email) is None:
+        return None
+    return email
 
 
 async def _read_submission(request: Request) -> FeedbackSubmission:
@@ -59,6 +71,9 @@ async def submit_feedback(
 ) -> Response:
     """Send feedback privately to the Otari team."""
     body = await _read_submission(request)
+    reply_to = _reply_to(session_identity) if body.share_email else None
+    if body.share_email and reply_to is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, UNSHAREABLE_EMAIL)
     # After validation, so a body that never leaves the gateway costs no send.
     limiter: RateLimiter | None = getattr(request.app.state, "feedback_rate_limiter", None)
     if limiter is not None:
@@ -69,11 +84,14 @@ async def submit_feedback(
                 status.HTTP_429_TOO_MANY_REQUESTS, "Please wait before sending more feedback.", headers=exc.headers
             ) from None
     try:
-        await service.submit(body)
+        await service.submit(body, reply_to)
     except FeedbackDeliveryError as exc:
         detail = {
             413: "Feedback is too large.",
-            422: "Check the feedback text.",
+            # This gateway already checked the message by the receiver's rules,
+            # so a refusal of a send with an address is the address, as from a
+            # receiver that does not know the field yet.
+            422: UNSHAREABLE_EMAIL if reply_to is not None else "Check the feedback text.",
             429: "Please wait before sending more feedback.",
         }.get(exc.status_code, "We could not confirm delivery. Please try again.")
         headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after is not None else None

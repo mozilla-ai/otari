@@ -30879,6 +30879,12 @@
                     "minLength": 1,
                     "title": "Message",
                     "type": "string"
+                  },
+                  "share_email": {
+                    "default": false,
+                    "description": "Send the signed-in account's email with the message so the Otari team can reply. Refused when the caller has no email the team can reply to.",
+                    "title": "Share Email",
+                    "type": "boolean"
                   }
                 },
                 "required": [
