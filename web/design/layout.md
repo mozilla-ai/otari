@@ -76,8 +76,9 @@ Toolbar            search, filters, refresh. FilterChips goes INSIDE it, and
                    renders the selects and their chips together
 BulkActionBar      only while a selection exists, and fixed to the viewport
                    rather than in flow, so no row moves under the cursor
-DataTable          the subject
-TablePagination    range, page size, two bare arrows. No rule under it
+DataTable          the subject. Scrolls inside itself once taller than the screen
+TablePagination    directly below, outside the scroll. Hidden while every row
+                   fits one page at the smallest size. No rule under it
 ```
 
 A form page, in order:
@@ -156,8 +157,8 @@ lines.
 ```tsx
 // Correct: three children, three rows, separators supplied
 <SettingsGroup title="Access" description="Who can reach this gateway.">
-  <SettingsRow label="Allow passkeys">…</SettingsRow>
-  <SettingsRow label="Open signup">…</SettingsRow>
+  <SettingRow label="Allow passkeys">…</SettingRow>
+  <SettingRow label="Open signup">…</SettingRow>
   <div className="flex justify-end"><Button variant="primary">Save access</Button></div>
 </SettingsGroup>
 

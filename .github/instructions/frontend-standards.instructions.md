@@ -233,7 +233,12 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    already switches to a drawer below `md`. Touch targets ≥44px on the phone viewport, no
    hover-only controls (`opacity-0 group-hover:*` does not exist on a touch device), `min-w-0`
    on flex children that can overflow, no fixed-pixel layout containers, and a table needs a
-   card list or its own horizontal scroll below `md`. See
+   card list or its own horizontal scroll below `md`. From `md` up a long table bounds itself:
+   `DataTable` scrolls inside itself once taller than the screen, so flag a hand-written
+   `max-height` or `overflow-y` on a table; rows beyond a page go through `TablePagination`
+   (server) or `useClientPagination` (client) at `PAGE_SIZE_OPTIONS`, so flag a `slice()` with "Show all"
+   or a page size list of its own; and filters sit above the table with the pager directly
+   below, never inside it. See
    [responsiveness.md](../skills/frontend-standards/responsiveness.md).
 
 10. **Tests for changed behavior.** Colocated Vitest tests (`Foo.tsx` → `Foo.test.tsx`) that
