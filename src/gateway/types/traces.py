@@ -538,6 +538,8 @@ class ContentShare:
     expires_at: datetime
     revoked_at: datetime | None
     reads: tuple[ContentRead, ...] = ()
+    """Its newest reads; ``read_count`` says how many there are in all."""
+    read_count: int = 0
 
     def active(self, now: datetime) -> bool:
         """Whether it still lets its audience read."""

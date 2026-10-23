@@ -4112,7 +4112,7 @@ export interface paths {
         };
         /**
          * List Trace Content Shares
-         * @description Every share one of your sessions has had, newest first, with each read made through it.
+         * @description The shares one of your sessions has had, ended ones included, newest first, each with its newest reads.
          */
         get: operations["organization-traces-list_trace_content_shares"];
         put?: never;
@@ -4146,6 +4146,26 @@ export interface paths {
          * @description Stop a share letting its audience read what your session was about.
          */
         delete: operations["organization-traces-end_trace_content_share"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/traces/{trace_id}/shares/{share_id}/reads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Trace Content Share Reads
+         * @description Every read through one share of your session, newest first, a page at a time.
+         */
+        get: operations["organization-traces-list_trace_content_share_reads"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -9257,6 +9277,16 @@ export interface components {
              */
             shadowed: boolean;
         };
+        /** ContentReadListPublic */
+        ContentReadListPublic: {
+            /**
+             * Has More
+             * @description More reads follow this page.
+             */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["ContentReadPublic"][];
+        };
         /**
          * ContentReadPublic
          * @description One read of a session's content through a share.
@@ -9299,6 +9329,12 @@ export interface components {
         };
         /** ContentShareListPublic */
         ContentShareListPublic: {
+            /**
+             * Has More
+             * @description More shares follow this page.
+             * @default false
+             */
+            has_more: boolean;
             /** Items */
             items: components["schemas"]["ContentSharePublic"][];
         };
@@ -9339,8 +9375,14 @@ export interface components {
              */
             note: string | null;
             /**
+             * Read Count
+             * @description How many reads it has had in all.
+             * @default 0
+             */
+            read_count: number;
+            /**
              * Reads
-             * @description Each read made through it, newest first. Only its owner sees them.
+             * @description Its newest reads, newest first; GET .../shares/{share_id}/reads pages through all of them. A reader's reads are recorded at most once an hour. Only its owner sees them.
              */
             reads?: components["schemas"]["ContentReadPublic"][];
             /** Revoked At */
@@ -26229,6 +26271,8 @@ export interface operations {
             query?: {
                 /** @description The workspace the trace is in, as its list entry names it. */
                 workspace_id?: string | null;
+                skip?: number;
+                limit?: number;
             };
             header?: never;
             path: {
@@ -26317,6 +26361,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-list_trace_content_share_reads": {
+        parameters: {
+            query?: {
+                /** @description The workspace the trace is in, as its list entry names it. */
+                workspace_id?: string | null;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+                share_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentReadListPublic"];
+                };
             };
             /** @description Validation Error */
             422: {

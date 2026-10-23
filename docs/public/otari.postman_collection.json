@@ -7835,7 +7835,7 @@
         {
           "name": "List Trace Content Shares",
           "request": {
-            "description": "Every share one of your sessions has had, newest first, with each read made through it.",
+            "description": "The shares one of your sessions has had, ended ones included, newest first, each with its newest reads.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7857,9 +7857,21 @@
                   "disabled": true,
                   "key": "workspace_id",
                   "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id/shares?workspace_id=",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id/shares?workspace_id=&skip=&limit=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7951,6 +7963,63 @@
                 }
               ],
               "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id/shares/:share_id?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "share_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Trace Content Share Reads",
+          "request": {
+            "description": "Every read through one share of your session, newest first, a page at a time.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                ":trace_id",
+                "shares",
+                ":share_id",
+                "reads"
+              ],
+              "query": [
+                {
+                  "description": "The workspace the trace is in, as its list entry names it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id/shares/:share_id/reads?workspace_id=&skip=&limit=",
               "variable": [
                 {
                   "description": "path parameter",

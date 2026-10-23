@@ -21,7 +21,7 @@ from gateway.exceptions.traces_exceptions import (
     TraceContentShareNotFoundError,
     TraceNotFoundError,
 )
-from gateway.models.traces import Trace, TraceContentShare, TraceGuardrailDefinition, TraceSpan
+from gateway.models.traces import Trace, TraceContentRead, TraceContentShare, TraceGuardrailDefinition, TraceSpan
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
 from gateway.services.traces._collector import CALL_ID_DIGEST, call_id_digest
 from gateway.services.traces._content import SpanContent
@@ -52,6 +52,11 @@ from otari_agent.domain.definitions import GateDefinition, definition_digest, ga
 
 # A stored span's identity: its workspace, its trace and its own id.
 SpanKey = tuple[uuid.UUID, str, str]
+
+# How often one reader's reads through a share are recorded, and how many of a
+# share's newest reads its listing carries.
+READ_RECORDED_EVERY = timedelta(hours=1)
+SHARE_LATEST_READS = 10
 
 # The most buckets one series read returns, each joined against every session it
 # overlaps. A dashboard preset asks for at most 60; its "All", by the day, keeps
@@ -223,7 +228,10 @@ class TraceService:
                 share = await self._shares.active(row.workspace_id, row.trace_id, scope.reader.audience, now)
                 if share is not None:
                     access = "share"
-                    await self._shares.record_read(share.id, scope.reader.user_id, scope.reader.email)
+                    # Once an hour per reader, so a page polling an active session is one read, not one a poll.
+                    await self._shares.record_read(
+                        share.id, scope.reader.user_id, scope.reader.email, unless_since=now - READ_RECORDED_EVERY
+                    )
         # Opened after the block, so a key source's round trip holds no connection.
         for position, span in enumerate(spans[:span_limit]):
             if not span.content_sealed:
@@ -275,9 +283,19 @@ class TraceService:
             return _share(share)
 
     async def content_shares(
-        self, scope: TraceScope, trace_id: str, *, workspace_id: uuid.UUID | None = None
-    ) -> tuple[ContentShare, ...]:
-        """Every share the session has had, newest first, each with the reads made through it. Its own user only.
+        self,
+        scope: TraceScope,
+        trace_id: str,
+        *,
+        limit: int,
+        offset: int = 0,
+        workspace_id: uuid.UUID | None = None,
+    ) -> tuple[tuple[ContentShare, ...], bool]:
+        """A page of the shares the session has had, newest first, and whether more follow. Its own user only.
+
+        Ended and expired shares are listed too, so their reads stay visible. Each
+        carries its newest ``SHARE_LATEST_READS`` reads and how many it has had;
+        :meth:`content_share_reads` pages through the rest.
 
         Raises:
             TraceNotFoundError: the scope holds no such trace.
@@ -287,14 +305,40 @@ class TraceService:
         _owner(scope)
         async with self._uow:
             row = await self._owned(scope, trace_id, workspace_id)
-            shares = await self._shares.for_trace(row.workspace_id, row.trace_id)
-            reads = await self._shares.reads([share.id for share in shares])
+            shares = list(await self._shares.for_trace(row.workspace_id, row.trace_id, limit=limit + 1, offset=offset))
+            ids = [share.id for share in shares[:limit]]
+            reads = await self._shares.latest_reads(ids, per_share=SHARE_LATEST_READS)
+            counts = await self._shares.read_counts(ids)
         by_share: dict[uuid.UUID, list[ContentRead]] = defaultdict(list)
         for read in reads:
-            by_share[read.share_id].append(
-                ContentRead(reader_user_id=read.reader_user_id, reader_email=read.reader_email, read_at=read.read_at)
-            )
-        return tuple(_share(share, tuple(by_share[share.id])) for share in shares)
+            by_share[read.share_id].append(_read(read))
+        page = tuple(_share(share, tuple(by_share[share.id]), counts.get(share.id, 0)) for share in shares[:limit])
+        return page, len(shares) > limit
+
+    async def content_share_reads(
+        self,
+        scope: TraceScope,
+        trace_id: str,
+        share_id: uuid.UUID,
+        *,
+        limit: int,
+        offset: int = 0,
+        workspace_id: uuid.UUID | None = None,
+    ) -> tuple[tuple[ContentRead, ...], bool]:
+        """A page of the reads through one of the session's shares, newest first, and whether more follow.
+
+        Raises:
+            TraceNotFoundError: the scope holds no such trace.
+            TraceContentShareNotFoundError: the session holds no such share.
+            TraceContentShareForbiddenError: the reader is not the session's own user.
+        """
+        _owner(scope)
+        async with self._uow:
+            row = await self._owned(scope, trace_id, workspace_id)
+            if await self._shares.find(row.workspace_id, row.trace_id, share_id) is None:
+                raise TraceContentShareNotFoundError(str(share_id))
+            reads = list(await self._shares.reads_page(share_id, limit=limit + 1, offset=offset))
+        return tuple(_read(read) for read in reads[:limit]), len(reads) > limit
 
     async def end_content_share(
         self, scope: TraceScope, trace_id: str, share_id: uuid.UUID, *, workspace_id: uuid.UUID | None = None
@@ -573,7 +617,11 @@ def _owner(scope: TraceScope) -> ContentReader:
     return scope.reader
 
 
-def _share(row: TraceContentShare, reads: tuple[ContentRead, ...] = ()) -> ContentShare:
+def _read(row: TraceContentRead) -> ContentRead:
+    return ContentRead(reader_user_id=row.reader_user_id, reader_email=row.reader_email, read_at=row.read_at)
+
+
+def _share(row: TraceContentShare, reads: tuple[ContentRead, ...] = (), read_count: int = 0) -> ContentShare:
     return ContentShare(
         id=row.id,
         audience=row.audience,  # type: ignore[arg-type]
@@ -582,6 +630,7 @@ def _share(row: TraceContentShare, reads: tuple[ContentRead, ...] = ()) -> Conte
         expires_at=row.expires_at,
         revoked_at=row.revoked_at,
         reads=reads,
+        read_count=read_count,
     )
 
 

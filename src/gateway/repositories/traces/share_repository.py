@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import TraceContentRead, TraceContentShare
@@ -41,12 +41,16 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
         await self.db.flush()
         return share
 
-    async def for_trace(self, workspace_id: uuid.UUID, trace_id: str) -> Sequence[TraceContentShare]:
-        """Every share the session has had, newest first."""
+    async def for_trace(
+        self, workspace_id: uuid.UUID, trace_id: str, *, limit: int, offset: int = 0
+    ) -> Sequence[TraceContentShare]:
+        """A page of the shares the session has had, newest first."""
         result = await self.db.execute(
             select(TraceContentShare)
             .where(TraceContentShare.workspace_id == workspace_id, TraceContentShare.trace_id == trace_id)
-            .order_by(TraceContentShare.created_at.desc())
+            .order_by(TraceContentShare.created_at.desc(), TraceContentShare.id)
+            .limit(limit)
+            .offset(offset)
         )
         return result.scalars().all()
 
@@ -85,18 +89,60 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
             share.revoked_at = now
             await self.db.flush()
 
-    async def record_read(self, share_id: uuid.UUID, reader_user_id: uuid.UUID, reader_email: str) -> None:
-        """Stage the record of one read through a share."""
+    async def record_read(
+        self, share_id: uuid.UUID, reader_user_id: uuid.UUID, reader_email: str, *, unless_since: datetime
+    ) -> None:
+        """Stage the record of one read through a share, unless this reader already has one since ``unless_since``."""
+        recent = await self.db.execute(
+            select(TraceContentRead.id)
+            .where(
+                TraceContentRead.share_id == share_id,
+                TraceContentRead.reader_user_id == reader_user_id,
+                TraceContentRead.read_at >= unless_since,
+            )
+            .limit(1)
+        )
+        if recent.scalar_one_or_none() is not None:
+            return
         self.db.add(TraceContentRead(share_id=share_id, reader_user_id=reader_user_id, reader_email=reader_email))
         await self.db.flush()
 
-    async def reads(self, share_ids: Sequence[uuid.UUID]) -> Sequence[TraceContentRead]:
-        """The reads made through these shares, newest first."""
+    async def latest_reads(self, share_ids: Sequence[uuid.UUID], *, per_share: int) -> Sequence[TraceContentRead]:
+        """The newest ``per_share`` reads through each of these shares, newest first."""
         if not share_ids:
             return []
+        rank = (
+            func.row_number()
+            .over(partition_by=TraceContentRead.share_id, order_by=TraceContentRead.read_at.desc())
+            .label("rank")
+        )
+        ranked = select(TraceContentRead.id, rank).where(TraceContentRead.share_id.in_(share_ids)).subquery()
         result = await self.db.execute(
             select(TraceContentRead)
-            .where(TraceContentRead.share_id.in_(share_ids))
+            .join(ranked, ranked.c.id == TraceContentRead.id)
+            .where(ranked.c.rank <= per_share)
             .order_by(TraceContentRead.read_at.desc())
+        )
+        return result.scalars().all()
+
+    async def read_counts(self, share_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, int]:
+        """How many reads each of these shares has had."""
+        if not share_ids:
+            return {}
+        result = await self.db.execute(
+            select(TraceContentRead.share_id, func.count())
+            .where(TraceContentRead.share_id.in_(share_ids))
+            .group_by(TraceContentRead.share_id)
+        )
+        return {share_id: int(count) for share_id, count in result.tuples().all()}
+
+    async def reads_page(self, share_id: uuid.UUID, *, limit: int, offset: int = 0) -> Sequence[TraceContentRead]:
+        """A page of the reads through one share, newest first."""
+        result = await self.db.execute(
+            select(TraceContentRead)
+            .where(TraceContentRead.share_id == share_id)
+            .order_by(TraceContentRead.read_at.desc(), TraceContentRead.id)
+            .limit(limit)
+            .offset(offset)
         )
         return result.scalars().all()
