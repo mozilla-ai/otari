@@ -32,6 +32,15 @@ describe("errorRateHealth", () => {
       errorRateHealth(totals({ request_count: 1000, error_count: 100 })).status,
     ).toBe("alert") // 10%
   })
+
+  it("stays amber on too few requests to call an incident", () => {
+    expect(
+      errorRateHealth(totals({ request_count: 3, error_count: 1 })).status,
+    ).toBe("warn")
+    expect(
+      errorRateHealth(totals({ request_count: 20, error_count: 2 })).status,
+    ).toBe("alert")
+  })
 })
 
 describe("providerHealthStatus", () => {

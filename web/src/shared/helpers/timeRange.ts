@@ -100,6 +100,18 @@ export const SESSION_PRESETS: RangePreset<ChartBucket>[] = [
 // (drag-selected or zoomed). Not a preset itself, so it never appears in a list.
 export const CUSTOM_KEY = "custom"
 
+/**
+ * The start of the caller's local day, as an absolute instant: the window
+ * "today" means to a person, rather than UTC's day or the last 24 hours.
+ */
+export function localMidnightIso(now: Date = new Date()): string {
+  return new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).toISOString()
+}
+
 export function findPreset<B extends ChartBucket>(
   presets: RangePreset<B>[],
   key: string,

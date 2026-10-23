@@ -82,10 +82,11 @@ describe("ActivityPage", () => {
   })
 
   it("asks the summary endpoint only for the breakdowns it reads", async () => {
-    // Two summary reads back this page: the model typeahead (by_model) and the
+    // Two summary reads back this page: the source picker (by_source) and the
     // timeline histogram (series, plus by_tool so the Tool filter knows whether this
     // window has any gateway-run tool calls to offer). Each breakdown is a separate
     // GROUP BY over the window server-side, so neither may request the full set.
+    // The model, user and key pickers are the Overview's and read nothing here.
     const { calls } = mockApi({ rows: [entry()] })
     renderPage(<ActivityPage />)
 
@@ -94,9 +95,12 @@ describe("ActivityPage", () => {
       .filter((c) => c.url.includes(`${API_ROOT}/usage/summary`))
       .map((c) => c.url)
     expect(summaryCalls.length).toBeGreaterThan(0)
-    expect(summaryCalls.some((url) => url.includes("dimensions=model"))).toBe(
+    expect(summaryCalls.some((url) => url.includes("dimensions=source"))).toBe(
       true,
     )
+    expect(
+      summaryCalls.some((url) => /dimensions=(model|user)/.test(url)),
+    ).toBe(false)
     expect(summaryCalls.some((url) => url.includes("dimensions=tool"))).toBe(
       true,
     )
@@ -131,7 +135,7 @@ describe("ActivityPage", () => {
   })
 
   it("honors a session drill-down and shows it as a clearable chip", async () => {
-    // The Usage page's session breakdown links here scoped to one source_label.
+    // The Usage session breakdown links here scoped to one source_label.
     // Without the filter the log would silently show every session's requests.
     const { calls } = mockApi({
       rows: [entry({ source: "claude_code", source_label: "sess-1" })],
@@ -148,6 +152,14 @@ describe("ActivityPage", () => {
     await waitFor(() =>
       expect(listCalls(calls).at(-1)).not.toContain("source_label="),
     )
+  })
+
+  it("leaves the heading to the Overview when embedded", async () => {
+    mockApi({ rows: [entry()] })
+    renderPage(<ActivityPage embedded />, "/requests")
+
+    await screen.findByText("gpt-4o")
+    expect(screen.queryByRole("heading", { name: "Activity" })).toBeNull()
   })
 
   it("honors endpoint and provider drill-downs", async () => {
@@ -248,26 +260,6 @@ describe("ActivityPage", () => {
     )
   })
 
-  it("opens the detail inline directly under the clicked row, and Close collapses it", async () => {
-    // Regression: the shared-table migration rendered the detail below the
-    // whole table, so on a full page a row click looked like it did nothing.
-    const user = userEvent.setup()
-    mockApi({
-      rows: [entry({ id: "r1" }), entry({ id: "r2", model: "gpt-4o-mini" })],
-    })
-    renderPage(<ActivityPage />)
-
-    const row = (await screen.findByText("gpt-4o")).closest("tr")!
-    await user.click(row)
-
-    expect(screen.getByText("Request detail")).toBeInTheDocument()
-    // The panel is the row's next sibling (accordion), not a card after the table.
-    expect(row.nextElementSibling?.textContent).toContain("Request detail")
-
-    await user.click(screen.getByRole("button", { name: "Close" }))
-    expect(screen.queryByText("Request detail")).not.toBeInTheDocument()
-  })
-
   it("shows the provider-reported compute time in the detail panel", async () => {
     // provider_latency_ms is a diagnostic alongside Total time (otari#337); this
     // asserts the row's value actually reaches the "Provider time" field rather
@@ -286,32 +278,15 @@ describe("ActivityPage", () => {
     expect(label.parentElement?.textContent).toContain("156 ms")
   })
 
-  it("sends the status filter to the API", async () => {
+  it("reads the status filter the Overview puts in the URL", async () => {
     const { calls } = mockApi({ rows: [entry()] })
-    const user = userEvent.setup()
-    renderPage(<ActivityPage />)
+    renderPage(<ActivityPage />, "/activity?status=error")
 
     await screen.findByText("gpt-4o")
-    await pickOption(user, "Status", "Error")
 
     await waitFor(() =>
       expect(listCalls(calls).at(-1)).toContain("status=error"),
     )
-  })
-
-  it("names a filter the URL invented rather than react-aria's placeholder", async () => {
-    // A hand-edited or stale link can name a status no option carries. HeroUI's
-    // Select answers an unmatched key with "Select an item", which would put
-    // library boilerplate in the filter bar over a filter that is genuinely
-    // applied; the control carries the value as its own option instead, so the
-    // bar says what is actually filtering.
-    mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />, "/activity?status=bogus")
-
-    await waitFor(() =>
-      expect(selectTrigger("Status")).toHaveTextContent("bogus"),
-    )
-    expect(selectTrigger("Status")).not.toHaveTextContent("Select an item")
   })
 
   it("sends the priced filter to the API", async () => {
@@ -549,10 +524,10 @@ describe("ActivityPage", () => {
     expect(await screen.findByText("101–150 of 500")).toBeInTheDocument()
 
     const before = listCalls(calls).length
-    const entitySummaryBefore = calls.filter(
+    const sourceSummaryBefore = calls.filter(
       (call) =>
         call.url.includes(`${API_ROOT}/usage/summary`) &&
-        call.url.includes("dimensions=user"),
+        call.url.includes("dimensions=source"),
     ).length
     const button = screen.getByRole("button", { name: "Refresh" })
     await waitFor(() => expect(button).toBeEnabled())
@@ -565,9 +540,9 @@ describe("ActivityPage", () => {
         calls.filter(
           (call) =>
             call.url.includes(`${API_ROOT}/usage/summary`) &&
-            call.url.includes("dimensions=user"),
+            call.url.includes("dimensions=source"),
         ).length,
-      ).toBeGreaterThan(entitySummaryBefore),
+      ).toBeGreaterThan(sourceSummaryBefore),
     )
     expect(listCalls(calls).every((url) => url.includes("skip=100"))).toBe(true)
     expect(screen.getByText("101–150 of 500")).toBeInTheDocument()
@@ -683,50 +658,6 @@ describe("ActivityPage", () => {
     const latest = listCalls(calls).at(-1)!
     expect(latest).toContain("user_id=alice")
     expect(latest).toContain("user_id=bob")
-
-    // Both values are chips, each clearing only itself.
-    expect(
-      screen.getByRole("button", { name: "Remove User filter alice" }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: "Remove User filter bob" }),
-    ).toBeInTheDocument()
-  })
-
-  it("adds a second value to a filter from the picker", async () => {
-    const user = userEvent.setup()
-    const { calls } = mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />, "/activity?user_id=alice")
-    await screen.findByText("gpt-4o")
-
-    const userInput = screen.getByRole("combobox", { name: "User" })
-    await user.click(userInput)
-    await user.click(await screen.findByRole("option", { name: /bob/ }))
-
-    await waitFor(() => {
-      const latest = listCalls(calls).at(-1)!
-      expect(latest).toContain("user_id=alice")
-      expect(latest).toContain("user_id=bob")
-    })
-  })
-
-  it("takes a free-text model value on Enter, since any model may appear in the log", async () => {
-    // The model suggestions come from a windowed summary, so a model the log holds
-    // but the breakdown folded away would be unfilterable if the picker were
-    // options-only. Enter commits whatever was typed.
-    const user = userEvent.setup()
-    const { calls } = mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />)
-    await screen.findByText("gpt-4o")
-
-    const modelInput = screen.getByRole("combobox", { name: "Model" })
-    await user.click(modelInput)
-    await user.type(modelInput, "some-unlisted-model")
-    await user.keyboard("{Enter}")
-
-    await waitFor(() =>
-      expect(listCalls(calls).at(-1)!).toContain("model=some-unlisted-model"),
-    )
   })
 
   it("snaps URL-supplied page sizes to the nearest offered option", async () => {
@@ -880,7 +811,9 @@ describe("ActivityPage", () => {
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
     await user.click(row)
 
-    expect(screen.getByText("Request detail")).toBeInTheDocument()
+    expect(
+      screen.getByRole("complementary", { name: "Request detail" }),
+    ).toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: "Price this model" }),
     ).not.toBeInTheDocument()
@@ -905,7 +838,9 @@ describe("ActivityPage", () => {
     const row = (await screen.findByText("mistral-small")).closest("tr")!
     await user.click(row)
 
-    expect(screen.getByText("Request detail")).toBeInTheDocument()
+    expect(
+      screen.getByRole("complementary", { name: "Request detail" }),
+    ).toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: "Price this model" }),
     ).not.toBeInTheDocument()
@@ -937,16 +872,17 @@ describe("ActivityPage", () => {
     ).toHaveValue("vllm:mistral-small")
   })
 
-  it("keeps the filter pickers behind an 'Add filter' toggle", async () => {
+  it("keeps its own filter pickers behind a 'More filters' toggle", async () => {
     mockApi({ rows: [entry()] })
     const user = userEvent.setup()
     renderPage(<ActivityPage />)
     await screen.findByText("gpt-4o")
 
-    // The picker row is collapsed until the operator opts to add a filter. jsdom
+    // Named apart from the Overview's own "Add filter" toggle above it. The picker row
+    // is collapsed until the operator opts to add a filter. jsdom
     // does not apply Tailwind's `.hidden`, so assert on the toggled class rather
     // than computed visibility.
-    const toggle = screen.getByRole("button", { name: "Add filter" })
+    const toggle = screen.getByRole("button", { name: "More filters" })
     const region = document.getElementById(
       toggle.getAttribute("aria-controls")!,
     )!
@@ -963,28 +899,33 @@ describe("ActivityPage", () => {
     expect([...region.classList]).not.toContain("hidden")
   })
 
-  it("shows active filters as removable chips and clears one on ✕", async () => {
+  it("shows its own filters as removable chips and clears one on ✕", async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />, "/activity?model=gpt-4o&status=error")
+    renderPage(<ActivityPage />, "/activity?priced=false&endpoint=/v1/messages")
     await screen.findByText("gpt-4o")
 
-    // A chip per active entity filter (model + status); the time range is not a chip.
-    // The entity filters hold sets, so their chips name the value they clear.
+    // The model, user, key and status chips are the Overview's, and the time range is
+    // not a chip.
     expect(
-      screen.getByRole("button", { name: "Remove Model filter gpt-4o" }),
+      screen.getByRole("button", { name: "Remove Priced filter" }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Remove Status filter" }),
+      screen.getByRole("button", { name: "Remove Endpoint filter" }),
     ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /Remove (Model|Status) filter/ }),
+    ).not.toBeInTheDocument()
 
-    // Removing the model chip drops just that filter from the query.
+    // Removing the endpoint chip drops just that filter from the query.
     await user.click(
-      screen.getByRole("button", { name: "Remove Model filter gpt-4o" }),
+      screen.getByRole("button", { name: "Remove Endpoint filter" }),
     )
     await waitFor(() =>
       expect(
-        listCalls(calls).some((url) => !url.includes("model=gpt-4o")),
+        listCalls(calls).some(
+          (url) => url.includes("priced=false") && !url.includes("endpoint="),
+        ),
       ).toBe(true),
     )
   })
@@ -1695,7 +1636,7 @@ describe("ActivityPage user naming", () => {
     expect(await screen.findByText("ci-bot")).toBeInTheDocument()
   })
 
-  it("keeps the raw id copyable in the detail drawer", async () => {
+  it("keeps the raw id copyable in the request panel", async () => {
     const user = userEvent.setup()
     mockApi({
       rows: [
@@ -1712,7 +1653,7 @@ describe("ActivityPage user naming", () => {
 
     // The one place an operator goes for the raw id, so naming the person must
     // not take it away: the copy control still yields the id.
-    const detail = row.nextElementSibling as HTMLElement
+    const detail = screen.getByRole("complementary", { name: "Request detail" })
     expect(within(detail).getByText("Alice Example")).toBeInTheDocument()
     await user.click(
       within(detail).getByRole("button", { name: "Copy user id" }),
@@ -1720,42 +1661,6 @@ describe("ActivityPage user naming", () => {
     expect(await navigator.clipboard.readText()).toBe(
       "81e24d08-7d1e-4287-a074-54aa57d9debc",
     )
-  })
-})
-
-describe("ActivityPage suggestion scoping", () => {
-  it("keeps the user filter on the model typeahead but not on the user picker", async () => {
-    // The two pickers want opposite windows. The model typeahead must stay
-    // narrowed by the active user, or it offers models that user never called
-    // and picking one returns an empty table. The user picker must drop it, or
-    // it can only ever offer the user already selected.
-    const { calls } = mockApi({ rows: [entry()] })
-    renderPage(
-      <ActivityPage />,
-      "/activity?model=gpt-4o&user_id=alice&range=24h",
-    )
-
-    // See the drill-down cases above: the label paints from the URL, so the wait
-    // has to be on the summaries this assertion actually reads.
-    const summariesSoFar = () =>
-      calls
-        .map((c) => c.url)
-        .filter((url) => url.includes(`${API_ROOT}/usage/summary`))
-    await waitFor(() =>
-      expect(
-        summariesSoFar().some((url) => url.includes("dimensions=user")),
-      ).toBe(true),
-    )
-    const summaries = summariesSoFar()
-
-    const modelQuery = summaries.find((url) => url.includes("dimensions=model"))
-    expect(modelQuery, "model typeahead summary").toBeDefined()
-    expect(modelQuery).toContain("user_id=alice")
-
-    const entityQuery = summaries.find((url) => url.includes("dimensions=user"))
-    expect(entityQuery, "user/key picker summary").toBeDefined()
-    expect(entityQuery).not.toContain("user_id=alice")
-    expect(entityQuery).toContain("model=gpt-4o")
   })
 })
 
@@ -2022,10 +1927,9 @@ describe("ActivityPage live traffic", () => {
     }
   })
 
-  it("leaves an expanded row alone while it polls for in-flight requests", async () => {
+  it("leaves an open request alone while it polls for in-flight requests", async () => {
     // Regression: the poll runs every 2s and its result used to re-derive the
-    // table's rows, so DataTable rebuilt its detail host to match and an operator
-    // who expanded a row watched the panel flash and slide open again every couple
+    // table's rows, so an open request flashed and slid open again every couple
     // of seconds. The poll no longer touches the rows array at all.
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
@@ -2038,11 +1942,9 @@ describe("ActivityPage live traffic", () => {
 
       const row = (await screen.findByText("gpt-4o")).closest("tr")!
       await user.click(row)
-      // Reached through the detail's own heading rather than the host's class:
-      // the host is `role="presentation"` on purpose, but its content is in the
-      // tree, so the panel is addressable by what it says.
-      const panel = screen.getByText("Request detail").closest("tr")
-      expect(panel).not.toBeNull()
+      const panel = screen.getByRole("complementary", {
+        name: "Request detail",
+      })
 
       const polls = () =>
         calls.filter((c) => c.url.includes(`${API_ROOT}/usage/in-flight`))
@@ -2051,10 +1953,10 @@ describe("ActivityPage live traffic", () => {
       await vi.advanceTimersByTimeAsync(5_000)
       await waitFor(() => expect(polls()).toBeGreaterThan(before + 1))
 
-      // Same node, still open: the panel was never torn down and rebuilt. The
-      // singular query is also the "exactly one panel" half, since a rebuilt
-      // host that stranded the old one would match twice and throw.
-      expect(screen.getByText("Request detail").closest("tr")).toBe(panel)
+      // Same node, still open: the panel was never torn down and rebuilt.
+      expect(
+        screen.getByRole("complementary", { name: "Request detail" }),
+      ).toBe(panel)
     } finally {
       vi.useRealTimers()
     }

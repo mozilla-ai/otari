@@ -150,7 +150,7 @@ describe("PricingWarning", () => {
     // on reports the same number the banner just claimed.
     expect(
       screen.getByRole("link", { name: "View failed requests" }),
-    ).toHaveAttribute("href", "/activity?status=error&range=1h&source=gateway")
+    ).toHaveAttribute("href", "/requests?status=error&range=1h&source=gateway")
 
     // Counted from the error rows of the last hour, not from all usage.
     const countUrl = String(

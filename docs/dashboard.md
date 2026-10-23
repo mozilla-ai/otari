@@ -46,10 +46,10 @@ work, the page offers the master-key box beside the form.
 
 Account settings also carries the name you are known by, which is not a
 credential: it is what the account menu, the organization roster and the user
-column on Usage and Activity show. Someone an admin added to the roster by
-address has no name until they set one here. Clearing it puts those surfaces
-back to naming you by your sign-in address. The dashboard reads who is signed in
-from `GET /api/v1/auth/profile`, which answers whether or not you belong to an
+column on the Overview shows. Someone an admin added to the roster by address has no
+name until they set one here. Clearing it puts those surfaces back to naming you
+by your sign-in address. The dashboard reads who is signed in from `GET
+/api/v1/auth/profile`, which answers whether or not you belong to an
 organization, so the account menu names you even before you join one.
 
 ## First-run walkthrough
@@ -62,7 +62,7 @@ organization, so the account menu names you even before you join one.
 5. Test the provider connection or declare model IDs for a backend that has no
    model-listing endpoint.
 6. Create an API key from the setup guide or the Keys page.
-7. Send a request and confirm it appears under Activity.
+7. Send a request and confirm it appears on the Overview, in Requests.
 
 The [Quickstart](quickstart.md) includes a complete request example.
 
@@ -80,7 +80,24 @@ created. Set `activation_guide: false` to disable the flow for the deployment.
 
 The workspace view contains day-to-day gateway operations:
 
-- Overview, Activity, and Usage
+- Overview, the landing page. It opens with what needs attention, then reads
+  the gateway three ways, as tabs over one time window and one set of filters:
+  Usage (spend, tokens and requests over time, with breakdowns, at `/`),
+  Requests (the per-request log, at `/requests`) and Sessions (agent sessions,
+  at `/sessions`). The window and the model, user, API key and status filters
+  live in the URL and travel when you switch tab, and clicking a chart bar
+  narrows the window to that bar. Today, beside the window presets on Usage,
+  starts the window at local midnight. The old `/usage` and `/activity`
+  addresses open the matching tab with their filters.
+
+  A Mine | Everyone switch above the tabs sets whose requests every tab shows,
+  and a line beside it says which one it is ("Your requests in Production",
+  "Everyone in Production"). Mine is the caller's own usage identity, so
+  requests made with a shared key count toward the key's owner; it hides the
+  User filter. Members and viewers open on Mine, owners, admins and deployment
+  operators on Everyone, and the choice is the `scope` key in the URL, carried
+  between tabs. Mine is disabled for an account with no usage identity in the
+  organization yet.
 - Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers. Routing lists each policy with its main model, its backups in order, and who it applies to. Automatic fallback lists the models your organization used in the last 30 days with the providers their catalog ID tries in order, how many requests a backup served, and which ones have no backup, including those most requests pin to one provider. The Models guide explains the order. Create policy first asks what the policy is for (a fallback, a traffic split, a smart router, spill-over at rate limits, or a budget tier-down) and then shows only that kind's fields; the empty list offers a fallback directly. Models are chosen by model and then by provider. Each policy has its own page, opened from Edit in the list, where its main selection, fallback chain, budget tier-down and guardrails are combined, each section with its own Save. Policies from `config.yml` open there read-only.
 - Tools
 - API keys and workspace members
@@ -226,13 +243,13 @@ which. A request or image rate is entered per 1,000, the way providers publish
 one: $2 per 1,000 searches for a rerank model is entered as 2 and stored as 2000
 per million, which is how every rate travels on the wire. The model lists name
 such a rate by its unit, for example "$0.002 per request". The same choice is on
-Activity's "Price this model", offered on a served request that carried no cost
-(a failed attempt billed nothing, so its error is the guide instead), which
-opens per request for a rerank, audio or moderation request and per image for
-an image generation. The unit decides what
-a rate bills. A token rate on an audio or moderation request is still read per
-request for now and logs a warning; a later release reads it strictly, as
-tokens, which those requests do not report, so price them per request.
+the Requests view's "Price this model", offered on a served request that carried
+no cost (a failed attempt billed nothing, so its error is the guide instead),
+which opens per request for a rerank, audio or moderation request and per image
+for an image generation. The unit decides what a rate bills. A token rate on an
+audio or moderation request is still read per request for now and logs a
+warning; a later release reads it strictly, as tokens, which those requests do
+not report, so price them per request.
 
 Exact page names and availability can change with configuration and installed
 extensions. The running dashboard is the source of truth.
@@ -248,20 +265,22 @@ period against its limit. Where the deployment turns on
 operator, and to an organization owner or admin on their own keys; see [Rules on
 a member's own key](workload-identity.md#rules-on-a-members-own-key).
 
-Overview splits the same way. Everyone lands on their own spend, traffic and
-recent requests. An organization owner or admin also gets a budget-health
-figure, read from the spend ceilings holding their organization, while a
-deployment operator gets provider health and the deployment's own budgets
-instead. A member who belongs to no workspace yet is told so beside the
-activity table, rather than shown workspace counts.
+The Overview's attention strip splits the same way. It appears only when there
+is something to act on, above the tabs on every one of them, and each item links
+to the page that explains it: a high error rate today opens Requests on today's
+failures. It is about what the caller answers for, so it does not follow the
+Mine | Everyone switch: for an organization member it carries their own error
+rate when it is high; an owner or admin sees the organization's error rate and a
+spend ceiling at or near its limit; a deployment operator sees the deployment's
+error rate, provider health and the deployment's own budgets.
 
 ## Playground
 
 The Playground is the in-product chat page: pick a model the gateway serves and
 talk to it, or put two side by side and record which answered better. Requests
 run through the same path as any other completion, so routing policies,
-guardrails, budgets and the tool loop all apply, and every request appears in
-Activity and Usage.
+guardrails, budgets and the tool loop all apply, and every request appears on
+the Overview.
 
 A question can carry files. Attach them with the paperclip in the composer or
 drop them anywhere on the page; each uploads at once and shows as a chip with
@@ -302,23 +321,30 @@ be deleted from the page.
 
 ## Observability
 
-Activity is the per-request log. Sessions lists [agent sessions](traces.md)
-where the deployment records traces (`trace_capture_enabled`, on by default), and has no entry where it does not. Its chart
-counts sessions per hour or day as succeeded or failed, and its Levels column
-counts each session's errors, tools' errors included; a tool's error alone does
-not fail a session (see [Sessions and failures](traces.md#sessions-and-failures)). The
-Last activity, Levels, Latency, Tokens and Total cost headers sort the list
-across every page: a header's first press puts the largest first and a second
-press flips it, and the order is kept in the URL with the filters. A session
-opens in a side panel as a tree of its turns, LLM calls and tool calls, a
-timeline of the same spans, or a flat log. The token count in its header breaks
-down into input, the share of it the prompt cache served, and output, for the
-session or the span picked. Before a span is picked, the panel
-shows what the session cost against its key's own spend ceiling and where the
-gateway stepped in. A request in Activity whose session was recorded links to it:
-**View trace** in the request's detail opens the session on that LLM call. Usage provides aggregates and time series; its spend by session groups requests by the same sessions, keyed by trace id. Routed requests share a request-group ID, so the
-request log can show the attempted models and the model that served the
-response. Imported usage is labeled by
+The Overview's Requests tab is the per-request log. Its Sessions tab lists [agent
+sessions](traces.md) where the deployment records traces
+(`trace_capture_enabled`, on by default), and is not offered where it does not.
+Sessions applies the user, API key, model and status filters carried from the
+other tabs; a model filter matches the sessions with an LLM call on that model,
+and a status with no session meaning is shown as not applied rather than
+dropped. Narrowing the chart to a window that holds a single session opens it.
+Its chart counts sessions per hour or day as succeeded or failed, and its Levels
+column counts each session's errors, tools' errors included; a tool's error
+alone does not fail a session (see [Sessions and
+failures](traces.md#sessions-and-failures)). The Last activity, Levels, Latency,
+Tokens and Total cost headers sort the list across every page: a header's first
+press puts the largest first and a second press flips it, and the order is kept
+in the URL with the filters. A session opens in a side panel as a tree of its
+turns, LLM calls and tool calls, a timeline of the same spans, or a flat log.
+The token count in its header breaks down into input, the share of it the prompt
+cache served, and output, for the session or the span picked. Before a span is
+picked, the panel shows what the session cost against its key's own spend
+ceiling and where the gateway stepped in. A request in Requests whose session
+was recorded links to it: **View trace** in the request's detail opens the
+session on that LLM call. Charts provides aggregates and time series; its spend
+by session groups requests by the same sessions, keyed by trace id. Routed
+requests share a request-group ID, so the request log can show the attempted
+models and the model that served the response. Imported usage is labeled by
 source and does not consume a budget.
 
 Use Prometheus at `/metrics` for process-level monitoring when
