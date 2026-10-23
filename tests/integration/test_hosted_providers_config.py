@@ -576,3 +576,15 @@ def test_a_request_is_served_on_a_keyless_configured_provider(
     assert captured["api_base"] == "http://vllm.internal:8000/v1"
     # The keyless placeholder, never None and never another provider's key.
     assert captured["api_key"] == "otari-no-key-required"
+
+
+@pytest.mark.asyncio
+async def test_a_configured_provider_lists_its_supported_countries(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _discovery(monkeypatch)
+
+    listed = await _service(async_db, _configured(supported_countries=["gb", "de"])).list_providers()
+
+    [public] = listed.data
+    assert public.supported_countries == ["GB", "DE"]

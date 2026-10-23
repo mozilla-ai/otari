@@ -244,6 +244,7 @@ class HostedProviderService:
                     enabled=request.enabled,
                     restricted_to_organization_id=request.restricted_to_organization_id,
                     serves_unlisted_models=request.serves_unlisted_models,
+                    supported_countries=request.supported_countries,
                 )
             except HostedProviderConflict as conflict:
                 # The pre-check races the insert; the unique constraint decides.
@@ -269,7 +270,7 @@ class HostedProviderService:
         key, where the provider can be served without one. ``client_args``
         omitted is left alone, null clears, and an entry echoed back as the
         mask keeps the stored value. The restriction reads the same way:
-        omitted keeps it, null lifts it.
+        omitted keeps it, null lifts it, and so do the supported countries.
 
         Raises:
             HostedProviderNotFoundError: no such provider.
@@ -321,6 +322,8 @@ class HostedProviderService:
             if "restricted_to_organization_id" in request.model_fields_set:
                 await self._require_organization(request.restricted_to_organization_id)
                 row.restricted_to_organization_id = request.restricted_to_organization_id
+            if "supported_countries" in request.model_fields_set:
+                row.supported_countries = request.supported_countries
             await self.providers.save(row)
             public = self._public(source)
         # The cached listing was made on what this request may just have changed.
@@ -836,6 +839,7 @@ class HostedProviderService:
             client_args=entry.client_args,
             enabled=entry.enabled,
             restricted_to_organization_id=entry.restricted_to_organization_id,
+            supported_countries=list(entry.supported_countries) if entry.supported_countries is not None else None,
         )
 
     async def _require_organization(self, organization_id: uuid.UUID | None) -> None:

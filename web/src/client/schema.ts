@@ -11489,7 +11489,9 @@ export interface components {
          *     every other one is served as if it were not configured.
          *     ``serves_unlisted_models`` serves a model the roster does not list, as a
          *     ``config.yml`` instance does, and switches on every model it offers
-         *     whether or not something prices it.
+         *     whether or not something prices it. ``supported_countries`` keeps the
+         *     provider to requests from those ISO country codes, checked as well as
+         *     ``provider_supported_countries``; null serves every country.
          * @example {
          *       "api_key": "<your OpenAI API key>",
          *       "provider": "openai"
@@ -11520,6 +11522,8 @@ export interface components {
              * @default false
              */
             serves_unlisted_models: boolean;
+            /** Supported Countries */
+            supported_countries?: string[] | null;
         };
         /**
          * HostedProviderPublic
@@ -11541,7 +11545,8 @@ export interface components {
          *     and ``decryptable`` false for one whose key or extras no configured
          *     ``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.
          *     ``serves_unlisted_models`` is true for one that serves a model its roster
-         *     does not list.
+         *     does not list. ``supported_countries`` is null for one that serves every
+         *     country.
          */
         HostedProviderPublic: {
             /** Api Base */
@@ -11590,6 +11595,8 @@ export interface components {
              * @enum {string}
              */
             source: "database" | "config";
+            /** Supported Countries */
+            supported_countries?: string[] | null;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -11655,7 +11662,8 @@ export interface components {
          *     without one. ``client_args`` omitted is left alone; an explicit
          *     null clears it, and an entry echoed back as the mask keeps the stored value.
          *     ``restricted_to_organization_id`` reads the same way: omitted keeps the
-         *     restriction, null lifts it.
+         *     restriction, null lifts it, and so does ``supported_countries``, where an
+         *     empty list closes the provider to every country.
          * @example {
          *       "enabled": false
          *     }
@@ -11675,6 +11683,8 @@ export interface components {
             restricted_to_organization_id?: string | null;
             /** Serves Unlisted Models */
             serves_unlisted_models?: boolean | null;
+            /** Supported Countries */
+            supported_countries?: string[] | null;
         };
         /**
          * HostedProvidersPublic

@@ -16,9 +16,10 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal, Self
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from sqlmodel import Field, SQLModel
 
+from gateway.core.settings.inference import country_codes
 from gateway.models.money import as_float
 from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.provider_keys import OrgProviderKey
@@ -363,7 +364,9 @@ class HostedProviderCreateRequest(SQLModel):
     every other one is served as if it were not configured.
     ``serves_unlisted_models`` serves a model the roster does not list, as a
     ``config.yml`` instance does, and switches on every model it offers
-    whether or not something prices it.
+    whether or not something prices it. ``supported_countries`` keeps the
+    provider to requests from those ISO country codes, checked as well as
+    ``provider_supported_countries``; null serves every country.
     """
 
     model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "<your OpenAI API key>"}}}
@@ -376,6 +379,12 @@ class HostedProviderCreateRequest(SQLModel):
     enabled: bool = True
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool = False
+    supported_countries: list[str] | None = Field(default=None, max_length=300)
+
+    @field_validator("supported_countries")
+    @classmethod
+    def _country_codes(cls, value: list[str] | None) -> list[str] | None:
+        return country_codes(value) if value is not None else None
 
 
 class HostedProviderUpdateRequest(SQLModel):
@@ -389,7 +398,8 @@ class HostedProviderUpdateRequest(SQLModel):
     without one. ``client_args`` omitted is left alone; an explicit
     null clears it, and an entry echoed back as the mask keeps the stored value.
     ``restricted_to_organization_id`` reads the same way: omitted keeps the
-    restriction, null lifts it.
+    restriction, null lifts it, and so does ``supported_countries``, where an
+    empty list closes the provider to every country.
     """
 
     # A toggle alone, so a reader who edits the example never re-sends a key.
@@ -401,6 +411,12 @@ class HostedProviderUpdateRequest(SQLModel):
     enabled: bool | None = None
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool | None = None
+    supported_countries: list[str] | None = Field(default=None, max_length=300)
+
+    @field_validator("supported_countries")
+    @classmethod
+    def _country_codes(cls, value: list[str] | None) -> list[str] | None:
+        return country_codes(value) if value is not None else None
 
 
 class HostedProviderPublic(SQLModel):
@@ -422,7 +438,8 @@ class HostedProviderPublic(SQLModel):
     and ``decryptable`` false for one whose key or extras no configured
     ``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.
     ``serves_unlisted_models`` is true for one that serves a model its roster
-    does not list.
+    does not list. ``supported_countries`` is null for one that serves every
+    country.
     """
 
     id: uuid.UUID | None = None
@@ -437,6 +454,7 @@ class HostedProviderPublic(SQLModel):
     enabled: bool
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool = False
+    supported_countries: list[str] | None = None
     shadows_config: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -471,6 +489,7 @@ class HostedProviderPublic(SQLModel):
             enabled=row.enabled,
             restricted_to_organization_id=row.restricted_to_organization_id,
             serves_unlisted_models=row.serves_unlisted_models,
+            supported_countries=row.supported_countries,
             shadows_config=shadows_config,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -488,6 +507,7 @@ class HostedProviderPublic(SQLModel):
         client_args: dict[str, Any] | None,
         enabled: bool,
         restricted_to_organization_id: uuid.UUID | None,
+        supported_countries: list[str] | None = None,
     ) -> HostedProviderPublic:
         """Read one configuration entry for the API, masked as a row is.
 
@@ -503,6 +523,7 @@ class HostedProviderPublic(SQLModel):
             client_args=redact_secret_like_values(client_args),
             enabled=enabled,
             restricted_to_organization_id=restricted_to_organization_id,
+            supported_countries=supported_countries,
         )
 
 
