@@ -1673,7 +1673,8 @@ export interface paths {
          *     `otari hook` sends this once per version, the first time it reports a check
          *     against it. The fingerprint is recomputed from the gates, and one that does
          *     not match the one sent is refused, so a version cannot be stored under
-         *     another's name. Sending a version again changes nothing. It is stored in the
+         *     another's name. Sending a version again changes nothing. A workspace keeps at
+         *     most 1,000 versions, and a new one past that is refused with a 409. It is stored in the
          *     API key's workspace, beside that key's traces, and takes the same key a trace
          *     export does: a budget-exempt API key, never the master key.
          */

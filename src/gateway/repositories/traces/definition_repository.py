@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Collection, Sequence
 from typing import Any, Never
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -31,6 +31,14 @@ class GuardrailDefinitionRepository(BaseRepository[TraceGuardrailDefinition, Nev
             )
         )
         await self.db.flush()
+
+    async def count_for_workspace(self, workspace_id: uuid.UUID) -> int:
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(TraceGuardrailDefinition)
+            .where(TraceGuardrailDefinition.workspace_id == workspace_id)
+        )
+        return result.scalar_one()
 
     async def for_digests(
         self, workspace_id: uuid.UUID, digests: Collection[str]

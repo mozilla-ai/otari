@@ -2879,7 +2879,7 @@
               },
               "raw": "{\n  \"digest\": \"string\",\n  \"gates\": [\n    {\n      \"gate_id\": \"string\",\n      \"gate_type\": \"command\",\n      \"enforcement\": \"required\",\n      \"origin\": \"repo\",\n      \"runs\": [\n        \"pre_tool_use.edit_target\"\n      ],\n      \"message\": \"string\"\n    }\n  ]\n}"
             },
-            "description": "Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.\n\n`otari hook` sends this once per version, the first time it reports a check\nagainst it. The fingerprint is recomputed from the gates, and one that does\nnot match the one sent is refused, so a version cannot be stored under\nanother's name. Sending a version again changes nothing. It is stored in the\nAPI key's workspace, beside that key's traces, and takes the same key a trace\nexport does: a budget-exempt API key, never the master key.",
+            "description": "Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.\n\n`otari hook` sends this once per version, the first time it reports a check\nagainst it. The fingerprint is recomputed from the gates, and one that does\nnot match the one sent is refused, so a version cannot be stored under\nanother's name. Sending a version again changes nothing. A workspace keeps at\nmost 1,000 versions, and a new one past that is refused with a 409. It is stored in the\nAPI key's workspace, beside that key's traces, and takes the same key a trace\nexport does: a budget-exempt API key, never the master key.",
             "header": [
               {
                 "key": "Content-Type",
