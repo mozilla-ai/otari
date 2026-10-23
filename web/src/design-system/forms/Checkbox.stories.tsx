@@ -58,6 +58,23 @@ export const Disabled: Story = {
   ),
 }
 
+/** A label too long for its column wraps under itself, with the box beside its first line. */
+export const WrappingLabel: Story = {
+  render: () => {
+    const [on, setOn] = useState(false)
+    return (
+      <div className="w-72">
+        <Checkbox isSelected={on} onChange={setOn}>
+          <span className="min-w-0 break-words">
+            Share maria-jose.fernandez@research.example.org so the team can
+            reply
+          </span>
+        </Checkbox>
+      </div>
+    )
+  },
+}
+
 /**
  * The box glyph on its own, in all four states.
  *
