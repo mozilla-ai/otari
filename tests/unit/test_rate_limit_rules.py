@@ -14,6 +14,7 @@ from gateway.adapters.rate_limit_store_adapter import InMemoryRateLimitStore
 from gateway.core.config import GatewayConfig, RateLimitRule
 from gateway.rate_limit import (
     RATE_LIMIT_HITS,
+    RATE_LIMIT_REPORTED,
     BudgetMinuteLimits,
     RateLimitGrantMiddleware,
     RateLimitRules,
@@ -686,3 +687,34 @@ async def test_the_middleware_names_the_reported_rules_on_the_response() -> None
 
     assert b"otari-rate-limit-exceeded" not in first_headers
     assert dict(sent[0]["headers"])[b"otari-rate-limit-exceeded"] == b"watch"
+
+
+@pytest.mark.asyncio
+async def test_the_middleware_reports_nothing_on_a_refused_response() -> None:
+    rules = _rules(
+        InMemoryRateLimitStore(),
+        {"name": "watch", "per": "key", "mode": "report", "rpm": 1},
+        {"name": "hard", "per": "deployment", "rpm": 1},
+    )
+    sent: list[Message] = []
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await rules.admit(Request(scope), key_id="k", user_id=None, estimated_tokens=1)
+            status = 200
+        except HTTPException:
+            status = 429
+        await send({"type": "http.response.start", "status": status, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def capture(message: Message) -> None:
+        sent.append(message)
+
+    await RateLimitGrantMiddleware(app)({"type": "http", "headers": []}, _receive, capture)
+    sent.clear()
+    before = RATE_LIMIT_REPORTED.labels(rule="watch")._value.get()
+    await RateLimitGrantMiddleware(app)({"type": "http", "headers": []}, _receive, capture)
+
+    assert sent[0]["status"] == 429
+    assert b"otari-rate-limit-exceeded" not in dict(sent[0]["headers"])
+    assert RATE_LIMIT_REPORTED.labels(rule="watch")._value.get() == before

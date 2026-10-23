@@ -247,7 +247,7 @@ takes no place in a count other users share.
 is served, routing still picks the same candidate, and the response carries
 `Otari-Rate-Limit-Exceeded` naming every report rule it was over (comma-separated).
 The gateway also logs it and counts it in `gateway_rate_limit_reported_total`
-by rule. A reported request is not counted in the window it was over, as a
+by rule. A request something else refuses is not reported. A reported request is not counted in the window it was over, as a
 refused one is not, so the count is the one the rule would keep if it were
 enforced. Use it to watch a limit before enforcing it, or to see when traffic
 borrows beyond a share without refusing anyone; `mode: enforce` is the default.

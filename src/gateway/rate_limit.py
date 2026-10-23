@@ -411,7 +411,8 @@ async def _count_rule(
 def _over(rule: "RateLimitRule", hold: _Hold, detail: str, retry_after: float | None) -> None:
     """Refuse a request over ``rule``, or, for a ``mode: report`` rule, note it on ``hold`` and let it through.
 
-    A reported request is not counted in the window it was over, as a refused one
+    The middleware reports it once the response starts, so a request another
+    rule then refuses reports nothing. A reported request is not counted in the window it was over, as a refused one
     is not, so the count stays the one an enforced rule would keep.
 
     Raises:
@@ -422,8 +423,6 @@ def _over(rule: "RateLimitRule", hold: _Hold, detail: str, retry_after: float | 
         raise _refused(detail, retry_after, rule.name)
     if rule.name not in hold.reported:
         hold.reported.append(rule.name)
-        RATE_LIMIT_REPORTED.labels(rule=rule.name).inc()
-        logger.info("Reported, not enforced: %s", detail)
 
 
 async def _undo(store: RateLimitStorePort, hold: _Hold) -> None:
@@ -591,10 +590,14 @@ class RateLimitGrantMiddleware:
             if message["type"] == "http.response.start":
                 grant: RateLimitGrant | None = scope.get("state", {}).get(_GRANT_STATE)
                 reported = grant.reported_rules if grant is not None else []
-                if reported:
+                # An error response was not served over the limit, whatever refused it.
+                if reported and message["status"] < 400:
                     headers = list(message.get("headers") or [])
                     headers.append((RATE_LIMIT_EXCEEDED_HEADER.lower().encode(), ", ".join(reported).encode()))
                     message = {**message, "headers": headers}
+                    for rule in reported:
+                        RATE_LIMIT_REPORTED.labels(rule=rule).inc()
+                    logger.info("Served over mode: report rate limits: %s", ", ".join(reported))
             await send(message)
 
         try:
