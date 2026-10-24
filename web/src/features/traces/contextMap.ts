@@ -52,8 +52,17 @@ export interface ContextMap {
   windowTokens?: number
   /** The split is an estimate (the total never is). */
   isEstimate: boolean
+  /** The provider's exact cache counts, kept beside an estimated split rather than drawn in it. */
+  cache?: CacheCounts
   /** The input is larger than the window it was measured against. */
   isOverWindow: boolean
+}
+
+/** Where the input came from, in the provider's own counts. */
+export interface CacheCounts {
+  read: number
+  write: number
+  fresh: number
 }
 
 export interface ContextMapInput {
@@ -213,13 +222,17 @@ function composition(
   })
 }
 
-function cacheSplit(input: ContextMapInput, inputTokens: number): Draft[] {
+function cacheCounts(input: ContextMapInput, inputTokens: number): CacheCounts {
   const read = Math.min(Math.max(input.cacheReadTokens ?? 0, 0), inputTokens)
   const write = Math.min(
     Math.max(input.cacheWriteTokens ?? 0, 0),
     inputTokens - read,
   )
-  const fresh = inputTokens - read - write
+  return { read, write, fresh: inputTokens - read - write }
+}
+
+function cacheSplit(input: ContextMapInput, inputTokens: number): Draft[] {
+  const { read, write, fresh } = cacheCounts(input, inputTokens)
   const known =
     input.cacheReadTokens !== undefined || input.cacheWriteTokens !== undefined
   const drafts: Draft[] = []
@@ -250,6 +263,15 @@ function cacheSplit(input: ContextMapInput, inputTokens: number): Draft[] {
       ],
     })
   return drafts
+}
+
+// The exact cache split of a request whose tiles are an estimate, when it used the cache at all.
+function exactCache(
+  input: ContextMapInput,
+  used: number,
+): CacheCounts | undefined {
+  const counts = cacheCounts(input, used)
+  return counts.read > 0 || counts.write > 0 ? counts : undefined
 }
 
 /**
@@ -294,6 +316,7 @@ export function buildContextMap(
     used,
     windowTokens,
     isEstimate: fromWeights !== undefined,
+    cache: fromWeights !== undefined ? exactCache(input, used) : undefined,
     isOverWindow,
   }
 }

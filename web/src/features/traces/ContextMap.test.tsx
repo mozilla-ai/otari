@@ -116,6 +116,30 @@ describe("ContextMapView", () => {
     ).toBeInTheDocument()
   })
 
+  it("states the exact cache counts in text beside an estimated map, with no tiles for them", () => {
+    render(
+      <ContextMapView
+        map={buildContextMap({
+          inputTokens: 39_600,
+          cacheReadTokens: 31_200,
+          cacheWriteTokens: 2_400,
+          windowTokens: 200_000,
+          weights: WEIGHTS,
+        })}
+      />,
+    )
+
+    expect(
+      screen.getByText(
+        /Exact from the provider: 31\.2k read from the cache, 2\.4k written to it, 6\.0k fresh input/,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /^Cache read/ }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByText("Estimated")).toBeInTheDocument()
+  })
+
   it("draws the cache split with the provider's own counts, and no estimate marker", () => {
     render(
       <ContextMapView
