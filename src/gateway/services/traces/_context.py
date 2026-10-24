@@ -107,12 +107,14 @@ def _weigh(value: Any, depth: int = 0) -> tuple[int, int]:
     if depth >= _MAX_DEPTH:
         return 0, 0
     if isinstance(value, Mapping):
+        # A `type` that is not a string (JSON Schema allows a list) is a property name, not a block type.
         kind = value.get("type")
+        kind = kind if isinstance(kind, str) else ""
         if kind in _FILE_TYPES:
             return 0, FILE_CHARS
         if kind in _OPAQUE_BLOCKS:
             return 0, 0
-        opaque = _OPAQUE_KEYS.get(kind, frozenset()) if isinstance(kind, str) else frozenset()
+        opaque = _OPAQUE_KEYS.get(kind, frozenset())
         text = files = 0
         for key, item in value.items():
             if key in _STRUCTURAL_KEYS or key in opaque:
@@ -132,6 +134,8 @@ def _weigh(value: Any, depth: int = 0) -> tuple[int, int]:
 
 
 def _role_bucket(role: Any) -> str:
+    if not isinstance(role, str):
+        return "user"
     if role in _SYSTEM_ROLES:
         return "system"
     if role == "assistant":
@@ -177,6 +181,8 @@ def _responses(tally: _Tally, items: Any) -> int:
         if not isinstance(item, Mapping):
             continue
         kind = item.get("type", "message")
+        if not isinstance(kind, str):
+            kind = ""
         if kind == "message":
             tally.add(_role_bucket(item.get("role")), item.get("content"))
         elif kind in _RESULT_ITEMS:
