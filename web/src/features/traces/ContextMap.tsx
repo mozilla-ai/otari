@@ -49,6 +49,7 @@ const BORDER = 2
 const MIN_TITLE = { width: 64, height: 36 }
 const MIN_COUNT = { width: 64, height: 56 }
 const MIN_CATEGORY_WIDTH = 150
+const MIN_BORDERED = 4
 
 function mapHeight(width: number): number {
   return Math.round(Math.min(360, Math.max(200, width * 0.5)))
@@ -72,12 +73,16 @@ function BlockTooltip({ block }: { block: ContextBlock }) {
 
 function Block({ placed }: { placed: Placed<ContextBlock> }) {
   const block = placed.item
-  const width = placed.width - GAP
-  const height = placed.height - GAP
+  // A sliver of a block can come out smaller than the gap; a negative size is invalid CSS.
+  const width = Math.max(0, placed.width - GAP)
+  const height = Math.max(0, placed.height - GAP)
   const isFree = block.kind === "free"
   const showTitle = width >= MIN_TITLE.width && height >= MIN_TITLE.height
   const showCount =
     showTitle && width >= MIN_COUNT.width && height >= MIN_COUNT.height
+  // Padding and a border cannot be drawn inside a box smaller than they are, so a
+  // block gets them only where it has the room, and never grows past its share.
+  const hasRoom = width >= MIN_BORDERED && height >= MIN_BORDERED
   const showCategory =
     showCount && width >= MIN_CATEGORY_WIDTH && block.category !== block.title
   return (
@@ -93,7 +98,7 @@ function Block({ placed }: { placed: Placed<ContextBlock> }) {
             width,
             height,
           }}
-          className={`absolute flex min-w-0 cursor-default flex-col items-start justify-start gap-0.5 overflow-hidden border p-2 text-left hover:z-10 hover:-translate-y-px hover:shadow-elevation-md focus-visible:z-10 focus-visible:-translate-y-px focus-visible:shadow-elevation-md ${MOTION} ${isFree ? HATCH : `${TONE[block.kind]} ${TILE}`}`}
+          className={`absolute flex min-w-0 cursor-default flex-col items-start justify-start gap-0.5 overflow-hidden text-left ${hasRoom ? "border" : ""} ${showTitle ? "p-2" : ""} hover:z-10 hover:-translate-y-px hover:shadow-elevation-md focus-visible:z-10 focus-visible:-translate-y-px focus-visible:shadow-elevation-md ${MOTION} ${isFree ? HATCH : `${TONE[block.kind]} ${TILE}`}`}
         >
           {showTitle ? (
             <span className="w-full truncate text-heading">{block.title}</span>
