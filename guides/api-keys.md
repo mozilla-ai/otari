@@ -6,12 +6,9 @@ What a key can carry, and who may manage which keys, is in
 [Access control](access-control.md#api-keys).
 
 Send the key as a bearer token (`Authorization: Bearer <key>`); the other
-accepted headers are in [Authentication](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference#authentication). On
-otari.ai the OpenAI-compatible base URL is `https://api.otari.ai/api/v1`, or
-`https://eu.api.otari.ai/api/v1` for an account in the European Union; a
-client that speaks the Anthropic API takes the base ending in `/api`. A
-self-hosted gateway serves the same paths at its own address, such as
-`http://localhost:8000/api/v1`.
+accepted headers are in [Authentication](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference#authentication). The
+base URL to send it to, and the form each SDK expects, are in
+[Connect to Otari](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/connect).
 
 ## Create a key
 

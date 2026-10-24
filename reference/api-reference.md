@@ -6,10 +6,9 @@ docs at `/api/v1/docs` by default. The repository also commits the generated
 [Postman collection](https://github.com/mozilla-ai/otari/blob/main/docs/public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
-The default server address is `http://localhost:8000`. The API is mounted at
-`/api/v1`. OpenAI-compatible clients use `http://localhost:8000/api/v1` as their
-base URL; Anthropic-compatible clients use `http://localhost:8000/api`, because
-their SDK appends `/v1/messages` itself. OTLP ingest is a sibling at `/otlp`:
+The API is mounted at `/api/v1` under the base URL, whose values for otari.ai
+and for your own gateway (`http://localhost:8000` by default) are in
+[Connect to Otari](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/connect), with the form each SDK expects. OTLP ingest is a sibling at `/otlp`:
 point `OTEL_EXPORTER_OTLP_ENDPOINT` at `http://localhost:8000/otlp` and the
 exporter appends `/v1/traces`, `/v1/logs` and `/v1/metrics`.
 

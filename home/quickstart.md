@@ -42,8 +42,9 @@ quickstart uses `deepseek/deepseek-v4-pro-0813`.
 
 ## 4. Send a request
 
-otari.ai serves an OpenAI-compatible API at `https://api.otari.ai/api/v1`, or at
-`https://eu.api.otari.ai/api/v1` for an account in the European Union:
+Send a chat completion to otari.ai's OpenAI-compatible API. For an account in
+the European Union, use `eu.api.otari.ai` instead; [Connect to Otari](connect.md)
+lists the base URLs.
 
 ```bash
 curl https://api.otari.ai/api/v1/chat/completions \
