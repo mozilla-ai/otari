@@ -242,13 +242,14 @@ def test_a_chat_request_keeps_the_size_of_each_part_and_never_its_text(
     request_id = response.headers[REQUEST_ID_HEADER]
 
     llm = _by_kind(_wait_for_spans(db_session_factory, request_id, 2))["llm"]
+    attributes = llm.attributes or {}
 
-    assert set(_CONTEXT_ATTRIBUTES) <= set(llm.attributes)
-    assert llm.attributes["otari.context.system_chars"] == len("Answer in French.")
-    assert llm.attributes["otari.context.user_chars"] == len("Summarize the quarterly report for Acme")
-    assert llm.attributes["otari.context.tool_result_chars"] == len("revenue is up")
-    assert (llm.attributes["otari.context.tool_count"], llm.attributes["otari.context.message_count"]) == (1, 4)
-    assert "quarterly" not in repr(llm.attributes)
+    assert set(_CONTEXT_ATTRIBUTES) <= set(attributes)
+    assert attributes["otari.context.system_chars"] == len("Answer in French.")
+    assert attributes["otari.context.user_chars"] == len("Summarize the quarterly report for Acme")
+    assert attributes["otari.context.tool_result_chars"] == len("revenue is up")
+    assert (attributes["otari.context.tool_count"], attributes["otari.context.message_count"]) == (1, 4)
+    assert "quarterly" not in repr(attributes)
     detail = client.get(f"{API_ROOT}/traces/{request_id}", headers=master_key_header).json()
     [read] = [span for span in detail["spans"] if span["kind"] == "llm"]
     assert read["attributes"]["otari.context.user_chars"] == len("Summarize the quarterly report for Acme")
@@ -267,9 +268,10 @@ def test_a_messages_request_counts_its_system_parameter(
     assert response.status_code == 200
 
     llm = _by_kind(_wait_for_spans(db_session_factory, response.headers[REQUEST_ID_HEADER], 2))["llm"]
+    attributes = llm.attributes or {}
 
-    assert llm.attributes["otari.context.system_chars"] == len("You are terse.")
-    assert llm.attributes["otari.context.message_count"] == 1
+    assert attributes["otari.context.system_chars"] == len("You are terse.")
+    assert attributes["otari.context.message_count"] == 1
 
 
 _FAILING_ENDPOINTS: dict[str, tuple[str, str, dict[str, Any]]] = {
