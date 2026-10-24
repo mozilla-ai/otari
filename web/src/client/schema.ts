@@ -16812,6 +16812,11 @@ export interface components {
             content: {
                 [key: string]: string;
             };
+            /**
+             * Context Window
+             * @description The model's context window in tokens, where the catalog knows it. Null on a span that is not a model request, and for a model the catalog does not list.
+             */
+            context_window: number | null;
             /** Cost */
             cost: number | null;
             /** Duration Ms */

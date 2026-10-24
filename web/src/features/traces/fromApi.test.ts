@@ -43,6 +43,32 @@ describe("toTrace", () => {
     expect(byId.get("call-toolu_1")?.metadata?.Timing).toBe("Approximate")
   })
 
+  it("carries a model request's context window and the sizes the gateway kept of it", () => {
+    const detail = traceDetail()
+    const spans = detail.spans.map((span) =>
+      span.span_id === "llm-1"
+        ? {
+            ...span,
+            context_window: 200_000,
+            attributes: {
+              "otari.context.system_chars": 40,
+              "otari.context.user_chars": 60,
+              "otari.context.message_count": 2,
+            },
+          }
+        : span,
+    )
+    const trace = toTrace(traceSummary(), { ...detail, spans })
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("llm-1")).toMatchObject({
+      contextWindow: 200_000,
+      context: { system: 40, user: 60, messageCount: 2, tools: 0 },
+    })
+    expect(byId.get("llm-2")?.contextWindow).toBeUndefined()
+    expect(byId.get("llm-2")?.context).toBeUndefined()
+  })
+
   it("carries a call's cache and reasoning counts, and a turn's cached reads", () => {
     const detail = traceDetail()
     const spans = detail.spans.map((span) =>
