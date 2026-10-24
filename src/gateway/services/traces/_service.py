@@ -20,6 +20,7 @@ from gateway.exceptions.traces_exceptions import (
 )
 from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
+from gateway.services.pricing_service import model_context_window
 from gateway.services.traces._collector import CALL_ID_DIGEST, call_id_digest
 from gateway.services.traces._content import open_content, seal_content
 from gateway.services.traces._reading import MAX_SPANS_PER_READ, trace_view
@@ -202,7 +203,7 @@ class TraceService:
         stored = await self.get(scope, trace_id, span_limit=MAX_SPANS_PER_READ, workspace_id=workspace_id)
         if stored is None:
             raise TraceNotFoundError(trace_id)
-        return trace_view(stored, now=datetime.now(UTC))
+        return trace_view(stored, now=datetime.now(UTC), context_window_of=model_context_window)
 
     async def for_request(self, scope: TraceScope, request_id: str) -> TraceSummary:
         """The session a gateway request was traced into, found by its ``Otari-Request-ID``.

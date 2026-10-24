@@ -21,10 +21,12 @@ of the answer as soon as it is stored and no stored state can disagree with it:
 """
 
 from bisect import bisect_right
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from gateway.log_config import logger
 from gateway.services.traces._tool_costs import tool_costs
 from gateway.types.trace_views import GateSummary, TraceView, TurnState, TurnView
 from gateway.types.traces import GATE_USAGE_SEPARATOR, USAGE_OPERATION, GuardrailDefinition, SpanRecord, TraceDetail
@@ -273,7 +275,34 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
     return tuple(views)
 
 
-def trace_view(detail: TraceDetail, *, now: datetime) -> TraceView:
+ContextWindowOf = Callable[[str | None, str], int | None]
+
+
+def _context_windows(spans: Sequence[SpanRecord], window_of: ContextWindowOf) -> dict[str, int]:
+    """The context window of each model request's model, looked up once per distinct model.
+
+    A lookup that fails reads as an unknown window: this is metadata for the reader,
+    never a reason the session cannot be read.
+    """
+    known: dict[tuple[str | None, str], int | None] = {}
+    windows: dict[str, int] = {}
+    for span in spans:
+        if span.kind != "llm" or span.model is None:
+            continue
+        key = (span.provider, span.model)
+        if key not in known:
+            try:
+                known[key] = window_of(*key)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Context window not resolved (%s)", type(exc).__name__)
+                known[key] = None
+        window = known[key]
+        if window is not None:
+            windows[span.span_id] = window
+    return windows
+
+
+def trace_view(detail: TraceDetail, *, now: datetime, context_window_of: ContextWindowOf | None = None) -> TraceView:
     """One stored trace as a person reads it: its spans in order, grouped into turns."""
     steps = sorted((span for span in detail.spans if span.kind == "step"), key=_moment)
     priced = _price_requests(list(detail.spans))
@@ -291,4 +320,5 @@ def trace_view(detail: TraceDetail, *, now: datetime) -> TraceView:
         truncated=detail.truncated,
         gates=_gate_summaries(spans, detail.definitions),
         tool_costs=costs,
+        context_windows=_context_windows(spans, context_window_of) if context_window_of is not None else {},
     )

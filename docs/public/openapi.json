@@ -20038,6 +20038,18 @@
             "title": "Content",
             "type": "object"
           },
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The model's context window in tokens, where the catalog knows it. Null on a span that is not a model request, and for a model the catalog does not list.",
+            "title": "Context Window"
+          },
           "cost": {
             "anyOf": [
               {
@@ -20303,6 +20315,7 @@
           "cache_read_tokens",
           "cache_write_tokens",
           "reasoning_tokens",
+          "context_window",
           "cost",
           "tool_name",
           "tool_type",

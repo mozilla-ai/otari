@@ -1,6 +1,7 @@
 """Response models for the trace read API, and their mapping from the traces service's views."""
 
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Literal
 
@@ -87,6 +88,10 @@ class SpanPublic(BaseModel):
     cache_read_tokens: int | None = Field(description="Input tokens read from the prompt cache.")
     cache_write_tokens: int | None = Field(description="Input tokens written to the prompt cache.")
     reasoning_tokens: int | None = Field(description="Output tokens spent reasoning.")
+    context_window: int | None = Field(
+        description="The model's context window in tokens, where the catalog knows it. Null on a span that is "
+        "not a model request, and for a model the catalog does not list."
+    )
     cost: float | None
     tool_name: str | None
     tool_type: str | None
@@ -208,7 +213,7 @@ def series_public(bucket: TraceBucketGrain, points: tuple[TraceBucket, ...]) -> 
     )
 
 
-def _span_public(span: SpanRecord, approximate: frozenset[str]) -> SpanPublic:
+def _span_public(span: SpanRecord, approximate: frozenset[str], context_windows: Mapping[str, int]) -> SpanPublic:
     return SpanPublic(
         span_id=span.span_id,
         parent_span_id=span.parent_span_id,
@@ -231,6 +236,7 @@ def _span_public(span: SpanRecord, approximate: frozenset[str]) -> SpanPublic:
         cache_read_tokens=span.cache_read_tokens,
         cache_write_tokens=span.cache_write_tokens,
         reasoning_tokens=span.reasoning_tokens,
+        context_window=context_windows.get(span.span_id),
         cost=as_float(span.cost_snapshot),
         tool_name=span.tool_name,
         tool_type=span.tool_type,
@@ -266,7 +272,7 @@ def detail_public(view: TraceView) -> TraceDetailPublic:
         summary=summary_public(view.summary),
         state=view.state,
         turns=[_turn_public(turn) for turn in view.turns],
-        spans=[_span_public(span, view.approximate) for span in view.spans],
+        spans=[_span_public(span, view.approximate, view.context_windows) for span in view.spans],
         truncated=view.truncated,
         gates=[
             GateSummaryPublic(
