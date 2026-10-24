@@ -103,6 +103,7 @@ from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
+from gateway.services.pricing_service import model_context_window
 from gateway.services.providers import (
     HostedCatalogUpdate,
     HostedProviderService,
@@ -887,7 +888,7 @@ def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayC
 
 def build_trace_service(uow: UnitOfWork) -> TraceService:
     """Build the traces operations for a request or a worker job."""
-    return TraceService(uow, TracesRepositories.on(uow))
+    return TraceService(uow, TracesRepositories.on(uow), model_context_window)
 
 
 def _file_backends(request: Request) -> FileBackends | None:

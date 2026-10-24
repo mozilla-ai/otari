@@ -21,10 +21,9 @@ from gateway.exceptions.traces_exceptions import (
 )
 from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
-from gateway.services.pricing_service import model_context_window
 from gateway.services.traces._collector import CALL_ID_DIGEST, call_id_digest
 from gateway.services.traces._content import open_content, seal_content
-from gateway.services.traces._reading import MAX_SPANS_PER_READ, trace_view
+from gateway.services.traces._reading import MAX_SPANS_PER_READ, ContextWindowOf, trace_view
 from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
     TRACE_BUCKET_DURATION,
@@ -61,8 +60,9 @@ class TraceService:
     settles in a block of its own on the Unit of Work it was built with.
     """
 
-    def __init__(self, uow: UnitOfWork, repositories: TracesRepositories) -> None:
+    def __init__(self, uow: UnitOfWork, repositories: TracesRepositories, context_window_of: ContextWindowOf) -> None:
         self._uow = uow
+        self._context_window_of = context_window_of
         self._traces = repositories.traces
         self._spans = repositories.spans
         self._definitions = repositories.definitions
@@ -214,7 +214,7 @@ class TraceService:
         stored = await self.get(scope, trace_id, span_limit=MAX_SPANS_PER_READ, workspace_id=workspace_id)
         if stored is None:
             raise TraceNotFoundError(trace_id)
-        return trace_view(stored, now=datetime.now(UTC), context_window_of=model_context_window)
+        return trace_view(stored, now=datetime.now(UTC), context_window_of=self._context_window_of)
 
     async def for_request(self, scope: TraceScope, request_id: str) -> TraceSummary:
         """The session a gateway request was traced into, found by its ``Otari-Request-ID``.
