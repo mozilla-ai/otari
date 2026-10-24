@@ -92,7 +92,7 @@ class _ReservationMoves:
         """
         if not handle.counts_toward_budget or handle.strategy == "disabled":
             return None
-        target = get_provider_ceilings(handle.scope_ceilings, attempt.instance)
+        target = get_provider_ceilings(handle.scope_ceilings, attempt.instance, attempt.model)
         if not target and not handle.scoped_budgets:
             return None
         pricing: ModelPricing | None = None
