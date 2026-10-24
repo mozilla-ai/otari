@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Never, cast
 
-from sqlalchemy import and_, case, delete, func, or_, select, update
+from sqlalchemy import and_, case, delete, func, or_, select, true, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped
@@ -98,6 +98,11 @@ def _in_scopes(scopes: ScopeIdSets) -> ColumnElement[bool]:
     )
 
 
+def _for_budget(budget_id: str | None) -> ColumnElement[bool]:
+    """Match the ceilings naming this budget, or every ceiling when there is none."""
+    return true() if budget_id is None else ScopedBudget.budget_id == budget_id
+
+
 def _for_provider(provider_key_id: str | None, model: str | None = None) -> ColumnElement[bool]:
     """Match a ceiling's provider and model, where None matches the ceiling that caps every one."""
     provider = (
@@ -178,9 +183,22 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
         )
         return dict(result.tuples().all())
 
-    async def count_in_scopes(self, scopes: ScopeIdSets) -> int:
-        """Count the ceilings on these scopes."""
-        result = await self.db.execute(select(func.count()).select_from(ScopedBudget).where(_in_scopes(scopes)))
+    async def delete_for_budget(self, budget_id: str, scopes: ScopeIdSets) -> None:
+        """Delete the ceilings on these scopes naming this budget.
+
+        A reservation still held against one settles into nothing.
+        """
+        await self.db.execute(
+            delete(ScopedBudget)
+            .where(ScopedBudget.budget_id == budget_id, _in_scopes(scopes))
+            .execution_options(synchronize_session=False)
+        )
+
+    async def count_in_scopes(self, scopes: ScopeIdSets, *, budget_id: str | None = None) -> int:
+        """Count the ceilings on these scopes, only those naming ``budget_id`` when one is given."""
+        result = await self.db.execute(
+            select(func.count()).select_from(ScopedBudget).where(_in_scopes(scopes), _for_budget(budget_id))
+        )
         return result.scalar_one()
 
     async def delete_for_member(self, member_id: uuid.UUID) -> None:
@@ -403,15 +421,17 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
         limit: int,
         scope_type: ScopeType | None = None,
         scope_id: str | None = None,
+        budget_id: str | None = None,
     ) -> list[tuple[ScopedBudget, Budget]]:
         """Return a page of the ceilings on these scopes, each with the budget it names, oldest first.
 
-        ``scope_type`` and ``scope_id`` narrow the page to one scope kind or one scope.
+        ``scope_type`` and ``scope_id`` narrow the page to one scope kind or one scope, and ``budget_id`` to the
+        ceilings naming that budget.
         """
         statement = (
             select(ScopedBudget, Budget)
             .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
-            .where(_in_scopes(scopes))
+            .where(_in_scopes(scopes), _for_budget(budget_id))
         )
         if scope_type is not None:
             statement = statement.where(ScopedBudget.scope_type == scope_type)
