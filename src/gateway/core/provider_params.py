@@ -42,5 +42,22 @@ SENSITIVE_PARAM_FIELDS: frozenset[str] = frozenset(
 # in the body over the value the gateway set.
 FORBIDDEN_ENDPOINT_DEFAULTS: frozenset[str] = SENSITIVE_PARAM_FIELDS | {"model", "messages", "input", "stream"}
 
+# The fields the chat completion request declares beyond any-llm's
+# ``CompletionParams``. The route parses each one, so none is ever an extra a
+# provider instance's ``request_fields`` could forward.
+CHAT_GATEWAY_FIELDS: frozenset[str] = frozenset(
+    {
+        "guardrails",
+        "max_tool_iterations",
+        "mcp_server_ids",
+        "mcp_servers",
+        "metadata",
+        "model",
+        "safety_identifier",
+        "session_label",
+        "tools_header",
+    }
+)
 
-__all__ = ["FORBIDDEN_ENDPOINT_DEFAULTS", "SENSITIVE_PARAM_FIELDS"]
+
+__all__ = ["CHAT_GATEWAY_FIELDS", "FORBIDDEN_ENDPOINT_DEFAULTS", "SENSITIVE_PARAM_FIELDS"]

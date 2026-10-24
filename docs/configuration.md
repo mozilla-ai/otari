@@ -510,10 +510,10 @@ A request reaching that instance with `"text": true` sends it to Exa in
 on it, merge into the request body. A field the instance does not list is
 dropped as before, and so is every listed field on a request another instance
 serves, including a routing policy's other candidates. A name the request
-already carries (`temperature`, `user`, ...), that shapes it (`model`,
-`messages`, `stream`) or that Otari sets itself (a credential, `api_base`,
-`extra_body`) cannot be listed, so a caller can never override the gateway's
-own values through it. Chat completions only.
+already carries (`temperature`, `user`, `safety_identifier`, ...), that shapes
+it (`model`, `messages`, `stream`) or that Otari sets itself (a credential,
+`api_base`, `extra_body`) cannot be listed, so a caller can never override the
+gateway's own values through it. Chat completions only.
 
 ### Messages through the Responses API
 

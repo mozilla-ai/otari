@@ -36,7 +36,19 @@ def test_nothing_listed_or_sent_leaves_the_fields_alone() -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["model", "messages", "stream", "api_key", "api_base", "extra_body", "temperature", "user"]
+    "name",
+    [
+        "model",
+        "messages",
+        "stream",
+        "api_key",
+        "api_base",
+        "extra_body",
+        "temperature",
+        "user",
+        "safety_identifier",
+        "metadata",
+    ],
 )
 def test_a_field_the_gateway_sets_or_a_request_carries_cannot_be_listed(name: str) -> None:
     with pytest.raises(ValidationError, match=name):
@@ -54,3 +66,12 @@ def test_the_list_never_reaches_the_provider_call() -> None:
     kwargs = get_provider_kwargs(_config(request_fields=["text"]), LLMProvider.OPENAI, instance="exa")
 
     assert "request_fields" not in kwargs
+
+
+def test_the_reserved_chat_fields_are_the_ones_the_route_declares() -> None:
+    from any_llm.types.completion import CompletionParams
+
+    from gateway.api.routes.chat import ChatCompletionRequest
+    from gateway.core.provider_params import CHAT_GATEWAY_FIELDS
+
+    assert set(ChatCompletionRequest.model_fields) - set(CompletionParams.model_fields) == CHAT_GATEWAY_FIELDS

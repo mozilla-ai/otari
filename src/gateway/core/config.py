@@ -2110,16 +2110,17 @@ class GatewayConfig(
         """Refuse a ``request_fields`` entry that names anything the gateway sets itself.
 
         ``request_fields`` lists the extra chat request fields a caller may send this
-        instance's provider. One that a request already carries (a completion
-        parameter), that shapes the request (``model``, ``messages``, ``stream``) or
-        that the gateway resolves (a credential, the base URL) would land in the
-        provider body over the gateway's own value, so it is refused at load.
+        instance's provider. One that shapes the request (``model``, ``messages``,
+        ``stream``) or that the gateway resolves (a credential, the base URL) would
+        land in the provider body over the gateway's own value, and one the request
+        already declares (a completion parameter, ``safety_identifier``) never
+        reaches the extras at all, so either is refused at load.
         """
         from any_llm.types.completion import CompletionParams
 
-        from gateway.core.provider_params import FORBIDDEN_ENDPOINT_DEFAULTS
+        from gateway.core.provider_params import CHAT_GATEWAY_FIELDS, FORBIDDEN_ENDPOINT_DEFAULTS
 
-        reserved = FORBIDDEN_ENDPOINT_DEFAULTS | set(CompletionParams.model_fields) | {"user"}
+        reserved = FORBIDDEN_ENDPOINT_DEFAULTS | CHAT_GATEWAY_FIELDS | set(CompletionParams.model_fields)
         for instance, entry in providers.items():
             fields = entry.get("request_fields")
             if fields is None:
