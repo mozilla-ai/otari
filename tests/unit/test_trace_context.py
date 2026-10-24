@@ -282,3 +282,21 @@ def test_an_encrypted_reasoning_item_weighs_only_its_summary() -> None:
     )
 
     assert weights.assistant_chars == len("thought")
+
+
+def test_a_type_or_role_that_is_not_a_string_weighs_what_it_holds_instead_of_dropping_the_request() -> None:
+    schema = {"type": ["string", "null"], "description": "a name"}
+    messages = _weights(
+        "messages",
+        [
+            {"role": ["user"], "content": "hello"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "f", "input": schema}]},
+        ],
+    )
+    chat = _weights("chat", [{"role": {"x": 1}, "content": [{"type": ["text"], "text": "hi"}]}])
+    responses = _weights("responses", [{"type": ["message"], "role": "user", "content": "hi"}, {"type": {}}])
+
+    assert messages.user_chars == len("hello")
+    assert messages.assistant_chars == len("f") + len("a name")
+    assert chat.user_chars == len("hi")
+    assert responses.message_count == 2
