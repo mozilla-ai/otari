@@ -85,7 +85,7 @@ the corresponding startup value after the database is available.
 | `auto_migrate` | Apply Alembic migrations at startup. |
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
-| `pricing_refresh` | What a scheduled models.dev price check does with an update: `manual`, `review`, or `auto`. |
+| `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting. See [Product feedback](#product-feedback). |
 | `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
@@ -688,11 +688,12 @@ A provider stored through the page or the API under the same name wins over the
 entry, and the start logs each entry it shadows; deleting the stored provider
 serves the entry again on the same models. Taking an entry out of the
 configuration leaves its models in the database, serving nothing and offered
-in no catalog; they come back if the entry does, and the next catalog sweep on
-the Hosted providers page (`POST /api/v1/hosted-providers/refresh`) deletes
-them and their prices, naming the provider in `orphaned_rosters`. Where no
-hosted provider offers a model at all, the sweep deletes those models and leaves
-every price in place.
+in no catalog; they come back if the entry does, and the next catalog update run
+with its cleanup on the Hosted providers page (`POST
+/api/v1/hosted-providers/catalog-update` with `cleanup`) deletes them and their
+prices, naming the provider in `orphaned_rosters`. Where no hosted provider
+offers a model at all, the cleanup deletes those models and leaves every price
+in place.
 
 ### Provider copies
 
@@ -855,18 +856,35 @@ each can be priced.
 
 ### Keeping the defaults current
 
-`pricing_refresh` decides what the gateway does with a newer models.dev
-snapshot on its own:
+A catalog update does two things in order: it fetches the latest models.dev
+prices and applies them, then it asks every enabled hosted provider what it
+lists, offers what is new, and prices each model at the prices now in force. A
+model that was waiting for a price is served once it has one. Running the two in
+that order is what lets a model released after the bundled snapshot arrive
+priced and serving in one update.
 
-- `manual` (the default) never fetches. An operator checks for updates with
-  `POST /api/v1/pricing/refresh` and accepts or rejects what it finds with
-  `/refresh/confirm` or `/refresh/reject`. The dashboard has no page for this.
-- `review` fetches every `pricing_refresh_interval_seconds` (default one day,
-  minimum five minutes) and holds a changed snapshot for review.
-  `GET /api/v1/pricing/refresh/pending` is what reads it; nothing is metered
-  differently until an operator accepts it. On a deployment with nobody to make
+**Update catalog** on the Hosted providers page runs it at once, after a preview
+of the price changes and of each provider's new models
+(`POST /api/v1/hosted-providers/catalog-update/preview`, then
+`POST /api/v1/hosted-providers/catalog-update` with the preview's `digest`).
+Its optional cleanup also removes the prices of models no hosted provider
+serves, with their history; the cleanup never runs on a schedule.
+
+`pricing_refresh` decides whether the update also runs on its own, every
+`pricing_refresh_interval_seconds` (default one day, minimum five minutes):
+
+- `manual` (the default) never runs it on a schedule: only an operator does.
+- `review` runs it, but holds changed prices for an operator to approve on the
+  Hosted providers page. The model lists are still refreshed, at the prices
+  already in force, so a new model that only the new prices cover waits for the
+  approval. `GET /api/v1/pricing/refresh/pending` reads what is held; nothing is
+  metered differently until it is approved. On a deployment with nobody to make
   that call, prefer `auto`.
-- `auto` fetches on the same schedule and applies a changed snapshot at once.
+- `auto` runs it and applies changed prices at once, unless they look wrong: an
+  update that would lose or remove more than a tenth of the priced models is
+  held for review as under `review`.
+
+`POST /api/v1/pricing/refresh/reject` discards held prices.
 
 Each accepted snapshot is kept, and a request or report priced for a past
 instant (`as_of`, usage backfills) uses the snapshot in force then, or the oldest
@@ -879,9 +897,9 @@ saved `api.json`) and commit `src/gateway/data/models_dev_pricing.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was
 rejected, so the next check re-offers the same update while upstream still
-differs from what is active. One worker performs each check, whichever claims
-the tick first, so a deployment running several does not fetch or accept an
-update once per worker.
+differs from what is active. One worker performs each scheduled update,
+whichever claims the run first, so a deployment running several does not fetch,
+accept or refresh once per worker.
 
 Every accepted snapshot is recorded with who accepted it, `operator` or
 `schedule`, and how many models it priced; `GET /api/v1/pricing/snapshots` lists

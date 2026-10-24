@@ -6,6 +6,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -80,7 +81,7 @@ class PricingRefreshChange:
     """One model added, changed, or removed by a snapshot refresh."""
 
     model_key: str
-    change: str
+    change: Literal["added", "changed", "removed"]
 
 
 @dataclass(frozen=True)
@@ -136,6 +137,7 @@ def _build_preview(
     removed_count = 0
 
     for model_key in sorted(current_prices.keys() | latest_prices.keys()):
+        change: Literal["added", "changed", "removed"]
         if model_key not in current_prices:
             added_count += 1
             change = "added"
@@ -247,7 +249,7 @@ async def confirm_price_refresh(
     """Persist and activate the pending snapshot, returning false when absent.
 
     ``accepted_by`` is recorded on the history row: ``operator`` for a confirm
-    from the dashboard, ``schedule`` when :func:`run_price_update_poller`
+    from the dashboard, ``schedule`` when the scheduled catalog update
     applied it under the ``auto`` policy. With ``digest``, only the snapshot
     that digest names is accepted; a replaced one raises
     :class:`PendingSnapshotChanged` and nothing changes.
@@ -443,29 +445,56 @@ async def claim_poll_tick(session: AsyncSession, interval_seconds: float) -> boo
     return True
 
 
-async def run_price_update_poller(config: GatewayConfig) -> None:
-    """Check upstream models.dev on a schedule, forever.
+class ModelsDevPriceUpdates:
+    """The models.dev price steps of a catalog update.
 
-    The policy is read on every tick rather than captured, because it is a
-    runtime setting: an operator who switches from ``manual`` to ``review`` on
-    the dashboard gets the next check without a restart. The interval is
-    config-only and re-read for symmetry. Every error is swallowed and retried
-    on the next tick, for the reason the snapshot refresher gives.
+    What the hosted catalog update calls for its price half. Each step opens a
+    session of its own and commits there, as the price refresh functions do, so
+    the caller hands over no session and holds none across a step.
     """
-    while True:
-        await asyncio.sleep(config.pricing_refresh_interval_seconds)
-        if config.pricing_refresh == "manual":
-            continue
-        try:
-            async with create_session() as db:
-                if not await claim_poll_tick(db, config.pricing_refresh_interval_seconds):
-                    continue
-                outcome = await poll_price_updates(db, config.pricing_refresh, config)
-            logger.info("Scheduled models.dev price check: %s", outcome)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.warning("Scheduled models.dev price check failed; retrying next interval", exc_info=True)
+
+    def __init__(self, config: GatewayConfig) -> None:
+        self.config = config
+
+    async def claim(self, interval_seconds: float) -> bool:
+        """Whether this worker owns the next scheduled update."""
+        async with create_session() as session:
+            return await claim_poll_tick(session, interval_seconds)
+
+    async def fetch(self) -> PricingRefreshPreview | None:
+        """Fetch the latest prices and hold them as pending, or ``None`` when nothing changed.
+
+        Raises:
+            PricingRefreshError: the data could not be fetched, or was implausible.
+        """
+        async with create_session() as session:
+            preview = await prepare_price_refresh(session, self.config)
+            if preview.added_count + preview.changed_count + preview.removed_count:
+                return preview
+            try:
+                await reject_price_refresh(session, digest=preview.digest)
+            except PendingSnapshotChanged:
+                pass
+            return None
+
+    async def poll(self, policy: str) -> str:
+        """One scheduled price check under ``policy``: ``unchanged``, ``pending`` or ``applied``.
+
+        Raises:
+            PricingRefreshError: the data could not be fetched, or was implausible.
+        """
+        async with create_session() as session:
+            return await poll_price_updates(session, policy, self.config)
+
+    async def approve(self, digest: str) -> bool:
+        """Apply the pending prices an operator reviewed under ``digest``; false when none is pending.
+
+        Raises:
+            PendingSnapshotChanged: the pending prices are no longer the reviewed ones.
+            PricingRefreshError: they could not be applied.
+        """
+        async with create_session() as session:
+            return await confirm_price_refresh(session, digest=digest)
 
 
 async def reject_price_refresh(session: AsyncSession, *, digest: str | None = None) -> bool:

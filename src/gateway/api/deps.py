@@ -102,11 +102,14 @@ from gateway.services.organizations import InvitationMailLimit, UserAccess
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
+from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
 from gateway.services.providers import (
+    HostedCatalogUpdate,
     HostedProviderService,
     HostedSources,
     OrgProviderModelService,
     ProviderEndpointService,
+    ScheduledRun,
     refresh_provider_endpoint_cache,
 )
 from gateway.services.rate_limits import RateLimitService
@@ -1660,6 +1663,32 @@ def get_hosted_provider_service(
 
 
 HostedProviderServiceDep = Annotated[HostedProviderService, Depends(get_hosted_provider_service)]
+
+
+def build_hosted_catalog_update(uow: UnitOfWork, *, config: GatewayConfig) -> HostedCatalogUpdate:
+    """Build the catalog update on ``uow``; its price steps open sessions of their own."""
+    return HostedCatalogUpdate(build_hosted_provider_service(uow, config=config), ModelsDevPriceUpdates(config))
+
+
+def get_hosted_catalog_update(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> HostedCatalogUpdate:
+    """The catalog update for one request, on its Unit of Work."""
+    return build_hosted_catalog_update(uow, config=config)
+
+
+HostedCatalogUpdateDep = Annotated[HostedCatalogUpdate, Depends(get_hosted_catalog_update)]
+
+
+def build_scheduled_catalog_update(config: GatewayConfig) -> ScheduledRun:
+    """Build the catalog update worker's run, each on a Unit of Work of its own."""
+
+    async def run(policy: str, interval_seconds: float) -> str | None:
+        async with create_unit_of_work() as uow:
+            return await build_hosted_catalog_update(uow, config=config).run_scheduled(policy, interval_seconds)
+
+    return run
 
 
 def build_hosted_discovery(config: GatewayConfig) -> HostedDiscovery:

@@ -1,4 +1,8 @@
-import type { HostedCatalogRefresh, HostedModelsRefresh } from "@/client"
+import type {
+  HostedCatalogRefresh,
+  HostedCatalogUpdatePreview,
+  HostedModelsRefresh,
+} from "@/client"
 
 const plural = (count: number, one: string, many: string) =>
   `${count} ${count === 1 ? one : many}`
@@ -90,6 +94,36 @@ export function catalogPreviewOutcome(result: HostedCatalogRefresh): string {
     `${plural(result.removed_count, "model", "models")} will be removed, ` +
     `taking ${rates} and ${overrides} with ${them}.`
   return lists === undefined ? models : `${models} ${lists}`
+}
+
+/**
+ * One sentence for the models.dev half of a catalog update, for its confirm
+ * dialog. A fetch that failed is said rather than thrown, because the model
+ * lists are still updated without it.
+ */
+export function pricePreviewOutcome(
+  preview: HostedCatalogUpdatePreview,
+): string {
+  if (preview.price_error) return preview.price_error
+  const prices = preview.prices
+  if (!prices) return "models.dev prices are unchanged."
+  const parts = [
+    prices.added_count > 0 ? `${prices.added_count} new` : undefined,
+    prices.changed_count > 0 ? `${prices.changed_count} changed` : undefined,
+    prices.removed_count > 0 ? `${prices.removed_count} removed` : undefined,
+  ].filter((part) => part !== undefined)
+  const total = prices.added_count + prices.changed_count + prices.removed_count
+  return `models.dev has ${parts.join(", ")} ${total === 1 ? "price" : "prices"} to apply.`
+}
+
+/** One sentence for the models a catalog update would newly offer, across every provider. */
+export function modelsPreviewOutcome(result: HostedCatalogRefresh): string {
+  const added = result.providers.filter((provider) => provider.added.length > 0)
+  const count = added.reduce((sum, provider) => sum + provider.added.length, 0)
+  if (count === 0) return "No provider lists a model it does not already offer."
+  return `${plural(count, "new model", "new models")} to offer on ${added
+    .map((provider) => provider.provider)
+    .join(", ")}, each served once something prices it.`
 }
 
 /** A provider a sweep could not read, and whether it is worth removing. */

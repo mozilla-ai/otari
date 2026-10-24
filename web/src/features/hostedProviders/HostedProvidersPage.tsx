@@ -22,6 +22,7 @@ import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -35,8 +36,8 @@ import { ApiError } from "@/shared/api/client"
 import { useDeploymentAdminAccess } from "@/shared/api/deployment"
 import {
   useDeleteHostedProvider,
-  useHostedCatalogRefresh,
-  useHostedCatalogRefreshPreview,
+  useHostedCatalogUpdate,
+  useHostedCatalogUpdatePreview,
   useHostedProviders,
   useTestHostedProvider,
   useUpdateHostedProvider,
@@ -53,6 +54,8 @@ import {
   catalogPreviewOutcome,
   catalogRefreshFailures,
   catalogRefreshOutcome,
+  modelsPreviewOutcome,
+  pricePreviewOutcome,
 } from "./refreshOutcome"
 
 // The providers this deployment serves inference on with its own keys, for a
@@ -81,23 +84,29 @@ type ProviderRow =
   | { kind: "instance"; name: string; instance: ProviderInfo }
 
 /**
- * What the last sweep did, stated rather than implied by the table redrawing.
+ * What the last catalog update did, stated rather than implied by the table
+ * redrawing.
  *
- * The kept groups are worth the space: a sweep that leaves priced models under
+ * The kept groups are worth the space: a cleanup that leaves priced models under
  * a provider this page does not offer looks like it failed, when something else
  * on the deployment serves them.
  */
-function CatalogSweepReport({
+function CatalogUpdateReport({
   result,
+  pricesApplied,
   onRemoveProvider,
 }: {
   result: HostedCatalogRefresh
+  pricesApplied: boolean
   onRemoveProvider: (provider: string) => void
 }) {
   const failures = catalogRefreshFailures(result)
   return (
     <InfoBanner tone={failures.length > 0 ? "warning" : "info"}>
-      <p role="status">{catalogRefreshOutcome(result)}</p>
+      <p role="status">
+        {pricesApplied ? "Applied the latest models.dev prices. " : ""}
+        {catalogRefreshOutcome(result)}
+      </p>
       {result.removed_count > 0 ? (
         <p className="mt-1 text-caption">
           {result.removed_price_rows} stored{" "}
@@ -140,52 +149,84 @@ function CatalogSweepReport({
   )
 }
 
-/** The models a sweep is about to remove, named before anything is removed. */
-function CatalogSweepPreview({
+/**
+ * What a catalog update is about to do: the price changes, the models each
+ * provider newly lists, and, when the cleanup is ticked, the models it removes,
+ * named before anything is removed.
+ */
+function CatalogUpdatePreview({
   preview,
+  cleanup,
+  onCleanupChange,
 }: {
-  preview: ReturnType<typeof useHostedCatalogRefreshPreview>
+  preview: ReturnType<typeof useHostedCatalogUpdatePreview>
+  cleanup: boolean
+  onCleanupChange: (cleanup: boolean) => void
 }) {
-  if (preview.error) {
-    // The confirm refuses to fire in this state, so the banner is the answer.
-    return <ErrorBanner error={preview.error} />
+  const body = () => {
+    if (preview.error) {
+      // The confirm refuses to fire in this state, so the banner is the answer.
+      return <ErrorBanner error={preview.error} />
+    }
+    if (preview.isPending || preview.isFetching) {
+      return <p>Asking models.dev and every provider what changed…</p>
+    }
+    const { catalog, prices } = preview.data
+    const failures = catalogRefreshFailures(catalog)
+    return (
+      <>
+        <p>{pricePreviewOutcome(preview.data)}</p>
+        {prices?.needs_review ? (
+          <p className="text-caption text-warning">
+            Unusual: {prices.review_reason}. A scheduled update would wait for a
+            person.
+          </p>
+        ) : null}
+        <p>{modelsPreviewOutcome(catalog)}</p>
+        {failures.map((failure) => (
+          <p key={failure.provider} className="text-caption">
+            {failure.message}
+          </p>
+        ))}
+        {cleanup ? (
+          <>
+            <p>{catalogPreviewOutcome(catalog)}</p>
+            {catalog.removed.length > 0 ? (
+              <ul className="max-h-48 overflow-y-auto font-mono text-caption">
+                {catalog.removed.map((modelKey) => (
+                  <li key={modelKey}>{modelKey}</li>
+                ))}
+              </ul>
+            ) : null}
+            {catalog.removed_count > catalog.removed.length ? (
+              <p className="text-caption">
+                … and {catalog.removed_count - catalog.removed.length} more.
+              </p>
+            ) : null}
+            {catalog.kept.map((group) => (
+              <p key={group.reason} className="text-caption">
+                Keeping {group.count} {group.count === 1 ? "model" : "models"}:{" "}
+                {group.reason}.
+              </p>
+            ))}
+          </>
+        ) : null}
+      </>
+    )
   }
-  if (preview.isPending || preview.isFetching) {
-    return <p>Working out what would be removed…</p>
-  }
-  const result = preview.data
-  const failures = catalogRefreshFailures(result)
   return (
     <div className="flex flex-col gap-3">
-      <p>{catalogPreviewOutcome(result)}</p>
-      {result.removed.length > 0 ? (
-        <ul className="max-h-48 overflow-y-auto font-mono text-caption">
-          {result.removed.map((modelKey) => (
-            <li key={modelKey}>{modelKey}</li>
-          ))}
-        </ul>
-      ) : null}
-      {result.removed_count > result.removed.length ? (
+      {body()}
+      <Checkbox isSelected={cleanup} onChange={onCleanupChange}>
+        Also remove the prices of models no provider serves
+      </Checkbox>
+      {cleanup ? (
         <p className="text-caption">
-          … and {result.removed_count - result.removed.length} more.
+          Removing a model takes its rate history and the overrides of
+          organizations with no key of their own for the provider. Requests
+          already billed keep the cost they were billed at.
         </p>
       ) : null}
-      {result.kept.map((group) => (
-        <p key={group.reason} className="text-caption">
-          Keeping {group.count} {group.count === 1 ? "model" : "models"}:{" "}
-          {group.reason}.
-        </p>
-      ))}
-      {failures.map((failure) => (
-        <p key={failure.provider} className="text-caption">
-          {failure.message}
-        </p>
-      ))}
-      <p className="text-caption">
-        Removing a model takes its rate history and the overrides of
-        organizations with no key of their own for the provider. Requests
-        already billed keep the cost they were billed at.
-      </p>
     </div>
   )
 }
@@ -276,24 +317,26 @@ export function HostedProvidersPage() {
   const updateSettings = useUpdateSettings()
   const update = useUpdateHostedProvider()
   const remove = useDeleteHostedProvider()
-  const sweep = useHostedCatalogRefresh()
-  const [isSweepOpen, setIsSweepOpen] = useState(false)
-  const [sweepOpenCount, setSweepOpenCount] = useState(0)
+  const catalogUpdate = useHostedCatalogUpdate()
+  const [isUpdateOpen, setIsUpdateOpen] = useState(false)
+  const [updateOpenCount, setUpdateOpenCount] = useState(0)
+  const [cleanup, setCleanup] = useState(false)
   // Asked only while the dialog is open, because answering dials every
   // configured provider, and asked afresh on every opening.
-  const preview = useHostedCatalogRefreshPreview(
-    isSweepOpen ? sweepOpenCount : 0,
+  const preview = useHostedCatalogUpdatePreview(
+    isUpdateOpen ? updateOpenCount : 0,
+    cleanup,
   )
-  // The sweep takes no list, so the confirm waits for one this opening read
-  // successfully and shows: never a previous opening's, a failed or an
-  // in-flight one.
+  // The confirm waits for a preview this opening read successfully and shows:
+  // never a previous opening's, a failed or an in-flight one, because the
+  // update applies the prices that preview named.
   const isPreviewShown = preview.isSuccess && !preview.isFetching
 
   const [isAdding, setIsAdding] = useState(false)
   const [addOpenCount, setAddOpenCount] = useState(0)
   const [editingProvider, setEditingProvider] = useState("")
   const [modelsFor, setModelsFor] = useState("")
-  // A name rather than a row: the sweep report's own remove offer can name a
+  // A name rather than a row: the update report's own remove offer can name a
   // provider this page has not loaded.
   const [pendingDelete, setPendingDelete] = useState("")
 
@@ -528,14 +571,15 @@ export function HostedProvidersPage() {
           <div className="flex flex-wrap items-center gap-2">
             <Button
               className="min-h-11 md:min-h-9"
-              isPending={sweep.isPending}
+              isPending={catalogUpdate.isPending}
               onPress={() => {
-                setSweepOpenCount((n) => n + 1)
-                setIsSweepOpen(true)
+                setCleanup(false)
+                setUpdateOpenCount((n) => n + 1)
+                setIsUpdateOpen(true)
               }}
             >
               <FiRefreshCw aria-hidden className="size-4" />
-              Refresh and purge
+              Update catalog
             </Button>
             <Button
               variant="primary"
@@ -561,15 +605,16 @@ export function HostedProvidersPage() {
           providers.error ??
           update.error ??
           remove.error ??
-          sweep.error ??
+          catalogUpdate.error ??
           updateSettings.error
         }
       />
       {isKeyEncryptionMissing ? <SecretKeyMissingBanner /> : null}
       <DeploymentProviderMigration />
-      {sweep.data ? (
-        <CatalogSweepReport
-          result={sweep.data}
+      {catalogUpdate.data ? (
+        <CatalogUpdateReport
+          result={catalogUpdate.data.catalog}
+          pricesApplied={catalogUpdate.data.prices_applied}
           onRemoveProvider={setPendingDelete}
         />
       ) : null}
@@ -645,23 +690,33 @@ export function HostedProvidersPage() {
       ) : null}
 
       <ConfirmDialog
-        isOpen={isSweepOpen}
+        isOpen={isUpdateOpen}
         onOpenChange={(open) => {
-          if (!open) setIsSweepOpen(false)
+          if (!open) setIsUpdateOpen(false)
         }}
-        heading="Refresh and purge the catalog?"
-        body={<CatalogSweepPreview preview={preview} />}
-        confirmLabel="Refresh and purge"
-        confirmVariant="danger"
-        // The sweep's own pending state only: the preview dials every provider,
+        heading="Update the catalog?"
+        body={
+          <CatalogUpdatePreview
+            preview={preview}
+            cleanup={cleanup}
+            onCleanupChange={setCleanup}
+          />
+        }
+        confirmLabel={cleanup ? "Update and remove" : "Update catalog"}
+        // Danger only once it deletes: without the cleanup it only adds and reprices.
+        confirmVariant={cleanup ? "danger" : "primary"}
+        // The update's own pending state only: the preview dials every provider,
         // and folding it in would leave Cancel dead for that whole fan-out.
-        isPending={sweep.isPending}
+        isPending={catalogUpdate.isPending}
         isConfirmDisabled={!isPreviewShown}
-        error={sweep.error}
+        error={catalogUpdate.error}
         onConfirm={() => {
-          // Nothing is confirmed against a list nobody has seen.
+          // Nothing is confirmed against a preview nobody has seen.
           if (!isPreviewShown) return
-          sweep.mutate(undefined, { onSuccess: () => setIsSweepOpen(false) })
+          catalogUpdate.mutate(
+            { digest: preview.data.prices?.digest ?? null, cleanup },
+            { onSuccess: () => setIsUpdateOpen(false) },
+          )
         }}
       />
       <ConfirmDialog
@@ -685,7 +740,7 @@ export function HostedProvidersPage() {
               setPendingDelete("")
               // Its counts and remove offers described a deployment that has
               // since changed.
-              sweep.reset()
+              catalogUpdate.reset()
             },
           })
         }}

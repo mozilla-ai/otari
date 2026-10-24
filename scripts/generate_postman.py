@@ -63,6 +63,10 @@ EXAMPLE_BODY_OVERRIDES: dict[tuple[str, str], dict[str, Any]] = {
     # One field, so the template does the thing its name says and the other is a
     # line the operator adds on purpose.
     ("PATCH", "/v1/admin/users/{user_id}"): {"is_active": False},
+    # A derived ``digest`` is the literal "string", which names no pending
+    # prices and so answers 409. Without one, the update refreshes the model
+    # lists; the digest is a line the operator copies from the preview.
+    ("POST", "/api/v1/hosted-providers/catalog-update"): {"cleanup": False},
 }
 
 

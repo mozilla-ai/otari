@@ -26,6 +26,7 @@ from gateway.api.deps import (
     build_hosted_discovery,
     build_hosted_provider_service,
     build_inference_service,
+    build_scheduled_catalog_update,
     build_trace_service,
     get_api_key_service,
     get_membership_listener,
@@ -102,7 +103,6 @@ from gateway.services.pricing_init_service import (
 from gateway.services.pricing_refresh_service import (
     load_persisted_price_snapshot,
     run_price_snapshot_refresher,
-    run_price_update_poller,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
 from gateway.services.provider_kwargs import (
@@ -117,6 +117,7 @@ from gateway.services.providers import (
     refuse_unsafe_configured_endpoints,
     reset_hosted_name_index,
     reset_provider_endpoint_cache,
+    run_catalog_updater,
     run_hosted_name_refresher,
     run_provider_endpoint_refresher,
 )
@@ -487,7 +488,10 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker("price snapshot", lambda _config, _container: run_price_snapshot_refresher()),
     # Started whatever ``pricing_refresh`` says, because that policy is
     # runtime-settable and each tick re-reads it.
-    _LifespanWorker("price update poll", lambda config, _container: run_price_update_poller(config)),
+    _LifespanWorker(
+        "catalog update",
+        lambda config, _container: run_catalog_updater(config, build_scheduled_catalog_update(config)),
+    ),
     # Started whatever ``model_cache_ttl_seconds`` says, for the same reason.
     # Gating on it would strand the gateway: the TTL is runtime-settable, and
     # raising it from 0 flips every read onto a cache nothing then fills.

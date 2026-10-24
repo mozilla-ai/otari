@@ -85,14 +85,13 @@ export const DEPLOYMENT_ADMIN = "deployment-admin"
 // offered models: a catalog sweep touches every provider at once, so one
 // invalidation of the root covers the list and every open panel.
 export const HOSTED_PROVIDERS = "hosted-providers"
-// What a provider says it serves on the stored key, and what a sweep would
-// remove. Both dial the upstream, so neither sits under HOSTED_PROVIDERS: every
+// What a provider says it serves on the stored key, and what a catalog update
+// would do. Both dial the upstream, so neither sits under HOSTED_PROVIDERS: every
 // save there would re-dial, and the preview would refetch while its confirm
 // dialog is still open, asking every provider a second time.
 export const HOSTED_PROVIDER_AVAILABLE_MODELS =
   "hosted-provider-available-models"
-export const HOSTED_PROVIDERS_REFRESH_PREVIEW =
-  "hosted-providers-refresh-preview"
+export const HOSTED_CATALOG_UPDATE_PREVIEW = "hosted-catalog-update-preview"
 // The signed-in identity read on its own (`GET /v1/auth/profile`), for a caller
 // the organization context cannot describe because it has no organization. Not
 // a child of ORGANIZATIONS: switching organization does not change who you are.

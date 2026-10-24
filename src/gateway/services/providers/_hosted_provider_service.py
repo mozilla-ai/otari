@@ -719,13 +719,15 @@ class HostedProviderService:
         row.source_removed = True
         return True
 
-    async def refresh_catalog(self, *, apply: bool) -> HostedCatalogRefreshPublic:
+    async def refresh_catalog(self, *, apply: bool, remove: bool = True) -> HostedCatalogRefreshPublic:
         """Sweep the deployment price list against the roster, or preview the sweep.
+
+        ``remove=False`` refreshes every provider's models and removes nothing.
 
         Raises:
             HostedCatalogEmptyError: no provider offers a model, and no orphaned roster is left.
         """
-        return await self.sweep.run(apply=apply)
+        return await self.sweep.run(apply=apply, remove=remove)
 
     async def serveable_models(self, *, organization_id: uuid.UUID | None) -> dict[str, frozenset[str]]:
         """Each provider serveable to ``organization_id``, with the models switched on under it.

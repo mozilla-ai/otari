@@ -169,13 +169,14 @@ class PricingSettings(BaseModel):
     pricing_refresh: Annotated[Literal["manual", "review", "auto"], Shown(SettingsGroup.METERING)] = Field(
         default="manual",
         description=(
-            "How the models.dev defaults are kept current. 'manual': only when an operator checks for "
-            "updates on Model pricing. 'review': fetch upstream every pricing_refresh_interval_seconds and "
-            "hold the update for an operator to accept or reject. 'auto': fetch and apply on that schedule."
+            "Whether the catalog update (the latest models.dev prices, then every hosted provider's models) "
+            "runs on its own. 'manual': only when an operator runs Update catalog on Hosted providers. "
+            "'review': run every pricing_refresh_interval_seconds and hold changed prices for an operator "
+            "to approve. 'auto': run on that schedule and apply them."
         ),
     )
     pricing_refresh_interval_seconds: Annotated[int, Shown(SettingsGroup.METERING)] = Field(
         default=86400,
         ge=300,
-        description="How often the scheduled models.dev price check runs when pricing_refresh is review or auto.",
+        description="How often the scheduled catalog update runs when pricing_refresh is review or auto.",
     )

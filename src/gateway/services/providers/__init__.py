@@ -8,6 +8,12 @@ are still in the flat modules beside `services/`, and move here when the
 domain's migration reaches them (`DOMAINS.md`).
 """
 
+from gateway.services.providers._hosted_catalog_update import (
+    HostedCatalogUpdate,
+    PriceUpdates,
+    ScheduledRun,
+    run_catalog_updater,
+)
 from gateway.services.providers._hosted_name_index import (
     hosted_implementation,
     load_hosted_names_at_startup,
@@ -52,14 +58,17 @@ from gateway.services.providers._provider_endpoint_cache import (
 from gateway.services.providers._provider_endpoint_service import ProviderEndpointService
 
 __all__ = [
+    "HostedCatalogUpdate",
     "HostedProviderService",
     "HostedSources",
     "LiveByoPairs",
     "OrganizationExists",
     "OrgProviderModelService",
     "OwnedEndpoint",
+    "PriceUpdates",
     "ProviderEndpointService",
     "ResolvedHostedProvider",
+    "ScheduledRun",
     "UnknownHostedUpstreamError",
     "acompletion",
     "amessages",
@@ -79,6 +88,7 @@ __all__ = [
     "refuse_unsafe_configured_endpoints",
     "reset_hosted_name_index",
     "reset_provider_endpoint_cache",
+    "run_catalog_updater",
     "run_hosted_name_refresher",
     "run_provider_endpoint_refresher",
     "serve_on_hosted_provider",

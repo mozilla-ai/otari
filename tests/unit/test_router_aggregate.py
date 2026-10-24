@@ -107,5 +107,5 @@ def test_a_fixed_route_is_matched_before_the_catch_all_that_would_swallow_it() -
 
     assert first(f"{API_ROOT}/models/discoverable") < first(f"{API_ROOT}/models/{{model_id:path}}")
     assert first(f"{API_ROOT}/models/metadata") < first(f"{API_ROOT}/models/{{model_id:path}}")
-    assert first(f"{API_ROOT}/pricing/refresh") < first(f"{API_ROOT}/pricing/{{model_key:path}}")
+    assert first(f"{API_ROOT}/pricing/refresh/pending") < first(f"{API_ROOT}/pricing/{{model_key:path}}")
     assert first(f"{API_ROOT}/search-tools/providers") < first(f"{API_ROOT}/search-tools/{{name}}")
