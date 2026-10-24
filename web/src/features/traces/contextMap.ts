@@ -265,13 +265,19 @@ function cacheSplit(input: ContextMapInput, inputTokens: number): Draft[] {
   return drafts
 }
 
-// The exact cache split of a request whose tiles are an estimate, when it used the cache at all.
+// The exact cache split of a request whose tiles are an estimate, when it used the
+// cache at all. Counts that overrun the input cannot form a split, and clamping them
+// would present a number the provider never reported as exact, so they are left out.
 function exactCache(
   input: ContextMapInput,
   used: number,
 ): CacheCounts | undefined {
-  const counts = cacheCounts(input, used)
-  return counts.read > 0 || counts.write > 0 ? counts : undefined
+  const read = Math.max(input.cacheReadTokens ?? 0, 0)
+  const write = Math.max(input.cacheWriteTokens ?? 0, 0)
+  if (read + write > used) return undefined
+  return read > 0 || write > 0
+    ? { read, write, fresh: used - read - write }
+    : undefined
 }
 
 /**

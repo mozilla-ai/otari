@@ -140,6 +140,25 @@ describe("ContextMapView", () => {
     expect(screen.getByText("Estimated")).toBeInTheDocument()
   })
 
+  it("does not call counts that overrun the input exact", () => {
+    render(
+      <ContextMapView
+        map={buildContextMap({
+          inputTokens: 100,
+          cacheReadTokens: 90,
+          cacheWriteTokens: 90,
+          windowTokens: 1_000,
+          weights: WEIGHTS,
+        })}
+      />,
+    )
+
+    expect(
+      screen.queryByText(/Exact from the provider/),
+    ).not.toBeInTheDocument()
+    expect(screen.getByText("Estimated")).toBeInTheDocument()
+  })
+
   it("draws the cache split with the provider's own counts, and no estimate marker", () => {
     render(
       <ContextMapView

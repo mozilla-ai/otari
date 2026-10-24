@@ -240,6 +240,36 @@ describe("buildContextMap", () => {
     ).toBe(39_600)
   })
 
+  it("leaves out the exact summary when the cache counts overrun the input, rather than clamp them", () => {
+    const map = buildContextMap({
+      inputTokens: 100,
+      cacheReadTokens: 90,
+      cacheWriteTokens: 90,
+      windowTokens: 1_000,
+      weights: WEIGHTS,
+    })
+
+    expect(map?.cache).toBeUndefined()
+    expect(
+      sum(
+        map?.blocks
+          .filter((block) => block.kind !== "free")
+          .map((block) => block.tokens) ?? [],
+      ),
+    ).toBe(100)
+  })
+
+  it("keeps the exact summary when the counts fill the input exactly", () => {
+    expect(
+      buildContextMap({
+        inputTokens: 100,
+        cacheReadTokens: 60,
+        cacheWriteTokens: 40,
+        weights: WEIGHTS,
+      })?.cache,
+    ).toEqual({ read: 60, write: 40, fresh: 0 })
+  })
+
   it("has no cache summary without cache use, or where the cache split is the map itself", () => {
     expect(
       buildContextMap({ inputTokens: 100, weights: WEIGHTS })?.cache,
