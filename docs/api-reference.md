@@ -183,9 +183,9 @@ whose `delta` has no content or tool calls, so a client that reads only `choices
 passes over it. Match entries by `id`: the ended one replaces the started one.
 
 ```text
-data: {"id":"chatcmpl-…","choices":[{"delta":{"content":null,…},"finish_reason":null,"index":0}],…,"otari_tool_calls":[{"id":"otari_ws_5f0c…","type":"web_search","status":"in_progress","query":"latest python release"}]}
+data: {"id":"chatcmpl-…","choices":[{"delta":{},"index":0,"finish_reason":null}],…,"otari_tool_calls":[{"id":"otari_ws_5f0c…","type":"web_search","status":"in_progress","query":"latest python release"}]}
 
-data: {"id":"chatcmpl-…","choices":[{"delta":{"content":null,…},"finish_reason":null,"index":0}],…,"otari_tool_calls":[{"id":"otari_ws_5f0c…","type":"web_search","status":"completed","query":"latest python release","sources":[…]}]}
+data: {"id":"chatcmpl-…","choices":[{"delta":{},"index":0,"finish_reason":null}],…,"otari_tool_calls":[{"id":"otari_ws_5f0c…","type":"web_search","status":"completed","query":"latest python release","sources":[…]}]}
 ```
 
 The entries are not in the `delta`, where the OpenAI Python SDK's stream helper
