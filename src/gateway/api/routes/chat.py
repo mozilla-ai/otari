@@ -92,7 +92,7 @@ from gateway.services.tools import (
     with_typed_code_execution_tool,
     without_otari_tool_calls,
 )
-from gateway.services.traces import read_turn
+from gateway.services.traces import read_context, read_turn
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -644,6 +644,7 @@ async def run_chat_completion(
             idempotency=None if request.stream else idempotency,
             tags=resolved_tags(tags_header, request.metadata),
             turn=read_turn("chat", request.messages),
+            context=lambda: read_context("chat", request.messages, tools=request.tools),
             session_label=request.session_label,
         )
     except IdempotentReplay as replay:

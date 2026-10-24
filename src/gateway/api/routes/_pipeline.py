@@ -366,7 +366,16 @@ from gateway.services.tools import (
     unpriced_tool_detail,
     validate_web_declarations,
 )
-from gateway.services.traces import RequestTrace, SessionRef, TurnFacts, harness_of, is_subagent, resolve_session
+from gateway.services.traces import (
+    ContextWeights,
+    RequestTrace,
+    SessionRef,
+    TurnFacts,
+    context_of,
+    harness_of,
+    is_subagent,
+    resolve_session,
+)
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.web_retrieval_backend import (
     WebRetrievalBackend,
@@ -2640,6 +2649,7 @@ async def resolve_request_context(
     idempotency: IdempotencyGuard | None = None,
     tags: dict[str, str] | None = None,
     turn: TurnFacts | None = None,
+    context: Callable[[], ContextWeights | None] | None = None,
     session_label: str | None = None,
     safety_identifier: str | None = None,
 ) -> RequestContext:
@@ -3293,6 +3303,7 @@ async def resolve_request_context(
             session=session,
             harness=harness_of(raw_request.headers),
             turn=turn,
+            context=context_of(context),
             subagent=is_subagent(raw_request.headers),
             request_id=request_id,
             workspace_id=workspace_id,

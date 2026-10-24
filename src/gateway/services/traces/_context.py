@@ -1,0 +1,228 @@
+"""How much of a model request's input each kind of content accounts for, as character counts.
+
+The gateway has no tokenizer, so a request's composition is kept as weights: the
+characters in the system prompt, the tool definitions, the user and assistant
+turns, the tool results, and a flat allowance per attachment. Only the integers
+are kept. The dashboard scales them to the provider's exact input-token count,
+so the total is exact and the split is an estimate.
+
+The body is the client's, so every field is type-checked before use: a malformed
+one weighs nothing, and reading never raises into the request path.
+"""
+
+import json
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
+
+from gateway.log_config import logger
+from gateway.services.traces._turns import Dialect
+
+# An image, audio clip, file or document is billed by its size and format, not by
+# its bytes (a base64 payload says nothing about it), so each counts for a flat
+# 4,000 characters, about a thousand tokens at the gateway's four characters per token.
+FILE_CHARS = 4_000
+
+_FILE_TYPES = frozenset(
+    {
+        "image",
+        "image_url",
+        "input_image",
+        "audio",
+        "input_audio",
+        "video_url",
+        "file",
+        "input_file",
+        "document",
+    }
+)
+# Keys that name or tie a part together rather than say anything, so they weigh nothing.
+_STRUCTURAL_KEYS = frozenset(
+    {"type", "id", "role", "tool_use_id", "tool_call_id", "call_id", "cache_control", "status", "index"}
+)
+_MAX_DEPTH = 8
+
+_SYSTEM_ROLES = frozenset({"system", "developer"})
+_RESULT_ROLES = frozenset({"tool", "function"})
+_RESULT_ITEMS = frozenset({"function_call_output", "custom_tool_call_output"})
+
+# The span attributes the weights are stored under, in the order ``ContextWeights`` declares them.
+CONTEXT_ATTRIBUTE_PREFIX = "otari.context."
+
+
+@dataclass(frozen=True)
+class ContextWeights:
+    """Characters per kind of input, plus how many tool definitions and messages there were."""
+
+    system_chars: int = 0
+    tools_chars: int = 0
+    user_chars: int = 0
+    assistant_chars: int = 0
+    tool_result_chars: int = 0
+    file_chars: int = 0
+    tool_count: int = 0
+    message_count: int = 0
+
+    def attributes(self) -> dict[str, str | int | float | bool]:
+        """The weights as span attributes, ``otari.context.<field>``."""
+        return {
+            f"{CONTEXT_ATTRIBUTE_PREFIX}{name}": value
+            for name, value in (
+                ("system_chars", self.system_chars),
+                ("tools_chars", self.tools_chars),
+                ("user_chars", self.user_chars),
+                ("assistant_chars", self.assistant_chars),
+                ("tool_result_chars", self.tool_result_chars),
+                ("file_chars", self.file_chars),
+                ("tool_count", self.tool_count),
+                ("message_count", self.message_count),
+            )
+        }
+
+
+@dataclass
+class _Tally:
+    system: int = 0
+    user: int = 0
+    assistant: int = 0
+    tool_result: int = 0
+    files: int = 0
+
+    def add(self, bucket: str, value: Any) -> None:
+        """Weigh ``value`` into ``bucket``, setting aside the attachments inside it."""
+        text, files = _weigh(value)
+        setattr(self, bucket, getattr(self, bucket) + text)
+        self.files += files
+
+
+def _weigh(value: Any, depth: int = 0) -> tuple[int, int]:
+    """The characters of text in a value and the characters allowed for the attachments inside it."""
+    if isinstance(value, str):
+        return len(value), 0
+    if depth >= _MAX_DEPTH:
+        return 0, 0
+    if isinstance(value, Mapping):
+        if value.get("type") in _FILE_TYPES:
+            return 0, FILE_CHARS
+        text = files = 0
+        for key, item in value.items():
+            if key in _STRUCTURAL_KEYS:
+                continue
+            item_text, item_files = _weigh(item, depth + 1)
+            text += item_text
+            files += item_files
+        return text, files
+    if isinstance(value, Sequence) and not isinstance(value, bytes | bytearray):
+        text = files = 0
+        for item in value:
+            item_text, item_files = _weigh(item, depth + 1)
+            text += item_text
+            files += item_files
+        return text, files
+    return 0, 0
+
+
+def _role_bucket(role: Any) -> str:
+    if role in _SYSTEM_ROLES:
+        return "system"
+    if role == "assistant":
+        return "assistant"
+    if role in _RESULT_ROLES:
+        return "tool_result"
+    return "user"
+
+
+def _chat(tally: _Tally, messages: Sequence[Any]) -> None:
+    for message in messages:
+        if not isinstance(message, Mapping):
+            continue
+        bucket = _role_bucket(message.get("role"))
+        tally.add(bucket, message.get("content"))
+        if bucket == "assistant":
+            tally.add("assistant", message.get("tool_calls"))
+
+
+def _messages(tally: _Tally, messages: Sequence[Any]) -> None:
+    for message in messages:
+        if not isinstance(message, Mapping):
+            continue
+        bucket = _role_bucket(message.get("role"))
+        content = message.get("content")
+        if bucket != "user" or not isinstance(content, Sequence) or isinstance(content, str):
+            tally.add(bucket, content)
+            continue
+        for block in content:
+            if isinstance(block, Mapping) and block.get("type") == "tool_result":
+                tally.add("tool_result", block.get("content"))
+            else:
+                tally.add("user", block)
+
+
+def _responses(tally: _Tally, items: Any) -> int:
+    if isinstance(items, str):
+        tally.add("user", items)
+        return 1
+    if not isinstance(items, Sequence):
+        return 0
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        kind = item.get("type", "message")
+        if kind == "message":
+            tally.add(_role_bucket(item.get("role")), item.get("content"))
+        elif kind in _RESULT_ITEMS:
+            tally.add("tool_result", item.get("output"))
+        elif kind != "item_reference":
+            # A tool call's arguments, a reasoning item, or a built-in tool's own call.
+            tally.add("assistant", item)
+    return len(items)
+
+
+def _definitions(tools: Any) -> tuple[int, int]:
+    """The serialized size of the tool definitions and how many there are."""
+    if not isinstance(tools, Sequence) or isinstance(tools, str | bytes) or not tools:
+        return 0, 0
+    return len(json.dumps(tools, separators=(",", ":"), default=str)), len(tools)
+
+
+def read_context(dialect: Dialect, messages: Any, *, tools: Any = None, system: Any = None) -> ContextWeights | None:
+    """Weigh a request's messages (Chat, Messages) or input items (Responses).
+
+    ``system`` is Anthropic's ``system`` parameter or the Responses ``instructions``;
+    a system or developer message inside ``messages`` counts as system too.
+    Returns None when the request cannot be read, so the span simply carries no weights.
+    """
+    try:
+        tally = _Tally()
+        tally.add("system", system)
+        if dialect == "responses":
+            count = _responses(tally, messages)
+        else:
+            items = messages if isinstance(messages, Sequence) and not isinstance(messages, str) else ()
+            (_chat if dialect == "chat" else _messages)(tally, items)
+            count = len(items)
+        tools_chars, tool_count = _definitions(tools)
+        return ContextWeights(
+            system_chars=tally.system,
+            tools_chars=tools_chars,
+            user_chars=tally.user,
+            assistant_chars=tally.assistant,
+            tool_result_chars=tally.tool_result,
+            file_chars=tally.files,
+            tool_count=tool_count,
+            message_count=count,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Request context not weighed (%s)", type(exc).__name__)
+        return None
+
+
+def context_of(read: Callable[[], ContextWeights | None] | None) -> ContextWeights | None:
+    """What a route's reader returns, or None when there is none or it failed."""
+    if read is None:
+        return None
+    try:
+        return read()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Request context not weighed (%s)", type(exc).__name__)
+        return None
