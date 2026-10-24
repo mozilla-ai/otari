@@ -93,6 +93,16 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         )
         return result.scalar_one_or_none()
 
+    async def lock(self, budget_id: str) -> None:
+        """Lock this budget's row until the transaction ends.
+
+        ``FOR NO KEY UPDATE``, so two writers of the budget queue while a ceiling inserted against it, which takes a
+        key-share lock for its foreign key, does not.
+        """
+        await self.db.execute(
+            select(Budget.budget_id).where(Budget.budget_id == budget_id).with_for_update(key_share=True)
+        )
+
     async def get_in_reach_of(self, budget_id: str, organization_id: uuid.UUID) -> Budget | None:
         """Return the budget with this ID when the deployment or this organization owns it, otherwise None."""
         result = await self.db.execute(
