@@ -232,6 +232,11 @@ billing source: usage-and-telemetry keeps the usage rows and their cost.
 Inference, tools and usage-and-telemetry depend on traces; traces depends on
 none of them.
 
+An LLM span also keeps the size of each part of its request (system prompt,
+tool definitions, messages, tool results, files) as integers, and a read adds
+the model's context window from the pricing domain's catalog lookup. Neither
+keeps text.
+
 Built in the target shape from the start.
 
 ### inference
