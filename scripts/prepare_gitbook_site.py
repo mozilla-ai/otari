@@ -40,6 +40,8 @@ SPEC_NAME = "otari-openapi-spec"
 SPEC_SITE_PATH = "api/openapi.json"
 SPEC_URL = f"https://raw.githubusercontent.com/{REPO}/gitbook-docs/{SPEC_SITE_PATH}"
 ENDPOINTS_DIR = "api-endpoints"
+# Images and other files pages embed, copied into every space so a page links them by its own relative path.
+ASSETS_DIR = "assets"
 ENDPOINTS_PARENT = "api-reference.md"
 
 # Repository-root files copied to the root of the site, keyed by their name in the repository.
@@ -255,6 +257,8 @@ class Site:
             raise ValueError(f"{page}: link {target!r} names no file")
         if resolved.is_relative_to(self.docs_dir.resolve()):
             linked = resolved.relative_to(self.docs_dir.resolve()).as_posix()
+            if linked.startswith(f"{ASSETS_DIR}/") and resolved.is_file():
+                return match.group(0)
             if linked in self.published:
                 here, there = self.site_path(page), self.site_path(linked)
                 if here.split("/", 1)[0] == there.split("/", 1)[0]:
@@ -289,6 +293,9 @@ class Site:
             (out_dir / space.directory / ".gitbook.yaml").write_text(
                 f"root: ./\n\nstructure:\n  readme: {space.pages[0]}\n  summary: {SUMMARY}\n", encoding="utf-8"
             )
+        if (self.docs_dir / ASSETS_DIR).is_dir():
+            for space in self.spaces:
+                shutil.copytree(self.docs_dir / ASSETS_DIR, out_dir / space.directory / ASSETS_DIR)
         (out_dir / SITE_CONFIG).write_text(config, encoding="utf-8")
         for name, dest_name in BRANCH_FILES.items():
             shutil.copyfile(self.docs_dir.parent / name, out_dir / dest_name)

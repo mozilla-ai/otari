@@ -99,6 +99,16 @@ def test_summary_spaces_refuses_a_page_outside_a_space_or_an_empty_space(summary
         gitbook.summary_spaces(summary)
 
 
+def test_build_copies_assets_into_every_space_and_keeps_links_to_them(repo: Path) -> None:
+    (repo / "docs" / "assets").mkdir()
+    (repo / "docs" / "assets" / "flow.webp").write_bytes(b"RIFF")
+    site = gitbook.Site.from_summary(repo / "docs", "main")
+    assert site.rewrite_links("![Flow](../assets/flow.webp)", "providers/openai.md") == "![Flow](../assets/flow.webp)"
+    site.build(repo / "site")
+    assert (repo / "site" / "home" / "assets" / "flow.webp").is_file()
+    assert (repo / "site" / "guides" / "assets" / "flow.webp").is_file()
+
+
 def test_link_within_a_space_is_kept(site: Any) -> None:
     text = "See [API](../api-reference.md#auth)."
     assert site.rewrite_links(text, "providers/openai.md") == text
