@@ -117,6 +117,16 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.llm.rate.output": str,
     "otari.llm.rate.cache_read": str,
     "otari.llm.rate.cache_write": str,
+    # Characters per kind of input in a model request, and how many tool definitions and
+    # messages it held. Sizes only, never text; the dashboard scales them to the exact input tokens.
+    "otari.context.system_chars": int,
+    "otari.context.tools_chars": int,
+    "otari.context.user_chars": int,
+    "otari.context.assistant_chars": int,
+    "otari.context.tool_result_chars": int,
+    "otari.context.file_chars": int,
+    "otari.context.tool_count": int,
+    "otari.context.message_count": int,
     "otari.tool.decision": str,
     "otari.tool.decision_source": str,
     "otari.tool.succeeded": bool,
