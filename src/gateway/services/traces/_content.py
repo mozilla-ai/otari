@@ -307,19 +307,22 @@ class SpanContent:
             del self._open_keys[cache_key]
 
     def _schedule_sweep(self) -> None:
+        """Wake when the oldest held key reaches its age, so none outlives it by more than a sweep's delay."""
         if self._sweep is not None:
+            return
+        made = [held.made_at for held in self._write_keys.values()] + [at for _, at in self._open_keys.values()]
+        if not made:
             return
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        self._sweep = loop.call_later(_KEY_MAX_AGE_S, self._run_sweep)
+        self._sweep = loop.call_later(max(0.0, min(made) + _KEY_MAX_AGE_S - monotonic()), self._run_sweep)
 
     def _run_sweep(self) -> None:
         self._sweep = None
         self._prune()
-        if self._write_keys or self._open_keys:
-            self._schedule_sweep()
+        self._schedule_sweep()
 
     def _write_paused(self) -> bool:
         return monotonic() < self._write_paused_until

@@ -999,9 +999,9 @@ class _MembershipListeners:
         for listener in self._listeners:
             await listener.workspace_deleted(workspace_id, member_ids)
 
-    async def member_left_organization(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
+    async def member_lost_workspaces(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
         for listener in self._listeners:
-            await listener.member_left_organization(user_id, workspace_ids)
+            await listener.member_lost_workspaces(user_id, workspace_ids)
 
 
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:

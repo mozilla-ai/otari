@@ -13,7 +13,7 @@ class TraceMembershipListener:
 
     Nobody reads a departed member's content, and they can no longer manage what
     they shared, so their shares end with their membership. Reading through a share
-    checks the owner's membership as well, which covers leaving the organization.
+    checks the owner's membership as well, which covers losing access any other way.
     """
 
     def __init__(self, repositories: TracesRepositories) -> None:
@@ -31,7 +31,7 @@ class TraceMembershipListener:
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         """Nothing: the workspace's sessions, and their shares, go with it."""
 
-    async def member_left_organization(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
-        """End every share the person made in any of the organization's workspaces, so a return revives none."""
+    async def member_lost_workspaces(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
+        """End every share the person made in these workspaces, so regaining access revives none."""
         await self._repositories.erasures.lock([str(user_id)])
         await self._repositories.shares.revoke_by(workspace_ids, user_id, datetime.now(UTC))

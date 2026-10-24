@@ -63,8 +63,12 @@ from otari_agent.domain.definitions import GateDefinition, definition_digest, ga
 
 # How long after a user's erasure spans taken in for them are still refused.
 ERASURE_MARGIN = timedelta(minutes=10)
-# How long past that an erased user's row is kept: far longer than any batch is held.
-ERASURE_KEPT_FOR = timedelta(hours=1)
+# The oldest a write may be when it is stored, measured from when it was taken in;
+# an older one is refused whole, however long its upload or request stalled.
+MAX_WRITE_AGE = timedelta(hours=24)
+# How long past the margin an erased user's row is kept: past the oldest write that
+# can still be stored, by an hour that absorbs the clock of the replica deleting it.
+ERASURE_KEPT_FOR = MAX_WRITE_AGE + timedelta(hours=1)
 
 # How often one reader's reads through a share are recorded, and how many of a
 # share's newest reads its listing carries.
@@ -124,7 +128,7 @@ class TraceService:
             new_traces: dict[TraceKey, dict[str, Any]] = {}
             for trace in traces:
                 # An erased user's write creates nothing, not even the session it names.
-                if not _erased_since(trace, erased):
+                if not _refused(trace, erased, written_at):
                     new_traces.setdefault(_key(trace), _new_trace(trace, written_at))
             await self._traces.create_absent(list(new_traces.values()))
             # Read after creating, so a trace a concurrent writer created first is
@@ -137,7 +141,7 @@ class TraceService:
             for trace, held in zip(traces, sealed, strict=True):
                 spans = _unique_spans(trace.spans)
                 holder = holders.get(_key(trace))
-                if _erased_since(trace, erased) or holder is None or holder[0] != trace.user_id:
+                if _refused(trace, erased, written_at) or holder is None or holder[0] != trace.user_id:
                     rejected += len(spans)
                     continue
                 kept.append((trace, spans))
@@ -735,6 +739,15 @@ def _span_record(row: TraceSpan) -> SpanRecord:
         otel_span_id=row.otel_span_id,
         attributes=row.attributes or {},
     )
+
+
+def _refused(trace: TraceWrite, erased: dict[str, datetime | None], written_at: datetime) -> bool:
+    """Whether the write is refused whole: taken in too long ago, or for a user erased since.
+
+    The age bound is what lets an erased user's row be deleted at all: a write
+    older than any row still kept would otherwise find no erasure to refuse it.
+    """
+    return written_at - trace.captured_at > MAX_WRITE_AGE or _erased_since(trace, erased)
 
 
 def _erased_since(trace: TraceWrite, erased: dict[str, datetime | None]) -> bool:

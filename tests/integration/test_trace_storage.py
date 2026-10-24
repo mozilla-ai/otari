@@ -879,8 +879,9 @@ async def test_an_erased_users_id_goes_from_the_barrier_and_the_break_glass_reco
 
     [read], _ = await store.break_glass_reads(organization_id=None, kind=None, limit=10)
     assert read.session_user_id is None and read.reason == "Legal request from the regulator"
-    assert await store.expire_erasures(now=datetime.now(UTC)) == 0
-    assert await store.expire_erasures(now=datetime.now(UTC) + timedelta(hours=2)) == 1
+    kept_until = datetime.now(UTC) + trace_service_module.ERASURE_MARGIN + trace_service_module.ERASURE_KEPT_FOR
+    assert await store.expire_erasures(now=kept_until - timedelta(minutes=1)) == 0
+    assert await store.expire_erasures(now=kept_until + timedelta(minutes=1)) == 1
 
 
 async def test_an_upload_admitted_before_an_erasure_and_finished_long_after_is_never_stored(
@@ -900,3 +901,44 @@ async def test_an_upload_admitted_before_an_erasure_and_finished_long_after_is_n
     assert result.accepted == 0
     async_db.expire_all()
     assert (await async_db.execute(select(Trace.trace_id))).scalars().all() == []
+
+
+async def test_an_upload_still_held_when_its_users_erasure_is_forgotten_is_never_stored(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    await store.purge_user("alice")
+    # The erasure's row is forgotten only once this long has passed, so by then an
+    # upload let in before the erasure is at least this old when it is written.
+    forgotten_after = trace_service_module.ERASURE_MARGIN + trace_service_module.ERASURE_KEPT_FOR
+    assert await store.expire_erasures(now=datetime.now(UTC) + forgotten_after + timedelta(seconds=1)) == 1
+    late = dataclasses.replace(
+        _write(workspace, "s-late", _span("tool-1", kind="tool", content={"prompt": "x"})),
+        captured_at=datetime.now(UTC) - forgotten_after,
+    )
+
+    result = await store.write((late,))
+
+    assert result.accepted == 0 and result.rejected == 1
+    async_db.expire_all()
+    assert (await async_db.execute(select(Trace.trace_id))).scalars().all() == []
+
+
+async def test_a_write_taken_in_longer_ago_than_any_write_is_held_is_refused_whole(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    now = datetime.now(UTC)
+    old = dataclasses.replace(
+        _write(workspace, "s-old", _span("step-0")),
+        captured_at=now - trace_service_module.MAX_WRITE_AGE - timedelta(minutes=1),
+    )
+    recent = dataclasses.replace(
+        _write(workspace, "s-recent", _span("step-0")),
+        captured_at=now - trace_service_module.MAX_WRITE_AGE + timedelta(minutes=1),
+    )
+
+    result = await store.write((old, recent))
+
+    assert (result.accepted, result.rejected) == (1, 1)
