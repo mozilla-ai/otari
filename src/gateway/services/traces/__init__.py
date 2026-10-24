@@ -6,7 +6,9 @@ its response is sent; ``TraceService`` stores them in this deployment's database
 
 from gateway.services.traces._capture import RequestTraces
 from gateway.services.traces._collector import LlmCall, RequestTrace, identifier_or_none
+from gateway.services.traces._content import SpanContent
 from gateway.services.traces._identity import SessionRef, harness_of, is_subagent, resolve_session
+from gateway.services.traces._membership import TraceMembershipListener
 from gateway.services.traces._otlp import (
     CLAUDE_CODE_USAGE_SOURCE,
     HOOK_SCOPE,
@@ -35,7 +37,9 @@ __all__ = [
     "PricedRequest",
     "RequestTrace",
     "RequestTraces",
+    "SpanContent",
     "SessionRef",
+    "TraceMembershipListener",
     "TraceService",
     "TraceWriter",
     "TurnFacts",

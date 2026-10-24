@@ -203,6 +203,11 @@ export function bootstrap(
     feedback_enabled: true,
     // Off, the setting default: the workload identity tests turn it on.
     federation_member_rules: false,
+    // Off, the setting default: the session content tests turn it on.
+    trace_content_available: false,
+    trace_platform_break_glass: false,
+    trace_retention_days: 30,
+    trace_session_max_age_days: 90,
     // Off by default, matching the config default; the public-catalog tests
     // turn it on.
     public_catalog: false,
@@ -375,6 +380,7 @@ export function workspace(overrides: Partial<Workspace> = {}): Workspace {
     description: null,
     organization_id: ORGANIZATION_ID,
     created_by_user_id: null,
+    trace_content_enabled: false,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: null,
     ...overrides,

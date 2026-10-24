@@ -8,27 +8,37 @@ reads another organization's traces, whose ids answer 404 like ones that do
 not exist.
 """
 
+import asyncio
 import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 import pytest
-from fastapi import status
+from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from gateway.adapters.content_key_adapter import SECRET_KEY_WRAPPER, ContentKeyring, SecretKeyContentKeys
 from gateway.core.config import API_ROOT
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
-from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
+from gateway.models.traces import (
+    Trace,
+    TraceContentBarrier,
+    TraceContentRead,
+    TraceContentShare,
+    TraceGuardrailDefinition,
+    TraceSpan,
+)
 from gateway.models.users import User as BillingUser
+from gateway.repositories.traces.break_glass_repository import BreakGlassRepository
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import generate_secret_key
-from gateway.services.traces._content import seal_content
+from gateway.services.traces import SpanContent, TraceService
 
 from .test_otlp import _agent_span, _exempt_key, _otlp_traces
 
@@ -529,64 +539,685 @@ def test_the_detail_counts_each_gate_an_agents_hook_reported_and_names_the_ones_
     assert _operator_get(client, world, "/traces/s-two").json()["gates"] == []
 
 
-def test_the_detail_returns_what_a_span_was_about_where_it_was_kept(
+def _sealed(content: dict[str, str], *, workspace_id: uuid.UUID, trace_id: str, span_id: str) -> str | None:
+    keys = ContentKeyring(SECRET_KEY_WRAPPER, {SECRET_KEY_WRAPPER: SecretKeyContentKeys()})
+    return asyncio.run(SpanContent(keys).seal(content, workspace_id=workspace_id, trace_id=trace_id, span_id=span_id))
+
+
+def _seal_tool_call(db_session_factory: Callable[[], Session], command: str = "pytest -x") -> None:
+    with db_session_factory() as session:
+        span = session.scalars(
+            select(TraceSpan).where(col(TraceSpan.trace_id) == "s-one", col(TraceSpan.span_id) == "call-toolu_1")
+        ).one()
+        span.content_sealed = _sealed(
+            {"command": command}, workspace_id=span.workspace_id, trace_id=span.trace_id, span_id=span.span_id
+        )
+        session.commit()
+
+
+def _give_s_one_to(db_session_factory: Callable[[], Session], email: str) -> None:
+    with db_session_factory() as session:
+        owner = session.scalars(select(User).where(col(User.email) == email)).one()
+        trace = session.scalars(select(Trace).where(col(Trace.trace_id) == "s-one")).one()
+        session.add(BillingUser(user_id=str(owner.id)))
+        session.flush()
+        trace.user_id = str(owner.id)
+        session.commit()
+
+
+def _detail(client: TestClient, cookie: str) -> dict[str, Any]:
+    response = _as(client, cookie, "GET", "/organizations/me/traces/s-one")
+    assert response.status_code == status.HTTP_200_OK, response.text
+    detail: dict[str, Any] = response.json()
+    return detail
+
+
+def _tool_call(detail: dict[str, Any]) -> dict[str, Any]:
+    span: dict[str, Any] = next(span for span in detail["spans"] if span["span_id"] == "call-toolu_1")
+    return span
+
+
+def test_a_sessions_content_opens_for_its_own_user_and_is_private_to_everyone_else(
     client: TestClient,
     world: dict[str, str],
     db_session_factory: Callable[[], Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
-    with db_session_factory() as session:
-        span = session.scalars(
-            select(TraceSpan).where(col(TraceSpan.trace_id) == "s-one", col(TraceSpan.span_id) == "call-toolu_1")
-        ).one()
-        span.content_sealed = seal_content(
-            {"command": "pytest -x"}, workspace_id=span.workspace_id, span_id=span.span_id
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+
+    own = _detail(client, world["member"])
+    assert (_tool_call(own)["content"], own["content_access"]) == ({"command": "pytest -x"}, "owner")
+
+    for reader in ("admin", "operator"):
+        detail = (
+            _detail(client, world[reader])
+            if reader == "admin"
+            else _operator_get(client, world, "/traces/s-one").json()
         )
-        session.commit()
-
-    detail = _operator_get(client, world, "/traces/s-one").json()
-
-    contents = {span["span_id"]: span["content"] for span in detail["spans"]}
-    assert contents["call-toolu_1"] == {"command": "pytest -x"}
-    assert contents["req-1"] == {}
+        tool = _tool_call(detail)
+        assert (tool["content"], tool["content_private"], detail["content_access"]) == ({}, True, "none")
+        request = next(span for span in detail["spans"] if span["span_id"] == "req-1")
+        assert request["content_private"] is False
 
 
-def test_only_a_manager_or_the_sessions_own_user_reads_what_its_spans_were_about(
+def test_a_session_no_member_owns_opens_for_nobody(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Content kept before the rule, on a session no person owns, opens for no admin and no operator."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+
+    assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
+    assert _tool_call(_detail(client, world["member"]))["content_private"] is True
+    assert _tool_call(_operator_get(client, world, "/traces/s-one").json())["content_private"] is True
+
+
+def test_a_share_ends_for_good_once_its_owner_leaves_the_workspace(
     client: TestClient,
     world: dict[str, str],
     db_session_factory: Callable[[], Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
-    with db_session_factory() as session:
-        span = session.scalars(
-            select(TraceSpan).where(col(TraceSpan.trace_id) == "s-one", col(TraceSpan.span_id) == "call-toolu_1")
-        ).one()
-        span.content_sealed = seal_content(
-            {"command": "pytest -x"}, workspace_id=span.workspace_id, span_id=span.span_id
-        )
-        session.commit()
-
-    def content(cookie: str) -> dict[str, str]:
-        client.cookies.set(SESSION_COOKIE_NAME, cookie)
-        try:
-            response = client.get(f"{API_ROOT}/organizations/me/traces/s-one")
-        finally:
-            client.cookies.clear()
-        assert response.status_code == status.HTTP_200_OK, response.text
-        contents: dict[str, dict[str, str]] = {span["span_id"]: span["content"] for span in response.json()["spans"]}
-        return contents["call-toolu_1"]
-
-    assert content(world["member"]) == {}
-    assert content(world["admin"]) == {"command": "pytest -x"}
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    share = _as(
+        client,
+        world["member"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "organization_admins"},
+    ).json()
+    assert _tool_call(_detail(client, world["admin"]))["content"] == {"command": "pytest -x"}
 
     with db_session_factory() as session:
         member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
-        trace = session.scalars(select(Trace).where(col(Trace.trace_id) == "s-one")).one()
-        session.add(BillingUser(user_id=str(member.id)))
-        session.flush()
-        trace.user_id = str(member.id)
+        for row in session.scalars(select(WorkspaceMember).where(col(WorkspaceMember.user_id) == member.id)):
+            session.delete(row)
         session.commit()
 
-    assert content(world["member"]) == {"command": "pytest -x"}
+    assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
+    with db_session_factory() as session:
+        stored = session.get(TraceContentShare, uuid.UUID(share["id"]))
+        assert stored is not None and stored.revoked_at is not None
+        member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+        workspace_id = session.scalars(select(col(Workspace.id)).where(col(Workspace.name) == "One")).one()
+        session.add(WorkspaceMember(workspace_id=workspace_id, user_id=member.id, role="member", status="active"))
+        session.commit()
+    # Back in the workspace, the ended share stays ended.
+    assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
+
+
+def test_a_share_lets_its_audience_read_until_its_owner_ends_it_and_records_each_read(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    path = "/organizations/me/traces/s-one/shares"
+
+    refused = _as(client, world["admin"], "POST", path, json={"audience": "organization_admins"})
+    assert refused.status_code == status.HTTP_403_FORBIDDEN
+    created = _as(
+        client, world["member"], "POST", path, json={"audience": "organization_admins", "note": "flaky test", "days": 7}
+    )
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    share = created.json()
+    assert (share["audience"], share["note"], share["active"]) == ("organization_admins", "flaky test", True)
+
+    shared = _detail(client, world["admin"])
+    assert _tool_call(shared)["content"] == {"command": "pytest -x"}
+    assert (shared["content_access"], shared["content_share"]["note"]) == ("share", "flaky test")
+    # This operator also owns the organization, so a share with its owners and admins reaches them there too.
+    assert _tool_call(_operator_get(client, world, "/traces/s-one").json())["content"] == {"command": "pytest -x"}
+
+    listed = _as(client, world["member"], "GET", path)
+    assert listed.status_code == status.HTTP_200_OK, listed.text
+    [entry] = listed.json()["items"]
+    # Each reader through the share is recorded: the operator, who owns the organization, then the admin.
+    assert sorted(read["reader_email"] for read in entry["reads"]) == ["a@a.test", "op@a.test"]
+    assert _as(client, world["admin"], "GET", path).status_code == status.HTTP_403_FORBIDDEN
+
+    ended = _as(client, world["member"], "DELETE", f"{path}/{share['id']}")
+    assert ended.status_code == status.HTTP_204_NO_CONTENT
+    assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
+    [entry] = _as(client, world["member"], "GET", path).json()["items"]
+    assert entry["active"] is False and entry["revoked_at"] is not None
+    missing = _as(client, world["member"], "DELETE", f"{path}/{uuid.uuid4()}")
+    assert missing.status_code == status.HTTP_404_NOT_FOUND
+
+
+def test_a_share_with_the_operator_opens_for_the_operator(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+
+    created = _as(
+        client,
+        world["member"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "deployment_operator"},
+    )
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+
+    detail = _operator_get(client, world, "/traces/s-one").json()
+    assert (_tool_call(detail)["content"], detail["content_access"]) == ({"command": "pytest -x"}, "share")
+    assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
+
+
+def test_an_expired_share_opens_nothing(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    created = _as(
+        client,
+        world["member"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "organization_admins"},
+    )
+    with db_session_factory() as session:
+        share = session.get(TraceContentShare, uuid.UUID(created.json()["id"]))
+        assert share is not None
+        share.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        session.commit()
+
+    assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
+
+
+def _workspace_id(db_session_factory: Callable[[], Session], name: str) -> uuid.UUID:
+    with db_session_factory() as session:
+        workspace_id: uuid.UUID = session.scalars(select(col(Workspace.id)).where(col(Workspace.name) == name)).one()
+        return workspace_id
+
+
+def _as(client: TestClient, cookie: str, method: str, path: str, **kwargs: Any) -> Any:
+    client.cookies.set(SESSION_COOKIE_NAME, cookie)
+    try:
+        return client.request(method, f"{API_ROOT}{path}", **kwargs)
+    finally:
+        client.cookies.clear()
+
+
+def test_a_workspace_keeps_no_content_until_its_managers_turn_it_on(
+    client: TestClient, world: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    workspace_id = _workspace_id(db_session_factory, "One")
+
+    shown = _as(client, world["admin"], "GET", f"/workspaces/{workspace_id}")
+    assert shown.json()["trace_content_enabled"] is False
+    refused = _as(client, world["member"], "PATCH", f"/workspaces/{workspace_id}", json={"trace_content_enabled": True})
+    assert refused.status_code == status.HTTP_403_FORBIDDEN
+    turned_on = _as(
+        client, world["admin"], "PATCH", f"/workspaces/{workspace_id}", json={"trace_content_enabled": True}
+    )
+    assert turned_on.status_code == status.HTTP_200_OK, turned_on.text
+    assert turned_on.json()["trace_content_enabled"] is True
+    # A null leaves the switch where it is rather than failing the update.
+    renamed = _as(
+        client,
+        world["admin"],
+        "PATCH",
+        f"/workspaces/{workspace_id}",
+        json={"name": "Uno", "trace_content_enabled": None},
+    )
+    assert renamed.status_code == status.HTTP_200_OK, renamed.text
+    assert renamed.json()["trace_content_enabled"] is True
+
+    # Turning it off also ends the content generation, so nothing already queued is stored.
+    turned_off = _as(
+        client, world["admin"], "PATCH", f"/workspaces/{workspace_id}", json={"trace_content_enabled": False}
+    )
+    assert turned_off.status_code == status.HTTP_200_OK, turned_off.text
+    with db_session_factory() as session:
+        barrier = session.get(TraceContentBarrier, workspace_id)
+        assert barrier is not None and barrier.generation == 2
+
+
+def test_a_workspaces_managers_delete_its_stored_content_and_keep_its_sessions(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace_id = _workspace_id(db_session_factory, "One")
+    with db_session_factory() as session:
+        span = session.scalars(select(TraceSpan).where(col(TraceSpan.span_id) == "call-toolu_1")).first()
+        assert span is not None
+        span.content_sealed = _sealed(
+            {"command": "pytest -x"}, workspace_id=span.workspace_id, trace_id=span.trace_id, span_id=span.span_id
+        )
+        session.commit()
+
+    refused = _as(client, world["member"], "DELETE", f"/workspaces/{workspace_id}/trace-content")
+    assert refused.status_code == status.HTTP_403_FORBIDDEN
+    deleted = _as(client, world["admin"], "DELETE", f"/workspaces/{workspace_id}/trace-content")
+    assert deleted.status_code == status.HTTP_200_OK, deleted.text
+
+    with db_session_factory() as session:
+        held = session.scalars(
+            select(TraceSpan.span_id).where(
+                col(TraceSpan.workspace_id) == workspace_id, col(TraceSpan.content_sealed).is_not(None)
+            )
+        ).all()
+        kept = session.scalars(select(TraceSpan.span_id).where(col(TraceSpan.workspace_id) == workspace_id)).all()
+    assert held == [] and kept
+
+
+def test_the_bootstrap_says_whether_the_deployment_keeps_content(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = cast(FastAPI, client.app).state.config
+    assert client.get(f"{API_ROOT}/bootstrap").json()["trace_content_available"] is False
+
+    monkeypatch.setattr(config, "trace_content_enabled", True)
+    assert client.get(f"{API_ROOT}/bootstrap").json()["trace_content_available"] is True
+
+
+def test_a_share_records_a_polling_reader_once_and_pages_a_long_history(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    path = "/organizations/me/traces/s-one/shares"
+    share = _as(client, world["member"], "POST", path, json={"audience": "organization_admins"}).json()
+
+    # A page polling the session reads it again and again; that is one read.
+    for _ in range(3):
+        _detail(client, world["admin"])
+    [entry] = _as(client, world["member"], "GET", path).json()["items"]
+    assert (entry["read_count"], len(entry["reads"])) == (1, 1)
+
+    with db_session_factory() as session:
+        session.add_all(
+            TraceContentRead(
+                share_id=uuid.UUID(share["id"]),
+                reader_email=f"r{n}@a.test",
+                read_at=datetime.now(UTC) - timedelta(days=1, minutes=n),
+            )
+            for n in range(30)
+        )
+        session.commit()
+
+    [entry] = _as(client, world["member"], "GET", path).json()["items"]
+    assert (entry["read_count"], len(entry["reads"])) == (31, 10)
+    first = _as(client, world["member"], "GET", f"{path}/{share['id']}/reads", params={"limit": 20}).json()
+    rest = _as(client, world["member"], "GET", f"{path}/{share['id']}/reads", params={"limit": 20, "skip": 20}).json()
+    assert (len(first["items"]), first["has_more"]) == (20, True)
+    assert (len(rest["items"]), rest["has_more"]) == (11, False)
+    assert _as(client, world["admin"], "GET", f"{path}/{share['id']}/reads").status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_removing_a_member_from_the_workspace_ends_their_shares_at_once(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    share = _as(
+        client,
+        world["member"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "organization_admins"},
+    ).json()
+    workspace_id = _workspace_id(db_session_factory, "One")
+    with db_session_factory() as session:
+        member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+
+    removed = _as(client, world["admin"], "DELETE", f"/workspaces/{workspace_id}/members/{member.id}")
+    assert removed.status_code == status.HTTP_200_OK, removed.text
+
+    with db_session_factory() as session:
+        stored = session.get(TraceContentShare, uuid.UUID(share["id"]))
+        assert stored is not None and stored.revoked_at is not None
+
+
+def test_a_running_share_is_on_the_first_page_however_many_ended_ones_follow_it(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    path = "/organizations/me/traces/s-one/shares"
+    running = _as(client, world["member"], "POST", path, json={"audience": "organization_admins"}).json()
+    with db_session_factory() as session:
+        owner = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+        workspace_id = _workspace_id(db_session_factory, "One")
+        now = datetime.now(UTC)
+        session.add_all(
+            TraceContentShare(
+                workspace_id=workspace_id,
+                trace_id="s-one",
+                audience="organization_admins",
+                shared_by_user_id=owner.id,
+                created_at=now + timedelta(minutes=n + 1),
+                expires_at=now + timedelta(days=1),
+                revoked_at=now,
+            )
+            for n in range(25)
+        )
+        session.commit()
+
+    page = _as(client, world["member"], "GET", path).json()
+
+    assert page["items"][0]["id"] == running["id"] and page["items"][0]["active"] is True
+    assert len(page["items"]) == 20 and page["has_more"] is True
+
+
+_REASON = "HR investigation 2026-17, approved by legal"
+
+
+def test_an_owner_opens_a_private_session_by_break_glass_and_it_is_recorded_first(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    path = "/organizations/me/traces/s-one/break-glass"
+
+    # Admins and members are not owners, and a reason has to say something.
+    assert _as(client, world["admin"], "POST", path, json={"reason": _REASON}).status_code == 403
+    assert _as(client, world["member"], "POST", path, json={"reason": _REASON}).status_code == 403
+    assert _as(client, world["operator"], "POST", path, json={"reason": "why"}).status_code == 422
+    assert _as(client, world["operator"], "POST", path, json={"reason": " " * 20}).status_code == 422
+
+    opened = _as(client, world["operator"], "POST", path, json={"reason": _REASON})
+    assert opened.status_code == status.HTTP_200_OK, opened.text
+    assert opened.json()["content_access"] == "break_glass"
+    assert _tool_call(opened.json())["content"] == {"command": "pytest -x"}
+
+    log = _as(client, world["operator"], "GET", "/organizations/me/traces/audit/break-glass").json()
+    [entry] = log["items"]
+    assert (entry["kind"], entry["trace_id"], entry["reason"], entry["reader_email"]) == (
+        "organization",
+        "s-one",
+        _REASON,
+        "op@a.test",
+    )
+    assert _as(client, world["admin"], "GET", "/organizations/me/traces/audit/break-glass").status_code == 403
+    # The session's owner is not told: their own view of the session is unchanged.
+    assert _detail(client, world["member"])["content_access"] == "owner"
+
+
+def test_break_glass_opens_a_departed_members_session(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    with db_session_factory() as session:
+        member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+        for row in session.scalars(select(WorkspaceMember).where(col(WorkspaceMember.user_id) == member.id)):
+            session.delete(row)
+        session.commit()
+
+    opened = _as(
+        client, world["operator"], "POST", "/organizations/me/traces/s-one/break-glass", json={"reason": _REASON}
+    )
+
+    assert _tool_call(opened.json())["content"] == {"command": "pytest -x"}
+
+
+def test_nothing_opens_when_the_break_glass_record_cannot_be_written(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    opened: list[str] = []
+    real_open = SpanContent.open
+
+    async def tracked_open(self: SpanContent, *args: Any, **kwargs: Any) -> dict[str, str]:
+        opened.append("opened")
+        return await real_open(self, *args, **kwargs)
+
+    async def refuse(self: Any, **values: object) -> None:
+        raise RuntimeError("the audit table is unavailable")
+
+    monkeypatch.setattr(SpanContent, "open", tracked_open)
+    monkeypatch.setattr(BreakGlassRepository, "record", refuse)
+
+    with pytest.raises(RuntimeError):
+        _as(client, world["operator"], "POST", "/organizations/me/traces/s-one/break-glass", json={"reason": _REASON})
+    assert opened == []
+
+
+def test_platform_break_glass_is_off_by_default_and_reaches_any_organization_when_on(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    with db_session_factory() as session:
+        span = session.scalars(select(TraceSpan).where(col(TraceSpan.trace_id) == "s-theirs")).first()
+        assert span is not None
+        span.content_sealed = _sealed(
+            {"command": "make deploy"}, workspace_id=span.workspace_id, trace_id=span.trace_id, span_id=span.span_id
+        )
+        theirs = span.workspace_id
+        session.commit()
+    body = {"reason": "Court order 4411 from the Dublin District Court", "reference": "LEGAL-4411"}
+    path = f"/traces/s-theirs/break-glass?workspace_id={theirs}"
+
+    assert _as(client, world["operator"], "POST", path, json=body).status_code == status.HTTP_404_NOT_FOUND
+
+    monkeypatch.setattr(cast(FastAPI, client.app).state.config, "trace_platform_break_glass_enabled", True)
+    assert _as(client, world["operator"], "POST", path, json={"reason": body["reason"]}).status_code == 422
+    opened = _as(client, world["operator"], "POST", path, json=body)
+    assert opened.status_code == status.HTTP_200_OK, opened.text
+    contents = [span["content"] for span in opened.json()["spans"] if span["content"]]
+    assert contents == [{"command": "make deploy"}]
+
+    [entry] = _operator_get(client, world, "/traces/audit/break-glass").json()["items"]
+    assert (entry["kind"], entry["reference"]) == ("deployment", "LEGAL-4411")
+    # Not on the organization owners' own log: theirs lists owners' openings.
+    assert _as(client, world["outsider"], "GET", "/organizations/me/traces/audit/break-glass").json()["items"] == []
+    assert _as(client, world["admin"], "POST", path, json=body).status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_removing_a_member_from_the_organization_ends_their_shares_so_a_return_revives_none(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    share = _as(
+        client,
+        world["member"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "organization_admins"},
+    ).json()
+    with db_session_factory() as session:
+        member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+        membership = session.scalars(
+            select(OrganizationMember).where(col(OrganizationMember.user_id) == member.id)
+        ).one()
+        membership_id = membership.id
+
+    removed = _as(client, world["admin"], "DELETE", f"/organizations/me/members/{membership_id}")
+    assert removed.status_code == status.HTTP_200_OK, removed.text
+
+    with db_session_factory() as session:
+        stored = session.get(TraceContentShare, uuid.UUID(share["id"]))
+        assert stored is not None and stored.revoked_at is not None
+        # Back in the organization, the share stays ended.
+        returned = session.get(OrganizationMember, membership_id)
+        assert returned is not None
+        returned.status = "active"
+        session.commit()
+    assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
+
+
+def _admin_shares_s_one(
+    client: TestClient, world: dict[str, str], db_session_factory: Callable[[], Session]
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """The organization's admin owns s-one and shares it with the admins; their membership and the share."""
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "a@a.test")
+    share = _as(
+        client,
+        world["admin"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "organization_admins"},
+    )
+    assert share.status_code == status.HTTP_201_CREATED, share.text
+    with db_session_factory() as session:
+        admin = session.scalars(select(User).where(col(User.email) == "a@a.test")).one()
+        membership = session.scalars(
+            select(OrganizationMember).where(col(OrganizationMember.user_id) == admin.id)
+        ).one()
+        return membership.id, uuid.UUID(share.json()["id"])
+
+
+def _set_role(client: TestClient, world: dict[str, str], membership_id: uuid.UUID, role: str) -> None:
+    changed = _as(client, world["operator"], "PATCH", f"/organizations/me/members/{membership_id}", json={"role": role})
+    assert changed.status_code == status.HTTP_200_OK, changed.text
+
+
+def test_losing_the_admin_role_that_was_the_only_way_into_a_workspace_ends_its_shares_for_good(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    membership_id, share_id = _admin_shares_s_one(client, world, db_session_factory)
+
+    # Demoted and promoted back with no read in between, so nothing ends the share lazily.
+    _set_role(client, world, membership_id, "member")
+    with db_session_factory() as session:
+        stored = session.get(TraceContentShare, share_id)
+        assert stored is not None and stored.revoked_at is not None
+    _set_role(client, world, membership_id, "admin")
+
+    tool = _tool_call(_operator_get(client, world, "/traces/s-one").json())
+    assert (tool["content"], tool["content_private"]) == ({}, True)
+
+
+def test_losing_the_admin_role_keeps_shares_in_a_workspace_its_owner_is_a_member_of(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    membership_id, share_id = _admin_shares_s_one(client, world, db_session_factory)
+    with db_session_factory() as session:
+        trace = session.scalars(select(Trace).where(col(Trace.trace_id) == "s-one")).one()
+        admin = session.scalars(select(User).where(col(User.email) == "a@a.test")).one()
+        session.add(WorkspaceMember(workspace_id=trace.workspace_id, user_id=admin.id, role="member", status="active"))
+        session.commit()
+
+    _set_role(client, world, membership_id, "member")
+
+    with db_session_factory() as session:
+        stored = session.get(TraceContentShare, share_id)
+        assert stored is not None and stored.revoked_at is None
+    assert _tool_call(_operator_get(client, world, "/traces/s-one").json())["content"] == {"command": "pytest -x"}
+
+
+def test_a_share_made_after_its_owner_was_removed_mid_request_is_refused(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scope was resolved while they were a member; the removal lands before the share is written."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    real_owned = TraceService._owned
+
+    async def owned_then_removed(self: TraceService, *args: Any, **kwargs: Any) -> Any:
+        row = await real_owned(self, *args, **kwargs)
+        with db_session_factory() as session:
+            member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+            for membership in session.scalars(select(WorkspaceMember).where(col(WorkspaceMember.user_id) == member.id)):
+                session.delete(membership)
+            session.commit()
+        return row
+
+    monkeypatch.setattr(TraceService, "_owned", owned_then_removed)
+
+    refused = _as(
+        client,
+        world["member"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "organization_admins"},
+    )
+
+    assert refused.status_code == status.HTTP_403_FORBIDDEN, refused.text
+    with db_session_factory() as session:
+        assert session.scalars(select(TraceContentShare)).all() == []
+
+
+def test_an_operator_who_owns_the_organization_reads_a_share_with_its_owners_on_the_operator_routes(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The dashboard reads through the operator's routes for an operator, who may be an owner as well."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    assert _tool_call(_operator_get(client, world, "/traces/s-one").json())["content_private"] is True
+
+    created = _as(
+        client,
+        world["member"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "organization_admins"},
+    )
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+
+    detail = _operator_get(client, world, "/traces/s-one").json()
+    assert (_tool_call(detail)["content"], detail["content_access"]) == ({"command": "pytest -x"}, "share")

@@ -4006,6 +4006,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/traces/audit/break-glass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Organization Break Glass Reads
+         * @description The organization's owners' break-glass openings, newest first. Owners only.
+         */
+        get: operations["organization-traces-list_organization_break_glass_reads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/traces/count": {
         parameters: {
             query?: never;
@@ -4091,6 +4111,99 @@ export interface paths {
          *     than one of the caller's workspaces is a 409 rather than a guess.
          */
         get: operations["organization-traces-get_trace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/traces/{trace_id}/break-glass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Organization Break Glass
+         * @description Open a session's content without its owner's share, as an owner of the organization.
+         *
+         *     For an investigation the session's owner cannot be asked to share for, a member
+         *     who left included. The opening is recorded with its reason before anything
+         *     opens, and listed for every owner at ``GET .../audit/break-glass``. The
+         *     session's owner is not told.
+         */
+        post: operations["organization-traces-organization_break_glass"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/traces/{trace_id}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Trace Content Shares
+         * @description The shares one of your sessions has had, ended ones included, newest first, each with its newest reads.
+         */
+        get: operations["organization-traces-list_trace_content_shares"];
+        put?: never;
+        /**
+         * Share Trace Content
+         * @description Let the organization's admins, or the deployment's operator, read what one of your sessions was about.
+         *
+         *     A session's content is private to its own user. A share lets its audience read
+         *     it until it expires or you end it, and each read through it is recorded for you.
+         *     Only the session's own user can share it.
+         */
+        post: operations["organization-traces-share_trace_content"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/traces/{trace_id}/shares/{share_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * End Trace Content Share
+         * @description Stop a share letting its audience read what your session was about.
+         */
+        delete: operations["organization-traces-end_trace_content_share"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/traces/{trace_id}/shares/{share_id}/reads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Trace Content Share Reads
+         * @description Every read through one share of your session, newest first, a page at a time.
+         */
+        get: operations["organization-traces-list_trace_content_share_reads"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6045,6 +6158,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/traces/audit/break-glass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Break Glass Reads
+         * @description Every recorded break-glass opening on the deployment, by owners and the operator alike, newest first.
+         */
+        get: operations["traces-list_break_glass_reads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/traces/count": {
         parameters: {
             query?: never;
@@ -6132,6 +6265,30 @@ export interface paths {
         get: operations["traces-get_trace"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/traces/{trace_id}/break-glass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Platform Break Glass
+         * @description Open a session's content in any organization without its owner's share, as the deployment's operator.
+         *
+         *     Only where ``trace_platform_break_glass_enabled`` is on; a 404 otherwise. The
+         *     opening is recorded with its reason and reference before anything opens, and
+         *     listed at ``GET /traces/audit/break-glass``.
+         */
+        post: operations["traces-platform_break_glass"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6522,7 +6679,10 @@ export interface paths {
         head?: never;
         /**
          * Update Workspace
-         * @description Rename a workspace or change its description.
+         * @description Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.
+         *
+         *     Turning content off keeps nothing new from the next export on; what is already
+         *     stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
          */
         patch: operations["workspaces-update_workspace"];
         trace?: never;
@@ -6960,6 +7120,26 @@ export interface paths {
          * @description Remove one model from this workspace's allow-list for a key. Idempotent.
          */
         delete: operations["provider-keys-remove_workspace_provider_key_model_restriction"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/trace-content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Workspace Trace Content
+         * @description Delete what this workspace's agent sessions were about, keeping the sessions. Its managers only.
+         */
+        delete: operations["workspaces-delete_workspace_trace_content"];
         options?: never;
         head?: never;
         patch?: never;
@@ -8204,6 +8384,74 @@ export interface components {
             file: string;
         };
         /**
+         * BreakGlassCreate
+         * @description Why you are opening a session's content without its owner's share. Recorded with the opening.
+         */
+        BreakGlassCreate: {
+            /** Reason */
+            reason: string;
+        };
+        /** BreakGlassReadListPublic */
+        BreakGlassReadListPublic: {
+            /** Has More */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["BreakGlassReadPublic"][];
+        };
+        /**
+         * BreakGlassReadPublic
+         * @description One recorded opening of a session's content without its owner's share.
+         */
+        BreakGlassReadPublic: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @description 'organization' for an owner of the organization, 'deployment' for the deployment's operator.
+             * @enum {string}
+             */
+            kind: "organization" | "deployment";
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /**
+             * Read At
+             * Format: date-time
+             */
+            read_at: string;
+            /**
+             * Reader Email
+             * @description Their email address when they opened it.
+             */
+            reader_email: string;
+            /**
+             * Reader User Id
+             * @description Who opened it; null once that account is gone.
+             */
+            reader_user_id: string | null;
+            /** Reason */
+            reason: string;
+            /** Reference */
+            reference: string | null;
+            /**
+             * Session User Id
+             * @description Whose session it is.
+             */
+            session_user_id: string | null;
+            /** Trace Id */
+            trace_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
          * BudgetResetLogResponse
          * @description Response model for one budget reset event (per user).
          */
@@ -9180,6 +9428,117 @@ export interface components {
              */
             shadowed: boolean;
         };
+        /** ContentReadListPublic */
+        ContentReadListPublic: {
+            /**
+             * Has More
+             * @description More reads follow this page.
+             */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["ContentReadPublic"][];
+        };
+        /**
+         * ContentReadPublic
+         * @description One read of a session's content through a share.
+         */
+        ContentReadPublic: {
+            /**
+             * Read At
+             * Format: date-time
+             */
+            read_at: string;
+            /**
+             * Reader Email
+             * @description Their email address when they read it.
+             */
+            reader_email: string;
+            /**
+             * Reader User Id
+             * @description Who read it; null once that account is gone.
+             */
+            reader_user_id: string | null;
+        };
+        /**
+         * ContentShareCreate
+         * @description Let an audience read what one of your sessions was about.
+         */
+        ContentShareCreate: {
+            /**
+             * Audience
+             * @enum {string}
+             */
+            audience: "organization_admins" | "deployment_operator";
+            /**
+             * Days
+             * @description How long the share lasts.
+             * @default 30
+             */
+            days: number;
+            /** Note */
+            note?: string | null;
+        };
+        /** ContentShareListPublic */
+        ContentShareListPublic: {
+            /**
+             * Has More
+             * @description More shares follow this page.
+             * @default false
+             */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["ContentSharePublic"][];
+        };
+        /**
+         * ContentSharePublic
+         * @description A session's owner letting an audience read what it was about.
+         */
+        ContentSharePublic: {
+            /**
+             * Active
+             * @description Whether it still lets its audience read.
+             */
+            active: boolean;
+            /**
+             * Audience
+             * @description Who may read: the organization's owners and admins, or the deployment's operator.
+             * @enum {string}
+             */
+            audience: "organization_admins" | "deployment_operator";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Note
+             * @description Why it was shared, in its owner's words.
+             */
+            note: string | null;
+            /**
+             * Read Count
+             * @description How many reads it has had in all.
+             * @default 0
+             */
+            read_count: number;
+            /**
+             * Reads
+             * @description Its newest reads, newest first; GET .../shares/{share_id}/reads pages through all of them. A reader's reads are recorded at most once an hour. Only its owner sees them.
+             */
+            reads?: components["schemas"]["ContentReadPublic"][];
+            /** Revoked At */
+            revoked_at: string | null;
+        };
         /**
          * CountTokensRequest
          * @description Anthropic ``/v1/messages/count_tokens`` request.
@@ -9924,6 +10283,26 @@ export interface components {
              * @description Where this deployment's terms of service live. Set, the account menu carries a Terms of service row pointing at them; null, no address is configured and the menu carries no such row. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
              */
             terms_url: string | null;
+            /**
+             * Trace Content Available
+             * @description Whether this deployment lets a workspace keep what its agent sessions were about. A workspace keeps it only once its managers turn it on as well.
+             */
+            trace_content_available: boolean;
+            /**
+             * Trace Platform Break Glass
+             * @description Whether the deployment's operator may open any organization's session content without its owner's share, recorded with a reason and a reference.
+             */
+            trace_platform_break_glass: boolean;
+            /**
+             * Trace Retention Days
+             * @description Days after its last activity that a session, with what it was about, its shares and their reads, is deleted.
+             */
+            trace_retention_days: number;
+            /**
+             * Trace Session Max Age Days
+             * @description Days after it started that a session is deleted, however active it still is.
+             */
+            trace_session_max_age_days: number;
         };
         /**
          * DeploymentProviderMigrationPublic
@@ -14393,6 +14772,19 @@ export interface components {
             data: components["schemas"]["PendingOrganizationInvitationPublic"][];
         };
         /**
+         * PlatformBreakGlassCreate
+         * @description Why the deployment's operator is opening a session's content, and what asked for it.
+         */
+        PlatformBreakGlassCreate: {
+            /** Reason */
+            reason: string;
+            /**
+             * Reference
+             * @description What the opening answers: a legal request's number, a ticket.
+             */
+            reference: string;
+        };
+        /**
          * PlaygroundAttachment
          * @description A file one turn sent, as the page draws its chip and sends it again.
          *
@@ -16700,11 +17092,17 @@ export interface components {
             cache_write_tokens: number | null;
             /**
              * Content
-             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the deployment keeps content and the agent sent it. Empty otherwise.
+             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the workspace keeps content, the agent sent it, and the reader may open it. Empty otherwise.
              */
             content: {
                 [key: string]: string;
             };
+            /**
+             * Content Private
+             * @description The span holds content this reader may not open: it is private to the session's own user, unless they share the session.
+             * @default false
+             */
+            content_private: boolean;
             /** Cost */
             cost: number | null;
             /** Duration Ms */
@@ -17131,6 +17529,15 @@ export interface components {
         };
         /** TraceDetailPublic */
         TraceDetailPublic: {
+            /**
+             * Content Access
+             * @description How this read reached the session's content: 'owner' for its own user, 'share' through a share its user made, 'break_glass' for a recorded opening without one, 'none' otherwise.
+             * @default none
+             * @enum {string}
+             */
+            content_access: "owner" | "share" | "break_glass" | "none";
+            /** @description The share the content was read through, with its note. Its reads are not listed. */
+            content_share?: components["schemas"]["ContentSharePublic"] | null;
             /**
              * Gates
              * @description Each agent guardrail gate a coding agent's hook reported, the ones that did something first.
@@ -18764,6 +19171,12 @@ export interface components {
              * Format: uuid
              */
             organization_id: string;
+            /**
+             * Trace Content Enabled
+             * @description Whether this workspace keeps what its agent sessions were about.
+             * @default false
+             */
+            trace_content_enabled: boolean;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -18773,6 +19186,11 @@ export interface components {
             description?: string | null;
             /** Name */
             name?: string | null;
+            /**
+             * Trace Content Enabled
+             * @description Keep what this workspace's agent sessions were about: the prompts, commands and file paths its agents report. Only where the deployment keeps content at all.
+             */
+            trace_content_enabled?: boolean | null;
         };
         /**
          * WorkspaceWebSearchConfigPublic
@@ -25691,6 +26109,38 @@ export interface operations {
             };
         };
     };
+    "organization-traces-list_organization_break_glass_reads": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BreakGlassReadListPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "organization-traces-count_traces": {
         parameters: {
             query?: {
@@ -25840,6 +26290,188 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TraceDetailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-organization_break_glass": {
+        parameters: {
+            query?: {
+                /** @description The workspace the trace is in, as its list entry names it. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BreakGlassCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceDetailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-list_trace_content_shares": {
+        parameters: {
+            query?: {
+                /** @description The workspace the trace is in, as its list entry names it. */
+                workspace_id?: string | null;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentShareListPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-share_trace_content": {
+        parameters: {
+            query?: {
+                /** @description The workspace the trace is in, as its list entry names it. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentShareCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentSharePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-end_trace_content_share": {
+        parameters: {
+            query?: {
+                /** @description The workspace the trace is in, as its list entry names it. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+                share_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-list_trace_content_share_reads": {
+        parameters: {
+            query?: {
+                /** @description The workspace the trace is in, as its list entry names it. */
+                workspace_id?: string | null;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+                share_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentReadListPublic"];
                 };
             };
             /** @description Validation Error */
@@ -28901,6 +29533,38 @@ export interface operations {
             };
         };
     };
+    "traces-list_break_glass_reads": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BreakGlassReadListPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "traces-count_traces": {
         parameters: {
             query?: {
@@ -29042,6 +29706,44 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceDetailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "traces-platform_break_glass": {
+        parameters: {
+            query: {
+                /** @description The workspace the session is in. */
+                workspace_id: string;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformBreakGlassCreate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -30730,6 +31432,37 @@ export interface operations {
                 workspace_id: string;
                 key_id: string;
                 model: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspaces-delete_workspace_trace_content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
             };
             cookie?: never;
         };

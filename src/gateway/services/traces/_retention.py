@@ -10,9 +10,17 @@ from gateway.services.traces._service import TraceService
 
 
 async def run_trace_retention(
-    build_service: Callable[[UnitOfWork], TraceService], *, retention_days: int, max_age_days: int, interval: float
+    build_service: Callable[[UnitOfWork], TraceService],
+    *,
+    retention_days: int,
+    max_age_days: int,
+    break_glass_retention_days: int,
+    interval: float,
 ) -> None:
-    """Expire traces idle longer than ``retention_days`` or older than ``max_age_days``, once per ``interval``."""
+    """Expire traces idle longer than ``retention_days`` or older than ``max_age_days``, once per ``interval``.
+
+    The records of break-glass openings go too, ``break_glass_retention_days`` after each.
+    """
     while True:
         await asyncio.sleep(interval)
         try:
@@ -23,6 +31,14 @@ async def run_trace_retention(
                 )
             if removed:
                 logger.info("Trace retention removed %d traces", removed)
+            async with create_unit_of_work() as uow:
+                forgotten = await build_service(uow).expire_break_glass(
+                    before=datetime.now(UTC) - timedelta(days=break_glass_retention_days)
+                )
+            if forgotten:
+                logger.info("Trace retention removed %d break-glass records", forgotten)
+            async with create_unit_of_work() as uow:
+                await build_service(uow).expire_erasures(now=datetime.now(UTC))
         except asyncio.CancelledError:
             raise
         except Exception:

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 
-import type { TraceSortKey, TraceSummary } from "@/client"
+import type { TraceDetail, TraceSortKey, TraceSummary } from "@/client"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import {
@@ -9,12 +9,14 @@ import {
   TablePagination,
 } from "@/design-system/data/TablePagination"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { useIsMobile } from "@/design-system/hooks/useIsMobile"
 import { Chip } from "@/design-system/indicators/Chip"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { ActivityTimeline } from "@/features/activity/ActivityTimeline"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   DEFAULT_TRACE_SORT,
   type TraceFilters,
@@ -23,6 +25,7 @@ import {
   useTraceSeries,
   useTraces,
 } from "@/shared/api/traces"
+import { useWorkspaces } from "@/shared/api/workspaces"
 import { formatCost, formatNumber } from "@/shared/helpers/format"
 import {
   ACTIVITY_DEFAULT_KEY,
@@ -34,9 +37,12 @@ import {
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDebounced } from "@/shared/hooks/useDebounced"
-
+import { useDeployment } from "@/shared/hooks/useDeployment"
+import { BreakGlassLog } from "./BreakGlassLog"
+import { exceptionalAccess } from "./exceptionalAccess"
 import { formatDuration, formatTraceTimestamp } from "./format"
 import { toTrace } from "./fromApi"
+import { SessionContent } from "./SessionContent"
 import { TracePeek } from "./TracePeek"
 import {
   sessionDurationMs,
@@ -198,6 +204,18 @@ const iso = (ms: number) => new Date(ms).toISOString()
 export function SessionsPage() {
   const url = useUrlState(URL_DEFAULTS, { untracked: UNTRACKED })
   const { selected: workspace } = useSelectedWorkspace()
+  // Said on the page as well as in the workspace's settings, because a manager
+  // turns it on and a member may never have opted in themselves.
+  const workspaces = useWorkspaces()
+  const deployment = useDeployment()
+  const platformBreakGlass = deployment.trace_platform_break_glass
+  const keepsContent =
+    deployment.trace_content_available &&
+    (workspaces.data ?? []).some(
+      (candidate) =>
+        candidate.trace_content_enabled &&
+        (workspace ? candidate.id === workspace.workspace_id : true),
+    )
   const isMobile = useIsMobile()
   const [now, setNow] = useState(() => Date.now())
 
@@ -276,6 +294,18 @@ export function SessionsPage() {
   const seriesQuery = useTraceSeries(seriesFilters, bucket)
   const peekId = url.get("peek")
   const detail = useTrace(peekId, url.get("peek_workspace"))
+  // An owner of the organization may open a private session by break-glass. What
+  // it opened is held here for the session it opened, never polled over.
+  const isOwner = useOrganizationContext().data?.role === "owner"
+  const [opened, setOpened] = useState<TraceDetail>()
+  const peekWorkspace = url.get("peek_workspace")
+  const openedHere =
+    opened &&
+    opened.summary.trace_id === peekId &&
+    (!peekWorkspace || opened.summary.workspace_id === peekWorkspace)
+      ? opened
+      : undefined
+  const shown = openedHere ?? detail.data
 
   const points = seriesQuery.data?.points
   const chartStart =
@@ -310,10 +340,10 @@ export function SessionsPage() {
   const rows = traces.data?.items ?? []
   const openIndex = rows.findIndex((session) => session.trace_id === peekId)
   // The row on screen, or the read's own summary for a link off this page.
-  const openSummary = rows[openIndex] ?? detail.data?.summary
+  const openSummary = rows[openIndex] ?? shown?.summary
   const open = useMemo(
-    () => (openSummary ? toTrace(openSummary, detail.data) : null),
-    [openSummary, detail.data],
+    () => (openSummary ? toTrace(openSummary, shown) : null),
+    [openSummary, shown],
   )
   // A trace is keyed by its workspace and its id, so the URL keeps both.
   const openPeek = (id: string) =>
@@ -345,8 +375,16 @@ export function SessionsPage() {
       <div className="flex flex-col" inert={open !== null && isMobile}>
         <PageIntro title="Sessions">
           Every agent session the gateway recorded: the turns, LLM calls and
-          tools behind each one. No request or response content is stored.
+          tools behind each one. No model response or tool output is stored.
         </PageIntro>
+        {keepsContent ? (
+          <InfoBanner>
+            {workspace ? "This workspace keeps" : "Your workspaces keep"} what
+            your sessions were about: the prompts, commands and file paths your
+            agents send. Otari shows yours only to you, unless you share a
+            session. {exceptionalAccess(platformBreakGlass)}
+          </InfoBanner>
+        ) : null}
 
         <div className="flex flex-col gap-3">
           {traces.isError && !traces.data ? (
@@ -418,6 +456,7 @@ export function SessionsPage() {
               }
             />
           </TableScrollFrame>
+          {isOwner ? <BreakGlassLog /> : null}
           <TablePagination
             page={page}
             pageSize={pageSize}
@@ -442,6 +481,14 @@ export function SessionsPage() {
           onClose={() => url.patch({ peek: "", peek_workspace: "", span: "" })}
           onPrevious={previous ? () => openPeek(previous) : undefined}
           onNext={next ? () => openPeek(next) : undefined}
+          notice={
+            shown ? (
+              <SessionContent
+                detail={shown}
+                onBreakGlass={isOwner ? setOpened : undefined}
+              />
+            ) : null
+          }
         />
       ) : null}
     </div>

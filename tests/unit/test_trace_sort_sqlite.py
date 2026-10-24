@@ -10,9 +10,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the metadata)
+from gateway.api.deps import NoSessionOwners
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.repositories.traces import TracesRepositories
-from gateway.services.traces import TraceService
+from gateway.services.traces import SpanContent, TraceService
 from gateway.types.traces import SpanRecord, TraceFilter, TraceScope, TraceSort, TraceWrite
 
 pytestmark = pytest.mark.asyncio
@@ -29,7 +30,7 @@ async def store() -> AsyncIterator[TraceService]:
             await conn.run_sync(SQLModel.metadata.create_all)
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             uow = UnitOfWork(session)
-            yield TraceService(uow, TracesRepositories.on(uow))
+            yield TraceService(uow, TracesRepositories.on(uow), SpanContent.disabled(), NoSessionOwners())
     finally:
         await engine.dispose()
 

@@ -212,6 +212,27 @@ class DeploymentBootstrap(BaseModel):
             "federation_member_rules setting), so the dashboard offers workload identity on their keys."
         )
     )
+    trace_content_available: bool = Field(
+        description=(
+            "Whether this deployment lets a workspace keep what its agent sessions were about. A workspace "
+            "keeps it only once its managers turn it on as well."
+        )
+    )
+    trace_platform_break_glass: bool = Field(
+        description=(
+            "Whether the deployment's operator may open any organization's session content without its owner's "
+            "share, recorded with a reason and a reference."
+        )
+    )
+    trace_retention_days: int = Field(
+        description=(
+            "Days after its last activity that a session, with what it was about, its shares and their reads, is "
+            "deleted."
+        )
+    )
+    trace_session_max_age_days: int = Field(
+        description="Days after it started that a session is deleted, however active it still is."
+    )
     mail_ready: bool = Field(
         description=(
             "Whether this deployment can deliver a message carrying a link back to itself "
@@ -257,6 +278,10 @@ async def get_bootstrap(
         feedback_enabled=any(feature.name == "feedback" for feature in enabled_features),
         federation_member_rules=config.federation_member_rules,
         mail_ready=config.mail_ready,
+        trace_content_available=config.trace_capture_enabled and config.trace_content_enabled,
+        trace_platform_break_glass=config.trace_platform_break_glass_enabled,
+        trace_retention_days=config.trace_retention_days,
+        trace_session_max_age_days=config.trace_session_max_age_days,
         # Gated on mail as well as on the setting, and not only because the
         # route refuses without it: an operator who turned open signup on and
         # has no transport would otherwise get a page inviting registrations

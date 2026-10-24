@@ -765,3 +765,22 @@ def test_a_priced_request_whose_id_a_span_cannot_carry_is_skipped_and_the_rest_r
 
     [write] = writer.writes
     assert [span.request_id for span in write.spans] == ["req_2"]
+
+
+def test_an_exports_spans_are_taken_in_when_it_was_admitted_not_when_it_finished() -> None:
+    """An upload that outlasts an erasure of its user is judged from when it was let in."""
+    admitted = _NOW - timedelta(minutes=11)
+
+    [write] = project_otlp_spans(
+        [_claude("i1", "interaction", user_prompt="Fix the flaky test")],
+        workspace_id=_WORKSPACE,
+        user_id="alice",
+        api_key_id="k",
+        retention=_RETENTION,
+        now=_NOW,
+        keep_content=True,
+        content_generation=0,
+        captured_at=admitted,
+    ).writes
+
+    assert write.captured_at == admitted

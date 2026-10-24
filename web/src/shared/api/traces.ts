@@ -1,9 +1,15 @@
 import {
   keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
 import type {
+  TraceBreakGlassReadList,
+  TraceContentShare,
+  TraceContentShareCreate,
+  TraceContentShareList,
   TraceCount,
   TraceDetail,
   TraceList,
@@ -158,5 +164,139 @@ export function useRequestTrace(requestId: string, enabled = true) {
     enabled: enabled && scope.isReady && requestId !== "",
     staleTime: 60_000,
     retry: retryUnlessNotFound(useQueryClient()),
+  })
+}
+
+// Sharing one of your own sessions' content. Always on the organization route,
+// whichever route reads the session: only its own user shares it, as a member.
+const SHARE_BASE = "/organizations/me/traces"
+
+function sharesPath(
+  traceId: string,
+  workspaceId: string,
+  shareId = "",
+  page: Record<string, string> = {},
+): string {
+  const params = new URLSearchParams(page)
+  if (workspaceId) params.set("workspace_id", workspaceId)
+  const query = params.toString() ? `?${params.toString()}` : ""
+  const tail = shareId ? `/${encodeURIComponent(shareId)}` : ""
+  return `${SHARE_BASE}/${encodeURIComponent(traceId)}/shares${tail}${query}`
+}
+
+const SHARES_PAGE = 20
+
+// The shares the session has had, a page at a time, running ones first, with
+// the newest reads made through each. Only the session's own user may ask, so
+// it is asked only for them.
+export function useTraceShares(
+  traceId: string,
+  workspaceId: string,
+  enabled: boolean,
+) {
+  return useInfiniteQuery({
+    queryKey: [TRACES, "shares", traceId, workspaceId],
+    meta: workspaceMeta(workspaceId),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
+      apiFetch<TraceContentShareList>(
+        sharesPath(traceId, workspaceId, "", {
+          skip: String(pageParam),
+          limit: String(SHARES_PAGE),
+        }),
+      ),
+    getNextPageParam: (last, pages) =>
+      last.has_more ? pages.length * SHARES_PAGE : undefined,
+    enabled: enabled && traceId !== "",
+    staleTime: 10_000,
+  })
+}
+
+export function useShareTrace() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      traceId,
+      workspaceId,
+      body,
+    }: {
+      traceId: string
+      workspaceId: string
+      body: TraceContentShareCreate
+    }) =>
+      apiFetch<TraceContentShare>(sharesPath(traceId, workspaceId), {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [TRACES, "shares"] })
+    },
+  })
+}
+
+export function useEndTraceShare() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      traceId,
+      workspaceId,
+      shareId,
+    }: {
+      traceId: string
+      workspaceId: string
+      shareId: string
+    }) =>
+      apiFetch<void>(sharesPath(traceId, workspaceId, shareId), {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [TRACES, "shares"] })
+    },
+  })
+}
+
+// Opening a session's content without its owner's share, as an owner of the
+// organization. The opening is recorded with its reason before anything opens.
+export function useBreakGlass() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      traceId,
+      workspaceId,
+      reason,
+    }: {
+      traceId: string
+      workspaceId: string
+      reason: string
+    }) =>
+      apiFetch<TraceDetail>(
+        `${SHARE_BASE}/${encodeURIComponent(traceId)}/break-glass?${new URLSearchParams({ workspace_id: workspaceId }).toString()}`,
+        { method: "POST", body: JSON.stringify({ reason }) },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [TRACES, "break-glass"] })
+    },
+  })
+}
+
+const BREAK_GLASS_PAGE = 50
+
+// The organization's owners' break-glass openings, newest first, a page at a
+// time, so every opening stays reachable however many follow it. Owners only.
+export function useBreakGlassLog(enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: [TRACES, "break-glass"],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
+      apiFetch<TraceBreakGlassReadList>(
+        `${SHARE_BASE}/audit/break-glass?${new URLSearchParams({
+          skip: String(pageParam),
+          limit: String(BREAK_GLASS_PAGE),
+        }).toString()}`,
+      ),
+    getNextPageParam: (last, pages) =>
+      last.has_more ? pages.length * BREAK_GLASS_PAGE : undefined,
+    enabled,
+    staleTime: 30_000,
   })
 }

@@ -14,14 +14,31 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, ForeignKey, ForeignKeyConstraint, Index, String, Text, Uuid, false, func
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    CheckConstraint,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    String,
+    Text,
+    Uuid,
+    false,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
 from gateway.models.money import UsdCost
 
 # The vocabulary lives with the records, so the records import nothing from here.
-from gateway.types.traces import TRACE_ID_MAX_LENGTH
+from gateway.types.traces import (
+    BREAK_GLASS_REASON_MAX_LENGTH,
+    BREAK_GLASS_REFERENCE_MAX_LENGTH,
+    SHARE_NOTE_MAX_LENGTH,
+    TRACE_ID_MAX_LENGTH,
+)
 
 
 class Trace(Base):
@@ -79,7 +96,7 @@ class Trace(Base):
 
 
 class TraceSpan(Base):
-    """One span of a trace. Written once and never changed."""
+    """One span of a trace. Written once, and changed only by its content being deleted."""
 
     __tablename__ = "trace_spans"
     __table_args__ = (
@@ -158,5 +175,130 @@ class TraceGuardrailDefinition(Base):
     digest: Mapped[str] = mapped_column(String(64), primary_key=True)
     gates: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+
+
+class TraceContentShare(Base):
+    """A session's owner letting others read what it was about, until it expires or is revoked.
+
+    Without one, a session's content opens only for its owner. The audience is a
+    role, never a person: the organization's owners and admins, or the deployment's
+    operator. Deleted with the session.
+    """
+
+    __tablename__ = "trace_content_shares"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "trace_id"],
+            ["traces.workspace_id", "traces.trace_id"],
+            ondelete="CASCADE",
+            name="fk_trace_content_shares_trace",
+        ),
+        CheckConstraint(
+            "audience IN ('organization_admins', 'deployment_operator')", name="check_trace_content_shares_audience"
+        ),
+        Index("ix_trace_content_shares_trace", "workspace_id", "trace_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    trace_id: Mapped[str] = mapped_column(String(TRACE_ID_MAX_LENGTH))
+    audience: Mapped[str] = mapped_column(String(32))
+    # Why the owner shared it, in their words: shown to whoever reads through it.
+    note: Mapped[str | None] = mapped_column(String(SHARE_NOTE_MAX_LENGTH))
+    shared_by_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime())
+    revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+
+
+class TraceContentRead(Base):
+    """One read of a session's content through a share, which the session's owner can see."""
+
+    __tablename__ = "trace_content_reads"
+    __table_args__ = (
+        # The newest reads of a share, and whether a reader has one this hour.
+        Index("ix_trace_content_reads_share_read_at", "share_id", "read_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    share_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("trace_content_shares.id", ondelete="CASCADE"), index=True
+    )
+    reader_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("user.id", ondelete="SET NULL"), index=True
+    )
+    # Kept as it was at the read, so the record still says who read once they are gone.
+    reader_email: Mapped[str] = mapped_column(String(320))
+    read_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+
+
+class TraceContentBarrier(Base):
+    """Which generation of a workspace's content capture is current.
+
+    Turning content off and deleting it both move the generation on, and a
+    write stores content only when it was captured on the current one. The
+    write and the move lock this row, so neither can land in the middle of the
+    other on any replica.
+    """
+
+    __tablename__ = "trace_content_barriers"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    generation: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+
+
+class TraceUserBarrier(Base):
+    """When a user's traces were last erased, so no replica stores spans of theirs taken in before it.
+
+    Erasure sets ``erased_at`` and deletes in one transaction, and a write locks
+    the row of each user it stores for, so a batch another replica still held
+    from before the erasure is dropped rather than stored after it.
+    """
+
+    __tablename__ = "trace_user_barriers"
+
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
+    erased_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+
+
+class TraceBreakGlassRead(Base):
+    """One opening of a session's content without its owner's share, and why.
+
+    Written before the content is opened, and changed only by an erasure clearing
+    whose session it was. Kept apart from the session and the organization, with no
+    foreign key to either, so the record outlives both: an organization cannot
+    delete the record of the deployment's access to it. It goes once it is older
+    than ``trace_break_glass_retention_days``.
+    """
+
+    __tablename__ = "trace_break_glass_reads"
+    __table_args__ = (
+        CheckConstraint("kind IN ('organization', 'deployment')", name="check_trace_break_glass_reads_kind"),
+        Index("ix_trace_break_glass_reads_organization_read_at", "organization_id", "read_at"),
+        Index("ix_trace_break_glass_reads_read_at", "read_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    # ``organization`` for an organization owner, ``deployment`` for the deployment's operator.
+    kind: Mapped[str] = mapped_column(String(16))
+    organization_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    trace_id: Mapped[str] = mapped_column(String(TRACE_ID_MAX_LENGTH))
+    session_user_id: Mapped[str | None] = mapped_column(String)
+    reader_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("user.id", ondelete="SET NULL"), index=True
+    )
+    reader_email: Mapped[str] = mapped_column(String(320))
+    reason: Mapped[str] = mapped_column(String(BREAK_GLASS_REASON_MAX_LENGTH))
+    reference: Mapped[str | None] = mapped_column(String(BREAK_GLASS_REFERENCE_MAX_LENGTH))
+    read_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
     )

@@ -2151,6 +2151,7 @@ class OrganizationService:
         re-apply the parked workspace grants, undoing a removal, a decline or a
         revoke.
         """
+        was_manager = membership.status == "active" and membership.role in MANAGEMENT_ROLES
         updated = await self.members.update_membership(membership, update_data)
         if updated.status != "invited":
             pending = await self.invitations.get_pending_by_organization_members([updated.id])
@@ -2158,7 +2159,32 @@ class OrganizationService:
                 await self.invitations.update_status(invitation, {"status": "cancelled"})
         if updated.status == "suspended":
             await self._move_off_ended_membership(updated)
+            await self._tell_listener_workspaces_lost(updated, only_inherited=False)
+        elif was_manager and updated.status == "active" and updated.role not in MANAGEMENT_ROLES:
+            await self._tell_listener_workspaces_lost(updated, only_inherited=True)
         return updated
+
+    async def _tell_listener_workspaces_lost(self, membership: OrganizationMember, *, only_inherited: bool) -> None:
+        """Let the other domains react to a person losing workspaces, in the transaction that takes them.
+
+        Ending a membership takes every workspace of the organization. Losing a
+        management role takes the ones the role alone reached, those the person
+        is not an active member of. Skipped where this service was built without
+        a listener or a Unit of Work, which the read-only builds are.
+        """
+        if self._membership_listener is None or self._uow is None:
+            return
+        async with self._uow:
+            workspace_ids = await self.workspace_rows.get_ids_by_organization(membership.organization_id)
+            if only_inherited:
+                kept = set(
+                    await self.workspaces.get_workspace_ids_for_user(
+                        user_id=membership.user_id, organization_id=membership.organization_id
+                    )
+                )
+                workspace_ids = [workspace_id for workspace_id in workspace_ids if workspace_id not in kept]
+            if workspace_ids:
+                await self._membership_listener.member_lost_workspaces(membership.user_id, workspace_ids)
 
     async def _move_off_ended_membership(self, membership: OrganizationMember) -> None:
         """Stage the identity's active organization onto its oldest live membership, if it named the one that ended.

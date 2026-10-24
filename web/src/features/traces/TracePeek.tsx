@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import {
   FiChevronDown,
   FiChevronLeft,
@@ -342,6 +349,7 @@ export function TracePeek({
   onClose,
   onPrevious,
   onNext,
+  notice,
 }: {
   trace: Trace
   /** Why the session's spans could not be read, when they could not. */
@@ -353,6 +361,8 @@ export function TracePeek({
   onClose: () => void
   onPrevious?: () => void
   onNext?: () => void
+  /** Said above the session and every span in it: who may read what it was about. */
+  notice?: ReactNode
 }) {
   const [tab, setTab] = useState<PeekTab>("preview")
   const [format, setFormat] = useState<Format>("formatted")
@@ -890,6 +900,7 @@ export function TracePeek({
                   Back to the spans
                 </Button>
               </div>
+              {notice}
               {activeTab === "attributes" && observation ? (
                 <Attributes trace={trace} observation={observation} />
               ) : !observation && trace.gateway ? (
