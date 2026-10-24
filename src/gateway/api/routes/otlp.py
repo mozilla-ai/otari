@@ -569,8 +569,11 @@ async def receive_traces(
     """Ingest LLM usage from OTLP spans (GenAI semantic conventions)."""
     api_key = _require_import_key(auth_result[0])
     # As the export is let in, before its body uploads: an upload that outlasts an
-    # erasure of its user is measured from here, so its spans are never stored.
+    # erasure of its user, or a deletion or turning off of its workspace's content,
+    # is measured from here, so what it carries is never stored.
     admitted_at = datetime.now(UTC)
+    writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
+    generation = await _content_generation(traces, config, api_key.workspace_id) if writer is not None else None
     await _release_after_auth(db)
     content_type = _content_type(request)
     body = _decode_body(await request.body(), request.headers.get("content-encoding"))
@@ -633,11 +636,9 @@ async def receive_traces(
 
     # Only an export whose usage was taken is recorded, best-effort and off the
     # request path; the writer is absent where nothing records traces.
-    writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
     if writer is not None and received:
-        # The generation first and the switch after: content captured while the
-        # switch is turned off then carries the generation the turning off ends.
-        generation = await _content_generation(traces, config, api_key.workspace_id)
+        # The switch after the generation: content captured while the switch is
+        # turned off then carries the generation the turning off ends.
         keeps_content = generation is not None and await workspace_keeps_trace_content(
             db, config, api_key.workspace_id, api_key.user_id
         )

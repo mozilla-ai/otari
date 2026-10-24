@@ -516,6 +516,36 @@ async def test_an_idle_process_holds_no_key_past_its_age(key: str, monkeypatch: 
     assert content._sweep is None
 
 
+async def test_each_idle_key_goes_at_its_own_age_however_staggered(key: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [1_000.0]
+    monkeypatch.setattr(_content, "monotonic", lambda: now[0])
+    content = SpanContent(_CountingKeys())
+    loop = asyncio.get_running_loop()
+
+    def due_in() -> float:
+        assert content._sweep is not None
+        return content._sweep.when() - loop.time()
+
+    await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id="first", span_id="tool-1")
+    now[0] += 1
+    later = await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id="second", span_id="tool-1")
+    now[0] += 1
+    await content.open(later, workspace_id=_WORKSPACE, trace_id="second", span_id="tool-1")
+    try:
+        # Woken as the first key ages out, the sweep comes back for each later one at its own age.
+        now[0] = 1_000.0 + _content._KEY_MAX_AGE_S
+        content._run_sweep()
+        assert list(content._write_keys) == [(_WORKSPACE, "second")] and due_in() <= 1.1
+        now[0] += 1
+        content._run_sweep()
+        assert not content._write_keys and content._open_keys and due_in() <= 1.1
+        now[0] += 1
+        content._run_sweep()
+        assert not content._open_keys and content._sweep is None
+    finally:
+        content.clear()
+
+
 async def test_stopping_drops_every_cached_key(key: str) -> None:
     content = SpanContent(_CountingKeys())
     sealed = await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")

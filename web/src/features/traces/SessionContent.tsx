@@ -355,7 +355,7 @@ function ShareDialog({
         if (!open) onClose()
       }}
       title="Share this session"
-      description={`Otari shows this session's content only to you. ${exceptionalAccess(platformBreakGlass)} Whoever you share it with can read its prompts, commands and file paths until the share ends, you stop it, or you leave this workspace or the organization. Their reads are recorded, at most once an hour each, and listed here.`}
+      description={`Otari shows this session's content only to you. ${exceptionalAccess(platformBreakGlass)} Whoever you share it with can read its prompts, commands and file paths until the share ends, you stop it, or you lose access to this workspace. Their reads are recorded, at most once an hour each, and listed here.`}
       submitLabel="Share"
       onSubmit={submit}
       isPending={share.isPending}
