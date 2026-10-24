@@ -543,6 +543,10 @@ def _spent_user(
     db_session.commit()
 
 
+# An interval budget anchored now, so its first period ends an hour from now.
+_HOURLY = {"reset_cycle": "every_n_hours", "reset_every_n": 1, "reset_anchor_at": datetime.now(UTC).isoformat()}
+
+
 def _next_monday(moment: datetime) -> datetime:
     midnight = moment.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     return midnight + timedelta(days=7 - midnight.weekday())
@@ -554,8 +558,10 @@ def test_a_spent_calendar_budget_says_when_its_week_ends(
     db_session: Session,
     test_messages: list[dict[str, str]],
 ) -> None:
-    """``Retry-After`` is the seconds until the ISO week ends, the window the refusing budget counts over."""
-    _spent_user(client, master_key_header, db_session, "weekly-user", {"reset_alignment": "calendar_week"})
+    """``Retry-After`` is the seconds until the Monday the week ends on, the window the refusing budget counts over."""
+    _spent_user(
+        client, master_key_header, db_session, "weekly-user", {"reset_cycle": "weekly", "reset_weekdays": 0b0000001}
+    )
 
     before = datetime.now(UTC)
     response = client.post(
@@ -573,14 +579,14 @@ def test_a_spent_calendar_budget_says_when_its_week_ends(
     assert seconds_until(_next_monday(after), after) <= retry_after <= seconds_until(_next_monday(before), before)
 
 
-def test_a_spent_rolling_budget_says_when_its_period_ends(
+def test_a_spent_interval_budget_says_when_its_period_ends(
     client: TestClient,
     master_key_header: dict[str, str],
     db_session: Session,
     test_messages: list[dict[str, str]],
 ) -> None:
-    """A rolling period ends where the user's own window does, which only the gateway knows."""
-    _spent_user(client, master_key_header, db_session, "hourly-user", {"budget_duration_sec": 3600})
+    """An interval period ends where the user's own window does, which only the gateway knows."""
+    _spent_user(client, master_key_header, db_session, "hourly-user", _HOURLY)
     resets_at = db_session.execute(select(User.next_budget_reset_at).where(User.user_id == "hourly-user")).scalar_one()
     assert resets_at is not None
 
@@ -604,7 +610,7 @@ def test_a_messages_refusal_carries_the_same_wait(
     db_session: Session,
 ) -> None:
     """The Messages dialect renders its own error envelope, and keeps the header through it."""
-    _spent_user(client, master_key_header, db_session, "daily-user", {"reset_alignment": "calendar_day"})
+    _spent_user(client, master_key_header, db_session, "daily-user", {"reset_cycle": "daily"})
 
     response = client.post(
         f"{API_ROOT}/messages",
@@ -649,7 +655,7 @@ def test_a_request_larger_than_the_whole_budget_sends_no_wait(
 ) -> None:
     """A fresh window would refuse the same estimate, so waiting for one would not help."""
     budget_id = client.post(
-        f"{API_ROOT}/budgets", json={"max_budget": 0.0015, "budget_duration_sec": 3600}, headers=master_key_header
+        f"{API_ROOT}/budgets", json={"max_budget": 0.0015, **_HOURLY}, headers=master_key_header
     ).json()["budget_id"]
     client.post(f"{API_ROOT}/users", json={"user_id": "tiny-user", "budget_id": budget_id}, headers=master_key_header)
     client.post(

@@ -14,7 +14,8 @@ import {
 import { useWorkspaces } from "@/shared/api/workspaces"
 import { formatDate, formatUsd } from "@/shared/helpers/format"
 
-import { limitLabel, periodLabel, scopeLabel } from "./organizationBudget"
+import { limitLabel, scopeLabel } from "./organizationBudget"
+import { cycleLabel } from "./resetCycle"
 import { SpendCeilingDialog } from "./SpendCeilingDialog"
 
 // Where the organization's budgets actually apply, and what has been spent
@@ -150,7 +151,7 @@ export function SpendCeilingsCard({
       header: "Resets",
       cell: (row) => (
         <div className="flex flex-col gap-0.5">
-          <span>{periodLabel(row)}</span>
+          <span>{cycleLabel(row)}</span>
           {row.period_end ? (
             <span className="text-caption">
               Next on {formatDate(row.period_end)}

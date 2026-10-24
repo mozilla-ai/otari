@@ -52,7 +52,7 @@ def _budgets(client: TestClient, master_key_header: dict[str, str]) -> None:
     for budget_id in ("eu-ai", "eu-memories", "eu-other"):
         created = client.put(
             f"{API_ROOT}/budgets/{budget_id}",
-            json={"budget_duration_sec": 86400, "request_limit": 5},
+            json={"reset_cycle": "daily", "request_limit": 5},
             headers=master_key_header,
         )
         assert created.status_code in (200, 201), created.text

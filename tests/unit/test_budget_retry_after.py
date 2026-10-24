@@ -6,7 +6,7 @@ from decimal import Decimal
 from gateway.api.routes._pipeline import spend_ceiling_refusal
 from gateway.core.error_codes import BUDGET_EXCEEDED, error_headers
 from gateway.exceptions.budget_exceptions import SpendCeilingExceededError
-from gateway.services.budgets._periods import period_window, seconds_until
+from gateway.services.budgets._periods import CycleSettings, seconds_until
 from gateway.services.budgets._refusals import BlockedAxis, blocked_on
 
 NOW = datetime(2026, 10, 13, 15, 30, 0, 250_000, tzinfo=UTC)
@@ -24,11 +24,11 @@ def test_seconds_until_is_never_less_than_one() -> None:
 
 
 def test_calendar_windows_end_on_their_boundaries() -> None:
-    day = period_window(NOW, duration=None, alignment="calendar_day")
-    week = period_window(NOW, duration=None, alignment="calendar_week")
-    month = period_window(NOW, duration=None, alignment="calendar_month")
+    day = CycleSettings("daily", None, None, None, None, None).window(NOW)
+    week = CycleSettings("weekly", None, None, 0b0000001, None, None).window(NOW)
+    month = CycleSettings("monthly", None, None, None, 1, None).window(NOW)
     assert day is not None and week is not None and month is not None
-    # 2026-10-13 is a Tuesday: the ISO week ends Monday 2026-10-19.
+    # 2026-10-13 is a Tuesday: a week rolling on Mondays ends Monday 2026-10-19.
     assert seconds_until(day[1], NOW) == 8 * 3600 + 30 * 60
     assert seconds_until(week[1], NOW) == 5 * 86400 + 8 * 3600 + 30 * 60
     assert seconds_until(month[1], NOW) == 18 * 86400 + 8 * 3600 + 30 * 60

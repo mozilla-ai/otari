@@ -49,7 +49,7 @@ def _chat(client: TestClient, headers: dict[str, str], user: str, budget: str | 
 def _put_budget(client: TestClient, master_key_header: dict[str, str], budget_id: str, **fields: Any) -> Any:
     return client.put(
         f"{API_ROOT}/budgets/{budget_id}",
-        json={"budget_duration_sec": 86400, **fields},
+        json={"reset_cycle": "daily", **fields},
         headers=master_key_header,
     )
 
@@ -287,7 +287,7 @@ def test_put_creates_a_budget_under_your_id_and_then_replaces_it(
     assert replaced.status_code == 200, replaced.text
     assert fetched.json()["max_budget"] == 0.2
     assert fetched.json()["rpm_limit"] is None
-    assert fetched.json()["budget_duration_sec"] is None
+    assert fetched.json()["reset_cycle"] is None
 
 
 def test_put_is_idempotent(client: TestClient, master_key_header: dict[str, str]) -> None:

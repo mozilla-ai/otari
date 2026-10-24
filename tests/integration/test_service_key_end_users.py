@@ -46,7 +46,7 @@ def _chat(client: TestClient, headers: dict[str, str], user: str | None) -> Any:
 def _budget(client: TestClient, master_key_header: dict[str, str], *, request_limit: int) -> str:
     response = client.post(
         f"{API_ROOT}/budgets",
-        json={"request_limit": request_limit, "budget_duration_sec": 86400},
+        json={"request_limit": request_limit, "reset_cycle": "daily"},
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -325,10 +325,10 @@ def test_end_users_are_listed_and_counted_by_owner_and_external_id(
 def test_an_end_users_minute_limits_follow_its_budget(client: TestClient, master_key_header: dict[str, str]) -> None:
     """LiteLLM keeps rpm on the budget, so moving a user to another budget moves its limits too."""
     tight = client.post(
-        f"{API_ROOT}/budgets", json={"rpm_limit": 1, "budget_duration_sec": 86400}, headers=master_key_header
+        f"{API_ROOT}/budgets", json={"rpm_limit": 1, "reset_cycle": "daily"}, headers=master_key_header
     ).json()
     roomy = client.post(
-        f"{API_ROOT}/budgets", json={"rpm_limit": 100, "budget_duration_sec": 86400}, headers=master_key_header
+        f"{API_ROOT}/budgets", json={"rpm_limit": 100, "reset_cycle": "daily"}, headers=master_key_header
     ).json()
     _, headers = _service_key(client, master_key_header, "svc-rpm", end_user_budget_id=tight["budget_id"])
 
@@ -352,7 +352,7 @@ def test_a_key_excluded_from_budget_skips_its_budgets_minute_limits(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     budget = client.post(
-        f"{API_ROOT}/budgets", json={"rpm_limit": 1, "budget_duration_sec": 86400}, headers=master_key_header
+        f"{API_ROOT}/budgets", json={"rpm_limit": 1, "reset_cycle": "daily"}, headers=master_key_header
     ).json()
     client.post(
         f"{API_ROOT}/users", json={"user_id": "henry", "budget_id": budget["budget_id"]}, headers=master_key_header

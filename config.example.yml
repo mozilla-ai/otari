@@ -62,8 +62,8 @@ providers:
 # Budgets and API keys written to the database at every start. A key's secret is
 # yours to choose ('tk-' plus random characters); see docs/configuration.md.
 # budgets:
-#   per-user-daily: {max_budget: 1.0, reset_alignment: calendar_day}
-#   service-global: {max_budget: 100, reset_alignment: calendar_month}
+#   per-user-daily: {max_budget: 1.0, reset_cycle: daily}
+#   service-global: {max_budget: 100, reset_cycle: monthly, reset_month_day: 1}
 # api_keys:
 #   my-service:
 #     secret: ${MY_SERVICE_KEY}
