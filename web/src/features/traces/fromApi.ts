@@ -5,6 +5,7 @@ import type {
   TraceSummary,
   TraceTurn,
 } from "@/client"
+import { contextWeightsOf } from "./contextMap"
 import {
   explainSpan,
   type GateTally,
@@ -378,6 +379,8 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         cachedTokens: span.cache_read_tokens ?? undefined,
         cacheWriteTokens: span.cache_write_tokens ?? undefined,
         reasoningTokens: span.reasoning_tokens ?? undefined,
+        contextWindow: span.context_window ?? undefined,
+        context: contextWeightsOf(span.attributes),
         cost: span.cost ?? undefined,
         estimate: estimates.get(span.span_id),
         metadata: spanMetadata(span),
