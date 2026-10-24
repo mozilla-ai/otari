@@ -6,6 +6,8 @@ spill-over past a rate limit, learned selection, or guardrails the caller cannot
 remove. Use an
 [alias](models.md#model-aliases) when one name always maps to one target.
 
+![Your application sends one request to Otari, which routes it to OpenAI, Anthropic, or another provider.](assets/routing-overview.webp)
+
 ## Failover
 
 ```yaml
@@ -21,6 +23,8 @@ routing:
 Callers send `model: fast`. If the first provider fails before any response is
 sent, Otari tries the fallback. The response keeps the policy name; Activity and
 usage record the models that were attempted.
+
+![Otari tries OpenAI first and moves to Anthropic when OpenAI returns a retryable error.](assets/routing-fallback-flow.webp)
 
 ## Selection and failure are separate
 
