@@ -12,7 +12,6 @@ import pytest
 from any_llm.types.model import Model
 from fastapi.testclient import TestClient
 
-from gateway.api.routes import pricing as pricing_route
 from gateway.core.config import API_ROOT
 from gateway.services import pricing_refresh_service
 from gateway.services.model_discovery_service import ProviderDiscovery
@@ -112,23 +111,6 @@ def test_an_update_whose_prices_changed_since_the_preview_is_a_409_that_offers_n
     assert response.status_code == 409
     models = client.get(f"{PATH}/openai/models", headers=master_key_header).json()["data"]
     assert [model["model"] for model in models] == ["gpt-4o"]
-
-
-def test_the_deprecated_price_approval_also_offers_what_each_provider_newly_lists(
-    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _provider(client, master_key_header, monkeypatch)
-
-    async def confirm(*_: object, **__: object) -> bool:
-        return True
-
-    monkeypatch.setattr(pricing_route, "confirm_price_refresh", confirm)
-
-    response = client.post(f"{API_ROOT}/pricing/refresh/confirm", headers=master_key_header)
-
-    assert response.status_code == 200
-    models = client.get(f"{PATH}/openai/models", headers=master_key_header).json()["data"]
-    assert sorted(model["model"] for model in models) == ["gpt-4o", "gpt-5-1017"]
 
 
 def test_the_catalog_update_refuses_a_request_with_no_credential(client: TestClient) -> None:

@@ -1844,66 +1844,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/hosted-providers/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Refresh Catalog
-         * @deprecated
-         * @description Re-ask every enabled provider what it lists, then take the rest off the catalog.
-         *
-         *     Deprecated: ``POST /hosted-providers/catalog-update`` with ``cleanup``.
-         *
-         *     The whole deployment rather than one provider: a stored price is what puts a
-         *     model on a tenant's Models page, and a price under a provider nothing here
-         *     serves cannot be reached by a per-provider refresh. A model list whose
-         *     provider nothing defines any more, such as a removed ``config.yml`` entry,
-         *     goes too, and is named in ``orphaned_rosters``. Where no provider offers a
-         *     model, only those lists go and every price stays; with none of them either,
-         *     the sweep answers 409. Declared before the
-         *     ``/{provider}`` paths to read in the order the surface is used; no method
-         *     collides in any case.
-         */
-        post: operations["hosted-providers-refresh_catalog"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/hosted-providers/refresh/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Preview Catalog Refresh
-         * @deprecated
-         * @description What a catalog sweep would remove, without removing it.
-         *
-         *     Deprecated: ``POST /hosted-providers/catalog-update/preview`` with ``cleanup``.
-         *
-         *     A GET, and a truthful one: it writes nothing. It does dial every enabled
-         *     provider, as ``available-models`` does, because a model the provider still
-         *     lists would survive the sweep and previewing it as doomed would be a lie.
-         */
-        get: operations["hosted-providers-preview_catalog_refresh"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/hosted-providers/test": {
         parameters: {
             query?: never;
@@ -4742,52 +4682,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/pricing/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Preview Pricing Refresh
-         * @deprecated
-         * @description Fetch the latest defaults and hold them for operator review.
-         *
-         *     Deprecated: ``POST /hosted-providers/catalog-update/preview``.
-         */
-        post: operations["pricing-preview_pricing_refresh"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pricing/refresh/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Confirm Pricing Refresh
-         * @deprecated
-         * @description Activate the latest reviewed default-price snapshot, then refresh every hosted provider's models.
-         *
-         *     Deprecated: ``POST /hosted-providers/catalog-update`` with the ``digest``.
-         */
-        post: operations["pricing-confirm_pricing_refresh"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/pricing/refresh/pending": {
         parameters: {
             query?: never;
@@ -7173,7 +7067,7 @@ export interface components {
             accepted_at: string;
             /**
              * Accepted By
-             * @description `operator` for a dashboard confirm, `schedule` for the auto policy.
+             * @description `operator` for a catalog update an operator ran, `schedule` for the auto policy.
              */
             accepted_by: string;
             /** Id */
@@ -14908,17 +14802,6 @@ export interface components {
             model_key: string;
         };
         /**
-         * PricingRefreshConfirmationResponse
-         * @description Result of activating a reviewed models.dev refresh.
-         */
-        PricingRefreshConfirmationResponse: {
-            /**
-             * Applied
-             * @default true
-             */
-            applied: boolean;
-        };
-        /**
          * PricingRefreshPreviewResponse
          * @description Reviewable summary of a pending models.dev refresh.
          */
@@ -14933,7 +14816,7 @@ export interface components {
             changes_truncated: boolean;
             /**
              * Digest
-             * @description Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.
+             * @description Identity of the pending snapshot; send it to `POST /hosted-providers/catalog-update` to apply, or to reject, to act on exactly this one.
              * @default
              */
             digest: string;
@@ -21637,46 +21520,6 @@ export interface operations {
             };
         };
     };
-    "hosted-providers-refresh_catalog": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HostedCatalogRefreshPublic"];
-                };
-            };
-        };
-    };
-    "hosted-providers-preview_catalog_refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HostedCatalogRefreshPublic"];
-                };
-            };
-        };
-    };
     "hosted-providers-test_hosted_provider": {
         parameters: {
             query?: never;
@@ -26877,58 +26720,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PricingDriftRow"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "pricing-preview_pricing_refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PricingRefreshPreviewResponse"];
-                };
-            };
-        };
-    };
-    "pricing-confirm_pricing_refresh": {
-        parameters: {
-            query?: {
-                /** @description The `digest` of the previewed snapshot; 409 when the pending one differs. */
-                digest?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PricingRefreshConfirmationResponse"];
                 };
             };
             /** @description Validation Error */

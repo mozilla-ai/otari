@@ -854,9 +854,7 @@ serves, with their history; the cleanup never runs on a schedule.
   update that would lose or remove more than a tenth of the priced models is
   held for review as under `review`.
 
-`POST /api/v1/pricing/refresh` and `/refresh/confirm` still work and are
-deprecated in favor of the catalog update; confirming through them now also
-refreshes every provider's models. `/refresh/reject` discards held prices.
+`POST /api/v1/pricing/refresh/reject` discards held prices.
 
 Each accepted snapshot is kept, and a request or report priced for a past
 instant (`as_of`, usage backfills) uses the snapshot in force then, or the oldest

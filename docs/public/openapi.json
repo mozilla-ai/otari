@@ -104,7 +104,7 @@
             "type": "string"
           },
           "accepted_by": {
-            "description": "`operator` for a dashboard confirm, `schedule` for the auto policy.",
+            "description": "`operator` for a catalog update an operator ran, `schedule` for the auto policy.",
             "title": "Accepted By",
             "type": "string"
           },
@@ -16282,18 +16282,6 @@
         "title": "PricingRefreshChangeResponse",
         "type": "object"
       },
-      "PricingRefreshConfirmationResponse": {
-        "description": "Result of activating a reviewed models.dev refresh.",
-        "properties": {
-          "applied": {
-            "default": true,
-            "title": "Applied",
-            "type": "boolean"
-          }
-        },
-        "title": "PricingRefreshConfirmationResponse",
-        "type": "object"
-      },
       "PricingRefreshPreviewResponse": {
         "description": "Reviewable summary of a pending models.dev refresh.",
         "properties": {
@@ -16318,7 +16306,7 @@
           },
           "digest": {
             "default": "",
-            "description": "Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.",
+            "description": "Identity of the pending snapshot; send it to `POST /hosted-providers/catalog-update` to apply, or to reject, to act on exactly this one.",
             "title": "Digest",
             "type": "string"
           },
@@ -30936,68 +30924,6 @@
         ]
       }
     },
-    "/api/v1/hosted-providers/refresh": {
-      "post": {
-        "deprecated": true,
-        "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nDeprecated: ``POST /hosted-providers/catalog-update`` with ``cleanup``.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. A model list whose\nprovider nothing defines any more, such as a removed ``config.yml`` entry,\ngoes too, and is named in ``orphaned_rosters``. Where no provider offers a\nmodel, only those lists go and every price stays; with none of them either,\nthe sweep answers 409. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
-        "operationId": "hosted-providers-refresh_catalog",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Refresh Catalog",
-        "tags": [
-          "hosted-providers"
-        ]
-      }
-    },
-    "/api/v1/hosted-providers/refresh/preview": {
-      "get": {
-        "deprecated": true,
-        "description": "What a catalog sweep would remove, without removing it.\n\nDeprecated: ``POST /hosted-providers/catalog-update/preview`` with ``cleanup``.\n\nA GET, and a truthful one: it writes nothing. It does dial every enabled\nprovider, as ``available-models`` does, because a model the provider still\nlists would survive the sweep and previewing it as doomed would be a lie.",
-        "operationId": "hosted-providers-preview_catalog_refresh",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Preview Catalog Refresh",
-        "tags": [
-          "hosted-providers"
-        ]
-      }
-    },
     "/api/v1/hosted-providers/test": {
       "post": {
         "description": "Ask a provider what it lists on the given credentials, storing nothing.\n\nBacks the form's \"Test connection\". With ``name`` naming a stored provider,\na field left out is read from it, so an edit can be tested without typing\nthe key again; pointing the stored key at another origin still needs it.\nFailure comes back in the body.",
@@ -41629,98 +41555,6 @@
           }
         ],
         "summary": "List Pricing Drift",
-        "tags": [
-          "pricing"
-        ]
-      }
-    },
-    "/api/v1/pricing/refresh": {
-      "post": {
-        "deprecated": true,
-        "description": "Fetch the latest defaults and hold them for operator review.\n\nDeprecated: ``POST /hosted-providers/catalog-update/preview``.",
-        "operationId": "pricing-preview_pricing_refresh",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PricingRefreshPreviewResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Preview Pricing Refresh",
-        "tags": [
-          "pricing"
-        ]
-      }
-    },
-    "/api/v1/pricing/refresh/confirm": {
-      "post": {
-        "deprecated": true,
-        "description": "Activate the latest reviewed default-price snapshot, then refresh every hosted provider's models.\n\nDeprecated: ``POST /hosted-providers/catalog-update`` with the ``digest``.",
-        "operationId": "pricing-confirm_pricing_refresh",
-        "parameters": [
-          {
-            "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
-            "in": "query",
-            "name": "digest",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
-              "title": "Digest"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PricingRefreshConfirmationResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Confirm Pricing Refresh",
         "tags": [
           "pricing"
         ]

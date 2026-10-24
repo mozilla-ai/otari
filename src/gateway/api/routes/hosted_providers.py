@@ -39,7 +39,6 @@ from gateway.schemas.providers import (
     DeploymentProviderMigrationPublic,
     DeploymentProviderMigrationRequest,
     HostedAvailableModelsPublic,
-    HostedCatalogRefreshPublic,
     HostedCatalogUpdatePreviewPublic,
     HostedCatalogUpdatePreviewRequest,
     HostedCatalogUpdatePublic,
@@ -186,38 +185,6 @@ async def update_catalog(
     removes the prices of models no provider serves, with their history.
     """
     return await catalog.apply(digest=body.digest, cleanup=body.cleanup)
-
-
-@router.get("/refresh/preview", deprecated=True)
-async def preview_catalog_refresh(service: HostedProviderServiceDep) -> HostedCatalogRefreshPublic:
-    """What a catalog sweep would remove, without removing it.
-
-    Deprecated: ``POST /hosted-providers/catalog-update/preview`` with ``cleanup``.
-
-    A GET, and a truthful one: it writes nothing. It does dial every enabled
-    provider, as ``available-models`` does, because a model the provider still
-    lists would survive the sweep and previewing it as doomed would be a lie.
-    """
-    return await service.refresh_catalog(apply=False)
-
-
-@router.post("/refresh", deprecated=True)
-async def refresh_catalog(service: HostedProviderServiceDep) -> HostedCatalogRefreshPublic:
-    """Re-ask every enabled provider what it lists, then take the rest off the catalog.
-
-    Deprecated: ``POST /hosted-providers/catalog-update`` with ``cleanup``.
-
-    The whole deployment rather than one provider: a stored price is what puts a
-    model on a tenant's Models page, and a price under a provider nothing here
-    serves cannot be reached by a per-provider refresh. A model list whose
-    provider nothing defines any more, such as a removed ``config.yml`` entry,
-    goes too, and is named in ``orphaned_rosters``. Where no provider offers a
-    model, only those lists go and every price stays; with none of them either,
-    the sweep answers 409. Declared before the
-    ``/{provider}`` paths to read in the order the surface is used; no method
-    collides in any case.
-    """
-    return await service.refresh_catalog(apply=True)
 
 
 @router.patch("/{provider}")
