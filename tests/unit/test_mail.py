@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from gateway.core.config import MAIL_TRANSPORT_SETTINGS, GatewayConfig
+from gateway.log_config import CredentialMaskingFilter
 from gateway.log_config import logger as gateway_logger
 from gateway.services import mail as mail_package
 from gateway.services.mail import (
@@ -380,6 +381,30 @@ async def test_a_templated_message_sends_over_a_configured_transport(
     assert "Your Otari mail settings work" in gateway_logs.text
     # The recipient is redacted here too: these lines land in the same stream.
     assert "ada@example.com" not in gateway_logs.text
+
+
+def test_the_console_transport_keeps_its_link_past_the_credential_mask(
+    gateway_logs: pytest.LogCaptureFixture,
+) -> None:
+    """The handler masks credentials in every record; this record's link is the point of it."""
+    gateway_logs.handler.addFilter(mask := CredentialMaskingFilter())
+    try:
+        ConsoleTransport().deliver(
+            MailEnvelope(
+                to="ada@example.com",
+                sender_email="otari@example.com",
+                sender_name="Otari",
+                message=MailMessage(
+                    subject="Join",
+                    html="<p>Join</p>",
+                    text="Accept: https://otari.example.com/#/accept-invitation?token=abc123",
+                ),
+            )
+        )
+    finally:
+        gateway_logs.handler.removeFilter(mask)
+
+    assert "accept-invitation?token=abc123" in gateway_logs.text
 
 
 def test_require_ready_refuses_and_names_what_is_missing() -> None:
