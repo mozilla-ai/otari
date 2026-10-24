@@ -115,6 +115,28 @@ export const Open: Story = {
 }
 
 /**
+ * Two options spoken for elsewhere. Listed rather than left out, so the list
+ * still answers why they are missing from the pick, and the hint says where.
+ */
+export const DisabledOptions: Story = {
+  render: (args) => (
+    <Live
+      {...args}
+      autoFocus
+      options={PEOPLE.map((person, index) =>
+        index < 2
+          ? {
+              ...person,
+              hint: "Already on Engineering monthly",
+              isDisabled: true,
+            }
+          : person,
+      )}
+    />
+  ),
+}
+
+/**
  * A refusal, on the same rung a `Field`'s sits on, and in the description's
  * place rather than under it: the error replaces that line, so going invalid
  * moves nothing.
@@ -152,4 +174,20 @@ export const NoOptions: Story = {
       "Nobody to assign yet. Add people under Members & roles, or issue a key, and they can be assigned here.",
   },
   render: (args) => <Live {...args} />,
+}
+
+/**
+ * Options keyed by an internal id the query should not see. Typing "workspace"
+ * here matches nothing, where with the default it would match every row.
+ */
+export const IdNotSearched: Story = {
+  args: {
+    options: [
+      { id: '["workspace","a1"]', label: "Platform" },
+      { id: '["workspace","b2"]', label: "Research" },
+    ],
+    searchesId: false,
+    autoFocus: true,
+  },
+  render: (args) => <Live {...args} query="workspace" />,
 }
