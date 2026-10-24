@@ -7,12 +7,47 @@ their timing and cost. An LLM call is one kind of span among several, so a trace
 answers what an agent run did and cost, not only what one call did.
 
 No prompt, model output or tool content is recorded. A trace holds names, ids,
-timings, token counts, outcomes and costs.
+timings, token counts, sizes, outcomes and costs. The sizes are numbers only,
+described under [The context map](#the-context-map).
 
 An LLM call's input tokens are its whole prompt, cached tokens included,
 whichever way its provider reports them. Beside them the call keeps how many
 input tokens were read from or written to the prompt cache, and how many output
 tokens went to reasoning.
+
+## The context map
+
+Selecting an LLM call and opening its **Context** tab shows what filled the
+model's context window, as blocks sized by tokens, with the unused part of the
+window as **Free**. The window comes from the model catalog when the model is
+listed there. Without it the tab shows the used tokens and says the window is
+unknown. The total is always the provider's exact input-token count. How it is
+split depends on what the call recorded:
+
+- **Every call**, including those a coding agent exports over OTLP, is split into
+  cache reads, cache writes and fresh input, from the cache counts the call
+  already keeps.
+- **A request Otari served itself** (chat completions, Messages or Responses) is
+  also split into the system prompt, tool definitions, files, messages and tool
+  results. Otari has no tokenizer, so it counts characters per part as the
+  request arrives, and the dashboard scales those weights so they add up to the
+  exact input tokens. The split is an estimate and the tab says so. An image,
+  audio clip, file or document counts for a flat allowance of 4,000 characters
+  (about 1,000 tokens), because those are billed by size and format rather than
+  by bytes. Tokens the provider adds itself, such as a hidden tool prompt, are
+  spread across the parts.
+
+For that estimate a span keeps eight whole numbers, never text: the characters
+in the system prompt, the tool definitions, the user messages, the assistant
+messages, the tool results and the files, and the number of tool definitions and
+of messages. They are stored as the span attributes
+`otari.context.system_chars`, `otari.context.tools_chars`,
+`otari.context.user_chars`, `otari.context.assistant_chars`,
+`otari.context.tool_result_chars`, `otari.context.file_chars`,
+`otari.context.tool_count` and `otari.context.message_count`. Every attempt of a
+request, a fallback included, carries the same numbers, and turning trace
+capture off stores none. A request that runs a tool loop inside the gateway
+reports the sizes of the request as it arrived, not of each later round.
 
 ## What makes a session
 

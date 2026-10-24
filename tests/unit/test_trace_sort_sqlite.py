@@ -15,6 +15,11 @@ from gateway.repositories.traces import TracesRepositories
 from gateway.services.traces import TraceService
 from gateway.types.traces import SpanRecord, TraceFilter, TraceScope, TraceSort, TraceWrite
 
+
+def _no_window(provider: str | None, model: str) -> int | None:
+    return None
+
+
 pytestmark = pytest.mark.asyncio
 
 _T0 = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
@@ -29,7 +34,7 @@ async def store() -> AsyncIterator[TraceService]:
             await conn.run_sync(SQLModel.metadata.create_all)
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             uow = UnitOfWork(session)
-            yield TraceService(uow, TracesRepositories.on(uow))
+            yield TraceService(uow, TracesRepositories.on(uow), _no_window)
     finally:
         await engine.dispose()
 

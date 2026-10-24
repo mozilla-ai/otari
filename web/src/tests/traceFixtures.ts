@@ -51,6 +51,7 @@ export function traceSpan(overrides: Partial<TraceSpan> = {}): TraceSpan {
     cache_read_tokens: null,
     cache_write_tokens: null,
     reasoning_tokens: null,
+    context_window: null,
     cost: null,
     tool_name: null,
     tool_type: null,

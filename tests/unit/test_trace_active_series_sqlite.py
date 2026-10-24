@@ -19,6 +19,11 @@ from gateway.repositories.traces import TracesRepositories
 from gateway.services.traces import TraceService
 from gateway.types.traces import TraceBucketGrain, TraceFilter, TraceScope
 
+
+def _no_window(provider: str | None, model: str) -> int | None:
+    return None
+
+
 _T0 = datetime(2026, 10, 7, 12, tzinfo=UTC)
 
 
@@ -45,7 +50,7 @@ async def _series(*traces: Trace, filters: TraceFilter, bucket: TraceBucketGrain
             session.add_all(traces)
             await session.commit()
             uow = UnitOfWork(session)
-            series = await TraceService(uow, TracesRepositories.on(uow)).series(
+            series = await TraceService(uow, TracesRepositories.on(uow), _no_window).series(
                 TraceScope.deployment(), filters, bucket=bucket
             )
     finally:

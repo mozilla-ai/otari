@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from gateway.log_config import logger
+from gateway.services.traces._context import ContextWeights
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._turns import TurnFacts
 from gateway.types.traces import SpanRecord, TraceWrite, is_endpoint, is_identifier
@@ -131,6 +132,7 @@ class RequestTrace:
     session: SessionRef | None = None
     harness: str | None = None
     turn: TurnFacts | None = None
+    context: ContextWeights | None = None
     subagent: bool = False
     spans: list[SpanRecord] = field(default_factory=list)
     dropped: int = 0
@@ -165,6 +167,9 @@ class RequestTrace:
             attributes["otari.routing.attempt_position"] = call.attempt_position
         if call.status_code is not None:
             attributes["http.response.status_code"] = call.status_code
+        # Every attempt sent the same request, so each carries the same weights.
+        if self.context is not None:
+            attributes.update(self.context.attributes())
         self._add(
             SpanRecord(
                 span_id=call.attempt_id[:64],

@@ -3,6 +3,7 @@
 
 import type { TraceGateSummary, TraceToolCost } from "@/client"
 
+import type { ContextWeights } from "./contextMap"
 import type { Explanation } from "./explain"
 import type { GatewayEvent, GuardrailVerdict } from "./gateway"
 import type { SessionStats } from "./sessionStats"
@@ -40,6 +41,10 @@ export interface Observation {
   cachedTokens?: number
   cacheWriteTokens?: number
   reasoningTokens?: number
+  /** The model's context window, where the catalog knows it. */
+  contextWindow?: number
+  /** Characters per kind of input, for a request the gateway served. */
+  context?: ContextWeights
   cost?: number
   input?: unknown
   output?: unknown

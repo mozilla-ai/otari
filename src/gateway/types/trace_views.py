@@ -4,7 +4,8 @@ A leaf type, so the traces service can build it and the response schemas can map
 it without either importing the other.
 """
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from typing import Literal
@@ -93,3 +94,5 @@ class TraceView:
     truncated: bool
     gates: tuple[GateSummary, ...] = ()
     tool_costs: tuple[ToolCost, ...] = ()
+    # The context window of each model request's model, by span id, where one is known.
+    context_windows: Mapping[str, int] = field(default_factory=dict)
