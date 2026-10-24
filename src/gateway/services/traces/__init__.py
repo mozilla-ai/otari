@@ -24,7 +24,7 @@ from gateway.services.traces._otlp import (
 from gateway.services.traces._retention import run_trace_retention
 from gateway.services.traces._service import TraceService
 from gateway.services.traces._turns import AnsweredCall, TurnFacts, read_turn
-from gateway.services.traces._writer import TraceWriter, stored_by
+from gateway.services.traces._writer import TraceWriter
 
 __all__ = [
     "AnsweredCall",
@@ -53,5 +53,4 @@ __all__ = [
     "record_priced_requests",
     "resolve_session",
     "run_trace_retention",
-    "stored_by",
 ]

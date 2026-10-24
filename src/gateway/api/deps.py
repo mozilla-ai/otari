@@ -18,7 +18,7 @@ from gateway.core.database import DATABASE_ERRORS, create_session, describe_data
 from gateway.core.feature import CoreFeature
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
-from gateway.exceptions.traces_exceptions import TraceBreakGlassForbiddenError
+from gateway.exceptions.traces_exceptions import TraceBreakGlassForbiddenError, TraceBreakGlassUnnamedError
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
@@ -1891,6 +1891,18 @@ async def get_organization_trace_scope(visible: VisibleWorkspacesDep, identity: 
             audiences=frozenset({"organization_admins"}) if visible.whole_organization else frozenset(),
         ),
     )
+
+
+async def require_signed_in_reader(
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+) -> None:
+    """Refuse a break-glass opening that a header master key, which names nobody, would make.
+
+    The record has to say which person opened the content; the bootstrap operator
+    a master key falls back to is an account, not a person.
+    """
+    if session_identity is None:
+        raise TraceBreakGlassUnnamedError
 
 
 @dataclass(frozen=True)

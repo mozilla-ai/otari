@@ -111,7 +111,8 @@ class TraceService:
         users' erasure rows (and, where it keeps content, its workspaces'
         generations), create the traces not stored yet, read their owners, insert
         the spans, grow the totals. Each runs in key order, so two writers sharing traces lock them in
-        the same order.
+        the same order. Where it keeps content, it also asks whether each of its
+        users is still a member of the workspace, once for each pair.
         """
         written_at = datetime.now(UTC)
         # Sealed before the block, so a key source's round trip holds no connection.
@@ -125,6 +126,14 @@ class TraceService:
             generations = await self._barriers.lock(
                 {trace.workspace_id for trace, held in zip(traces, sealed, strict=True) if held}
             )
+            # Asked under the user's lock, which removing a member takes too: content is
+            # kept only for someone who is still a member as it is stored.
+            members = {
+                pair: await self._owners.is_member(*pair)
+                for pair in {
+                    (trace.workspace_id, trace.user_id) for trace, held in zip(traces, sealed, strict=True) if held
+                }
+            }
             new_traces: dict[TraceKey, dict[str, Any]] = {}
             for trace in traces:
                 # An erased user's write creates nothing, not even the session it names.
@@ -149,7 +158,13 @@ class TraceService:
                     rows.setdefault(
                         (trace.workspace_id, trace.trace_id, span.span_id),
                         # The write whose row this is supplies its content, never another write of the batch.
-                        _span_values(trace, span, held if _current(trace, generations) else {}),
+                        _span_values(
+                            trace,
+                            span,
+                            held
+                            if _current(trace, generations) and members.get((trace.workspace_id, trace.user_id), False)
+                            else {},
+                        ),
                     )
             inserted = await self._spans.insert_new(list(rows.values()))
 
@@ -376,7 +391,7 @@ class TraceService:
             return await self._break_glass.delete_before(before)
 
     async def expire_erasures(self, *, now: datetime) -> int:
-        """Forget users erased longer ago than any spans of theirs could still be waiting to be written."""
+        """Forget users erased longer ago than any of their spans could still be waiting, and those never erased."""
         async with self._uow:
             return await self._erasures.forget_erased_before(now - ERASURE_MARGIN - ERASURE_KEPT_FOR)
 

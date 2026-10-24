@@ -88,6 +88,9 @@ class SecretKeyContentKeys(DataKeySource):
             raise ContentKeyError("rejected", "the data key is malformed")
         return plaintext
 
+    def close(self) -> None:
+        """Nothing: the secret key holds nothing open."""
+
 
 class AwsKmsContentKeys(DataKeySource):
     """Makes data keys under a customer-managed AWS KMS key, with the context as encryption context.
@@ -114,6 +117,7 @@ class AwsKmsContentKeys(DataKeySource):
             try:
                 import boto3
                 from botocore.config import Config
+                from botocore.exceptions import BotoCoreError
             except ImportError as exc:
                 msg = "trace_content_key_backend 'aws_kms' requires boto3. Install the kms extra: uv sync --extra kms"
                 raise ImportError(msg) from exc
@@ -126,7 +130,14 @@ class AwsKmsContentKeys(DataKeySource):
                 retries={"max_attempts": 2, "mode": "standard"},
                 max_pool_connections=_KMS_CONCURRENCY,
             )
-            client = boto3.client("kms", region_name=region, endpoint_url=endpoint_url, config=config)
+            try:
+                client = boto3.client("kms", region_name=region, endpoint_url=endpoint_url, config=config)
+            except BotoCoreError as exc:
+                # A missing region, most often: a configuration error, reported as one.
+                msg = (
+                    f"the trace content KMS client cannot be built ({type(exc).__name__}); set trace_content_kms_region"
+                )
+                raise ValueError(msg) from None
         self._client = client
         self._executor = ThreadPoolExecutor(max_workers=_KMS_CONCURRENCY, thread_name_prefix="otari-kms")
         self._key_id = key_id
@@ -155,6 +166,10 @@ class AwsKmsContentKeys(DataKeySource):
             raise ContentKeyError("rejected", "the data key was made under a KMS key this deployment does not list")
         plaintext: bytes = response["Plaintext"]
         return plaintext
+
+    def close(self) -> None:
+        """Stop the pool KMS calls run on, abandoning any still queued."""
+        self._executor.shutdown(wait=False, cancel_futures=True)
 
     async def _allowed(self) -> frozenset[str]:
         """The key ARNs content may open under, resolved from the configured ids every few minutes.
@@ -227,6 +242,10 @@ class ContentKeyring(ContentKeyPort):
             # The row's fault, not the source's: it names a wrapper this deployment no longer configures.
             raise ContentKeyError("rejected", "the wrapper this data key names is not configured")
         return await source.open_data_key(wrapped, context)
+
+    def close(self) -> None:
+        for source in self._wrappers.values():
+            source.close()
 
 
 def _key_ids(raw: str | None) -> tuple[str, ...]:

@@ -142,6 +142,67 @@ describe("SessionsPage", () => {
     )
   })
 
+  it("forgets a break-glass opening once the peek closes, so seeing it again is a new recorded opening", async () => {
+    const user = userEvent.setup()
+    const privateDetail = traceDetail({
+      spans: traceDetail().spans.map((span) =>
+        span.span_id === "call-toolu_1"
+          ? { ...span, content: {}, content_private: true }
+          : span,
+      ),
+    })
+    const openedDetail = traceDetail({
+      content_access: "break_glass",
+      spans: traceDetail().spans.map((span) =>
+        span.span_id === "call-toolu_1"
+          ? { ...span, content: { command: "pytest -x" } }
+          : span,
+      ),
+    })
+    const { mock } = mockApi({
+      traces: [traceSummary()],
+      traceDetail: privateDetail,
+    })
+    const answer = mock.getMockImplementation() as typeof fetch
+    let openings = 0
+    mock.mockImplementation(async (input, init) => {
+      if (!/\/break-glass/.test(String(input)) || init?.method !== "POST") {
+        return answer(input, init)
+      }
+      openings += 1
+      return jsonResponse(openedDetail)
+    })
+    renderPage(<SessionsPage />, "/sessions")
+
+    const peek = await openFirstSession(user)
+    await user.click(
+      await screen.findByRole("button", { name: "Open by break-glass" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.type(
+      within(dialog).getByRole("textbox", { name: /Reason/ }),
+      "HR investigation 2026-17, approved by legal",
+    )
+    await user.click(
+      within(dialog).getByRole("button", { name: "Open and record" }),
+    )
+    expect(await screen.findByText(/Opened by break-glass/)).toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("complementary", { name: "Trace claude-code" }),
+      ).toBeNull(),
+    )
+    await openFirstSession(user)
+
+    expect(
+      await screen.findByRole("button", { name: "Open by break-glass" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Opened by break-glass/)).toBeNull()
+    expect(openings).toBe(1)
+  })
+
   it("lists sessions from the trace API and opens one into its spans", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 

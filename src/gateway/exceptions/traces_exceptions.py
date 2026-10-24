@@ -57,6 +57,13 @@ class TraceContentShareNotFoundError(TenancyNotFoundError):
         super().__init__(f"Share '{share_id}' not found")
 
 
+class TraceBreakGlassUnnamedError(TenancyForbiddenError):
+    """A break-glass opening is recorded against a named person, which a header master key is not."""
+
+    def __init__(self) -> None:
+        super().__init__("Sign in to open a session's content this way: a master key names nobody to record")
+
+
 class TraceBreakGlassForbiddenError(TenancyForbiddenError):
     """Only an organization's owners open its sessions' content without a share."""
 

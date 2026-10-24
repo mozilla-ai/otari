@@ -155,7 +155,7 @@ function spanStatus(
 // its own, so a command or a prompt reads as text rather than as an object. A
 // span whose content the reader may not open says so rather than showing none.
 export const PRIVATE_CONTENT =
-  "Private: only the person whose session this is can read what this was about."
+  "Private to the person whose session this is. Anyone else reads it only through their share or a recorded break-glass opening."
 
 function spanInput(span: TraceSpan): unknown {
   if (span.content_private) return PRIVATE_CONTENT

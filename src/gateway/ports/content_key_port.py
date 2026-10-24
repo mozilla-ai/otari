@@ -71,6 +71,10 @@ class DataKeySource(Protocol):
         """Return the plaintext of a key this source made for ``context``. Raises :class:`ContentKeyError`."""
         ...
 
+    def close(self) -> None:
+        """Release what the source holds open, as the process stops."""
+        ...
+
 
 class ContentKeyPort(Protocol):
     """Makes data keys with one wrapper and opens those of every wrapper configured."""
@@ -95,4 +99,8 @@ class ContentKeyPort(Protocol):
             ContentKeyError: that wrapper is not configured, could not be reached,
                 or does not open this key for this context.
         """
+        ...
+
+    def close(self) -> None:
+        """Release what every source holds open, as the process stops."""
         ...

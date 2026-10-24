@@ -55,6 +55,10 @@ _PAUSE_AFTER_FAILURE_S = 30.0
 # Well inside the trace writer's batch time limit, so a slow key source leaves
 # the batch time to store its spans without their content.
 _KEY_SOURCE_BUDGET_S = 1.5
+# The session the startup check makes a data key for, which no export can name.
+_CHECK_WORKSPACE = uuid.UUID(int=0)
+_CHECK_SESSION = "otari-startup-check"
+_CHECK_TIMEOUT_S = 10.0
 
 UNSEALED = Counter(
     "gateway_trace_content_unsealed",
@@ -124,6 +128,36 @@ class SpanContent:
         if self._sweep is not None:
             self._sweep.cancel()
             self._sweep = None
+
+    def close(self) -> None:
+        """Drop every cached key and release the key source, as the process stops."""
+        self.clear()
+        if self._keys is not None:
+            self._keys.close()
+
+    @property
+    def sealing(self) -> bool:
+        """Whether a key source to seal new content with is configured at all."""
+        return self._keys is not None and self._keys.wrapper is not None
+
+    async def check(self) -> ContentKeyError | None:
+        """Make a data key and open it again, for a session no export names; why that failed, or None.
+
+        Run at startup, so a key the deployment cannot use is reported then rather
+        than only as content that is quietly not kept.
+        """
+        keys = self._keys
+        if keys is None or keys.wrapper is None:
+            return ContentKeyError("unavailable", "no content key is configured")
+        context = _context(_CHECK_WORKSPACE, _CHECK_SESSION)
+        try:
+            key = await asyncio.wait_for(keys.new_data_key(context), timeout=_CHECK_TIMEOUT_S)
+            await asyncio.wait_for(keys.open_data_key(key.wrapper, key.wrapped, context), timeout=_CHECK_TIMEOUT_S)
+        except ContentKeyError as exc:
+            return exc
+        except TimeoutError:
+            return ContentKeyError("unavailable", "the content key source did not answer in time")
+        return None
 
     async def seal(
         self, content: Mapping[str, str], *, workspace_id: uuid.UUID, trace_id: str, span_id: str

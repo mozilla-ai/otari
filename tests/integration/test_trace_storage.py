@@ -22,7 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.adapters.content_key_adapter import build_content_key_port
-from gateway.api.deps import NoSessionOwners
 from gateway.core.config import GatewayConfig
 from gateway.core.database import dispose_db, init_db
 from gateway.core.unit_of_work import create_unit_of_work
@@ -44,13 +43,23 @@ pytestmark = pytest.mark.asyncio
 _T0 = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
 
 
+class _Members:
+    """Every user is a member of every workspace, but for those named as gone."""
+
+    def __init__(self, gone: frozenset[str] = frozenset()) -> None:
+        self.gone = set(gone)
+
+    async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
+        return user_id is not None and user_id not in self.gone
+
+
 @pytest_asyncio.fixture
 async def store(test_config: GatewayConfig, clean_database: None) -> AsyncIterator[TraceService]:
     init_db(test_config)
     try:
         async with create_unit_of_work() as uow:
             yield TraceService(
-                uow, TracesRepositories.on(uow), SpanContent(build_content_key_port(test_config)), NoSessionOwners()
+                uow, TracesRepositories.on(uow), SpanContent(build_content_key_port(test_config)), _Members()
             )
     finally:
         await dispose_db()
@@ -467,7 +476,7 @@ async def test_two_writers_sharing_traces_in_opposite_order_do_not_deadlock(
     async def write(order: list[str], tag: str) -> None:
         async with create_unit_of_work() as uow:
             await TraceService(
-                uow, TracesRepositories.on(uow), SpanContent(build_content_key_port(test_config)), NoSessionOwners()
+                uow, TracesRepositories.on(uow), SpanContent(build_content_key_port(test_config)), _Members()
             ).write(tuple(_write(workspace, trace_id, _span(f"{tag}-{trace_id}")) for trace_id in order))
 
     for attempt in range(5):
@@ -668,7 +677,7 @@ async def test_two_users_spans_sharing_an_id_in_one_batch_keep_their_own_content
 
 
 def _store_on(config: GatewayConfig, uow: Any) -> TraceService:
-    return TraceService(uow, TracesRepositories.on(uow), SpanContent(build_content_key_port(config)), NoSessionOwners())
+    return TraceService(uow, TracesRepositories.on(uow), SpanContent(build_content_key_port(config)), _Members())
 
 
 async def _sealed_of(async_db: AsyncSession, trace_id: str) -> str | None:
@@ -942,3 +951,34 @@ async def test_a_write_taken_in_longer_ago_than_any_write_is_held_is_refused_who
     result = await store.write((old, recent))
 
     assert (result.accepted, result.rejected) == (1, 1)
+
+
+async def test_content_is_not_stored_for_a_user_who_left_the_workspace_before_the_write(
+    test_config: GatewayConfig,
+    clean_database: None,
+    tenants: tuple[uuid.UUID, uuid.UUID],
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Membership is read again as the write stores, so content in flight while a member is removed is dropped."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    init_db(test_config)
+    try:
+        async with create_unit_of_work() as uow:
+            store = TraceService(
+                uow,
+                TracesRepositories.on(uow),
+                SpanContent(build_content_key_port(test_config)),
+                _Members(gone=frozenset({"alice"})),
+            )
+            result = await store.write(
+                (_write(workspace, "s-left", _span("tool-1", kind="tool", content={"prompt": "x"})),)
+            )
+    finally:
+        await dispose_db()
+
+    assert result.accepted == 1
+    async_db.expire_all()
+    stored = (await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.trace_id) == "s-left"))).one()
+    assert stored == (None,)

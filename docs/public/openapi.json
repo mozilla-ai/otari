@@ -46307,7 +46307,7 @@
     },
     "/api/v1/traces/audit/break-glass": {
       "get": {
-        "description": "Every recorded break-glass opening on the deployment, by owners and the operator alike, newest first.",
+        "description": "The operator's recorded break-glass openings, in any organization, newest first.\n\nAn organization owner's openings are listed for that organization's owners\nalone, at ``GET /organizations/me/traces/audit/break-glass``: their reasons\ncan name the people under investigation, which is no business of the operator's.",
         "operationId": "traces-list_break_glass_reads",
         "parameters": [
           {

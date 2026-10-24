@@ -5,7 +5,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -68,15 +68,20 @@ class UserBarrierRepository(BaseRepository[TraceUserBarrier, Never, Never]):
         super().__init__(uow, TraceUserBarrier)
 
     async def lock(self, user_ids: Collection[str]) -> dict[str, datetime | None]:
-        """Lock each user's row until the transaction ends, creating any missing, and return when each was erased."""
+        """Lock each user's row until the transaction ends, creating any missing, and return when each was erased.
+
+        The upsert both creates and locks a row, so a row deleted by retention
+        between creating it and locking it cannot leave the user unlocked.
+        """
         if not user_ids:
             return {}
         ordered = sorted(user_ids)
         insert = postgresql_insert if dialect_name(self.db) == "postgresql" else sqlite_insert
+        statement = insert(TraceUserBarrier).values([{"user_id": user_id} for user_id in ordered])
         await self.db.execute(
-            insert(TraceUserBarrier)
-            .values([{"user_id": user_id} for user_id in ordered])
-            .on_conflict_do_nothing(index_elements=[TraceUserBarrier.user_id])
+            statement.on_conflict_do_update(
+                index_elements=[TraceUserBarrier.user_id], set_={"user_id": statement.excluded.user_id}
+            )
         )
         result = await self.db.execute(
             select(TraceUserBarrier.user_id, TraceUserBarrier.erased_at)
@@ -87,9 +92,15 @@ class UserBarrierRepository(BaseRepository[TraceUserBarrier, Never, Never]):
         return dict(result.tuples().all())
 
     async def forget_erased_before(self, cutoff: datetime) -> int:
-        """Delete the rows of users erased before ``cutoff``, so an erased user's id is not kept past its use."""
+        """Delete the rows of users erased before ``cutoff``, and of users never erased.
+
+        A never-erased user's row only serializes writes and is made again on the
+        next one, so no user's id is kept past its use.
+        """
         result = await self.db.execute(
-            delete(TraceUserBarrier).where(TraceUserBarrier.erased_at.is_not(None), TraceUserBarrier.erased_at < cutoff)
+            delete(TraceUserBarrier).where(
+                or_(TraceUserBarrier.erased_at.is_(None), TraceUserBarrier.erased_at < cutoff)
+            )
         )
         return int(getattr(result, "rowcount", 0) or 0)
 

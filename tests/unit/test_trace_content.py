@@ -100,6 +100,9 @@ class _CountingKeys:
         self.opened += 1
         return await self._inner.open_data_key(wrapped, context)
 
+    def close(self) -> None:
+        self.closed = True
+
 
 class _FailingKmsClient:
     """A KMS client every call to which fails with ``error``."""
@@ -734,3 +737,58 @@ async def test_a_reading_with_its_own_keys_asks_the_source_afresh_and_leaves_not
 
     # Once per reading, however warm the shared cache was.
     assert keys.opened == 3
+
+
+# The startup check, and stopping.
+
+
+async def test_the_startup_check_passes_with_a_key_it_can_use(kms: Any) -> None:
+    content = SpanContent(_kms_keyring(kms, _new_kms_key(kms)))
+
+    assert await content.check() is None
+    # It caches nothing, so no session holds the check's key.
+    assert not content._write_keys and not content._open_keys
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [(_client_error("AccessDeniedException"), "denied"), (EndpointConnectionError(endpoint_url="x"), "unavailable")],
+)
+async def test_the_startup_check_reports_a_key_it_cannot_use(error: Exception, reason: str) -> None:
+    content = SpanContent(_kms_keyring(_FailingKmsClient(error), "alias/otari"))
+
+    failure = await content.check()
+
+    assert failure is not None and failure.reason == reason
+    assert "secret-detail" not in str(failure)
+
+
+async def test_the_startup_check_reports_no_key_at_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+    content = _secret_key_content()
+
+    assert content.sealing is False
+    failure = await content.check()
+    assert failure is not None and failure.reason == "unavailable"
+
+
+def test_a_kms_key_with_no_region_is_a_configuration_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("AWS_REGION", "AWS_DEFAULT_REGION"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AWS_CONFIG_FILE", "/nonexistent")
+
+    with pytest.raises(ValueError, match="trace_content_kms_region"):
+        AwsKmsContentKeys("alias/otari")
+
+
+async def test_closing_drops_the_keys_and_stops_the_kms_pool(kms: Any) -> None:
+    source = AwsKmsContentKeys(_new_kms_key(kms), client=kms)
+    content = SpanContent(
+        ContentKeyring(KMS_WRAPPER, {SECRET_KEY_WRAPPER: SecretKeyContentKeys(), KMS_WRAPPER: source})
+    )
+    await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
+
+    content.close()
+
+    assert not content._write_keys and content._sweep is None
+    assert source._executor._shutdown

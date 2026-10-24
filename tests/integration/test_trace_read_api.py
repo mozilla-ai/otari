@@ -831,6 +831,10 @@ def test_the_bootstrap_says_whether_the_deployment_keeps_content(
     assert client.get(f"{API_ROOT}/bootstrap").json()["trace_content_available"] is False
 
     monkeypatch.setattr(config, "trace_content_enabled", True)
+    monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+    # Allowed, but with no key to seal it with nothing would be kept, so a workspace is not offered it.
+    assert client.get(f"{API_ROOT}/bootstrap").json()["trace_content_available"] is False
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     assert client.get(f"{API_ROOT}/bootstrap").json()["trace_content_available"] is True
 
 
@@ -940,6 +944,7 @@ _REASON = "HR investigation 2026-17, approved by legal"
 
 def test_an_owner_opens_a_private_session_by_break_glass_and_it_is_recorded_first(
     client: TestClient,
+    master_key_header: dict[str, str],
     world: dict[str, str],
     db_session_factory: Callable[[], Session],
     monkeypatch: pytest.MonkeyPatch,
@@ -955,6 +960,10 @@ def test_an_owner_opens_a_private_session_by_break_glass_and_it_is_recorded_firs
     assert _as(client, world["operator"], "POST", path, json={"reason": "why"}).status_code == 422
     assert _as(client, world["operator"], "POST", path, json={"reason": " " * 20}).status_code == 422
 
+    # A header master key names nobody for the record, so it opens nothing.
+    unnamed = client.post(f"{API_ROOT}{path}", json={"reason": _REASON}, headers=master_key_header)
+    assert unnamed.status_code == status.HTTP_403_FORBIDDEN and "master key" in unnamed.json()["detail"], unnamed.text
+
     opened = _as(client, world["operator"], "POST", path, json={"reason": _REASON})
     assert opened.status_code == status.HTTP_200_OK, opened.text
     assert opened.json()["content_access"] == "break_glass"
@@ -969,6 +978,8 @@ def test_an_owner_opens_a_private_session_by_break_glass_and_it_is_recorded_firs
         "op@a.test",
     )
     assert _as(client, world["admin"], "GET", "/organizations/me/traces/audit/break-glass").status_code == 403
+    # An owner's reasons stay with the organization's owners: the operator's log lists only the operator's openings.
+    assert _operator_get(client, world, "/traces/audit/break-glass").json()["items"] == []
     # The session's owner is not told: their own view of the session is unchanged.
     assert _detail(client, world["member"])["content_access"] == "owner"
 
