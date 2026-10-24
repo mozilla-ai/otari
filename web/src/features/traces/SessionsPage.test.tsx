@@ -264,6 +264,97 @@ describe("SessionsPage", () => {
     expect(within(peek).getByText("Reasoning tokens")).toBeInTheDocument()
   })
 
+  it("maps what filled a model request's context window under its Context tab", async () => {
+    const detail = traceDetail()
+    const spans = detail.spans.map((span) =>
+      span.span_id === "llm-1"
+        ? {
+            ...span,
+            model: "claude-sonnet-4-5",
+            input_tokens: 39_600,
+            context_window: 200_000,
+            attributes: {
+              "otari.context.system_chars": 4_000,
+              "otari.context.tools_chars": 12_000,
+              "otari.context.user_chars": 3_000,
+              "otari.context.assistant_chars": 5_000,
+              "otari.context.tool_result_chars": 30_000,
+              "otari.context.file_chars": 4_000,
+              "otari.context.tool_count": 12,
+              "otari.context.message_count": 41,
+            },
+          }
+        : span,
+    )
+    mockApi({ traces: [traceSummary()], traceDetail: { ...detail, spans } })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    expect(
+      within(peek).queryByRole("button", { name: "Context" }),
+    ).not.toBeInTheDocument()
+    await userEvent.click(
+      within(peek).getAllByRole("button", {
+        name: /^Generation, claude-sonnet-4-5/,
+      })[0],
+    )
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: "Context" }),
+    )
+
+    expect(
+      within(peek).getByText("claude-sonnet-4-5 [200k]"),
+    ).toBeInTheDocument()
+    expect(within(peek).getByText("39.6k / 200k")).toBeInTheDocument()
+    expect(within(peek).getByText("20%")).toBeInTheDocument()
+    expect(
+      within(peek).getByRole("button", {
+        name: /^Tool definitions: .*12 tool definitions/,
+      }),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByRole("button", { name: /^Free:/ }),
+    ).toBeInTheDocument()
+    expect(within(peek).getByText("Estimated")).toBeInTheDocument()
+  })
+
+  it("falls back to the cache split for a request with no kept sizes, and has no tab for a step", async () => {
+    const detail = traceDetail()
+    const spans = detail.spans.map((span) =>
+      span.span_id === "llm-1"
+        ? {
+            ...span,
+            input_tokens: 1_000,
+            cache_read_tokens: 600,
+            context_window: null,
+          }
+        : span,
+    )
+    mockApi({ traces: [traceSummary()], traceDetail: { ...detail, spans } })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    await userEvent.click(
+      within(peek).getAllByRole("button", { name: /^Generation, gpt-5/ })[0],
+    )
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: "Context" }),
+    )
+
+    expect(within(peek).getByText("1.0k tokens")).toBeInTheDocument()
+    expect(within(peek).getByText("Window unknown")).toBeInTheDocument()
+    expect(
+      within(peek).getByRole("button", { name: /^Cache read:/ }),
+    ).toBeInTheDocument()
+    expect(within(peek).queryByText("Estimated")).not.toBeInTheDocument()
+    await userEvent.click(
+      within(peek).getAllByRole("button", { name: /^Span, Request/ })[0],
+    )
+    expect(
+      within(peek).queryByRole("button", { name: "Context" }),
+    ).not.toBeInTheDocument()
+  })
+
   it("opens the span a gateway decision is about", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
