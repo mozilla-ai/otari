@@ -236,4 +236,37 @@ describe("ContextMapView", () => {
     expect(system.textContent).toBe("")
     expect(system).toHaveAccessibleName(/System prompt: System · \d+ tokens/)
   })
+
+  it("never gives a sliver of a block a negative size, padding or border that would grow it past its share", () => {
+    render(
+      <ContextMapView
+        map={buildContextMap({
+          inputTokens: 3,
+          cacheReadTokens: 1,
+          windowTokens: 200_000,
+        })}
+      />,
+    )
+    const map = screen.getByRole("group", { name: "Context window map" })
+
+    const tiny = within(map)
+      .getAllByRole("button")
+      .filter((block) => !block.getAttribute("aria-label")?.startsWith("Free"))
+    expect(tiny).toHaveLength(2)
+    for (const block of tiny) {
+      expect(Number.parseFloat(block.style.width)).toBeGreaterThanOrEqual(0)
+      expect(Number.parseFloat(block.style.height)).toBeGreaterThanOrEqual(0)
+      expect(block).not.toHaveClass("p-2")
+      expect(block).not.toHaveClass("border")
+      expect(block).toHaveAccessibleName(/tokens/)
+    }
+  })
+
+  it("pads a block only where its title is drawn", () => {
+    render(<ContextMapView map={estimated()} />)
+
+    const free = screen.getByRole("button", { name: /^Free/ })
+    expect(free).toHaveClass("p-2")
+    expect(free).toHaveClass("border")
+  })
 })
