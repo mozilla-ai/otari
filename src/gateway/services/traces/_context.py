@@ -40,6 +40,11 @@ _FILE_TYPES = frozenset(
 _STRUCTURAL_KEYS = frozenset(
     {"type", "id", "role", "tool_use_id", "tool_call_id", "call_id", "cache_control", "status", "index"}
 )
+# Blobs a provider hands back to be echoed, not text anyone reads: a thinking block's
+# signature, a redacted thinking block, a reasoning item's encrypted content. The
+# readable `thinking` text of a thinking block still counts.
+_OPAQUE_BLOCKS = frozenset({"redacted_thinking"})
+_OPAQUE_KEYS = {"thinking": frozenset({"signature"}), "reasoning": frozenset({"encrypted_content"})}
 _MAX_DEPTH = 8
 
 _SYSTEM_ROLES = frozenset({"system", "developer"})
@@ -102,11 +107,15 @@ def _weigh(value: Any, depth: int = 0) -> tuple[int, int]:
     if depth >= _MAX_DEPTH:
         return 0, 0
     if isinstance(value, Mapping):
-        if value.get("type") in _FILE_TYPES:
+        kind = value.get("type")
+        if kind in _FILE_TYPES:
             return 0, FILE_CHARS
+        if kind in _OPAQUE_BLOCKS:
+            return 0, 0
+        opaque = _OPAQUE_KEYS.get(kind, frozenset()) if isinstance(kind, str) else frozenset()
         text = files = 0
         for key, item in value.items():
-            if key in _STRUCTURAL_KEYS:
+            if key in _STRUCTURAL_KEYS or key in opaque:
                 continue
             item_text, item_files = _weigh(item, depth + 1)
             text += item_text

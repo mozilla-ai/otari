@@ -245,3 +245,40 @@ def test_a_span_of_a_request_with_no_weights_carries_none() -> None:
     trace.record_llm_call(_call("attempt-1"))
 
     assert not any(key.startswith("otari.context.") for key in trace.spans[0].attributes)
+
+
+def test_opaque_provider_blobs_weigh_nothing_but_readable_thinking_does() -> None:
+    blob = "Zm9v" * 5_000
+    weights = _weights(
+        "messages",
+        [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "let me see", "signature": blob},
+                    {"type": "redacted_thinking", "data": blob},
+                    {"type": "text", "text": "done"},
+                    {"type": "tool_use", "id": "t1", "name": "sign", "input": {"signature": "abc"}},
+                ],
+            }
+        ],
+    )
+
+    assert weights.assistant_chars == len("let me see") + len("done") + len("sign") + len("abc")
+
+
+def test_an_encrypted_reasoning_item_weighs_only_its_summary() -> None:
+    blob = "gAAAA" * 5_000
+    weights = _weights(
+        "responses",
+        [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "encrypted_content": blob,
+                "summary": [{"type": "summary_text", "text": "thought"}],
+            }
+        ],
+    )
+
+    assert weights.assistant_chars == len("thought")
