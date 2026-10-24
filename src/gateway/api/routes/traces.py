@@ -25,6 +25,7 @@ from gateway.api.deps import (
     get_organization_trace_scope,
     get_platform_break_glass,
     require_deployment_operator,
+    require_signed_in_reader,
     verify_master_key,
 )
 from gateway.core.config import GatewayConfig
@@ -187,7 +188,9 @@ router = build_trace_router(
 )
 
 
-@router.post("/{trace_id}/break-glass", response_model=TraceDetailPublic)
+@router.post(
+    "/{trace_id}/break-glass", response_model=TraceDetailPublic, dependencies=[Depends(require_signed_in_reader)]
+)
 async def platform_break_glass(
     traces: TraceServiceDep,
     operator: Annotated[PlatformBreakGlass, Depends(get_platform_break_glass)],
@@ -221,8 +224,13 @@ async def list_break_glass_reads(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 50,
 ) -> BreakGlassReadListPublic:
-    """Every recorded break-glass opening on the deployment, by owners and the operator alike, newest first."""
-    reads, has_more = await traces.break_glass_reads(organization_id=None, kind=None, limit=limit, offset=skip)
+    """The operator's recorded break-glass openings, in any organization, newest first.
+
+    An organization owner's openings are listed for that organization's owners
+    alone, at ``GET /organizations/me/traces/audit/break-glass``: their reasons
+    can name the people under investigation, which is no business of the operator's.
+    """
+    reads, has_more = await traces.break_glass_reads(organization_id=None, kind="deployment", limit=limit, offset=skip)
     return BreakGlassReadListPublic(items=[break_glass_read_public(read) for read in reads], has_more=has_more)
 
 
@@ -241,7 +249,9 @@ WorkspaceQuery = Annotated[
 ]
 
 
-@organization_router.post("/{trace_id}/break-glass", response_model=TraceDetailPublic)
+@organization_router.post(
+    "/{trace_id}/break-glass", response_model=TraceDetailPublic, dependencies=[Depends(require_signed_in_reader)]
+)
 async def organization_break_glass(
     traces: TraceServiceDep,
     owner: Annotated[OrganizationBreakGlass, Depends(get_organization_break_glass)],

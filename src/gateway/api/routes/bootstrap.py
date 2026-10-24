@@ -12,7 +12,7 @@ operator configured, not credentials.
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +45,7 @@ from gateway.log_config import logger
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy.user_service import operator_has_password, password_sign_in_possible
 from gateway.services.tenancy.webauthn_service import has_any_credential
+from gateway.services.traces import SpanContent
 
 router = APIRouter(prefix="/bootstrap", tags=["bootstrap"])
 
@@ -246,8 +247,15 @@ class DeploymentBootstrap(BaseModel):
     )
 
 
+def _content_sealing(request: Request) -> bool:
+    """Whether this process has a key to seal session content with; a workspace turning it on otherwise keeps none."""
+    content: SpanContent | None = getattr(request.app.state, "trace_content", None)
+    return content is not None and content.sealing
+
+
 @router.get("", response_model=DeploymentBootstrap)
 async def get_bootstrap(
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     enabled_features: Annotated[tuple[CoreFeature, ...], Depends(get_enabled_features)],
@@ -278,7 +286,9 @@ async def get_bootstrap(
         feedback_enabled=any(feature.name == "feedback" for feature in enabled_features),
         federation_member_rules=config.federation_member_rules,
         mail_ready=config.mail_ready,
-        trace_content_available=config.trace_capture_enabled and config.trace_content_enabled,
+        trace_content_available=config.trace_capture_enabled
+        and config.trace_content_enabled
+        and _content_sealing(request),
         trace_platform_break_glass=config.trace_platform_break_glass_enabled,
         trace_retention_days=config.trace_retention_days,
         trace_session_max_age_days=config.trace_session_max_age_days,

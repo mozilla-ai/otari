@@ -21,7 +21,7 @@ import any_fetch
 import any_search
 from gateway import features
 from gateway.api.deps import (
-    NoSessionOwners,
+    DatabaseSessionOwners,
     build_budget_service,
     build_file_service,
     build_hosted_discovery,
@@ -49,7 +49,7 @@ from gateway.core.config import (
 from gateway.core.database import create_session, describe_database_error, dispose_db, init_db
 from gateway.core.error_codes import INVALID_REQUEST, error_code_of, error_headers
 from gateway.core.feature import CoreFeature, Worker
-from gateway.core.unit_of_work import create_unit_of_work
+from gateway.core.unit_of_work import create_unit_of_work, create_unit_of_work_with_session
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
@@ -159,8 +159,9 @@ from gateway.services.tools import (
     run_sandbox_credential_refresher,
     warn_about_tool_instances,
 )
-from gateway.services.traces import RequestTraces, SpanContent, TraceWriter, stored_by
+from gateway.services.traces import RequestTraces, SpanContent, TraceWriter
 from gateway.services.workspace_scope import default_workspace_id
+from gateway.types.traces import TraceWrite, WriteResult
 from gateway.version import __version__
 
 if TYPE_CHECKING:
@@ -301,6 +302,19 @@ def _resolve_trace_content(config: GatewayConfig, container: Container) -> SpanC
         return SpanContent.disabled()
 
 
+async def _check_trace_content(content: SpanContent) -> None:
+    """Try the trace content keys once, and say plainly if they do not work."""
+    failure = await content.check()
+    if failure is None:
+        logger.info("Trace content keys passed their startup check")
+        return
+    logger.error(
+        "Trace content keys failed their startup check, so no session content is kept until they work (%s: %s)",
+        failure.reason,
+        failure,
+    )
+
+
 def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutine[Any, Any, None] | None:
     """Return the file retention sweep, or None when files or the interval disable it.
 
@@ -329,9 +343,14 @@ def _records_traces(enabled_features: tuple[CoreFeature, ...]) -> bool:
 
 def _build_trace_writer(config: GatewayConfig, content: SpanContent) -> TraceWriter:
     """The writer every request's trace is handed to, sealing what it keeps with ``content``."""
+
+    async def store(batch: tuple[TraceWrite, ...]) -> WriteResult:
+        # On one session: the writer asks it whether each session's user is still a member.
+        async with create_unit_of_work_with_session() as (session, uow):
+            return await build_trace_service(uow, content, DatabaseSessionOwners(session)).write(batch)
+
     return TraceWriter(
-        # The writer opens no share, so it asks nobody's membership.
-        stored_by(lambda uow: build_trace_service(uow, content, NoSessionOwners())),
+        store,
         max_queued_spans=config.trace_queue_max_spans,
         batch_spans=config.trace_flush_max_spans,
         interval_s=config.trace_flush_interval_s,
@@ -993,11 +1012,15 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         log_writer_started = False
         trace_writer: TraceWriter | None = None
         trace_writer_started = False
+        content_check: asyncio.Task[None] | None = None
         try:
             # First inside the try, after every step that can refuse to start, so a
             # refused start never leaves one open. One per app: web tools, the search
             # endpoint and the connection tests call their providers through it.
             app.state.web_provider_client = build_web_provider_client()
+            # In the background, so a slow key source never holds the boot.
+            if config.trace_capture_enabled and config.trace_content_enabled:
+                content_check = asyncio.create_task(_check_trace_content(app.state.trace_content))
             # Inside the try, so a failure here still stops the workers started above.
             # Wired only where create_app set up trace capture, which a bare app has not.
             request_traces: RequestTraces | None = getattr(app.state, "request_traces", None)
@@ -1028,9 +1051,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 app.state.trace_writer = None
                 await trace_writer.stop()
             # After the writer's last batch, which may still seal with them.
+            if content_check is not None:
+                content_check.cancel()
             trace_content: SpanContent | None = getattr(app.state, "trace_content", None)
             if trace_content is not None:
-                trace_content.clear()
+                trace_content.close()
             # Removed before it closes, so a route served after shutdown fails plainly
             # rather than on a closed client.
             web_provider_client = getattr(app.state, "web_provider_client", None)

@@ -24,10 +24,8 @@ from collections.abc import Awaitable, Callable
 from time import monotonic
 
 from gateway.core.database import DATA_ERRORS
-from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter, Gauge
-from gateway.services.traces._service import TraceService
 from gateway.types.traces import TraceWrite, WriteResult
 
 SPANS_DROPPED = Counter(
@@ -55,16 +53,6 @@ _ERASED_FOR_S = 3600.0
 
 # Stores one batch and says how its spans were accounted for.
 StoreTraces = Callable[[tuple[TraceWrite, ...]], Awaitable[WriteResult]]
-
-
-def stored_by(build_service: Callable[[UnitOfWork], TraceService]) -> StoreTraces:
-    """Store each batch through the trace service, on a worker Unit of Work of its own."""
-
-    async def store(batch: tuple[TraceWrite, ...]) -> WriteResult:
-        async with create_unit_of_work() as uow:
-            return await build_service(uow).write(batch)
-
-    return store
 
 
 class TraceWriter:

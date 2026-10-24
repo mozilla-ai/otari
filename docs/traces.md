@@ -352,23 +352,32 @@ can open any of its sessions' content with
 at least ten characters. Where `trace_platform_break_glass_enabled` is on, off by
 default, the deployment's operator can open any organization's session with
 `POST /api/v1/traces/{trace_id}/break-glass?workspace_id=...`, giving a reason and
-a reference such as a legal request's number. Each opening:
+a reference such as a legal request's number. Either way it takes a signed-in
+person: a header master key names nobody to record, so it opens nothing this way.
+Each opening:
 
 - is recorded, with who, which session, when, the reason and the reference, in
   the same transaction that reads the session and before any content opens, so
   nothing opens without its record;
 - is listed for the organization's owners at
-  `GET /api/v1/organizations/me/traces/audit/break-glass` (their own openings) and
-  for the operator at `GET /api/v1/traces/audit/break-glass` (every opening);
+  `GET /api/v1/organizations/me/traces/audit/break-glass` (their own openings),
+  and the operator's openings for the operator at `GET /api/v1/traces/audit/break-glass`.
+  An owner's reason can name the person under investigation, so the operator's
+  list does not include the owners' openings;
 - is logged as an event naming ids only, and, with AWS KMS, opens its data keys
   afresh rather than from the gateway's cache, so each opening is a `Decrypt` in
-  CloudTrail naming the session;
+  CloudTrail naming the session. That outside record covers content sealed under
+  the KMS key only: content sealed under `OTARI_SECRET_KEY`, before a deployment
+  moved to KMS or by an earlier version, opens with no call to KMS, so the
+  gateway's own record is its only one. Content ages out with its sessions, so
+  after `trace_session_max_age_days` from the move all of it is under KMS;
 - is not told to the session's owner.
 
 Records are kept for `trace_break_glass_retention_days` (365 by default), apart
 from the session and the organization: deleting an organization does not delete
 the record of the operator's access to it. Erasing a user clears their id from
-the records of openings of their sessions; the openings stay recorded.
+the records of openings of their sessions; the openings stay recorded, with the
+email of whoever opened them and the reason given, which may mention anyone.
 
 A trace's detail says how the read reached its content in `content_access`:
 `owner`, `share`, `break_glass` or `none`.
@@ -380,6 +389,12 @@ the encryption give is that nobody reads content through Otari without its
 owner's say or a recorded break-glass, and that the database alone, or a backup
 of it, shows none. With AWS KMS, every data key the gateway fetches is also in
 CloudTrail.
+
+At startup, where content is on, the gateway makes one data key and opens it
+again, for a session no export names. A key it cannot use, such as a KMS key
+whose policy or region is wrong, is logged as an error then, rather than only as
+content quietly not kept (`gateway_trace_content_unsealed`). A deployment with
+no key to seal with at all does not offer workspaces content.
 
 ### How content is sealed
 
@@ -514,7 +529,8 @@ capturing still deletes what it captured on this schedule. Erasing a user delete
 their traces on every replica: spans another replica took in for them before the
 erasure, and still holds, are never stored. To enforce that, the gateway stores
 nothing taken in more than 24 hours earlier, however long an upload or request
-stalled, and keeps the erased user's id for about a day, then deletes it.
+stalled, and keeps the erased user's id for about a day, then deletes it. The id
+of a user never erased is deleted by the next hourly retention run.
 
 Traces are written off the request path, within fixed limits: a trace never
 slows or fails a request, and when the writer cannot keep up it drops whole

@@ -295,7 +295,9 @@ export function SessionsPage() {
   const peekId = url.get("peek")
   const detail = useTrace(peekId, url.get("peek_workspace"))
   // An owner of the organization may open a private session by break-glass. What
-  // it opened is held here for the session it opened, never polled over.
+  // it opened is held here for the session it opened, never polled over, and
+  // dropped once the peek shows anything else or closes, so seeing it again takes
+  // a new opening, which is recorded again.
   const isOwner = useOrganizationContext().data?.role === "owner"
   const [opened, setOpened] = useState<TraceDetail>()
   const peekWorkspace = url.get("peek_workspace")
@@ -305,6 +307,7 @@ export function SessionsPage() {
     (!peekWorkspace || opened.summary.workspace_id === peekWorkspace)
       ? opened
       : undefined
+  if (opened && !openedHere) setOpened(undefined)
   const shown = openedHere ?? detail.data
 
   const points = seriesQuery.data?.points

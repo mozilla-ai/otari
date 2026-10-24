@@ -6170,7 +6170,11 @@ export interface paths {
         };
         /**
          * List Break Glass Reads
-         * @description Every recorded break-glass opening on the deployment, by owners and the operator alike, newest first.
+         * @description The operator's recorded break-glass openings, in any organization, newest first.
+         *
+         *     An organization owner's openings are listed for that organization's owners
+         *     alone, at ``GET /organizations/me/traces/audit/break-glass``: their reasons
+         *     can name the people under investigation, which is no business of the operator's.
          */
         get: operations["traces-list_break_glass_reads"];
         put?: never;

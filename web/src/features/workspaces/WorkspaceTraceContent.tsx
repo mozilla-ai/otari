@@ -71,7 +71,7 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
           <p className="text-body">{LABEL}</p>
           <p className="mt-1 max-w-md text-caption">
             {available
-              ? `Stores the prompt that starts each turn, the commands and file paths your agents' tools use, and what guardrail checks looked at. Never tool output or model responses. It is encrypted, and Otari shows it only to the person whose session it is, unless they share a session for review. ${exceptions} Other members of this workspace, including its admins, see that a session ran and what it cost, but not what it was about. It is collected only for the workspace's current members; what is already stored stays until it is deleted, after its owner leaves too. Your agents also have to be set to send it. ${retention}`
+              ? `Stores the prompt that starts each turn, the commands and file paths your agents' tools use, and what guardrail checks looked at. Never tool output or model responses. It is stored encrypted, though not end to end: this deployment holds the keys, so it can read it. Otari shows it only to the person whose session it is, unless they share a session for review. ${exceptions} Other members of this workspace, including its admins, see that a session ran and what it cost, but not what it was about. It is collected only for the workspace's current members; what is already stored stays until it is deleted, after its owner leaves too. Your agents also have to be set to send it. ${retention}`
               : `This deployment does not keep session content, so a workspace cannot turn it on. Sessions still record their tools, costs and outcomes. ${retention}`}
           </p>
         </div>
