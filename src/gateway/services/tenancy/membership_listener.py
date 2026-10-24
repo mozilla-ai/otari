@@ -34,8 +34,8 @@ class MembershipListener(Protocol):
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         """A workspace and these memberships are about to be deleted."""
 
-    async def member_left_organization(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
-        """A person's organization membership ended; these are the organization's workspaces."""
+    async def member_lost_workspaces(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
+        """A person stopped seeing these workspaces: their organization membership ended, or their role changed."""
 
 
 class MembershipListeners:
@@ -66,9 +66,9 @@ class MembershipListeners:
         for listener in self._listeners:
             await listener.workspace_deleted(workspace_id, member_ids)
 
-    async def member_left_organization(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
+    async def member_lost_workspaces(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
         for listener in self._listeners:
-            await listener.member_left_organization(user_id, workspace_ids)
+            await listener.member_lost_workspaces(user_id, workspace_ids)
 
 
 __all__ = ["MembershipListener", "MembershipListeners"]

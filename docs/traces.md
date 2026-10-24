@@ -329,7 +329,8 @@ guardrail verdicts. A span whose content they may not open says so
 (`organization_admins` or `deployment_operator`), an optional note saying why,
 and how many days it lasts (30 by default, 90 at most). The share ends when it
 expires, when the user ends it (`DELETE .../shares/{share_id}`), or when the user
-leaves the workspace; a share that ended stays ended if they return. Reads
+loses the workspace: they leave it or the organization, or lose the admin role
+that was their only way into it. A share that ended stays ended if they return. Reads
 through a share are recorded, at most once an hour per reader so a page left open
 is one read, and the user sees who read it and when: `GET .../shares` lists every
 share, running ones first and ended ones after, with its newest reads and how
@@ -511,8 +512,9 @@ Deleting a user erases their traces, as it erases their telemetry.
 Retention runs whether or not traces are captured, so a deployment that stops
 capturing still deletes what it captured on this schedule. Erasing a user deletes
 their traces on every replica: spans another replica took in for them before the
-erasure, and still holds, are never stored. The gateway keeps the erased user's id
-for about an hour to enforce that, then deletes it.
+erasure, and still holds, are never stored. To enforce that, the gateway stores
+nothing taken in more than 24 hours earlier, however long an upload or request
+stalled, and keeps the erased user's id for about a day, then deletes it.
 
 Traces are written off the request path, within fixed limits: a trace never
 slows or fails a request, and when the writer cannot keep up it drops whole

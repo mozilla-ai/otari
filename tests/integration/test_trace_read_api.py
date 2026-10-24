@@ -1093,6 +1093,75 @@ def test_removing_a_member_from_the_organization_ends_their_shares_so_a_return_r
     assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
 
 
+def _admin_shares_s_one(
+    client: TestClient, world: dict[str, str], db_session_factory: Callable[[], Session]
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """The organization's admin owns s-one and shares it with the admins; their membership and the share."""
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "a@a.test")
+    share = _as(
+        client,
+        world["admin"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "organization_admins"},
+    )
+    assert share.status_code == status.HTTP_201_CREATED, share.text
+    with db_session_factory() as session:
+        admin = session.scalars(select(User).where(col(User.email) == "a@a.test")).one()
+        membership = session.scalars(
+            select(OrganizationMember).where(col(OrganizationMember.user_id) == admin.id)
+        ).one()
+        return membership.id, uuid.UUID(share.json()["id"])
+
+
+def _set_role(client: TestClient, world: dict[str, str], membership_id: uuid.UUID, role: str) -> None:
+    changed = _as(client, world["operator"], "PATCH", f"/organizations/me/members/{membership_id}", json={"role": role})
+    assert changed.status_code == status.HTTP_200_OK, changed.text
+
+
+def test_losing_the_admin_role_that_was_the_only_way_into_a_workspace_ends_its_shares_for_good(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    membership_id, share_id = _admin_shares_s_one(client, world, db_session_factory)
+
+    # Demoted and promoted back with no read in between, so nothing ends the share lazily.
+    _set_role(client, world, membership_id, "member")
+    with db_session_factory() as session:
+        stored = session.get(TraceContentShare, share_id)
+        assert stored is not None and stored.revoked_at is not None
+    _set_role(client, world, membership_id, "admin")
+
+    tool = _tool_call(_operator_get(client, world, "/traces/s-one").json())
+    assert (tool["content"], tool["content_private"]) == ({}, True)
+
+
+def test_losing_the_admin_role_keeps_shares_in_a_workspace_its_owner_is_a_member_of(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    membership_id, share_id = _admin_shares_s_one(client, world, db_session_factory)
+    with db_session_factory() as session:
+        trace = session.scalars(select(Trace).where(col(Trace.trace_id) == "s-one")).one()
+        admin = session.scalars(select(User).where(col(User.email) == "a@a.test")).one()
+        session.add(WorkspaceMember(workspace_id=trace.workspace_id, user_id=admin.id, role="member", status="active"))
+        session.commit()
+
+    _set_role(client, world, membership_id, "member")
+
+    with db_session_factory() as session:
+        stored = session.get(TraceContentShare, share_id)
+        assert stored is not None and stored.revoked_at is None
+    assert _tool_call(_operator_get(client, world, "/traces/s-one").json())["content"] == {"command": "pytest -x"}
+
+
 def test_a_share_made_after_its_owner_was_removed_mid_request_is_refused(
     client: TestClient,
     world: dict[str, str],
