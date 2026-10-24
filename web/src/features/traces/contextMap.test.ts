@@ -220,6 +220,43 @@ describe("buildContextMap", () => {
     ])
   })
 
+  it("keeps the exact cache counts beside an estimated split without drawing or adding them", () => {
+    const map = buildContextMap({
+      inputTokens: 39_600,
+      cacheReadTokens: 31_200,
+      cacheWriteTokens: 2_400,
+      windowTokens: 200_000,
+      weights: WEIGHTS,
+    })
+
+    expect(map?.cache).toEqual({ read: 31_200, write: 2_400, fresh: 6_000 })
+    expect(map?.blocks.some((block) => block.kind === "cacheRead")).toBe(false)
+    expect(
+      sum(
+        map?.blocks
+          .filter((block) => block.kind !== "free")
+          .map((block) => block.tokens) ?? [],
+      ),
+    ).toBe(39_600)
+  })
+
+  it("has no cache summary without cache use, or where the cache split is the map itself", () => {
+    expect(
+      buildContextMap({ inputTokens: 100, weights: WEIGHTS })?.cache,
+    ).toBeUndefined()
+    expect(
+      buildContextMap({
+        inputTokens: 100,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        weights: WEIGHTS,
+      })?.cache,
+    ).toBeUndefined()
+    expect(
+      buildContextMap({ inputTokens: 100, cacheReadTokens: 60 })?.cache,
+    ).toBeUndefined()
+  })
+
   it("falls back to the cache split when the weights are all zero", () => {
     const empty = {
       ...WEIGHTS,

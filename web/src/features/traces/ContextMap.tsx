@@ -192,6 +192,11 @@ export function ContextMapView({
       </div>
       <Treemap map={map} />
       <div className="flex flex-col gap-1 text-caption">
+        {map.cache ? (
+          <p>
+            {`Exact from the provider: ${formatBlockTokens(map.cache.read)} read from the cache, ${formatBlockTokens(map.cache.write)} written to it, ${formatBlockTokens(map.cache.fresh)} fresh input. These overlap the parts above and are not added to them.`}
+          </p>
+        ) : null}
         {map.isEstimate ? (
           <p>
             <Chip size="sm">Estimated</Chip> Split estimated from request size,
