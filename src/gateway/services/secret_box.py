@@ -76,7 +76,9 @@ def get_secret_box() -> MultiFernet:
     """
     keys = _load_keys()
     if not keys:
-        raise SecretBoxUnavailableError("OTARI_SECRET_KEY is not set; it is required to store provider credentials.")
+        raise SecretBoxUnavailableError(
+            f"OTARI_SECRET_KEY is not set or is empty; it is required to store provider credentials. {_GENERATE_HINT}"
+        )
     return _box_for(tuple(keys))
 
 
@@ -93,18 +95,16 @@ def _box_for(keys: tuple[str, ...]) -> MultiFernet:
 
 
 def validate_secret_key() -> None:
-    """Fail fast when ``OTARI_SECRET_KEY`` is set but empty or not a valid Fernet key.
+    """Fail fast when ``OTARI_SECRET_KEY`` is set but not a valid Fernet key.
 
     Unset is allowed: the provider store is simply unavailable until a key is
-    configured. A set-but-empty or invalid key would otherwise pass startup and
-    only surface later when a credential is stored or read, so validating it
-    here turns a latent runtime failure into a clear startup error. Raises
+    configured. A set-but-invalid key would otherwise pass startup and only
+    surface later when a credential is stored or read, so validating it here
+    turns a latent runtime failure into a clear startup error. Raises
     ``SecretBoxUnavailableError``; the message never carries key material.
     """
-    if otari_env(SECRET_KEY_ENV) is None:
-        return
     if not secret_box_configured():
-        raise SecretBoxUnavailableError(f"OTARI_SECRET_KEY is set but empty; unset it or set a key. {_GENERATE_HINT}")
+        return
     get_secret_box()
 
 

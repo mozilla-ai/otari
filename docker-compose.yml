@@ -83,9 +83,7 @@ services:
       # dashboard. Needed only for the dashboard-first flow (add providers in
       # the browser); unset is fine when providers live in config.yml. Generate
       # one with `docker run --rm mzdotai/otari:latest otari gen-secret-key`.
-      # Passed through without a default, so unset stays unset: an empty value
-      # is refused at startup.
-      - OTARI_SECRET_KEY
+      - OTARI_SECRET_KEY=${OTARI_SECRET_KEY:-}
       # Key that names the provider account a copy of an attached file is in.
       # Required while provider copies are on, which they are by default, and
       # it must differ from OTARI_SECRET_KEY. Generate one with

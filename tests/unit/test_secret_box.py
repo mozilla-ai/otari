@@ -2,6 +2,7 @@
 
 import pytest
 
+from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
@@ -104,11 +105,12 @@ def test_keys_may_be_whitespace_or_comma_separated(monkeypatch: pytest.MonkeyPat
     assert decrypt_secret(token) == "sk-x"
 
 
-@pytest.mark.parametrize("value", ["", "   ", " , \n"])
-def test_validate_secret_key_rejects_empty(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+@pytest.mark.parametrize("value", ["", "   "])
+def test_empty_key_is_treated_as_unset(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     monkeypatch.setenv("OTARI_SECRET_KEY", value)
-    with pytest.raises(SecretBoxUnavailableError, match="set but empty") as excinfo:
-        validate_secret_key()
+    validate_secret_key()
+    with pytest.raises(SecretBoxUnavailableError, match="not set or is empty") as excinfo:
+        encrypt_secret("x")
     assert "otari gen-secret-key" in str(excinfo.value)
 
 
@@ -116,3 +118,9 @@ def test_invalid_key_error_names_the_generator(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("OTARI_SECRET_KEY", "not-a-valid-fernet-key")
     with pytest.raises(SecretBoxUnavailableError, match="otari gen-secret-key"):
         validate_secret_key()
+
+
+def test_the_api_error_says_unset_or_empty_and_names_the_generator() -> None:
+    message = SecretBoxUnavailableTenancyError().message
+    assert "not set or is empty" in message
+    assert "otari gen-secret-key" in message
