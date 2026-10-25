@@ -2586,6 +2586,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     if structured_env_config:
         config_dict.update(structured_env_config)
     _apply_json_env_overrides(config_dict)
+    _warn_about_unknown_keys(config_dict)
 
     # Snapshot which bridged fields the YAML config set, before the env
     # overrides below inject OTARI_ values into the same dict: only YAML-set
@@ -2610,6 +2611,18 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.warn_about_half_configured_web_search()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
+
+
+def _warn_about_unknown_keys(config: dict[str, Any]) -> None:
+    """Warn about top-level config keys no setting reads.
+
+    ``GatewayConfig`` ignores extra input so an unrelated ``OTARI_*`` variable
+    cannot fail startup, which also lets a misspelled or misplaced key pass in
+    silence. Not fatal, so a key a newer version reads does not stop an older one.
+    """
+    unknown = sorted(str(key) for key in config if key not in GatewayConfig.model_fields)
+    if unknown:
+        logger.warning("Ignoring unknown config keys (no setting reads them): %s", ", ".join(unknown))
 
 
 def parse_bool_env(value: str) -> bool:

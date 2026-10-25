@@ -377,14 +377,46 @@ async def _discover_for_provider(
             # wrong api_base) on a backend that *does* support /v1/models is
             # diagnosable, rather than silently masked by the declared fallback.
             logger.debug("list_models failed for instance '%s': %s", provider_name, exc)
-            logger.info(
+            logger.warning(
                 "list_models failed for instance '%s'; using declared models: list (%d)",
                 provider_name,
                 len(declared),
             )
             return provider_name, declared
         raise
+    _warn_about_undiscovered_declared_models(config, provider_name, models)
     return provider_name, list(models)
+
+
+# The undiscovered declared ids last warned about per instance, so a mismatch
+# that persists across refreshes is logged once rather than on every refresh.
+_warned_undiscovered: dict[str, frozenset[str]] = {}
+_LISTED_IDS_SHOWN = 10
+
+
+def _warn_about_undiscovered_declared_models(config: GatewayConfig, instance: str, models: Sequence[Model]) -> None:
+    """Warn when the instance declares a model id its backend does not list.
+
+    A self-hosted server can serve a model under an id other than the one the
+    operator declared and priced (llama-server without ``--alias`` lists the
+    GGUF path), and a request for the declared id then fails upstream.
+    """
+    discovered = {model.id for model in models}
+    missing = frozenset(model.id for model in _declared_models(config, instance) if model.id not in discovered)
+    if missing == _warned_undiscovered.get(instance, frozenset()):
+        return
+    _warned_undiscovered[instance] = missing
+    if missing:
+        listed = sorted(discovered)
+        shown = ", ".join(listed[:_LISTED_IDS_SHOWN]) or "nothing"
+        if len(listed) > _LISTED_IDS_SHOWN:
+            shown += f" and {len(listed) - _LISTED_IDS_SHOWN} more"
+        logger.warning(
+            "Instance '%s' declares models its backend does not list: %s; it lists: %s",
+            instance,
+            ", ".join(sorted(missing)),
+            shown,
+        )
 
 
 # A provider error is echoed into a health or test response, so it is redacted
