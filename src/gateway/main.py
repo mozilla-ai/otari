@@ -22,6 +22,7 @@ import any_search
 from gateway import features
 from gateway.api.deps import (
     build_budget_service,
+    build_deployment_pricing_service,
     build_file_service,
     build_hosted_discovery,
     build_hosted_provider_service,
@@ -722,9 +723,9 @@ def _validate_provider_user_identifier_key(config: GatewayConfig) -> None:
     key = config.provider_user_identifier_key
     if key is None:
         logger.warning(
-            "OTARI_PROVIDER_USER_IDENTIFIER_KEY, which keys the opaque end-user id sent to providers so it cannot "
-            "be matched to a guessed user, is unset; set it to a random value of at least 32 characters (for "
-            "example `openssl rand -hex 32`), different from the master key and OTARI_SECRET_KEY."
+            "OTARI_PROVIDER_USER_IDENTIFIER_KEY is unset, so the end-user identifier sent to providers is an "
+            "unkeyed digest: anyone who knows a workspace id can test a guessed user tag against it. Set the "
+            "key to a random value of at least 32 characters."
         )
         return
     _refuse_shared_secret("OTARI_PROVIDER_USER_IDENTIFIER_KEY", key, config)
@@ -898,7 +899,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # exists yet).
             await load_org_provider_keys_at_startup(session)
             await bootstrap_first_api_key(config, session, app.state.container.resolve(ApiKeyFormatPort, session))
-            await initialize_pricing_from_config(config, session)
+            async with create_unit_of_work() as pricing_uow:
+                await initialize_pricing_from_config(config, session, build_deployment_pricing_service(pricing_uow))
             await initialize_tool_prices_from_config(config, session)
             await warn_if_require_pricing_without_pricing(config, session)
             await warn_if_search_tools_lack_flat_pricing(config, session)

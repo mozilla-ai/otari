@@ -29,14 +29,9 @@ class CredentialMaskingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if getattr(record, "carries_credential", False):
             return True
-        try:
-            message = record.getMessage()
-        except (TypeError, ValueError):
-            # Unformattable either way; the handler reports it, without the raw arguments.
-            record.msg, record.args = mask_credentials(str(record.msg), _LOG_PLACEHOLDER), None
-            return True
+        message = record.getMessage()
         masked = mask_credentials(message, _LOG_PLACEHOLDER)
-        if masked != message and not _mask_args(record) and not _blank_args(record):
+        if masked != message and not _mask_args(record):
             record.msg, record.args = masked, None
         if record.exc_info and record.exc_info[1] is not None:
             text = logging.Formatter().formatException(record.exc_info)
@@ -55,25 +50,6 @@ def _mask_args(record: logging.LogRecord) -> bool:
     if not isinstance(record.msg, str) or not isinstance(record.args, tuple):
         return False
     args = tuple(mask_credentials(arg, _LOG_PLACEHOLDER) if isinstance(arg, str) else arg for arg in record.args)
-    try:
-        message = record.msg % args
-    except (TypeError, ValueError):
-        return False
-    if mask_credentials(message, _LOG_PLACEHOLDER) != message:
-        return False
-    record.args = args
-    return True
-
-
-def _blank_args(record: logging.LogRecord) -> bool:
-    """Replace every string argument with the placeholder, keeping ``record.args`` a tuple.
-
-    The fallback for a credential that spans arguments: a formatter that unpacks
-    ``record.args`` (uvicorn's access log) cannot format a record without them.
-    """
-    if not isinstance(record.msg, str) or not isinstance(record.args, tuple):
-        return False
-    args = tuple(_LOG_PLACEHOLDER if isinstance(arg, str) else arg for arg in record.args)
     try:
         message = record.msg % args
     except (TypeError, ValueError):

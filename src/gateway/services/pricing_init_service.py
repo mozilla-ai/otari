@@ -9,11 +9,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.metered_pricing import quantize_rate
 from gateway.log_config import logger
 from gateway.models.money import to_usd
 from gateway.models.pricing import MODEL_KIND, ModelPricing, PricingKind
 from gateway.repositories.pricing import OrganizationModelPricingRepository
+from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     gateway_tool_pricing_key,
@@ -177,31 +177,26 @@ async def warn_if_router_candidates_lack_pricing(config: GatewayConfig, db: Asyn
             )
 
 
-def _same_rates(
-    row: ModelPricing,
-    rates: tuple[float | None, float | None, float | None, float | None],
-    pricing_tiers: list[dict[str, Any]],
-    unit: str,
-) -> bool:
-    """Whether ``row`` already carries the configured rates, compared as stored."""
-    stored = (
-        row.input_price_per_million,
-        row.output_price_per_million,
-        row.cache_read_price_per_million,
-        row.cache_write_price_per_million,
-    )
-    configured = tuple(None if rate is None else quantize_rate(to_usd(rate)) for rate in rates)
-    return stored == configured and row.unit == unit and (row.pricing_tiers or []) == pricing_tiers
+async def initialize_pricing_from_config(
+    config: GatewayConfig, db: AsyncSession, pricing: DeploymentPricingService
+) -> None:
+    """Initialize model pricing from configuration file.
 
-
-async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession) -> None:
-    """Initialize model pricing from configuration file."""
+    An entry with no ``effective_at`` is dated now, so it adds a version only
+    when its rates differ from the version in force: an unchanged file adds
+    nothing on a restart.
+    """
 
     if not config.pricing:
         logger.debug("No pricing configuration found in config file")
         return
 
     logger.info("Loading pricing configuration for %s model(s)", len(config.pricing))
+
+    undated_keys = [
+        normalize_pricing_key(config, key) for key, entry in config.pricing.items() if not entry.effective_at
+    ]
+    in_force = await pricing.current_versions(undated_keys, datetime.now(UTC)) if undated_keys else {}
 
     # A search or fetch instance's rate written here under its old
     # ``<provider>:<instance>`` key keeps loading, matched whole (the deprecation
@@ -248,49 +243,6 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         pricing_tiers = [tier.model_dump(exclude_none=True) for tier in pricing_config.pricing_tiers]
         effective_at = normalize_effective_at(pricing_config.effective_at)
 
-        existing_pricing = (
-            await db.execute(
-                select(ModelPricing).where(
-                    ModelPricing.kind == MODEL_KIND,
-                    ModelPricing.model_key == model_key,
-                    ModelPricing.effective_at == effective_at,
-                )
-            )
-        ).scalar_one_or_none()
-
-        # With no configured date the version is dated now, so the lookup above
-        # never matches across restarts: compare against the rate in force instead.
-        if existing_pricing is None and pricing_config.effective_at is None:
-            in_force = (
-                await db.execute(
-                    select(ModelPricing)
-                    .where(
-                        ModelPricing.kind == MODEL_KIND,
-                        ModelPricing.model_key == model_key,
-                        ModelPricing.effective_at <= effective_at,
-                    )
-                    .order_by(ModelPricing.effective_at.desc())
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if in_force is not None and _same_rates(
-                in_force,
-                (input_price, output_price, cache_read_price, cache_write_price),
-                pricing_tiers,
-                pricing_config.unit,
-            ):
-                logger.debug("Pricing for '%s' is unchanged; keeping the version in force", model_key)
-                continue
-
-        if existing_pricing:
-            logger.warning(
-                f"Pricing for model '{model_key}' effective {effective_at.isoformat()} already exists in database. "
-                f"Keeping database value (input: ${existing_pricing.input_price_per_million}/M, "
-                f"output: ${existing_pricing.output_price_per_million}/M). "
-                f"To update, use the pricing API or delete the existing entry."
-            )
-            continue
-
         new_pricing = ModelPricing(
             model_key=model_key,
             effective_at=effective_at,
@@ -302,6 +254,30 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
             unit=pricing_config.unit,
             origin="config",
         )
+        current = in_force.get(model_key)
+        if current is not None and DeploymentPricingService.rates_match(current, new_pricing):
+            logger.debug("Pricing for '%s' is unchanged; keeping the version in force", model_key)
+            continue
+
+        existing_pricing = (
+            await db.execute(
+                select(ModelPricing).where(
+                    ModelPricing.kind == MODEL_KIND,
+                    ModelPricing.model_key == model_key,
+                    ModelPricing.effective_at == effective_at,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if existing_pricing:
+            logger.warning(
+                f"Pricing for model '{model_key}' effective {effective_at.isoformat()} already exists in database. "
+                f"Keeping database value (input: ${existing_pricing.input_price_per_million}/M, "
+                f"output: ${existing_pricing.output_price_per_million}/M). "
+                f"To update, use the pricing API or delete the existing entry."
+            )
+            continue
+
         db.add(new_pricing)
         logger.info("Added pricing for '%s': input=$%s/M, output=$%s/M", model_key, input_price, output_price)
 

@@ -11,12 +11,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from gateway.api.deps import build_deployment_pricing_service
 from gateway.api.routes.chat import log_usage
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.settings.pricing import PricingConfig, PricingTierConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.db import ModelPricing, get_db
 from gateway.main import create_app
 from gateway.models.usage import UsageLog
+from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_init_service import initialize_pricing_from_config
 
 from .conftest import build_async_session_override
@@ -692,6 +695,10 @@ def _undated_pricing_config(input_price: float) -> GatewayConfig:
     )
 
 
+def _pricing(db: AsyncSession) -> DeploymentPricingService:
+    return build_deployment_pricing_service(UnitOfWork(db))
+
+
 async def _config_versions(db: AsyncSession) -> list[ModelPricing]:
     result = await db.execute(
         select(ModelPricing).where(ModelPricing.model_key == "openai:gpt-4").order_by(ModelPricing.effective_at)
@@ -704,8 +711,8 @@ async def test_undated_config_pricing_is_seeded_once_across_restarts(async_db: A
     """A pricing entry without effective_at adds no row on a restart that leaves it unchanged."""
     config = _undated_pricing_config(30.0)
 
-    await initialize_pricing_from_config(config, async_db)
-    await initialize_pricing_from_config(config, async_db)
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
 
     versions = await _config_versions(async_db)
     assert len(versions) == 1
@@ -715,8 +722,8 @@ async def test_undated_config_pricing_is_seeded_once_across_restarts(async_db: A
 @pytest.mark.asyncio
 async def test_undated_config_pricing_adds_a_version_when_the_rate_changes(async_db: AsyncSession) -> None:
     """Editing the configured rate still takes effect on the next start."""
-    await initialize_pricing_from_config(_undated_pricing_config(30.0), async_db)
-    await initialize_pricing_from_config(_undated_pricing_config(35.0), async_db)
+    await initialize_pricing_from_config(_undated_pricing_config(30.0), async_db, _pricing(async_db))
+    await initialize_pricing_from_config(_undated_pricing_config(35.0), async_db, _pricing(async_db))
 
     versions = await _config_versions(async_db)
     assert [version.input_price_per_million for version in versions] == [Decimal(30), Decimal(35)]
