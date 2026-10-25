@@ -47,6 +47,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Destroys the record of every break-glass opening, which is otherwise kept for a
+    # year and past the organization's deletion: export it before downgrading past here.
     op.drop_index("ix_trace_break_glass_reads_reader_user_id", table_name="trace_break_glass_reads")
     op.drop_index("ix_trace_break_glass_reads_read_at", table_name="trace_break_glass_reads")
     op.drop_index("ix_trace_break_glass_reads_organization_read_at", table_name="trace_break_glass_reads")

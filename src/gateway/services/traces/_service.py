@@ -70,6 +70,9 @@ MAX_WRITE_AGE = timedelta(hours=24)
 # can still be stored, by an hour that absorbs the clock of the replica deleting it.
 ERASURE_KEPT_FOR = MAX_WRITE_AGE + timedelta(hours=1)
 
+# How many spans' content one block clears when a workspace's content is deleted.
+CLEAR_CONTENT_BATCH = 5_000
+
 # How often one reader's reads through a share are recorded, and how many of a
 # share's newest reads its listing carries.
 READ_RECORDED_EVERY = timedelta(hours=1)
@@ -211,11 +214,20 @@ class TraceService:
     async def forget_content(self, workspace_id: uuid.UUID) -> int:
         """Delete what every span in the workspace was about, keeping the spans; returns how many held content.
 
-        Content captured before the deletion and not stored yet is never stored.
+        Content captured before the deletion and not stored yet is never stored. The
+        generation moves on first, in a block of its own, so every write holding content
+        has committed by the time clearing starts, and none stores any after; clearing
+        then goes a batch per block, so no write waits on the whole workspace's.
         """
         async with self._uow:
             await self._barriers.advance(workspace_id)
-            return await self._spans.clear_content(workspace_id)
+        cleared = 0
+        while True:
+            async with self._uow:
+                batch = await self._spans.clear_content(workspace_id, limit=CLEAR_CONTENT_BATCH)
+            cleared += batch
+            if batch < CLEAR_CONTENT_BATCH:
+                return cleared
 
     async def _seal(self, traces: Sequence[TraceWrite]) -> list[dict[str, str]]:
         """Each write's spans' content, sealed for that write's own rows, by span id.
@@ -414,11 +426,12 @@ class TraceService:
         """
         reader = _owner(scope)
         async with self._uow:
-            row = await self._owned(scope, trace_id, workspace_id)
             # Under the lock that ending the owner's membership takes too, and checked
             # again here, so a share is never made by someone whose membership has
-            # just ended, however long ago this request resolved their scope.
+            # just ended, however long ago this request resolved their scope. Taken
+            # first, so on SQLite the block writes before it reads and waits its turn.
             await self._erasures.lock([str(reader.user_id)])
+            row = await self._owned(scope, trace_id, workspace_id)
             if not await self._owners.is_member(row.workspace_id, row.user_id):
                 raise TraceContentShareForbiddenError
             share = await self._shares.add(
@@ -430,6 +443,16 @@ class TraceService:
                 expires_at=datetime.now(UTC) + timedelta(days=days),
             )
             return _share(share)
+
+    async def end_shares_of(self, user_id: uuid.UUID) -> None:
+        """End every share the person made, in every workspace, as their account is deactivated.
+
+        Under the lock making a share takes, so none is made in between; a reactivated
+        account gets none of them back.
+        """
+        async with self._uow:
+            await self._erasures.lock([str(user_id)])
+            await self._shares.revoke_all_by(user_id, datetime.now(UTC))
 
     async def content_shares(
         self,

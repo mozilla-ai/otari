@@ -108,6 +108,14 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
             .values(revoked_at=now)
         )
 
+    async def revoke_all_by(self, user_id: uuid.UUID, now: datetime) -> None:
+        """Stage the end of every running share this user made, in any workspace, in one statement."""
+        await self.db.execute(
+            update(TraceContentShare)
+            .where(TraceContentShare.shared_by_user_id == user_id, TraceContentShare.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
+
     async def record_read(
         self, share_id: uuid.UUID, reader_user_id: uuid.UUID, reader_email: str, *, unless_since: datetime
     ) -> None:

@@ -77,7 +77,8 @@ export interface paths {
          *     Both fields are optional and omitting one leaves it alone; a body naming
          *     neither is refused rather than treated as a no-op. Deactivating also ends
          *     that account's dashboard sessions immediately, so a lost laptop stops
-         *     working now rather than when its cookie is next presented.
+         *     working now rather than when its cookie is next presented, and ends every
+         *     share of session content it made, which reactivating does not bring back.
          *
          *     Two changes are refused to keep a deployment reachable: an operator may not
          *     deactivate their own account or drop their own operator access, and neither

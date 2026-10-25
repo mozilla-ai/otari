@@ -55,6 +55,12 @@ _PAUSE_AFTER_FAILURE_S = 30.0
 # Well inside the trace writer's batch time limit, so a slow key source leaves
 # the batch time to store its spans without their content.
 _KEY_SOURCE_BUDGET_S = 1.5
+# New data keys one workspace may ask the key source for: a burst, then a steady rate.
+# One export can name a thousand sessions, each needing a key of its own, and the key
+# source's quota is shared by every workspace; past this a workspace's new sessions are
+# stored without content rather than throttling everyone else's capture.
+_NEW_KEYS_BURST = 64.0
+_NEW_KEYS_PER_S = 1.0
 # The session the startup check makes a data key for, which no export can name.
 _CHECK_WORKSPACE = uuid.UUID(int=0)
 _CHECK_SESSION = "otari-startup-check"
@@ -115,6 +121,9 @@ class SpanContent:
         self._write_paused_until = 0.0
         self._read_paused_until = 0.0
         self._sweep: asyncio.TimerHandle | None = None
+        # Per workspace: new keys it may still ask for, and when that was last topped up.
+        self._new_key_allowance: dict[uuid.UUID, tuple[float, float]] = {}
+        self._check_failure: ContentKeyError | None = None
 
     @classmethod
     def disabled(cls) -> "SpanContent":
@@ -125,6 +134,7 @@ class SpanContent:
         """Drop every cached key, as the process stops."""
         self._write_keys.clear()
         self._open_keys.clear()
+        self._new_key_allowance.clear()
         if self._sweep is not None:
             self._sweep.cancel()
             self._sweep = None
@@ -137,15 +147,20 @@ class SpanContent:
 
     @property
     def sealing(self) -> bool:
-        """Whether a key source to seal new content with is configured at all."""
-        return self._keys is not None and self._keys.wrapper is not None
+        """Whether a key source to seal new content with is configured, and has made a key since any failed check."""
+        return self._keys is not None and self._keys.wrapper is not None and self._check_failure is None
 
     async def check(self) -> ContentKeyError | None:
         """Make a data key and open it again, for a session no export names; why that failed, or None.
 
         Run at startup, so a key the deployment cannot use is reported then rather
-        than only as content that is quietly not kept.
+        than only as content that is quietly not kept. Until a key is next made,
+        :attr:`sealing` answers no.
         """
+        self._check_failure = await self._try_keys()
+        return self._check_failure
+
+    async def _try_keys(self) -> ContentKeyError | None:
         keys = self._keys
         if keys is None or keys.wrapper is None:
             return ContentKeyError("unavailable", "no content key is configured")
@@ -178,7 +193,7 @@ class SpanContent:
             return [None] * len(items)
         self._prune()
         wanted = list(dict.fromkeys((item.workspace_id, item.trace_id) for item in items if item.content))
-        held, reason = await self._write_keys_for(keys, wanted) if wanted else ({}, "paused")
+        held, reason, limited = await self._write_keys_for(keys, wanted) if wanted else ({}, "paused", set())
         sealed: list[str | None] = []
         for item in items:
             session = (item.workspace_id, item.trace_id)
@@ -188,7 +203,7 @@ class SpanContent:
                 cached.uses += 1
             if key is None:
                 if item.content:
-                    UNSEALED.labels(reason=reason).inc()
+                    UNSEALED.labels(reason="limited" if session in limited else reason).inc()
                 sealed.append(None)
                 continue
             nonce = os.urandom(_NONCE_BYTES)
@@ -202,8 +217,12 @@ class SpanContent:
 
     async def _write_keys_for(
         self, keys: ContentKeyPort, sessions: Sequence[Session]
-    ) -> tuple[dict[Session, DataKey], str]:
-        """A write key for each session that has one cached or gets one in time, and why the others went without."""
+    ) -> tuple[dict[Session, DataKey], str, set[Session]]:
+        """A write key for each session that has one cached or gets one in time.
+
+        Also why the others went without, and which went without because their
+        workspace had asked for its share of new keys.
+        """
         held: dict[Session, DataKey] = {}
         missing: list[Session] = []
         for session in sessions:
@@ -214,9 +233,13 @@ class SpanContent:
             else:
                 missing.append(session)
         if not missing:
-            return held, "unavailable"
+            return held, "unavailable", set()
         if self._write_paused():
-            return held, "paused"
+            return held, "paused", set()
+        limited = {session for session in missing if not self._allow_new_key(session[0])}
+        missing = [session for session in missing if session not in limited]
+        if not missing:
+            return held, "limited", limited
         tasks = {asyncio.ensure_future(keys.new_data_key(_context(*session))): session for session in missing}
         done, pending = await asyncio.wait(tasks, timeout=_KEY_SOURCE_BUDGET_S)
         for task in pending:
@@ -240,8 +263,21 @@ class SpanContent:
                 )
         if failure is not None:
             self._failed(failure, "sealed")
-            return held, failure.reason
-        return held, "unavailable"
+            return held, failure.reason, limited
+        if held:
+            self._check_failure = None
+        return held, "unavailable", limited
+
+    def _allow_new_key(self, workspace_id: uuid.UUID) -> bool:
+        """Take one of the workspace's new keys, if it has one left."""
+        now = monotonic()
+        level, at = self._new_key_allowance.get(workspace_id, (_NEW_KEYS_BURST, now))
+        level = min(_NEW_KEYS_BURST, level + (now - at) * _NEW_KEYS_PER_S)
+        if level < 1.0:
+            self._new_key_allowance[workspace_id] = (level, now)
+            return False
+        self._new_key_allowance[workspace_id] = (level - 1.0, now)
+        return True
 
     def _cache_write_key(self, session: Session, key: DataKey) -> DataKey:
         self._write_keys[session] = _WriteKey(key, made_at=monotonic())
@@ -339,6 +375,14 @@ class SpanContent:
             del self._write_keys[session]
         for cache_key in [k for k, (_, at) in self._open_keys.items() if now - at >= _KEY_MAX_AGE_S]:
             del self._open_keys[cache_key]
+        # A workspace whose allowance has refilled is as good as one never seen.
+        refilled = [
+            workspace_id
+            for workspace_id, (level, at) in self._new_key_allowance.items()
+            if level + (now - at) * _NEW_KEYS_PER_S >= _NEW_KEYS_BURST
+        ]
+        for workspace_id in refilled:
+            del self._new_key_allowance[workspace_id]
 
     def _schedule_sweep(self) -> None:
         """Wake when the oldest held key reaches its age, so none outlives it by more than a sweep's delay."""

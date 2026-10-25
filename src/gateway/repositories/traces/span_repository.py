@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Collection, Sequence
 from typing import Any, Never
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -21,11 +21,16 @@ class SpanRepository(BaseRepository[TraceSpan, Never, Never]):
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, TraceSpan)
 
-    async def clear_content(self, workspace_id: uuid.UUID) -> int:
-        """Drop the sealed content of every span in the workspace, returning how many held any."""
+    async def clear_content(self, workspace_id: uuid.UUID, *, limit: int) -> int:
+        """Drop the sealed content of up to ``limit`` spans in the workspace, returning how many held any."""
+        held = (
+            select(TraceSpan.workspace_id, TraceSpan.trace_id, TraceSpan.span_id)
+            .where(TraceSpan.workspace_id == workspace_id, TraceSpan.content_sealed.is_not(None))
+            .limit(limit)
+        )
         result = await self.db.execute(
             update(TraceSpan)
-            .where(TraceSpan.workspace_id == workspace_id, TraceSpan.content_sealed.is_not(None))
+            .where(tuple_(TraceSpan.workspace_id, TraceSpan.trace_id, TraceSpan.span_id).in_(held))
             .values(content_sealed=None)
         )
         return int(getattr(result, "rowcount", 0) or 0)

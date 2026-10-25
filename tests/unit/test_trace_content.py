@@ -781,14 +781,75 @@ def test_a_kms_key_with_no_region_is_a_configuration_error(monkeypatch: pytest.M
         AwsKmsContentKeys("alias/otari")
 
 
-async def test_closing_drops_the_keys_and_stops_the_kms_pool(kms: Any) -> None:
+async def test_closing_drops_the_keys_and_stops_the_kms_pool_which_the_next_call_starts_again(kms: Any) -> None:
     source = AwsKmsContentKeys(_new_kms_key(kms), client=kms)
     content = SpanContent(
         ContentKeyring(KMS_WRAPPER, {SECRET_KEY_WRAPPER: SecretKeyContentKeys(), KMS_WRAPPER: source})
     )
     await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
+    pool = source._executor
+    assert pool is not None
 
     content.close()
 
     assert not content._write_keys and content._sweep is None
-    assert source._executor._shutdown
+    assert pool._shutdown and source._executor is None
+    # A process whose app starts again (as the tests' does) keeps sealing.
+    sealed = await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2")
+    assert sealed is not None
+
+
+async def test_a_failed_startup_check_withdraws_content_until_a_key_is_made(key: str) -> None:
+    keys = _FlakyKeys()
+    keys.down = True
+    content = SpanContent(keys)
+
+    assert await content.check() is not None
+    assert content.sealing is False
+
+    keys.down = False
+    sealed = await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
+
+    assert sealed is not None and content.sealing is True
+
+
+# One workspace's new sessions, against a key source every workspace shares.
+
+
+async def test_one_workspace_cannot_ask_for_more_than_its_share_of_new_keys(
+    key: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_content, "_NEW_KEYS_BURST", 3.0)
+    monkeypatch.setattr(_content, "_NEW_KEYS_PER_S", 0.0)
+    keys = _CountingKeys()
+    content = SpanContent(keys)
+    limited_before = _count(UNSEALED, "limited")
+    # One export naming many sessions, each needing a key of its own.
+    items = [SealItem(_CONTENT, _WORKSPACE, f"session-{n}", "tool-1") for n in range(10)]
+
+    sealed = await content.seal_many(items)
+
+    assert keys.made == 3
+    assert sum(value is not None for value in sealed) == 3
+    assert _count(UNSEALED, "limited") - limited_before == 7
+    # Another workspace's sessions are not held back by it.
+    other = await content.seal(_CONTENT, workspace_id=_OTHER_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
+    assert other is not None
+    # Nor are the sessions that already have a key.
+    again = await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id="session-0", span_id="tool-2")
+    assert again is not None and keys.made == 4
+
+
+async def test_a_workspaces_allowance_of_new_keys_refills(key: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = [1_000.0]
+    monkeypatch.setattr(_content, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(_content, "_NEW_KEYS_BURST", 1.0)
+    monkeypatch.setattr(_content, "_NEW_KEYS_PER_S", 1.0)
+    content = SpanContent(_CountingKeys())
+
+    first = await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id="session-1", span_id="tool-1")
+    refused = await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id="session-2", span_id="tool-1")
+    clock[0] += 1.0
+    later = await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id="session-2", span_id="tool-1")
+
+    assert first is not None and refused is None and later is not None

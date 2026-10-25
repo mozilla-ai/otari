@@ -323,7 +323,11 @@ Each opening:
   `GET /api/v1/organizations/me/traces/audit/break-glass` (their own openings),
   and the operator's openings for the operator at `GET /api/v1/traces/audit/break-glass`.
   An owner's reason can name the person under investigation, so the operator's
-  list does not include the owners' openings;
+  list does not include the owners' openings. The organization's list does not
+  include the operator's either, by design: an operator answering a legal request
+  may not be free to tell the organization, so its openings are reviewed on the
+  operator's side, and a deployment that wants them visible to the organization
+  has to disclose them some other way;
 - is logged as an event naming ids only, and, with AWS KMS, opens its data keys
   afresh rather than from the gateway's cache, so each opening is a `Decrypt` in
   CloudTrail naming the session. That outside record covers content sealed under
@@ -354,7 +358,21 @@ At startup, where content is on, the gateway makes one data key and opens it
 again, for a session no export names. A key it cannot use, such as a KMS key
 whose policy or region is wrong, is logged as an error then, rather than only as
 content quietly not kept (`gateway_trace_content_unsealed`). A deployment with
-no key to seal with at all does not offer workspaces content.
+no key to seal with at all does not offer workspaces content, and nor does one
+whose startup check failed, until the key source next makes a key.
+
+A header master key reads no session's content, on any route: it names no person
+a read or a share could be recorded against. Signed in, the operator reads what
+their account may.
+
+Deactivating an account ends every share it made, and reactivating it brings
+none back. While it is deactivated no content is kept for its sessions, and
+nobody reads through its shares.
+
+An account whose address was unproven when someone proved the mailbox (a
+password reset, or a first sign-in with an identity provider) keeps its sessions
+and shares: the person who proved the mailbox is taken to be the account's
+owner, and sees every share it made, ended or running, on each session.
 
 ### How content is sealed
 
@@ -372,6 +390,13 @@ per span. A busy Claude Code session, around 14,000 spans an hour, costs KMS abo
 calls, then none while they are cached. A batch fetches the keys it lacks
 together, so a batch spanning many sessions waits for them at most 1.5 seconds
 in all.
+
+The key source's request quota is shared by every workspace, and one export can
+name many sessions, so each workspace may ask a replica for 64 new data keys at
+once and one a second after that. A session that starts past that allowance is
+stored without its content (`gateway_trace_content_unsealed{reason="limited"}`),
+and its next spans are sealed once the allowance refills. One second is room for
+about 300 sessions active at once in a workspace, on each replica.
 
 A cached data key is dropped five minutes after it was fetched, whether or not
 the gateway is busy, and every cached key is dropped when the gateway stops.
@@ -446,6 +471,21 @@ To rotate:
 - **Moving from `OTARI_SECRET_KEY` to KMS**: switch the backend. New content is
   sealed with KMS, and content sealed before opens with `OTARI_SECRET_KEY` for as
   long as it is set.
+
+### Upgrading a deployment that keeps content
+
+The upgrade turns every workspace's content off. During a rolling deploy,
+replicas still on the earlier version neither read that switch nor take the
+locks that erasure and turning content off rely on, so where
+`trace_content_enabled` is on they go on storing content in every workspace
+until they stop, and the upgraded replicas show it to its owner. Either:
+
+- set `trace_content_enabled` to `false` for the deploy, and back to `true` once
+  no earlier replica runs; or
+- stop every earlier replica before the first upgraded one starts.
+
+Content an earlier replica stored after the upgrade began can be removed with
+`DELETE /api/v1/workspaces/{workspace_id}/trace-content`.
 
 ## Reading traces
 
