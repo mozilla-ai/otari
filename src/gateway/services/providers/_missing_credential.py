@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from gateway.core.error_codes import PRICING_REQUIRED
 from gateway.services.model_access import ModelRefusal
-from gateway.services.pricing_service import no_pricing_error_detail, warn_missing_pricing_rejection
+from gateway.services.pricing_service import no_pricing_error_detail
 from gateway.services.provider_kwargs import (
     MissingCredential,
     missing_declared_credential,
@@ -71,5 +71,4 @@ async def unpriced_model_refusal(
         missing = await missing_provider_credential(config, resolved, hosted=hosted, organization_id=organization_id)
         if missing is not None:
             return ModelRefusal(code=missing.code, status_code=missing.status_code, detail=missing.detail)
-    warn_missing_pricing_rejection(selector)
     return ModelRefusal(code=PRICING_REQUIRED, status_code=402, detail=no_pricing_error_detail(selector))

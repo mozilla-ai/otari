@@ -132,7 +132,6 @@ from gateway.services.pricing_service import (
     pricing_provenance,
     pricing_required_but_missing,
     resolve_model_pricing,
-    warn_missing_pricing_rejection,
 )
 from gateway.services.provider_kwargs import (
     ResolvedProvider,
@@ -555,6 +554,11 @@ async def run_passthrough(
                 hosted=model_provider_port_on(raw_request, db),
                 organization_id=organization_id,
             )
+            if unpriced.code == PRICING_REQUIRED:
+                logger.warning(
+                    "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on",
+                    model,
+                )
             # Record the rejection so dropped traffic is visible in the activity
             # log and countable as an error, rather than only reaching the
             # operator as a user complaint. cost stays null: nothing was spent.
@@ -637,7 +641,10 @@ async def run_passthrough(
                 and config.require_pricing
                 and not can_price(pricing, meter=billing.meter, reports_tokens=billing.reports_tokens)
             ):
-                warn_missing_pricing_rejection(f"{resolved.instance}:{resolved.model}")
+                logger.warning(
+                    "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on",
+                    f"{resolved.instance}:{resolved.model}",
+                )
                 raise await _refuse(
                     reservation,
                     resolved,
@@ -1168,7 +1175,9 @@ async def run_decision(
     ):
         await refund_reservation(db, reservation)
         no_pricing_detail = no_pricing_error_detail(selector)
-        warn_missing_pricing_rejection(selector)
+        logger.warning(
+            "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on", selector
+        )
         await log_rejection(no_pricing_detail, row_model=model, row_provider=provider_name, status_code=402)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,

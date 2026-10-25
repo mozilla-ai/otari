@@ -3008,6 +3008,10 @@ async def resolve_request_context(
             hosted=model_provider,
             organization_id=organization_id,
         )
+        if refusal.code == PRICING_REQUIRED:
+            logger.warning(
+                "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on", model
+            )
         # Record the rejection after the refund, so an operator who flipped
         # require_pricing on can see that live traffic is being dropped.
         await log_gateway_rejection(
