@@ -50,13 +50,18 @@ const MIN_TITLE = { width: 64, height: 36 }
 const MIN_COUNT = { width: 64, height: 56 }
 const MIN_CATEGORY_WIDTH = 150
 const MIN_BORDERED = 4
+const TOOLTIP_CLEARANCE = 8
 
 function mapHeight(width: number): number {
   return Math.round(Math.min(360, Math.max(200, width * 0.5)))
 }
 
+// A block whose title is its category (Free, Tool results) would say it twice.
 function summary(block: ContextBlock): string {
-  return `${block.category} · ${formatBlockTokens(block.tokens)} tokens · ${formatShare(block.share)}`
+  const amount = `${formatBlockTokens(block.tokens)} tokens · ${formatShare(block.share)}`
+  return block.category === block.title
+    ? amount
+    : `${block.category} · ${amount}`
 }
 
 function BlockTooltip({ block }: { block: ContextBlock }) {
@@ -73,6 +78,8 @@ function BlockTooltip({ block }: { block: ContextBlock }) {
 
 function Block({ placed }: { placed: Placed<ContextBlock> }) {
   const block = placed.item
+  // Lift the tooltip clear of the whole map, so it never covers a neighbour's label.
+  const tooltipOffset = Math.round(placed.y + GAP / 2) + TOOLTIP_CLEARANCE
   // A sliver of a block can come out smaller than the gap; a negative size is invalid CSS.
   const width = Math.max(0, placed.width - GAP)
   const height = Math.max(0, placed.height - GAP)
@@ -86,7 +93,12 @@ function Block({ placed }: { placed: Placed<ContextBlock> }) {
   const showCategory =
     showCount && width >= MIN_CATEGORY_WIDTH && block.category !== block.title
   return (
-    <Tooltip content={<BlockTooltip block={block} />} delay={0}>
+    <Tooltip
+      content={<BlockTooltip block={block} />}
+      delay={0}
+      placement="top"
+      offset={tooltipOffset}
+    >
       {(props) => (
         <button
           type="button"
@@ -152,9 +164,12 @@ function Treemap({ map }: { map: ContextMap }) {
 export function ContextMapView({
   map,
   model,
+  outputTokens,
 }: {
   map: ContextMap | undefined
   model?: string
+  /** The completion tokens of the same request, named beside the input the map is of. */
+  outputTokens?: number
 }) {
   if (!map)
     return (
@@ -180,7 +195,7 @@ export function ContextMapView({
         <div className="flex items-center gap-2 text-mono-caption">
           {windowTokens !== undefined ? (
             <>
-              <span>{`${used} / ${formatWindow(windowTokens)}`}</span>
+              <span>{`${used} input / ${formatWindow(windowTokens)}`}</span>
               <Chip
                 tone={map.used / windowTokens >= 0.9 ? "warning" : "neutral"}
               >
@@ -189,14 +204,22 @@ export function ContextMapView({
             </>
           ) : (
             <>
-              <span>{`${used} tokens`}</span>
+              <span>{`${used} input tokens`}</span>
               <Chip>Window unknown</Chip>
             </>
           )}
+          {outputTokens ? (
+            <span className="text-muted">{`+ ${formatBlockTokens(outputTokens)} output`}</span>
+          ) : null}
         </div>
       </div>
       <Treemap map={map} />
       <div className="flex flex-col gap-1 text-caption">
+        {outputTokens ? (
+          <p>
+            {`The map shows input tokens only. The ${formatBlockTokens(outputTokens)} output tokens of this request are counted in the span total, not here.`}
+          </p>
+        ) : null}
         {map.cache ? (
           <p>
             {`Exact from the provider: ${formatBlockTokens(map.cache.read)} read from the cache, ${formatBlockTokens(map.cache.write)} written to it, ${formatBlockTokens(map.cache.fresh)} fresh input. These overlap the parts above and are not added to them.`}
@@ -236,6 +259,7 @@ export function ContextTab({ observation }: { observation: Observation }) {
   return (
     <ContextMapView
       model={observation.model}
+      outputTokens={observation.completionTokens}
       map={buildContextMap({
         inputTokens: observation.promptTokens,
         cacheReadTokens: observation.cachedTokens,

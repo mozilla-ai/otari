@@ -53,6 +53,7 @@ export function Tooltip({
   content,
   placement = "top",
   delay = TOOLTIP_OPEN_DELAY_MS,
+  offset,
   children,
 }: {
   /** The label. A phrase, not a sentence, and never the only place it is said. */
@@ -63,6 +64,8 @@ export function Tooltip({
    * rather than a pointer passing a lane of icons on its way somewhere else.
    */
   delay?: number
+  /** Pixels between the trigger and the tooltip along `placement`, where the default would cover something beside it. */
+  offset?: number
   children: ReactNode | ((props: TooltipTriggerProps) => ReactElement)
 }) {
   return (
@@ -83,7 +86,9 @@ export function Tooltip({
           {children}
         </HeroTooltip.Trigger>
       )}
-      <HeroTooltip.Content placement={placement}>{content}</HeroTooltip.Content>
+      <HeroTooltip.Content placement={placement} offset={offset}>
+        {content}
+      </HeroTooltip.Content>
     </HeroTooltip.Root>
   )
 }

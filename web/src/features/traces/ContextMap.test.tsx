@@ -29,7 +29,7 @@ describe("ContextMapView", () => {
     render(<ContextMapView map={estimated()} model="claude-sonnet-4-5" />)
 
     expect(screen.getByText("claude-sonnet-4-5 [200k]")).toBeInTheDocument()
-    expect(screen.getByText("39.6k / 200k")).toBeInTheDocument()
+    expect(screen.getByText("39.6k input / 200k")).toBeInTheDocument()
     expect(screen.getByText("20%")).toBeInTheDocument()
   })
 
@@ -52,7 +52,7 @@ describe("ContextMapView", () => {
     ])
     expect(
       within(map).getByRole("button", {
-        name: /^Free: Free · 160\.4k tokens · 80\.2%/,
+        name: /^Free: 160\.4k tokens · 80\.2%/,
       }),
     ).toBeInTheDocument()
     expect(
@@ -99,10 +99,43 @@ describe("ContextMapView", () => {
     expect(
       within(tooltip).getByText(/^Tools · 8\.2k tokens · 4\.1%$/),
     ).toBeInTheDocument()
+    expect(tooltip).toHaveTextContent(/^Tool definitionsTools ·/)
     expect(within(tooltip).getByText("12 tool definitions")).toBeInTheDocument()
     expect(
       within(tooltip).getByText("Estimated from request size"),
     ).toBeInTheDocument()
+  })
+
+  it("does not repeat a title that is its own category in the tooltip", async () => {
+    const user = userEvent.setup()
+    render(<ContextMapView map={estimated()} />)
+    const results = screen.getByRole("button", { name: /^Tool results/ })
+
+    for (
+      let step = 0;
+      step < 10 && document.activeElement !== results;
+      step += 1
+    )
+      await user.tab()
+
+    const tooltip = await screen.findByRole("tooltip")
+    expect(within(tooltip).getAllByText(/Tool results/)).toHaveLength(1)
+    expect(
+      within(tooltip).getByText(/^\d+(\.\d)?k tokens · \d+\.\d%$/),
+    ).toBeInTheDocument()
+  })
+
+  it("says the map is of input tokens and names the output beside it", () => {
+    render(<ContextMapView map={estimated()} outputTokens={600} />)
+
+    expect(screen.getByText("+ 600 output")).toBeInTheDocument()
+    expect(screen.getByText(/shows input tokens only/)).toBeInTheDocument()
+  })
+
+  it("names no output when the request has none", () => {
+    render(<ContextMapView map={estimated()} />)
+
+    expect(screen.queryByText(/output/)).not.toBeInTheDocument()
   })
 
   it("says the split is an estimate and the total is not", () => {
@@ -195,7 +228,7 @@ describe("ContextMapView", () => {
     )
 
     expect(screen.getByText("mystery-1")).toBeInTheDocument()
-    expect(screen.getByText("1.5k tokens")).toBeInTheDocument()
+    expect(screen.getByText("1.5k input tokens")).toBeInTheDocument()
     expect(screen.getByText("Window unknown")).toBeInTheDocument()
     expect(
       screen.getByText(/context window of this model is unknown/),
