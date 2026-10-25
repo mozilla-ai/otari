@@ -79,6 +79,9 @@ services:
       # Deployment-wide management credential; overrides `master_key` in
       # config.yml. Unset, Otari generates one on first boot and prints it once.
       - OTARI_MASTER_KEY=${OTARI_MASTER_KEY:-}
+      # Each overrides its config.yml setting when set, and is ignored when empty.
+      - OTARI_DATABASE_URL=${OTARI_DATABASE_URL:-}
+      - OTARI_DEFAULT_PRICING=${OTARI_DEFAULT_PRICING:-}
       # Fernet key that encrypts provider credentials added through the admin
       # dashboard. Needed only for the dashboard-first flow (add providers in
       # the browser); unset is fine when providers live in config.yml. Generate

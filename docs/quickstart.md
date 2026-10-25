@@ -16,34 +16,29 @@ git clone https://github.com/mozilla-ai/otari
 cd otari
 ```
 
-Create `config.yml` with the database, master key and pricing settings:
-
-```yaml
-database_url: "postgresql://otari:otari@postgres:5432/otari"
-master_key: "choose-a-strong-management-key"
-default_pricing: true
-```
-
-This local file is gitignored. For a shared deployment, inject secrets through
-the environment or your platform's secret manager instead.
-
-Providers are added in the dashboard, not in `config.yml`. The `providers:`
-block of `config.yml` is deprecated: Otari copies each entry onto a hosted
-provider at startup, and logs a warning for any entry it cannot copy. Leave
-it out, including when you start from `config.example.yml`.
-
-The dashboard encrypts provider keys with `OTARI_SECRET_KEY`, and provider
-copies of attached files need a pepper of their own. Compose reads both from
-`.env`:
+Compose reads the settings from `.env`. Write it once:
 
 ```bash
-grep -qs OTARI_SECRET_KEY .env || echo "OTARI_SECRET_KEY=$(docker run --rm mzdotai/otari:latest otari gen-secret-key)" >> .env
-grep -qs OTARI_PROVIDER_ACCOUNT_PEPPER .env || echo "OTARI_PROVIDER_ACCOUNT_PEPPER=$(openssl rand -base64 32)" >> .env
+cat >> .env <<EOF
+OTARI_CONFIG_PATH=/dev/null
+OTARI_DATABASE_URL=postgresql://otari:otari@postgres:5432/otari
+OTARI_MASTER_KEY=$(openssl rand -hex 32)
+OTARI_DEFAULT_PRICING=true
+OTARI_SECRET_KEY=$(docker run --rm mzdotai/otari:latest otari gen-secret-key)
+OTARI_PROVIDER_ACCOUNT_PEPPER=$(openssl rand -base64 32)
+EOF
 ```
 
-Otari refuses to start without `OTARI_PROVIDER_ACCOUNT_PEPPER` while provider
-copies are on, which they are by default. See
-[Provider copies](configuration.md#provider-copies).
+- `OTARI_CONFIG_PATH=/dev/null` runs Otari on environment variables alone.
+- `OTARI_MASTER_KEY` signs you in to the dashboard.
+- `OTARI_DEFAULT_PRICING` prices common models from bundled rates.
+- `OTARI_SECRET_KEY` encrypts the provider keys you add in the dashboard.
+- `OTARI_PROVIDER_ACCOUNT_PEPPER` is required while provider copies of
+  attached files are on, which they are by default. See
+  [Provider copies](configuration.md#provider-copies).
+
+`.env` is gitignored. For a shared deployment, inject these through your
+platform's secret manager instead.
 
 ## Start
 
@@ -66,7 +61,7 @@ from the dashboard at `http://localhost:8000/`.
 3. Choose **Add provider**, pick the provider (for example OpenAI), paste its
    API key, and save. Otari lists the models the key reaches.
 4. Check that each model you want to serve is switched on and priced.
-   `default_pricing: true` prices common models from bundled rates. A model
+   `OTARI_DEFAULT_PRICING` prices common models from bundled rates. A model
    nothing prices arrives switched off, and Otari rejects unpriced budgeted
    traffic by default, so set a price on the model's row and switch it on.
 
