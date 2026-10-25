@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.metered_pricing import quantize_rate
 from gateway.log_config import logger
 from gateway.models.money import to_usd
 from gateway.models.pricing import MODEL_KIND, ModelPricing, PricingKind
@@ -176,6 +177,23 @@ async def warn_if_router_candidates_lack_pricing(config: GatewayConfig, db: Asyn
             )
 
 
+def _same_rates(
+    row: ModelPricing,
+    rates: tuple[float | None, float | None, float | None, float | None],
+    pricing_tiers: list[dict[str, Any]],
+    unit: str,
+) -> bool:
+    """Whether ``row`` already carries the configured rates, compared as stored."""
+    stored = (
+        row.input_price_per_million,
+        row.output_price_per_million,
+        row.cache_read_price_per_million,
+        row.cache_write_price_per_million,
+    )
+    configured = tuple(None if rate is None else quantize_rate(to_usd(rate)) for rate in rates)
+    return stored == configured and row.unit == unit and (row.pricing_tiers or []) == pricing_tiers
+
+
 async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession) -> None:
     """Initialize model pricing from configuration file."""
 
@@ -239,6 +257,30 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
                 )
             )
         ).scalar_one_or_none()
+
+        # With no configured date the version is dated now, so the lookup above
+        # never matches across restarts: compare against the rate in force instead.
+        if existing_pricing is None and pricing_config.effective_at is None:
+            in_force = (
+                await db.execute(
+                    select(ModelPricing)
+                    .where(
+                        ModelPricing.kind == MODEL_KIND,
+                        ModelPricing.model_key == model_key,
+                        ModelPricing.effective_at <= effective_at,
+                    )
+                    .order_by(ModelPricing.effective_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if in_force is not None and _same_rates(
+                in_force,
+                (input_price, output_price, cache_read_price, cache_write_price),
+                pricing_tiers,
+                pricing_config.unit,
+            ):
+                logger.debug("Pricing for '%s' is unchanged; keeping the version in force", model_key)
+                continue
 
         if existing_pricing:
             logger.warning(

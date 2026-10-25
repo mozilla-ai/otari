@@ -722,9 +722,9 @@ def _validate_provider_user_identifier_key(config: GatewayConfig) -> None:
     key = config.provider_user_identifier_key
     if key is None:
         logger.warning(
-            "OTARI_PROVIDER_USER_IDENTIFIER_KEY is unset, so the end-user identifier sent to providers is an "
-            "unkeyed digest: anyone who knows a workspace id can test a guessed user tag against it. Set the "
-            "key to a random value of at least 32 characters."
+            "OTARI_PROVIDER_USER_IDENTIFIER_KEY, which keys the opaque end-user id sent to providers so it cannot "
+            "be matched to a guessed user, is unset; set it to a random value of at least 32 characters (for "
+            "example `openssl rand -hex 32`), different from the master key and OTARI_SECRET_KEY."
         )
         return
     _refuse_shared_secret("OTARI_PROVIDER_USER_IDENTIFIER_KEY", key, config)
