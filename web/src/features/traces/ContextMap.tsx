@@ -122,7 +122,7 @@ function Block({
   animateGeometry: boolean
 }) {
   const block = placed.item
-  // Lift the tooltip clear of the whole map, so it never covers a neighbour's label.
+  // Lift the tooltip clear of the whole map, so it never covers a neighbor's label.
   const tooltipOffset = Math.round(placed.y + GAP / 2) + TOOLTIP_CLEARANCE
   // A sliver of a block can come out smaller than the gap; a negative size is invalid CSS.
   const width = Math.max(0, placed.width - GAP)

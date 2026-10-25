@@ -461,7 +461,7 @@ describe("ContextMapView in a narrow panel", () => {
     expect(tools.textContent).not.toContain("Tool definitions")
   })
 
-  it("leaves the list out where every block is labelled", () => {
+  it("leaves the list out where every block is labeled", () => {
     render(
       <ContextMapView
         map={buildContextMap({
