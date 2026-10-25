@@ -6,6 +6,7 @@ beyond the guardrail file itself is the verifier script a verifier gate
 names, and that it stats rather than runs.
 """
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -164,6 +165,58 @@ def test_an_unaccepted_warning_beside_an_accepted_one_still_fails_strict(repo: P
     result = _invoke("--strict")
     assert result.exit_code == 1
     assert "0 error(s), 1 warning(s), 1 accepted." in result.output
+
+
+_DEAD_GLOBS = _HEADER + (
+    "  - id: no-generated-client\n"
+    "    type: path\n"
+    "    runs: [stop.working_tree]\n"
+    "    enforcement: required\n"
+    '    forbidden: ["src/gone.gen.ts"]\n'
+    "  - id: docs-need-build\n"
+    "    type: command_if_changed\n"
+    "    runs: [stop.session]\n"
+    "    enforcement: required\n"
+    '    when_changed: ["lib/**"]\n'
+    '    require: ["make docs"]\n'
+)
+
+
+def _git_init(repo: Path) -> None:
+    (repo / ".git").rmdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+
+
+def test_a_glob_matching_no_file_is_reported_in_a_real_repo(repo: Path) -> None:
+    _git_init(repo)
+    _write(repo, _DEAD_GLOBS)
+    result = _invoke("--strict")
+    assert result.exit_code == 1
+    assert "warning[glob-matches-no-file]: no-generated-client:" in result.output
+    assert "warning[glob-matches-no-file]: docs-need-build:" in result.output
+    assert "0 error(s), 2 warning(s)" in result.output
+
+
+def test_a_glob_matching_a_tracked_or_new_file_is_not_reported(repo: Path) -> None:
+    _git_init(repo)
+    (repo / "src").mkdir()
+    (repo / "src" / "gone.gen.ts").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "add", "src/gone.gen.ts"], cwd=repo, check=True)
+    (repo / "lib").mkdir()
+    (repo / "lib" / "new.py").write_text("x", encoding="utf-8")
+    _write(repo, _DEAD_GLOBS)
+    result = _invoke("--strict")
+    assert result.exit_code == 0, result.output
+    assert "0 error(s), 0 warning(s)" in result.output
+
+
+def test_a_glob_matching_only_an_ignored_file_is_reported(repo: Path) -> None:
+    _git_init(repo)
+    (repo / ".gitignore").write_text("lib/\n", encoding="utf-8")
+    (repo / "lib").mkdir()
+    (repo / "lib" / "built.py").write_text("x", encoding="utf-8")
+    _write(repo, _DEAD_GLOBS)
+    assert "warning[glob-matches-no-file]: docs-need-build:" in _invoke().output
 
 
 def test_the_help_says_how_to_accept_a_warning() -> None:

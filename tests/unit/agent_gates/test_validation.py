@@ -9,7 +9,7 @@ grammar, so both are checkable before the gate ever runs.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import fields
 from typing import Any, get_args
 
@@ -42,6 +42,7 @@ def _validate(
     judge_gate_limit: int = 5,
     verifier_gate_limit: int = 20,
     probe_verifier: Callable[[VerifierGate], str | None] | None = None,
+    repo_files: Sequence[str] | None = None,
 ) -> tuple[Finding, ...]:
     spec = parse_policy(_policy(gates), source="test")
     return validate_policy(
@@ -49,6 +50,7 @@ def _validate(
         judge_gate_limit=judge_gate_limit,
         verifier_gate_limit=verifier_gate_limit,
         probe_verifier=probe_verifier,
+        repo_files=repo_files,
     )
 
 
@@ -496,8 +498,12 @@ _GLOB_GATE_FIELDS: dict[GateType, str] = {
 
 _PROVOKING_GLOBS = {
     WarningCode.BACKSLASH_IN_GLOB: '"docs\\\\x.md"',
+    WarningCode.GLOB_MATCHES_NO_FILE: '"gone.txt"',
     WarningCode.GLOB_MISSES_SHALLOWER_DEPTH: '"**/CLAUDE.md"',
 }
+
+# Only a check that sees the tree can draw these.
+_NEEDS_REPO_FILES = {WarningCode.GLOB_MATCHES_NO_FILE}
 
 _PROVOKING_POLICIES: dict[WarningCode, tuple[str, dict[str, int]]] = {
     WarningCode.JUDGE_GATE_CAP: (_judge_gates(2), {"judge_gate_limit": 1}),
@@ -528,7 +534,7 @@ def test_every_gate_type_a_code_names_draws_that_code(code: WarningCode, gate_ty
     """A gate accepts a warning by its code, so each code must arrive on every gate type it names."""
     if code in _PROVOKING_GLOBS:
         gates = f"  - id: g\n    type: {gate_type}\n" + _GLOB_GATE_FIELDS[gate_type].format(glob=_PROVOKING_GLOBS[code])
-        limits: dict[str, int] = {}
+        limits: dict[str, Any] = {"repo_files": ["other.txt"]} if code in _NEEDS_REPO_FILES else {}
     else:
         gates, limits = _PROVOKING_POLICIES[code]
     assert _codes(gates, **limits) == [code]
@@ -573,6 +579,47 @@ def test_a_gate_accepts_the_warning_it_names_and_no_other() -> None:
         (WarningCode.GLOB_MISSES_SHALLOWER_DEPTH, False),
         (WarningCode.SHELL_WRITE_UNSEEN, True),
     ]
+
+
+def test_a_glob_matching_no_file_warns_once_the_tree_is_known() -> None:
+    gates = _PATH_GATE.format(forbidden='["src/gone.gen.ts"]')
+    (finding,) = _validate(gates, repo_files=["src/a.ts"])
+    assert (finding.severity, finding.code, finding.accepted) == ("warning", WarningCode.GLOB_MATCHES_NO_FILE, False)
+    assert "'src/gone.gen.ts'" in finding.message
+
+
+def test_a_glob_matching_a_file_is_left_alone() -> None:
+    gates = _PATH_GATE.format(forbidden='["src/*.ts", "docs/**"]')
+    assert _validate(gates, repo_files=["src/a.ts", "docs/x/y.md"]) == ()
+
+
+def test_globs_are_not_checked_against_the_tree_without_a_file_list() -> None:
+    assert _validate(_PATH_GATE.format(forbidden='["src/gone.gen.ts"]')) == ()
+
+
+def test_the_shallower_twin_of_a_double_star_glob_is_not_reported_for_matching_nothing() -> None:
+    """The twin exists to cover the root depth, where a repo often has no file."""
+    gates = _PATH_GATE.format(forbidden='[".env", "**/.env"]')
+    assert _validate(gates, repo_files=["web/.env"]) == ()
+
+
+def test_an_empty_tree_is_not_the_same_as_an_unknown_one() -> None:
+    assert _codes(_PATH_GATE.format(forbidden='["a.txt"]'), repo_files=[]) == [WarningCode.GLOB_MATCHES_NO_FILE]
+
+
+def test_one_matching_glob_does_not_excuse_a_sibling_that_matches_nothing() -> None:
+    gates = _PATH_GATE.format(forbidden='["a.txt", "gone.txt"]')
+    (finding,) = _validate(gates, repo_files=["a.txt"])
+    assert "'gone.txt'" in finding.message
+
+
+def test_a_gate_can_accept_a_glob_naming_a_file_that_does_not_exist_yet() -> None:
+    gates = _PATH_GATE.format(forbidden='["dist/app.js"]') + "    accept_warnings: [glob-matches-no-file]\n"
+    assert _accepted(gates, repo_files=["a.txt"]) == [(WarningCode.GLOB_MATCHES_NO_FILE, True)]
+
+
+def test_a_glob_that_is_already_an_error_is_not_also_reported_as_matching_nothing() -> None:
+    assert _codes(_PATH_GATE.format(forbidden='["/CHANGELOG.md"]'), repo_files=["CHANGELOG.md"]) == [None]
 
 
 def _judge_gates_accepting(count: int, accepting: set[int]) -> str:
