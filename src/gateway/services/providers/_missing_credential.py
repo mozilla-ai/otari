@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from gateway.core.error_codes import PRICING_REQUIRED
 from gateway.services.model_access import ModelRefusal
-from gateway.services.pricing_service import no_pricing_error_detail
+from gateway.services.pricing_service import no_pricing_error_detail, warn_missing_pricing_rejection
 from gateway.services.provider_kwargs import (
     MissingCredential,
     missing_declared_credential,
@@ -64,11 +64,13 @@ async def unpriced_model_refusal(
     pricing the model would not make it servable. A plan with several
     candidates keeps the pricing refusal: only a single candidate is offered
     to the hosted port at dispatch, so only its credential can be judged here.
-    ``selector`` is what the caller wrote and is what a pricing refusal names.
+    ``selector`` is what the caller wrote and is what a pricing refusal names,
+    and a pricing refusal is also logged as a warning.
     """
     single_candidate = plan is None or len(plan.attempts) == 1
     if resolved is not None and single_candidate:
         missing = await missing_provider_credential(config, resolved, hosted=hosted, organization_id=organization_id)
         if missing is not None:
             return ModelRefusal(code=missing.code, status_code=missing.status_code, detail=missing.detail)
+    warn_missing_pricing_rejection(selector)
     return ModelRefusal(code=PRICING_REQUIRED, status_code=402, detail=no_pricing_error_detail(selector))

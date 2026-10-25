@@ -1051,6 +1051,13 @@ def pricing_required_but_missing(pricing: ModelPricing | None, *, require_pricin
     return pricing is None and require_pricing
 
 
+def warn_missing_pricing_rejection(model: str) -> None:
+    """Log a ``require_pricing`` 402 on the console, which an operator watching the logs reads first."""
+    logger.warning(
+        "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on", model
+    )
+
+
 def no_pricing_error_detail(model: str) -> str:
     """The 402 body for an unpriced model: what went wrong, why, and how to fix it.
 

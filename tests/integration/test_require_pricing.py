@@ -7,6 +7,7 @@ rejections (404/403) take precedence over the missing-pricing rejection (402),
 i.e. budget is reserved before the pricing gate is enforced.
 """
 
+import logging
 from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -17,6 +18,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.log_config import logger as gateway_logger
 from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, OrganizationModelPricing
 
 from .conftest import build_test_client
@@ -135,6 +137,45 @@ def test_passthrough_missing_pricing_rejection_is_recorded_too(strict_pricing_cl
     # use for every row they write (see the chat assertion above).
     assert rows[0]["model"] == "text-embedding-3-small"
     assert rows[0]["provider"] == "openai"
+
+
+@pytest.mark.parametrize(
+    ("path", "body", "model"),
+    [
+        ("chat/completions", {"model": "openai:gpt-4o", "messages": _MESSAGES}, "openai:gpt-4o"),
+        (
+            "embeddings",
+            {"model": "openai:text-embedding-3-small", "input": "hi"},
+            "openai:text-embedding-3-small",
+        ),
+    ],
+)
+def test_missing_pricing_rejection_is_logged_as_a_warning(
+    strict_pricing_client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    path: str,
+    body: dict[str, Any],
+    model: str,
+) -> None:
+    """A 402 for missing pricing reaches the console too, not only the usage log.
+
+    An operator reading the container's stdout otherwise sees nothing while
+    every request is refused.
+    """
+    c = strict_pricing_client
+    c.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        resp = c.post(f"{API_ROOT}/{path}", json={**body, "user": "priced-user"}, headers=_MASTER_HEADER)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+    assert resp.status_code == 402
+
+    [record] = [r for r in caplog.records if "require_pricing" in r.getMessage()]
+    assert record.levelno == logging.WARNING
+    assert f"'{model}'" in record.getMessage()
+    assert "test-master-key" not in caplog.text
 
 
 @pytest.mark.parametrize(

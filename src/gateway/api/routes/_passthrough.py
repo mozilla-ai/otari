@@ -132,6 +132,7 @@ from gateway.services.pricing_service import (
     pricing_provenance,
     pricing_required_but_missing,
     resolve_model_pricing,
+    warn_missing_pricing_rejection,
 )
 from gateway.services.provider_kwargs import (
     ResolvedProvider,
@@ -636,6 +637,7 @@ async def run_passthrough(
                 and config.require_pricing
                 and not can_price(pricing, meter=billing.meter, reports_tokens=billing.reports_tokens)
             ):
+                warn_missing_pricing_rejection(f"{resolved.instance}:{resolved.model}")
                 raise await _refuse(
                     reservation,
                     resolved,
@@ -1166,6 +1168,7 @@ async def run_decision(
     ):
         await refund_reservation(db, reservation)
         no_pricing_detail = no_pricing_error_detail(selector)
+        warn_missing_pricing_rejection(selector)
         await log_rejection(no_pricing_detail, row_model=model, row_provider=provider_name, status_code=402)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
