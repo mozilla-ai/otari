@@ -16,7 +16,8 @@ too, one of the deployment's **hosted providers** does.
 A hosted provider is a credential the deployment's operator configures for the
 deployment to serve requests on, under a name that defaults to its provider
 (a name of its own, such as `openai-eu`, lets two endpoints of one provider
-be served side by side), with a roster of the models offered on it and the rate
+be served side by side; `otari` and `hosted` are reserved, so an `otari`
+provider always takes a name of its own), with a roster of the models offered on it and the rate
 each is charged at on the deployment price list. A hosted provider named after its
 provider is reached by a bare `provider:model` request once neither a
 `providers:` instance nor the organization's own key answers. One with a name
