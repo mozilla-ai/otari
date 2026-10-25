@@ -13,9 +13,9 @@ services:
       - "${OTARI_PORT:-8000}:8000"
     volumes:
       # Default `./config.yml` matches the existing operator convention
-      # (gitignored, operator-supplied). The demo overrides this via
-      # OTARI_CONFIG_PATH=./demo/code-exec/otari-config.yml so the
-      # repo's main config.yml stays untouched.
+      # (gitignored, operator-supplied). OTARI_CONFIG_PATH overrides it: the
+      # demo sets ./demo/code-exec/otari-config.yml, and docs/quickstart.md
+      # sets /dev/null to run on environment variables alone.
       - ${OTARI_CONFIG_PATH:-./config.yml}:/app/config.yml
       - ./service_account.json:/app/service_account.json
     command: ["otari", "serve", "--config", "/app/config.yml"]

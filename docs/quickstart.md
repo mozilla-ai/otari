@@ -16,10 +16,12 @@ git clone https://github.com/mozilla-ai/otari
 cd otari
 ```
 
-Compose reads the settings from `.env`. Write it once:
+Compose reads the settings from `.env`. Create it once; the guard leaves an
+existing `.env` alone, because a second `OTARI_SECRET_KEY` would make stored
+provider keys undecryptable:
 
 ```bash
-cat >> .env <<EOF
+test -e .env || cat > .env <<EOF
 OTARI_CONFIG_PATH=/dev/null
 OTARI_DATABASE_URL=postgresql://otari:otari@postgres:5432/otari
 OTARI_MASTER_KEY=$(openssl rand -hex 32)
