@@ -1627,7 +1627,7 @@ def get_workspace_web_search_policies(
 
 
 def build_deployment_pricing_service(uow: UnitOfWork) -> DeploymentPricingService:
-    """Build the deployment price list's service on ``uow``."""
+    """The one assembly, shared by the hosted-providers service and startup's config pricing seed."""
     return DeploymentPricingService(
         uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
     )
