@@ -4,6 +4,7 @@ import {
   buildContextMap,
   type ContextWeights,
   contextWeightsOf,
+  fitBlockLabel,
   formatBlockTokens,
   formatShare,
   formatUsedPercent,
@@ -368,5 +369,40 @@ describe("buildContextMap", () => {
     expect(
       buildContextMap({ inputTokens: 0, windowTokens: 200_000 }),
     ).toBeUndefined()
+  })
+})
+
+describe("fitBlockLabel", () => {
+  const block = {
+    title: "Tool results",
+    category: "Tool results",
+    tokens: 28_700,
+  }
+  const tools = { title: "Tool definitions", category: "Tools", tokens: 8_200 }
+
+  it("writes nothing on a box too short for a line", () => {
+    expect(fitBlockLabel(block, 300, 30).text).toBeUndefined()
+  })
+
+  it("falls back to the category when the title does not fit", () => {
+    expect(fitBlockLabel(tools, 90, 80).text).toBe("Tools")
+    expect(fitBlockLabel(tools, 200, 80).text).toBe("Tool definitions")
+  })
+
+  it("writes nothing when not even the category fits", () => {
+    expect(fitBlockLabel(tools, 40, 80).text).toBeUndefined()
+  })
+
+  it("is complete only with a count, and adds the category on a wide block", () => {
+    expect(fitBlockLabel(tools, 200, 40)).toMatchObject({
+      count: false,
+      isComplete: false,
+    })
+    expect(fitBlockLabel(tools, 200, 80)).toMatchObject({
+      count: true,
+      category: true,
+      isComplete: true,
+    })
+    expect(fitBlockLabel(block, 200, 80).category).toBe(false)
   })
 })

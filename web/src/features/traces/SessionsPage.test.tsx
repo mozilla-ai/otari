@@ -305,7 +305,7 @@ describe("SessionsPage", () => {
     expect(
       within(peek).getByText("claude-sonnet-4-5 [200k]"),
     ).toBeInTheDocument()
-    expect(within(peek).getByText("39.6k / 200k")).toBeInTheDocument()
+    expect(within(peek).getByText("39.6k input / 200k")).toBeInTheDocument()
     expect(within(peek).getByText("20%")).toBeInTheDocument()
     expect(
       within(peek).getByRole("button", {
@@ -341,7 +341,7 @@ describe("SessionsPage", () => {
       await within(peek).findByRole("button", { name: "Context" }),
     )
 
-    expect(within(peek).getByText("1.0k tokens")).toBeInTheDocument()
+    expect(within(peek).getByText("1.0k input tokens")).toBeInTheDocument()
     expect(within(peek).getByText("Window unknown")).toBeInTheDocument()
     expect(
       within(peek).getByRole("button", { name: /^Cache read:/ }),

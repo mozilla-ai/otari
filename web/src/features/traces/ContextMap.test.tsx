@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ContextMapView } from "./ContextMap"
 import { buildContextMap, type ContextWeights } from "./contextMap"
@@ -320,5 +320,75 @@ describe("ContextMapView", () => {
     const free = screen.getByRole("button", { name: /^Free/ })
     expect(free).toHaveClass("p-2")
     expect(free).toHaveClass("border")
+  })
+})
+
+function measuredAt(width: number) {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        this.callback(
+          [{ target, contentRect: { width } } as ResizeObserverEntry],
+          this as unknown as ResizeObserver,
+        )
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+  )
+}
+
+describe("ContextMapView in a narrow panel", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("lists every part with its tokens and share when a block cannot show its label", () => {
+    measuredAt(280)
+    render(<ContextMapView map={estimated()} />)
+
+    const list = screen.getByRole("list", { name: "Context parts" })
+    const items = within(list).getAllByRole("listitem")
+    expect(items.map((item) => item.textContent)).toEqual([
+      "System prompt2.7k · 1.4%",
+      "Tool definitions8.2k · 4.1%",
+      "Files2.7k · 1.4%",
+      "Messages5.5k · 2.7%",
+      "Tool results20.5k · 10.2%",
+      "Free160.4k · 80.2%",
+    ])
+  })
+
+  it("writes the shorter category on a block too narrow for its title", () => {
+    measuredAt(280)
+    render(<ContextMapView map={estimated()} />)
+    const map = screen.getByRole("group", { name: "Context window map" })
+
+    const tools = within(map).getByRole("button", { name: /^Tool definitions/ })
+    expect(tools.textContent).not.toContain("Tool definitions")
+  })
+
+  it("leaves the list out where every block is labelled", () => {
+    render(
+      <ContextMapView
+        map={buildContextMap({
+          inputTokens: 100_000,
+          windowTokens: 200_000,
+          weights: {
+            ...WEIGHTS,
+            system: 25_000,
+            tools: 25_000,
+            user: 25_000,
+            assistant: 25_000,
+            toolResults: 0,
+            files: 0,
+          },
+        })}
+      />,
+    )
+
+    expect(
+      screen.queryByRole("list", { name: "Context parts" }),
+    ).not.toBeInTheDocument()
   })
 })

@@ -149,6 +149,20 @@ export const Narrow: Story = {
   ),
 }
 
+/** The normal trace side panel, about 280px: parts too small to be written on their blocks are listed beneath the map. */
+export const SidePanel: Story = {
+  args: {
+    map: buildContextMap(ESTIMATED),
+    model: "claude-sonnet-4-5",
+    outputTokens: 600,
+  },
+  render: (args) => (
+    <div className="w-[280px]">
+      <ContextMapView {...args} />
+    </div>
+  ),
+}
+
 /** Both themes at once, each scoped by `data-theme`, so one screenshot shows both. */
 export const LightAndDark: Story = {
   args: { map: buildContextMap(ESTIMATED), model: "claude-sonnet-4-5" },

@@ -8,6 +8,7 @@ import {
   type ContextBlock,
   type ContextKind,
   type ContextMap,
+  fitBlockLabel,
   formatBlockTokens,
   formatShare,
   formatUsedPercent,
@@ -45,10 +46,6 @@ const MOTION =
 const GAP = 2
 // The container's own border, top and bottom, which the blocks do not lie on.
 const BORDER = 2
-// What a block needs before each line of text is worth drawing, in px.
-const MIN_TITLE = { width: 64, height: 36 }
-const MIN_COUNT = { width: 64, height: 56 }
-const MIN_CATEGORY_WIDTH = 150
 const MIN_BORDERED = 4
 const TOOLTIP_CLEARANCE = 8
 
@@ -76,6 +73,37 @@ function BlockTooltip({ block }: { block: ContextBlock }) {
   )
 }
 
+function Swatch({ block }: { block: ContextBlock }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`size-3 shrink-0 border ${block.kind === "free" ? HATCH : `${TONE[block.kind]} ${TILE}`}`}
+    />
+  )
+}
+
+/** The parts by name, for a map too small to write them all on its blocks. */
+function Legend({ blocks }: { blocks: ContextBlock[] }) {
+  return (
+    <ul
+      aria-label="Context parts"
+      className="m-0 flex list-none flex-col gap-1 p-0 text-caption"
+    >
+      {blocks.map((block) => (
+        <li key={block.kind} className="flex items-center gap-2">
+          <Swatch block={block} />
+          <span className="min-w-0 flex-1 truncate text-heading">
+            {block.title}
+          </span>
+          <span className="shrink-0 text-mono-caption">
+            {`${formatBlockTokens(block.tokens)} · ${formatShare(block.share)}`}
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function Block({ placed }: { placed: Placed<ContextBlock> }) {
   const block = placed.item
   // Lift the tooltip clear of the whole map, so it never covers a neighbour's label.
@@ -84,14 +112,11 @@ function Block({ placed }: { placed: Placed<ContextBlock> }) {
   const width = Math.max(0, placed.width - GAP)
   const height = Math.max(0, placed.height - GAP)
   const isFree = block.kind === "free"
-  const showTitle = width >= MIN_TITLE.width && height >= MIN_TITLE.height
-  const showCount =
-    showTitle && width >= MIN_COUNT.width && height >= MIN_COUNT.height
+  const label = fitBlockLabel(block, width, height)
+  const showTitle = label.text !== undefined
   // Padding and a border cannot be drawn inside a box smaller than they are, so a
   // block gets them only where it has the room, and never grows past its share.
   const hasRoom = width >= MIN_BORDERED && height >= MIN_BORDERED
-  const showCategory =
-    showCount && width >= MIN_CATEGORY_WIDTH && block.category !== block.title
   return (
     <Tooltip
       content={<BlockTooltip block={block} />}
@@ -113,12 +138,12 @@ function Block({ placed }: { placed: Placed<ContextBlock> }) {
           className={`absolute flex min-w-0 cursor-default flex-col items-start justify-start gap-0.5 overflow-hidden text-left ${hasRoom ? "border" : ""} ${showTitle ? "p-2" : ""} hover:z-10 hover:-translate-y-px hover:shadow-elevation-md focus-visible:z-10 focus-visible:-translate-y-px focus-visible:shadow-elevation-md ${MOTION} ${isFree ? HATCH : `${TONE[block.kind]} ${TILE}`}`}
         >
           {showTitle ? (
-            <span className="w-full truncate text-heading">{block.title}</span>
+            <span className="w-full truncate text-heading">{label.text}</span>
           ) : null}
-          {showCount ? (
+          {label.count ? (
             <span className="w-full truncate text-caption">
               {formatBlockTokens(block.tokens)}
-              {showCategory ? ` · ${block.category}` : ""}
+              {label.category ? ` · ${block.category}` : ""}
             </span>
           ) : null}
         </button>
@@ -146,17 +171,28 @@ function Treemap({ map }: { map: ContextMap }) {
     map.blocks.map((block) => ({ ...block, value: block.tokens })),
     { x: 0, y: 0, width, height: height - BORDER },
   ).map(({ item, ...rect }) => ({ ...rect, item: item as ContextBlock }))
+  // Once measured, a block with no room for its name and count sends every part to a list below.
+  const needsLegend =
+    width > 0 &&
+    placed.some(
+      ({ item, width: w, height: h }) =>
+        !fitBlockLabel(item, Math.max(0, w - GAP), Math.max(0, h - GAP))
+          .isComplete,
+    )
   return (
-    <fieldset
-      ref={measure}
-      aria-label="Context window map"
-      style={{ height }}
-      className="relative m-0 min-w-0 w-full overflow-hidden border border-border bg-surface-subtle"
-    >
-      {placed.map((block) => (
-        <Block key={block.item.kind} placed={block} />
-      ))}
-    </fieldset>
+    <div className="flex flex-col gap-3">
+      <fieldset
+        ref={measure}
+        aria-label="Context window map"
+        style={{ height }}
+        className="relative m-0 min-w-0 w-full overflow-hidden border border-border bg-surface-subtle"
+      >
+        {placed.map((block) => (
+          <Block key={block.item.kind} placed={block} />
+        ))}
+      </fieldset>
+      {needsLegend ? <Legend blocks={map.blocks} /> : null}
+    </div>
   )
 }
 

@@ -47,7 +47,7 @@ export interface ContextBlock {
 
 export interface ContextMap {
   blocks: ContextBlock[]
-  /** The request's input tokens, all of it. */
+  /** The request's input tokens, all of it (output tokens are not part of the window it measures against). */
   used: number
   windowTokens?: number
   /** The split is an estimate (the total never is). */
@@ -324,5 +324,51 @@ export function buildContextMap(
     isEstimate: fromWeights !== undefined,
     cache: fromWeights !== undefined ? exactCache(input, used) : undefined,
     isOverWindow,
+  }
+}
+
+// Approximate width of one character of the block text, and the padding around it, in px.
+const CHAR_WIDTH = 7
+const TEXT_PADDING = 16
+const MIN_LABEL_HEIGHT = 36
+const MIN_COUNT_HEIGHT = 56
+const MIN_CATEGORY_WIDTH = 150
+
+/** What a block of this size can write on itself. */
+export interface BlockLabel {
+  /** The title, or the shorter category when the title does not fit, or nothing. */
+  text?: string
+  count: boolean
+  /** The category appended to the count, on a block wide enough that has one to add. */
+  category: boolean
+  /** Name and count are both drawn, so the block needs no entry in a legend. */
+  isComplete: boolean
+}
+
+function fits(text: string, width: number): boolean {
+  return text.length * CHAR_WIDTH + TEXT_PADDING <= width
+}
+
+/** Fits the longest wording of a block's name that its box can hold, in px. */
+export function fitBlockLabel(
+  block: Pick<ContextBlock, "title" | "category" | "tokens">,
+  width: number,
+  height: number,
+): BlockLabel {
+  const none = { count: false, category: false, isComplete: false }
+  if (height < MIN_LABEL_HEIGHT) return none
+  const text = [block.title, block.category].find((name) => fits(name, width))
+  if (text === undefined) return none
+  const count =
+    height >= MIN_COUNT_HEIGHT && fits(formatBlockTokens(block.tokens), width)
+  return {
+    text,
+    count,
+    category:
+      count &&
+      text === block.title &&
+      block.category !== block.title &&
+      width >= MIN_CATEGORY_WIDTH,
+    isComplete: count,
   }
 }
