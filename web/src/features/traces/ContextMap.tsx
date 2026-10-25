@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { type CSSProperties, useCallback, useState } from "react"
 
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { Chip } from "@/design-system/indicators/Chip"
@@ -39,9 +39,19 @@ const HATCH =
 
 // Blocks move and resize as the window or the split changes. Geometry is what
 // animates here (a treemap's layout is its data), so this is the documented
-// exception to transform-and-opacity, bounded to a handful of elements.
+// exception to transform-and-opacity, bounded to a handful of elements. The
+// properties run in the order the list names them: geometry settles in 200ms,
+// the hover lift and border answer in 120ms, and opacity (the entrance) takes
+// the block's stagger delay, the one delay in the list. Transitions rather than
+// keyframes, so a block retargets from where it is when the data changes again.
 const MOTION =
-  "transition-[left,top,width,height,transform,box-shadow,border-color,opacity] duration-300 ease-out starting:opacity-0 motion-reduce:transition-none"
+  "transition-[left,top,width,height,transform,box-shadow,border-color,opacity] [transition-duration:200ms,200ms,200ms,200ms,120ms,120ms,120ms,200ms] [transition-delay:0ms,0ms,0ms,0ms,0ms,0ms,0ms,calc(var(--enter-index)*40ms)] ease-out-fluid starting:opacity-0 motion-reduce:transition-none"
+// Hover lifts a block a pixel; a keyboard arriving at one does not move it, only
+// outlines it. `hover:` is already gated on a hover-capable pointer.
+const LIFT =
+  "hover:z-10 hover:-translate-y-px hover:shadow-elevation-md motion-reduce:hover:translate-y-0 focus-visible:z-10"
+// The most blocks that wait their turn to enter, so a long split is not slow.
+const MAX_STAGGER = 6
 
 const GAP = 2
 // The container's own border, top and bottom, which the blocks do not lie on.
@@ -87,7 +97,7 @@ function Legend({ blocks }: { blocks: ContextBlock[] }) {
   return (
     <ul
       aria-label="Context parts"
-      className="m-0 flex list-none flex-col gap-1 p-0 text-caption"
+      className="transition-opacity duration-200 ease-out-fluid starting:opacity-0 motion-reduce:transition-none m-0 flex list-none flex-col gap-1 p-0 text-caption"
     >
       {blocks.map((block) => (
         <li key={block.kind} className="flex items-center gap-2">
@@ -104,7 +114,13 @@ function Legend({ blocks }: { blocks: ContextBlock[] }) {
   )
 }
 
-function Block({ placed }: { placed: Placed<ContextBlock> }) {
+function Block({
+  placed,
+  index,
+}: {
+  placed: Placed<ContextBlock>
+  index: number
+}) {
   const block = placed.item
   // Lift the tooltip clear of the whole map, so it never covers a neighbour's label.
   const tooltipOffset = Math.round(placed.y + GAP / 2) + TOOLTIP_CLEARANCE
@@ -129,13 +145,16 @@ function Block({ placed }: { placed: Placed<ContextBlock> }) {
           type="button"
           {...props}
           aria-label={`${block.title}: ${summary(block)}. ${block.notes.join(". ")}`}
-          style={{
-            left: placed.x + GAP / 2,
-            top: placed.y + GAP / 2,
-            width,
-            height,
-          }}
-          className={`absolute flex min-w-0 cursor-default flex-col items-start justify-start gap-0.5 overflow-hidden text-left ${hasRoom ? "border" : ""} ${showTitle ? "p-2" : ""} hover:z-10 hover:-translate-y-px hover:shadow-elevation-md focus-visible:z-10 focus-visible:-translate-y-px focus-visible:shadow-elevation-md ${MOTION} ${isFree ? HATCH : `${TONE[block.kind]} ${TILE}`}`}
+          style={
+            {
+              left: placed.x + GAP / 2,
+              top: placed.y + GAP / 2,
+              width,
+              height,
+              "--enter-index": Math.min(index, MAX_STAGGER),
+            } as CSSProperties
+          }
+          className={`absolute flex min-w-0 cursor-default flex-col items-start justify-start gap-0.5 overflow-hidden text-left ${hasRoom ? "border" : ""} ${showTitle ? "p-2" : ""} ${LIFT} ${MOTION} ${isFree ? HATCH : `${TONE[block.kind]} ${TILE}`}`}
         >
           {showTitle ? (
             <span className="w-full truncate text-heading">{label.text}</span>
@@ -187,8 +206,8 @@ function Treemap({ map }: { map: ContextMap }) {
         style={{ height }}
         className="relative m-0 min-w-0 w-full overflow-hidden border border-border bg-surface-subtle"
       >
-        {placed.map((block) => (
-          <Block key={block.item.kind} placed={block} />
+        {placed.map((block, index) => (
+          <Block key={block.item.kind} placed={block} index={index} />
         ))}
       </fieldset>
       {needsLegend ? <Legend blocks={map.blocks} /> : null}

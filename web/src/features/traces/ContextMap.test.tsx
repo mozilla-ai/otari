@@ -323,6 +323,41 @@ describe("ContextMapView", () => {
   })
 })
 
+describe("ContextMapView motion", () => {
+  it("guards every block's transition for reduced motion and lifts it only on hover", () => {
+    render(<ContextMapView map={estimated()} />)
+
+    for (const block of screen.getAllByRole("button")) {
+      expect(block).toHaveClass("motion-reduce:transition-none")
+      expect(block).toHaveClass("motion-reduce:hover:translate-y-0")
+      expect(block).toHaveClass("hover:-translate-y-px")
+      expect(block).not.toHaveClass("focus-visible:-translate-y-px")
+      expect(block.className).not.toMatch(/(^|\s)ease-(in|out|linear)(\s|$)/)
+    }
+  })
+
+  it("staggers the entrance by block, capped, and delays nothing but opacity", () => {
+    render(<ContextMapView map={estimated()} />)
+
+    const indexes = screen
+      .getAllByRole("button")
+      .map((block) => block.style.getPropertyValue("--enter-index"))
+    expect(indexes).toEqual(["0", "1", "2", "3", "4", "5"])
+    expect(screen.getAllByRole("button")[0].className).toContain(
+      "[transition-delay:0ms,0ms,0ms,0ms,0ms,0ms,0ms,calc(var(--enter-index)*40ms)]",
+    )
+  })
+
+  it("fades the legend in and guards that for reduced motion", () => {
+    measuredAt(280)
+    render(<ContextMapView map={estimated()} />)
+
+    const list = screen.getByRole("list", { name: "Context parts" })
+    expect(list).toHaveClass("starting:opacity-0")
+    expect(list).toHaveClass("motion-reduce:transition-none")
+  })
+})
+
 function measuredAt(width: number) {
   vi.stubGlobal(
     "ResizeObserver",
