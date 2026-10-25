@@ -12,7 +12,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 from any_llm import LLMProvider
 
-from gateway.core.config import PROVIDER_TYPE_ALIASES, RESERVED_PROVIDER_INSTANCE_NAMES, hosted_provider_name_problem
+from gateway.core.config import PROVIDER_TYPE_ALIASES, hosted_provider_name_problem
 from gateway.exceptions.providers_exceptions import (
     HostedProviderApiBaseMaskedError,
     HostedProviderInvalidNameError,
@@ -140,10 +140,6 @@ def normalize_name(name: str | None, implementation: str) -> str:
             reserved, or is another implementation's.
     """
     name = implementation if name is None else name
-    # Checked before the implementation's own name is let through: ``otari`` is
-    # both an implementation and the prefix tool prices are stored under.
-    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
-        raise HostedProviderInvalidNameError(name, "is reserved; give the provider a name of its own")
     if (problem := hosted_provider_name_problem(name, implementation)) is not None:
         raise HostedProviderInvalidNameError(name, problem)
     return name

@@ -288,12 +288,15 @@ def _is_keyless(provider_type: str) -> bool:
 def hosted_provider_name_problem(name: str, provider: str) -> str | None:
     """Why ``name`` cannot name a hosted provider served by ``provider``, or None when it can.
 
-    The implementation's own name always may. Any other is the prefix of a
+    A reserved name never may, even an implementation's own (``otari``). The
+    implementation's own name otherwise always may. Any other is the prefix of a
     ``name:model`` selector, so it cannot hold the separators a selector splits
     on, and it follows the instance-name rules. Another implementation's name
     is refused, because a request for ``anthropic:...`` must not reach an
     OpenAI endpoint.
     """
+    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
+        return "is reserved; give the provider a name of its own"
     if name == provider:
         return None
     if not name or name != name.strip():
@@ -302,8 +305,6 @@ def hosted_provider_name_problem(name: str, provider: str) -> str | None:
         return "must be at most 64 characters"
     if ":" in name or "/" in name:
         return "must not contain ':' or '/'"
-    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
-        return "is reserved"
     if name in {member.value for member in LLMProvider} or name in PROVIDER_TYPE_ALIASES:
         return "names another provider"
     return None
