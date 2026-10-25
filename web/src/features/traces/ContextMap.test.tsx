@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react"
+import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -324,37 +324,95 @@ describe("ContextMapView", () => {
 })
 
 describe("ContextMapView motion", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
   it("guards every block's transition for reduced motion and lifts it only on hover", () => {
     render(<ContextMapView map={estimated()} />)
 
     for (const block of screen.getAllByRole("button")) {
-      expect(block).toHaveClass("motion-reduce:transition-none")
+      expect(block).toHaveClass("motion-reduce:transition-none!")
       expect(block).toHaveClass("motion-reduce:hover:translate-y-0")
       expect(block).toHaveClass("hover:-translate-y-px")
       expect(block).not.toHaveClass("focus-visible:-translate-y-px")
-      expect(block.className).not.toMatch(/(^|\s)ease-(in|out|linear)(\s|$)/)
+      expect(block).not.toHaveClass("hover:shadow-elevation-md")
+      expect(block.style.transitionProperty).not.toContain("box-shadow")
     }
   })
 
-  it("staggers the entrance by block, capped, and delays nothing but opacity", () => {
+  it("staggers the entrance in 30ms steps, delaying nothing but opacity, within 300ms", () => {
     render(<ContextMapView map={estimated()} />)
 
-    const indexes = screen
+    const delays = screen
       .getAllByRole("button")
-      .map((block) => block.style.getPropertyValue("--enter-index"))
-    expect(indexes).toEqual(["0", "1", "2", "3", "4", "5"])
-    expect(screen.getAllByRole("button")[0].className).toContain(
-      "[transition-delay:0ms,0ms,0ms,0ms,0ms,0ms,0ms,calc(var(--enter-index)*40ms)]",
+      .map((block) => block.style.transitionDelay.split(", ").at(-1))
+    expect(delays).toEqual(["0ms", "30ms", "60ms", "90ms", "120ms", "120ms"])
+    const first = screen.getAllByRole("button")[0]
+    const rows = first.style.transitionProperty.split(", ")
+    expect(rows.at(-1)).toBe("opacity")
+    expect(first.style.transitionDelay.split(", ").slice(0, -1)).toEqual(
+      rows.slice(0, -1).map(() => "0ms"),
     )
   })
 
-  it("fades the legend in and guards that for reduced motion", () => {
+  it("keeps a duration and a curve for each property it transitions", () => {
+    render(<ContextMapView map={estimated()} />)
+    const style = screen.getAllByRole("button")[0].style
+
+    const count = style.transitionProperty.split(", ").length
+    expect(style.transitionDuration.split(", ")).toHaveLength(count)
+    expect(style.transitionDelay.split(", ")).toHaveLength(count)
+    expect(style.transitionProperty).toContain("width")
+  })
+
+  it("snaps the blocks while the container is resized and animates them again when the data changes", () => {
+    let fire: (width: number) => void = () => {}
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(private readonly callback: ResizeObserverCallback) {}
+        observe(target: Element) {
+          fire = (width) =>
+            act(() =>
+              this.callback(
+                [{ target, contentRect: { width } } as ResizeObserverEntry],
+                this as unknown as ResizeObserver,
+              ),
+            )
+          fire(800)
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+    const { rerender } = render(<ContextMapView map={estimated()} />)
+    const geometry = () =>
+      screen
+        .getAllByRole("button")[0]
+        .style.transitionProperty.includes("width")
+
+    expect(geometry()).toBe(true)
+    fire(500)
+    expect(geometry()).toBe(false)
+    fire(520)
+    expect(geometry()).toBe(false)
+    rerender(
+      <ContextMapView
+        map={buildContextMap({
+          inputTokens: 60_000,
+          windowTokens: 200_000,
+          weights: WEIGHTS,
+        })}
+      />,
+    )
+    expect(geometry()).toBe(true)
+  })
+
+  it("does not fade the legend in", () => {
     measuredAt(280)
     render(<ContextMapView map={estimated()} />)
 
     const list = screen.getByRole("list", { name: "Context parts" })
-    expect(list).toHaveClass("starting:opacity-0")
-    expect(list).toHaveClass("motion-reduce:transition-none")
+    expect(list.className).not.toMatch(/transition|starting:/)
   })
 })
 

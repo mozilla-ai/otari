@@ -372,3 +372,59 @@ export function fitBlockLabel(
     isComplete: count,
   }
 }
+
+/** The curve a block moves on: it is on screen already, so it eases out of one place and into the next. */
+const MOVE_EASE = "cubic-bezier(0.77, 0, 0.175, 1)"
+// The repo's `ease-out-fluid` token (cubic-bezier(0.32, 0.72, 0, 1)), for what enters.
+const ENTER_EASE = "cubic-bezier(0.32, 0.72, 0, 1)"
+const STAGGER_MS = 30
+/** The most blocks that wait their turn to enter, so the last one settles within 300ms. */
+export const MAX_STAGGER = 4
+
+interface Motion {
+  property: string
+  duration: number
+  ease: string
+  delay: number
+}
+
+/**
+ * The transition of one block, a row per property so a duration cannot drift
+ * from the property it belongs to. Geometry is listed only while the data is
+ * changing: while the container is resized the blocks follow it at once.
+ */
+export function blockTransition(
+  index: number,
+  animateGeometry: boolean,
+): {
+  transitionProperty: string
+  transitionDuration: string
+  transitionTimingFunction: string
+  transitionDelay: string
+} {
+  const move = { duration: 200, ease: MOVE_EASE, delay: 0 }
+  const rows: Motion[] = [
+    ...(animateGeometry
+      ? (["left", "top", "width", "height"] as const).map((property) => ({
+          property,
+          ...move,
+        }))
+      : []),
+    { property: "transform", duration: 120, ease: ENTER_EASE, delay: 0 },
+    { property: "border-color", duration: 120, ease: "ease", delay: 0 },
+    {
+      property: "opacity",
+      duration: 180,
+      ease: ENTER_EASE,
+      delay: Math.min(index, MAX_STAGGER) * STAGGER_MS,
+    },
+  ]
+  const join = (pick: (row: Motion) => string | number, unit = "") =>
+    rows.map((row) => `${pick(row)}${unit}`).join(", ")
+  return {
+    transitionProperty: join((row) => row.property),
+    transitionDuration: join((row) => row.duration, "ms"),
+    transitionTimingFunction: join((row) => row.ease),
+    transitionDelay: join((row) => row.delay, "ms"),
+  }
+}

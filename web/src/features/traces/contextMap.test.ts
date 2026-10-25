@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  blockTransition,
   buildContextMap,
   type ContextWeights,
   contextWeightsOf,
@@ -404,5 +405,26 @@ describe("fitBlockLabel", () => {
       isComplete: true,
     })
     expect(fitBlockLabel(block, 200, 80).category).toBe(false)
+  })
+})
+
+describe("blockTransition", () => {
+  it("lists a duration, curve and delay for every property, geometry only when asked", () => {
+    for (const animateGeometry of [true, false]) {
+      const t = blockTransition(2, animateGeometry)
+      const count = t.transitionProperty.split(", ").length
+      expect(t.transitionDuration.split(", ")).toHaveLength(count)
+      expect(t.transitionDelay.split(", ")).toHaveLength(count)
+      expect(t.transitionProperty.includes("width")).toBe(animateGeometry)
+      expect(t.transitionProperty).not.toContain("box-shadow")
+    }
+  })
+
+  it("moves on ease-in-out and enters on the drawer ease-out, the stagger capped", () => {
+    const t = blockTransition(40, true)
+    const curves = t.transitionTimingFunction.split("), ")
+    expect(curves[0]).toContain("0.77, 0, 0.175, 1")
+    expect(curves.at(-1)).toContain("0.32, 0.72, 0, 1")
+    expect(t.transitionDelay.split(", ").at(-1)).toBe("120ms")
   })
 })

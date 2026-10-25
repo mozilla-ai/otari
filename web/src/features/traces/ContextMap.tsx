@@ -1,9 +1,10 @@
-import { type CSSProperties, useCallback, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { Chip } from "@/design-system/indicators/Chip"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 import {
+  blockTransition,
   buildContextMap,
   type ContextBlock,
   type ContextKind,
@@ -39,19 +40,16 @@ const HATCH =
 
 // Blocks move and resize as the window or the split changes. Geometry is what
 // animates here (a treemap's layout is its data), so this is the documented
-// exception to transform-and-opacity, bounded to a handful of elements. The
-// properties run in the order the list names them: geometry settles in 200ms,
-// the hover lift and border answer in 120ms, and opacity (the entrance) takes
-// the block's stagger delay, the one delay in the list. Transitions rather than
-// keyframes, so a block retargets from where it is when the data changes again.
-const MOTION =
-  "transition-[left,top,width,height,transform,box-shadow,border-color,opacity] [transition-duration:200ms,200ms,200ms,200ms,120ms,120ms,120ms,200ms] [transition-delay:0ms,0ms,0ms,0ms,0ms,0ms,0ms,calc(var(--enter-index)*40ms)] ease-out-fluid starting:opacity-0 motion-reduce:transition-none"
+// exception to transform-and-opacity, bounded to a handful of elements, and
+// only while the data changes: a container being resized snaps. The timings are
+// inline (`blockTransition`), so the reduced-motion guard has to be important
+// to win over them. Transitions rather than keyframes, so a block retargets from
+// where it is when the data changes again.
+const MOTION = "starting:opacity-0 motion-reduce:transition-none!"
 // Hover lifts a block a pixel; a keyboard arriving at one does not move it, only
 // outlines it. `hover:` is already gated on a hover-capable pointer.
 const LIFT =
-  "hover:z-10 hover:-translate-y-px hover:shadow-elevation-md motion-reduce:hover:translate-y-0 focus-visible:z-10"
-// The most blocks that wait their turn to enter, so a long split is not slow.
-const MAX_STAGGER = 6
+  "hover:z-10 hover:-translate-y-px motion-reduce:hover:translate-y-0 focus-visible:z-10"
 
 const GAP = 2
 // The container's own border, top and bottom, which the blocks do not lie on.
@@ -97,7 +95,7 @@ function Legend({ blocks }: { blocks: ContextBlock[] }) {
   return (
     <ul
       aria-label="Context parts"
-      className="transition-opacity duration-200 ease-out-fluid starting:opacity-0 motion-reduce:transition-none m-0 flex list-none flex-col gap-1 p-0 text-caption"
+      className="m-0 flex list-none flex-col gap-1 p-0 text-caption"
     >
       {blocks.map((block) => (
         <li key={block.kind} className="flex items-center gap-2">
@@ -117,9 +115,11 @@ function Legend({ blocks }: { blocks: ContextBlock[] }) {
 function Block({
   placed,
   index,
+  animateGeometry,
 }: {
   placed: Placed<ContextBlock>
   index: number
+  animateGeometry: boolean
 }) {
   const block = placed.item
   // Lift the tooltip clear of the whole map, so it never covers a neighbour's label.
@@ -145,15 +145,13 @@ function Block({
           type="button"
           {...props}
           aria-label={`${block.title}: ${summary(block)}. ${block.notes.join(". ")}`}
-          style={
-            {
-              left: placed.x + GAP / 2,
-              top: placed.y + GAP / 2,
-              width,
-              height,
-              "--enter-index": Math.min(index, MAX_STAGGER),
-            } as CSSProperties
-          }
+          style={{
+            left: placed.x + GAP / 2,
+            top: placed.y + GAP / 2,
+            width,
+            height,
+            ...blockTransition(index, animateGeometry),
+          }}
           className={`absolute flex min-w-0 cursor-default flex-col items-start justify-start gap-0.5 overflow-hidden text-left ${hasRoom ? "border" : ""} ${showTitle ? "p-2" : ""} ${LIFT} ${MOTION} ${isFree ? HATCH : `${TONE[block.kind]} ${TILE}`}`}
         >
           {showTitle ? (
@@ -175,12 +173,28 @@ function Treemap({ map }: { map: ContextMap }) {
   // Blocks wait for the first measurement, so they animate in at their real
   // size instead of shrinking from a guess.
   const [width, setWidth] = useState(0)
+  // A new width snaps the blocks; the next change of the data animates them again.
+  const [isResizing, setIsResizing] = useState(false)
+  const signature = `${map.windowTokens}|${map.blocks.map((block) => `${block.kind}:${block.tokens}`).join()}`
+  const [seen, setSeen] = useState(signature)
+  if (seen !== signature) {
+    setSeen(signature)
+    setIsResizing(false)
+  }
+  const measured = useRef(0)
   const measure = useCallback((element: HTMLFieldSetElement | null) => {
     if (!element) return
-    setWidth(Math.floor(element.clientWidth))
+    measured.current = Math.floor(element.clientWidth)
+    setWidth(measured.current)
     const observer = new ResizeObserver(([entry]) => {
-      if (entry && entry.contentRect.width > 0)
-        setWidth(Math.floor(entry.contentRect.width))
+      if (entry && entry.contentRect.width > 0) {
+        const next = Math.floor(entry.contentRect.width)
+        if (next !== measured.current) {
+          if (measured.current !== 0) setIsResizing(true)
+          measured.current = next
+          setWidth(next)
+        }
+      }
     })
     observer.observe(element)
     return () => observer.disconnect()
@@ -207,7 +221,12 @@ function Treemap({ map }: { map: ContextMap }) {
         className="relative m-0 min-w-0 w-full overflow-hidden border border-border bg-surface-subtle"
       >
         {placed.map((block, index) => (
-          <Block key={block.item.kind} placed={block} index={index} />
+          <Block
+            key={block.item.kind}
+            placed={block}
+            index={index}
+            animateGeometry={!isResizing}
+          />
         ))}
       </fieldset>
       {needsLegend ? <Legend blocks={map.blocks} /> : null}
