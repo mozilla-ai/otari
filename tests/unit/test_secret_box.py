@@ -102,3 +102,17 @@ def test_keys_may_be_whitespace_or_comma_separated(monkeypatch: pytest.MonkeyPat
     token = encrypt_secret("sk-x")
     monkeypatch.setenv("OTARI_SECRET_KEY", f"  {b}\n{a} ")
     assert decrypt_secret(token) == "sk-x"
+
+
+@pytest.mark.parametrize("value", ["", "   ", " , \n"])
+def test_validate_secret_key_rejects_empty(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", value)
+    with pytest.raises(SecretBoxUnavailableError, match="set but empty") as excinfo:
+        validate_secret_key()
+    assert "otari gen-secret-key" in str(excinfo.value)
+
+
+def test_invalid_key_error_names_the_generator(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", "not-a-valid-fernet-key")
+    with pytest.raises(SecretBoxUnavailableError, match="otari gen-secret-key"):
+        validate_secret_key()

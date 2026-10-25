@@ -597,7 +597,8 @@ Hosted providers page or through `/api/v1/hosted-providers` (see
 fields). Config-file entries remain read-only in the dashboard.
 
 Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
-`otari gen-secret-key`. To rotate it, configure the new key before the old key,
+`otari gen-secret-key`. Leave it unset to run without stored credentials; an
+empty or invalid value stops the gateway at startup. To rotate it, configure the new key before the old key,
 run the hosted provider and search-tool re-encryption endpoints
 (`POST /api/v1/hosted-providers/reencrypt` and
 `POST /api/v1/search-tools/reencrypt`), then remove the old key. Losing every

@@ -21,6 +21,7 @@ from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from gateway.core.env import otari_env
 
 SECRET_KEY_ENV = "SECRET_KEY"
+_GENERATE_HINT = "Generate one with `otari gen-secret-key`."
 
 
 class SecretBoxUnavailableError(RuntimeError):
@@ -87,21 +88,23 @@ def _box_for(keys: tuple[str, ...]) -> MultiFernet:
         fernets = [Fernet(key.encode()) for key in keys]
     except (ValueError, TypeError):
         # Do not include the offending value: it is key material.
-        raise SecretBoxUnavailableError("OTARI_SECRET_KEY is not a valid Fernet key.") from None
+        raise SecretBoxUnavailableError(f"OTARI_SECRET_KEY is not a valid Fernet key. {_GENERATE_HINT}") from None
     return MultiFernet(fernets)
 
 
 def validate_secret_key() -> None:
-    """Fail fast when ``OTARI_SECRET_KEY`` is set but not a valid Fernet key.
+    """Fail fast when ``OTARI_SECRET_KEY`` is set but empty or not a valid Fernet key.
 
     Unset is allowed: the provider store is simply unavailable until a key is
-    configured. A set-but-invalid key would otherwise pass startup and only
-    surface later when a credential is stored or read, so validating it here
-    turns a latent runtime failure into a clear startup error. Raises
+    configured. A set-but-empty or invalid key would otherwise pass startup and
+    only surface later when a credential is stored or read, so validating it
+    here turns a latent runtime failure into a clear startup error. Raises
     ``SecretBoxUnavailableError``; the message never carries key material.
     """
-    if not secret_box_configured():
+    if otari_env(SECRET_KEY_ENV) is None:
         return
+    if not secret_box_configured():
+        raise SecretBoxUnavailableError(f"OTARI_SECRET_KEY is set but empty; unset it or set a key. {_GENERATE_HINT}")
     get_secret_box()
 
 
