@@ -2100,15 +2100,18 @@ class OrganizationService:
         invitation, membership = await self._open_invitation(invitation_id, organization)
         # Only a membership still waiting on this invitation is suspended with it.
         # One that became active another way keeps its access; the stale link goes.
-        if membership is not None and membership.status == "invited":
+        suspended = membership if membership is not None and membership.status == "invited" else None
+        if suspended is not None:
             await self._validate_membership_update(
                 actor_membership=actor_membership,
-                target_membership=membership,
+                target_membership=suspended,
                 update_data={"status": "suspended"},
                 organization_id=organization.id,
             )
-            await self._update_membership(membership, {"status": "suspended"})
+        # Before the suspension, whose listener step commits what is staged so far.
         await self.invitations.update_status(invitation, {"status": "cancelled"})
+        if suspended is not None:
+            await self._update_membership(suspended, {"status": "suspended"})
         await self.db.commit()
 
     async def _open_invitation(
@@ -2229,6 +2232,9 @@ class OrganizationService:
         management role takes the ones the role alone reached, those the person
         is not an active member of. Skipped where this service was built without
         a listener or a Unit of Work, which the read-only builds are.
+
+        Its block is the outermost one on these paths, so it commits what the caller
+        staged before it: a caller stages every other write first and calls this last.
         """
         if self._membership_listener is None or self._uow is None:
             return

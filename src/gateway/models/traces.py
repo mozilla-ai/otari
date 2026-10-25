@@ -151,8 +151,9 @@ class TraceSpan(Base):
     otel_span_id: Mapped[str | None] = mapped_column(String(TRACE_ID_MAX_LENGTH))
     # Allowlisted, typed attributes only (``types.traces.SPAN_ATTRIBUTES``).
     attributes: Mapped[dict[str, Any] | None] = mapped_column(JSON)
-    # What the span was about, sealed with OTARI_SECRET_KEY by ``services.traces._content``;
-    # kept only where the deployment keeps content (``trace_content_enabled``).
+    # What the span was about, sealed under a per-session data key by ``services.traces._content``
+    # (or, from before data keys, a bare OTARI_SECRET_KEY token); kept only where both the
+    # deployment and the workspace keep content.
     content_sealed: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
@@ -284,6 +285,7 @@ class TraceBreakGlassRead(Base):
         CheckConstraint("kind IN ('organization', 'deployment')", name="check_trace_break_glass_reads_kind"),
         Index("ix_trace_break_glass_reads_organization_read_at", "organization_id", "read_at"),
         Index("ix_trace_break_glass_reads_read_at", "read_at"),
+        Index("ix_trace_break_glass_reads_session_user_id", "session_user_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)

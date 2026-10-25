@@ -63,6 +63,7 @@ from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
     OrgProviderKeyRepository,
+    UserRepository,
     WorkspaceMemberRepository,
     WorkspaceRepository,
     ids_in_organization,
@@ -1800,7 +1801,8 @@ async def is_workspace_member(
 
     An active owner or admin of its organization, or an active member of the
     workspace itself: the people whose own sessions' content they can read. A
-    billing user no dashboard identity stands behind is none of them.
+    billing user no dashboard identity stands behind is none of them, and nor is
+    a deactivated account, which can no longer sign in to read or manage it.
     """
     if user_id is None:
         return False
@@ -1815,6 +1817,9 @@ async def is_workspace_member(
     if workspace is None:
         workspace = await WorkspaceRepository(db).get(workspace_id)
     if workspace is None:
+        return False
+    account = await UserRepository(db).get(person)
+    if account is None or not account.is_active:
         return False
     membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
         workspace.organization_id, person
@@ -1919,12 +1924,19 @@ async def get_visible_workspaces(
 VisibleWorkspacesDep = Annotated[VisibleWorkspaces, Depends(get_visible_workspaces)]
 
 
-async def get_organization_trace_scope(visible: VisibleWorkspacesDep, identity: CurrentIdentity) -> TraceScope:
+async def get_organization_trace_scope(
+    visible: VisibleWorkspacesDep,
+    identity: CurrentIdentity,
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+) -> TraceScope:
     """The workspaces of their active organization this caller may read traces in.
 
     Each reads their own sessions' content. An owner or admin also reads what a
-    session's user shared with the organization's admins.
+    session's user shared with the organization's admins. A header master key
+    names no person to record a read against, so it reads no content at all.
     """
+    if session_identity is None:
+        return TraceScope.workspaces(visible.workspace_ids)
     return TraceScope.workspaces(
         visible.workspace_ids,
         reader=ContentReader(
@@ -2180,12 +2192,16 @@ async def get_deployment_trace_scope(
     organization_id: CallerOrganization,
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
 ) -> TraceScope:
     """The scope of the deployment-operator trace routes: every workspace in the caller's organization.
 
     The operator reads a session's content where it is their own, where its user shared it with the
     operator, and, as an owner or admin of that organization too, where its user shared it with them.
+    A header master key names no person to record a read against, so it reads no content at all.
     """
+    if session_identity is None:
+        return TraceScope.workspaces(workspace_ids)
     audiences: set[ShareAudience] = {"deployment_operator"}
     membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
         organization_id, identity.id

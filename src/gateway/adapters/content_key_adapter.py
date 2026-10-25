@@ -139,7 +139,7 @@ class AwsKmsContentKeys(DataKeySource):
                 )
                 raise ValueError(msg) from None
         self._client = client
-        self._executor = ThreadPoolExecutor(max_workers=_KMS_CONCURRENCY, thread_name_prefix="otari-kms")
+        self._executor: ThreadPoolExecutor | None = None
         self._key_id = key_id
         self._key_ids = (key_id, *previous_key_ids)
         self._allowed_arns: frozenset[str] | None = None
@@ -168,8 +168,10 @@ class AwsKmsContentKeys(DataKeySource):
         return plaintext
 
     def close(self) -> None:
-        """Stop the pool KMS calls run on, abandoning any still queued."""
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        """Stop the pool KMS calls run on, abandoning any still queued; the next call starts a new one."""
+        executor, self._executor = self._executor, None
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     async def _allowed(self) -> frozenset[str]:
         """The key ARNs content may open under, resolved from the configured ids every few minutes.
@@ -205,6 +207,8 @@ class AwsKmsContentKeys(DataKeySource):
         try:
             # A pool of its own, as wide as the client's connections, so a batch fetching many
             # sessions' keys is not queued behind the process's small default executor.
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(max_workers=_KMS_CONCURRENCY, thread_name_prefix="otari-kms")
             return await asyncio.get_running_loop().run_in_executor(self._executor, partial(method, **kwargs))
         except ClientError as exc:
             code = str(exc.response.get("Error", {}).get("Code", "unknown"))
