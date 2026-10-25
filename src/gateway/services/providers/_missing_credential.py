@@ -64,8 +64,7 @@ async def unpriced_model_refusal(
     pricing the model would not make it servable. A plan with several
     candidates keeps the pricing refusal: only a single candidate is offered
     to the hosted port at dispatch, so only its credential can be judged here.
-    ``selector`` is what the caller wrote and is what a pricing refusal names,
-    and a pricing refusal is also logged as a warning.
+    ``selector`` is what the caller wrote and is what a pricing refusal names.
     """
     single_candidate = plan is None or len(plan.attempts) == 1
     if resolved is not None and single_candidate:
