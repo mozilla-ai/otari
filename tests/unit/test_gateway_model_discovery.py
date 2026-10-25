@@ -486,22 +486,6 @@ class TestDiscoverAllModels:
         assert result[0][1].id == "m1"
 
     @pytest.mark.asyncio
-    async def test_declared_fallback_is_logged_as_a_warning(self, caplog: pytest.LogCaptureFixture) -> None:
-        config = self._make_config(
-            providers={"edge": {"provider_type": "openai", "api_base": "http://edge/v1", "models": ["m1"]}}
-        )
-
-        with (
-            caplog.at_level(logging.WARNING),
-            patch("gateway.services.model_discovery_service.get_model_cache", return_value=ModelCache()),
-            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
-            patch("gateway.services.model_discovery_service.alist_models", side_effect=ConnectionError("loading")),
-        ):
-            await discover_all_models(config)
-
-        assert "list_models failed for instance 'edge'; using declared models" in caplog.text
-
-    @pytest.mark.asyncio
     async def test_a_declared_model_the_backend_does_not_list_is_warned_once(
         self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
     ) -> None:

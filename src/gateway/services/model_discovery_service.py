@@ -51,6 +51,10 @@ from gateway.services.url_safety import UnsafeURLError, validate_provider_api_ba
 # applies to direct callers (e.g. tests).
 _ADHOC_DISCOVERY_TIMEOUT_SECONDS = 10.0
 
+# The undiscovered declared ids last warned about per instance, so a mismatch
+# that persists across refreshes is logged once rather than on every refresh.
+_warned_undiscovered: dict[str, frozenset[str]] = {}
+
 
 @dataclass
 class ProviderDiscovery:
@@ -377,7 +381,7 @@ async def _discover_for_provider(
             # wrong api_base) on a backend that *does* support /v1/models is
             # diagnosable, rather than silently masked by the declared fallback.
             logger.debug("list_models failed for instance '%s': %s", provider_name, exc)
-            logger.warning(
+            logger.info(
                 "list_models failed for instance '%s'; using declared models: list (%d)",
                 provider_name,
                 len(declared),
@@ -386,12 +390,6 @@ async def _discover_for_provider(
         raise
     _warn_about_undiscovered_declared_models(config, provider_name, models)
     return provider_name, list(models)
-
-
-# The undiscovered declared ids last warned about per instance, so a mismatch
-# that persists across refreshes is logged once rather than on every refresh.
-_warned_undiscovered: dict[str, frozenset[str]] = {}
-_LISTED_IDS_SHOWN = 10
 
 
 def _warn_about_undiscovered_declared_models(config: GatewayConfig, instance: str, models: Sequence[Model]) -> None:
@@ -407,15 +405,11 @@ def _warn_about_undiscovered_declared_models(config: GatewayConfig, instance: st
         return
     _warned_undiscovered[instance] = missing
     if missing:
-        listed = sorted(discovered)
-        shown = ", ".join(listed[:_LISTED_IDS_SHOWN]) or "nothing"
-        if len(listed) > _LISTED_IDS_SHOWN:
-            shown += f" and {len(listed) - _LISTED_IDS_SHOWN} more"
         logger.warning(
             "Instance '%s' declares models its backend does not list: %s; it lists: %s",
             instance,
             ", ".join(sorted(missing)),
-            shown,
+            ", ".join(sorted(discovered)) or "nothing",
         )
 
 
