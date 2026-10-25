@@ -89,6 +89,22 @@ export const Placements: Story = {
   ),
 }
 
+/** `offset` lifts the tooltip further from its trigger, clear of a neighbour it would otherwise cover. */
+export const Offset: Story = {
+  render: () => (
+    <div className="flex gap-1 p-16">
+      <Tooltip content="Lifted clear of its neighbour" offset={40}>
+        <IconButton label="Explain offset">
+          <FiInfo aria-hidden className="size-4" />
+        </IconButton>
+      </Tooltip>
+      <IconButton label="Neighbour">
+        <FiTrash2 aria-hidden className="size-4" />
+      </IconButton>
+    </div>
+  ),
+}
+
 /**
  * The other honest use: an exact value beside a rounded one. The relative time
  * is on screen for everyone; the tooltip only adds precision.
