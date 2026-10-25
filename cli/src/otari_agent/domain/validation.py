@@ -279,8 +279,12 @@ def validate_policy(
     judge_gate_limit: int,
     verifier_gate_limit: int,
     probe_verifier: Callable[[VerifierGate], str | None] | None = None,
+    repo_files: Sequence[str] | None = None,
 ) -> tuple[Finding, ...]:
     """Check a parsed guardrail for gates that run without meaning what they say.
+
+    ``repo_files`` is the repo-relative POSIX paths a glob can match.
+    Left unset, globs are not checked against the tree, for the same reason as ``probe_verifier``.
 
     ``probe_verifier`` is given a verifier gate and returns a problem to report about its script,
     or ``None`` when the script is fine.
@@ -311,6 +315,19 @@ def validate_policy(
                             f"{field} glob {glob!r} contains a backslash, and a glob is matched "
                             "against repo-relative POSIX paths split on '/'. If that was meant as "
                             "a path separator, spell it with '/'.",
+                        )
+                    )
+                # The shallower twin of a `**` glob in the same field is written to cover the root depth,
+                # which often holds no file, so it is not reported.
+                is_twin = any(shallower_twin(other) == glob for other in globs)
+                if repo_files is not None and not is_twin and not matched_changed_paths((glob,), tuple(repo_files)):
+                    findings.append(
+                        _gate_warning(
+                            gate,
+                            WarningCode.GLOB_MATCHES_NO_FILE,
+                            f"{field} glob {glob!r} matches no file in the repo. "
+                            "If it names a file that does not exist yet, such as build output, "
+                            "accept this warning on the gate.",
                         )
                     )
                 twin = shallower_twin(glob)

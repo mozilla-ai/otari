@@ -1025,6 +1025,30 @@ def _hook_untracked_paths(repo_root: Path) -> list[str] | None:
     return [path for path in result.stdout.split("\0") if path]
 
 
+def _hook_repo_files(repo_root: Path) -> list[str] | None:
+    """Paths a guardrail glob can match: tracked files plus untracked ones the ignore rules keep.
+
+    A file created this session counts, so a glob naming it is not reported as matching nothing.
+    None means Git could not list them, and the caller skips the check rather than report on a guess.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return [path for path in result.stdout.split("\0") if path]
+
+
 def _hook_render_untracked_file(repo_root: Path, path: str) -> str:
     """One untracked file as the `new file` hunk `git diff` would emit for it.
 
@@ -3902,7 +3926,8 @@ def guardrails_validate(
     submitted one is parsed, then reports what running it would have taught
     the hard way. An error is a gate that cannot do its job (a missing or
     unrunnable verifier script). A warning is a gate that runs and may not
-    mean what its author intended: a `**` glob that cannot reach the
+    mean what its author intended: a glob that matches no file in the
+    repository, a `**` glob that cannot reach the
     repository root, a one-token forbidden phrase that also refuses commands
     merely mentioning the word, a path gate blind to every shell write, more
     judge gates than one Stop event evaluates. A warning never fails on its
@@ -3956,6 +3981,7 @@ def guardrails_validate(
         judge_gate_limit=max_judges,
         verifier_gate_limit=_HOOK_CHECK_MAX_GATES_PER_RUN,
         probe_verifier=lambda gate: _guardrails_probe_verifier(root, gate.verifier, origins[gate.id]),
+        repo_files=_hook_repo_files(root),
     )
     # `policy_id` is the composed set's own name where several files compose,
     # which is `target` again; one file declares its own, worth showing.

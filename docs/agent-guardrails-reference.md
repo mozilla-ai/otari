@@ -1203,6 +1203,13 @@ more are added that a parser does not see:
 A **warning** is a gate that parses, runs, and may not mean what its author
 intended. Each kind has a stable code, which `validate` prints beside it:
 
+- `glob-matches-no-file`: a `forbidden` or `when_changed` glob that matches no file Git tracks and no
+  untracked file the ignore rules keep. Such a gate never fires, the same as one
+  with a typo in its path. A glob naming a file that does not exist yet, such as
+  build output, is the legitimate case, and the gate names this code in its
+  `accept_warnings`. The shallower twin of a `**` glob in the same list, such as
+  `.env` beside `**/.env`, is not reported, since it exists to cover the root.
+  Skipped when Git cannot list the files.
 - `glob-misses-shallower-depth`: a `**` glob whose shallower depth nothing else in the same field covers.
   `**` must consume at least one path segment, so `**/CLAUDE.md` reaches
   `web/CLAUDE.md` and never the root file, and `src/**/conftest.py` never
