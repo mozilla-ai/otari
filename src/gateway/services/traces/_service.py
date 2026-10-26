@@ -114,8 +114,8 @@ class TraceService:
         users' erasure rows (and, where it keeps content, its workspaces'
         generations), create the traces not stored yet, read their owners, insert
         the spans, grow the totals. Each runs in key order, so two writers sharing traces lock them in
-        the same order. Where it keeps content, it also asks whether each of its
-        users is still a member of the workspace, once for each pair.
+        the same order. Where it keeps content, it also asks whether its users are
+        still members of their workspaces, all at once.
         """
         written_at = datetime.now(UTC)
         # Sealed before the block, so a key source's round trip holds no connection.
@@ -131,12 +131,9 @@ class TraceService:
             )
             # Asked under the user's lock, which removing a member takes too: content is
             # kept only for someone who is still a member as it is stored.
-            members = {
-                pair: await self._owners.is_member(*pair)
-                for pair in {
-                    (trace.workspace_id, trace.user_id) for trace, held in zip(traces, sealed, strict=True) if held
-                }
-            }
+            members = await self._owners.members(
+                {(trace.workspace_id, trace.user_id) for trace, held in zip(traces, sealed, strict=True) if held}
+            )
             new_traces: dict[TraceKey, dict[str, Any]] = {}
             for trace in traces:
                 # An erased user's write creates nothing, not even the session it names.
@@ -165,7 +162,7 @@ class TraceService:
                             trace,
                             span,
                             held
-                            if _current(trace, generations) and members.get((trace.workspace_id, trace.user_id), False)
+                            if _current(trace, generations) and (trace.workspace_id, trace.user_id) in members
                             else {},
                         ),
                     )

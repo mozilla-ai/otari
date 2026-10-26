@@ -315,6 +315,15 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         result = await self.db.execute(select(col(User.id)).where(col(User.active_organization_id) == organization_id))
         return list(result.scalars().all())
 
+    async def get_active_ids(self, user_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """Return which of these identities exist and are active, in one query."""
+        if not user_ids:
+            return set()
+        result = await self.db.execute(
+            select(col(User.id)).where(col(User.id).in_(list(user_ids)), col(User.is_active).is_(True))
+        )
+        return set(result.scalars().all())
+
     async def move_active_organization(self, user_ids: Collection[uuid.UUID], organization_id: uuid.UUID) -> None:
         """Stage ``organization_id`` as the active organization of each of these identities."""
         if not user_ids:

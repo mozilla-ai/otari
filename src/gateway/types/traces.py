@@ -23,7 +23,7 @@ The records carry the privacy rules, so nothing downstream can weaken them:
 
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -361,6 +361,10 @@ class SessionOwners(Protocol):
 
     async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
         """Whether ``user_id`` names a person who currently sees ``workspace_id``."""
+        ...
+
+    async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
+        """Which of these (workspace, user) pairs :meth:`is_member` holds for, asked at once."""
         ...
 
 

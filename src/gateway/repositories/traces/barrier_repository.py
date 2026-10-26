@@ -95,13 +95,20 @@ class UserBarrierRepository(BaseRepository[TraceUserBarrier, Never, Never]):
         """Delete the rows of users erased before ``cutoff``, and of users never erased.
 
         A never-erased user's row only serializes writes and is made again on the
-        next one, so no user's id is kept past its use.
+        next one, so no user's id is kept past its use. Rows are locked in ``user_id``
+        order, as writers lock them, so the two never deadlock; a row a writer holds
+        is skipped and goes on the next run.
         """
-        result = await self.db.execute(
-            delete(TraceUserBarrier).where(
-                or_(TraceUserBarrier.erased_at.is_(None), TraceUserBarrier.erased_at < cutoff)
-            )
+        locked = await self.db.execute(
+            select(TraceUserBarrier.user_id)
+            .where(or_(TraceUserBarrier.erased_at.is_(None), TraceUserBarrier.erased_at < cutoff))
+            .order_by(TraceUserBarrier.user_id)
+            .with_for_update(skip_locked=True)
         )
+        user_ids = list(locked.scalars().all())
+        if not user_ids:
+            return 0
+        result = await self.db.execute(delete(TraceUserBarrier).where(TraceUserBarrier.user_id.in_(user_ids)))
         return int(getattr(result, "rowcount", 0) or 0)
 
     async def erase(self, user_id: str, at: datetime) -> None:

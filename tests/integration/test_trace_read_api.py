@@ -20,10 +20,12 @@ import pytest
 from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.adapters.content_key_adapter import SECRET_KEY_WRAPPER, ContentKeyring, SecretKeyContentKeys
+from gateway.api.deps import is_workspace_member, workspace_members
 from gateway.core.config import API_ROOT
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.traces import (
@@ -41,6 +43,7 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.traces import SpanContent, TraceService, _service
 
+from .conftest import _to_async_url
 from .test_otlp import _agent_span, _exempt_key, _otlp_traces
 
 _T0 = datetime(2026, 10, 7, 12, tzinfo=UTC)
@@ -1437,3 +1440,70 @@ def test_deleting_stored_content_clears_it_a_batch_at_a_time(
             )
         ).all()
     assert held == []
+
+
+def test_the_batched_membership_check_agrees_with_asking_one_pair_at_a_time(
+    world: dict[str, str], db_session_factory: Callable[[], Session], postgres_url: str
+) -> None:
+    with db_session_factory() as session:
+        ids = {user.email: str(user.id) for user in session.scalars(select(User))}
+        workspaces = {workspace.name: workspace.id for workspace in session.scalars(select(Workspace))}
+        one_row = session.get(Workspace, workspaces["One"])
+        assert one_row is not None
+        gone = User(email="gone@a.test", full_name="X", is_active=False, active_organization_id=one_row.organization_id)
+        suspended = User(email="s@a.test", full_name="X", active_organization_id=one_row.organization_id)
+        session.add_all([gone, suspended])
+        session.commit()
+        session.add_all(
+            [
+                OrganizationMember(
+                    organization_id=one_row.organization_id, user_id=gone.id, role="owner", status="active"
+                ),
+                OrganizationMember(
+                    organization_id=one_row.organization_id, user_id=suspended.id, role="member", status="active"
+                ),
+                WorkspaceMember(workspace_id=one_row.id, user_id=suspended.id, role="member", status="suspended"),
+            ]
+        )
+        session.commit()
+        ids |= {"gone@a.test": str(gone.id), "s@a.test": str(suspended.id)}
+
+    one, two, theirs = workspaces["One"], workspaces["Two"], workspaces["Theirs"]
+    pairs: set[tuple[uuid.UUID, str | None]] = {
+        (one, ids["m@a.test"]),
+        (two, ids["m@a.test"]),
+        (one, ids["a@a.test"]),
+        (two, ids["a@a.test"]),
+        (one, ids["o@b.test"]),
+        (theirs, ids["o@b.test"]),
+        (one, ids["gone@a.test"]),
+        (one, ids["s@a.test"]),
+        (one, ids["m@a.test"].upper()),
+        (one, None),
+        (one, "billing-user"),
+        (uuid.uuid4(), ids["a@a.test"]),
+        (one, str(uuid.uuid4())),
+    }
+
+    async def ask() -> tuple[set[tuple[uuid.UUID, str | None]], set[tuple[uuid.UUID, str | None]]]:
+        engine = create_async_engine(_to_async_url(postgres_url))
+        try:
+            async with async_sessionmaker(engine)() as db:
+                batched = await workspace_members(db, pairs)
+                singly = {pair for pair in pairs if await is_workspace_member(db, *pair)}
+                return batched, singly
+        finally:
+            await engine.dispose()
+
+    batched, singly = asyncio.run(ask())
+
+    assert (
+        batched
+        == singly
+        == {
+            (one, ids["m@a.test"]),
+            (one, ids["a@a.test"]),
+            (two, ids["a@a.test"]),
+            (theirs, ids["o@b.test"]),
+        }
+    )
