@@ -288,6 +288,10 @@ class TraceUserBarrier(Base):
     """
 
     __tablename__ = "trace_user_barriers"
+    # Finds the rows the retention sweep may forget. A write makes a row for every
+    # user it stores for, so the table holds one per user who has written a trace
+    # since the last sweep and a scan of it would grow with the traffic.
+    __table_args__ = (Index("ix_trace_user_barriers_erased_at", "erased_at"),)
 
     user_id: Mapped[str] = mapped_column(String, primary_key=True)
     erased_at: Mapped[datetime | None] = mapped_column(UtcDateTime())

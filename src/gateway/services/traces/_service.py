@@ -73,6 +73,9 @@ ERASURE_KEPT_FOR = MAX_WRITE_AGE + timedelta(hours=1)
 
 # How many spans' content one block clears when a workspace's content is deleted.
 CLEAR_CONTENT_BATCH = 5_000
+# How many users' barrier rows one block forgets. Smaller than the batch above,
+# because each row it holds is one a write of that user's spans waits on.
+FORGET_ERASURES_BATCH = 1_000
 
 # How often one reader's reads through a share are recorded, and how many of a
 # share's newest reads its listing carries.
@@ -407,9 +410,20 @@ class TraceService:
             return await self._break_glass.delete_before(before)
 
     async def expire_erasures(self, *, now: datetime) -> int:
-        """Forget users erased longer ago than any of their spans could still be waiting, and those never erased."""
-        async with self._uow:
-            return await self._erasures.forget_erased_before(now - ERASURE_MARGIN - ERASURE_KEPT_FOR)
+        """Forget users erased longer ago than any of their spans could still be waiting, and those never erased.
+
+        A batch per block, as clearing a workspace's content goes, so a write holding
+        the row of a user it stores for waits for one batch rather than for every user
+        who has written a trace since the last pass.
+        """
+        cutoff = now - ERASURE_MARGIN - ERASURE_KEPT_FOR
+        forgotten = 0
+        while True:
+            async with self._uow:
+                batch = await self._erasures.forget_erased_before(cutoff, limit=FORGET_ERASURES_BATCH)
+            forgotten += batch
+            if batch < FORGET_ERASURES_BATCH:
+                return forgotten
 
     async def share_content(
         self,

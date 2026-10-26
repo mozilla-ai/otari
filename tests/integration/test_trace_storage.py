@@ -999,6 +999,27 @@ async def test_content_is_kept_only_where_the_workspace_switch_is_still_on(
     assert await workspaces_keeping_content_for(async_db, [pair]) == set()
     # Still a member; it is the workspace that stopped keeping content.
     assert await is_workspace_member(async_db, workspace_id, str(person.id))
+async def test_forgetting_erasures_goes_a_batch_at_a_time(
+    store: TraceService,
+    tenants: tuple[uuid.UUID, uuid.UUID],
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch per block, so a write holding one of these rows waits for a batch and not for the table."""
+    monkeypatch.setattr(trace_service_module, "FORGET_ERASURES_BATCH", 2)
+    workspace, _ = tenants
+    users = [f"u{n}" for n in range(5)]
+    # A trace's user is a real spend identity, which the barrier rows follow.
+    async_db.add_all([User(user_id=user) for user in users])
+    await async_db.commit()
+    for user in users:
+        await store.write((_write(workspace, f"s-{user}", _span("tool-1"), user_id=user),))
+
+    forgotten = await store.expire_erasures(now=datetime.now(UTC))
+
+    # Every user the batch loop reached, across more blocks than one.
+    assert forgotten >= len(users)
+    assert await store.expire_erasures(now=datetime.now(UTC)) == 0
 
 
 async def test_an_upload_still_held_when_its_users_erasure_is_forgotten_is_never_stored(
