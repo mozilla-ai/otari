@@ -108,8 +108,8 @@ async def test_a_real_client_session_closes_without_cancelling_its_caller(
 
     @asynccontextmanager
     async def open_real_session(*args: Any, **kwargs: Any) -> AsyncIterator[ClientSession]:
-        incoming_writer, incoming_reader = anyio.create_memory_object_stream(1)
-        outgoing_writer, outgoing_reader = anyio.create_memory_object_stream(1)
+        incoming_writer, incoming_reader = anyio.create_memory_object_stream[Any](1)
+        outgoing_writer, outgoing_reader = anyio.create_memory_object_stream[Any](1)
         async with incoming_writer, incoming_reader, outgoing_writer, outgoing_reader:
             async with ClientSession(incoming_reader, outgoing_writer) as real_session:
                 yield real_session
