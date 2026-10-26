@@ -13,9 +13,9 @@ import type {
   TraceSummary,
 } from "@/client"
 import { apiFetch, retryUnlessNotFound } from "@/shared/api/client"
-import { useDeploymentOperator } from "@/shared/api/organizations"
 import { TRACES, workspaceMeta } from "@/shared/api/queryKeys"
 import type { ChartBucket } from "@/shared/helpers/timeRange"
+import { useIsDeploymentScope } from "@/shared/hooks/DeploymentScope"
 
 // What narrows the session list. An empty string is "no filter", the same
 // reading the URL state gives a cleared key. `workspaceId` is the shell's
@@ -29,14 +29,14 @@ export interface TraceFilters {
   q: string
 }
 
-// An operator reads every workspace on the deployment, anyone else their own
-// organization, by the same rule as the usage pages (`useUsageScope`). The
-// server derives the scope; this only picks which of the two routes to ask.
+// Every workspace on the deployment on the deployment's own pages, the caller's
+// organization everywhere else, by the same rule as the usage pages
+// (`useUsageScope`). The server derives the scope; this only picks the route.
 export function useTraceScope(): { base: string; isReady: boolean } {
-  const operator = useDeploymentOperator()
+  const isDeploymentWide = useIsDeploymentScope()
   return {
-    base: operator.isOperator ? "/traces" : "/organizations/me/traces",
-    isReady: operator.isSettled,
+    base: isDeploymentWide ? "/traces" : "/organizations/me/traces",
+    isReady: true,
   }
 }
 

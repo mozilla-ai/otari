@@ -44,7 +44,7 @@ export function RoutingPage() {
     rows,
     isLoading: isListLoading,
     error,
-    isOperator,
+    isDeploymentWide,
     canEdit,
     writeWorkspaceId,
   } = useRoutingRows()
@@ -80,11 +80,11 @@ export function RoutingPage() {
   const openPolicy = useCallback(
     (row: RoutingRow) =>
       void navigate({
-        to: "/routing/$name",
+        to: isDeploymentWide ? "/deployment/routing/$name" : "/routing/$name",
         params: { name: row.name },
         search: row.user_id ? { user: row.user_id } : {},
       }),
-    [navigate],
+    [navigate, isDeploymentWide],
   )
 
   // Stable so DataTable's row cache holds; see its docstring.
@@ -147,14 +147,14 @@ export function RoutingPage() {
         // policies, "Router" names the thing rather than what opens, and the count
         // of scored examples is the one number in there that changes.
         //
-        // Three outcomes, not two. Operator-only within an actions column an
-        // admin now also gets, because the panel reads `/routing/status`,
-        // which is deployment-wide: an admin sees no readiness at all. Then an
+        // Three outcomes, not two. Deployment page only, because the panel
+        // reads `/routing/status`, which is deployment-wide: a workspace page
+        // shows no readiness at all. Then an
         // em dash where a policy has no readiness to report, rather than an
         // empty cell, since a fallback chain has nothing to learn and that
         // absence is worth stating and is not the same as zero examples. Then
         // the control, for a backend that learns.
-        const readiness = !isOperator ? null : findRouterBackend(
+        const readiness = !isDeploymentWide ? null : findRouterBackend(
             policy.spec,
           ) !== KNN_BACKEND ? (
           <span className="text-muted">—</span>
@@ -195,7 +195,7 @@ export function RoutingPage() {
       },
     })
     return base
-  }, [canEdit, expanded, isOperator, openPolicy])
+  }, [canEdit, expanded, isDeploymentWide, openPolicy])
 
   // Which of the four delete surfaces a row goes to. Both name the workspace the
   // row lives in; only the deployment-wide pair carries the user scope, which
@@ -203,7 +203,7 @@ export function RoutingPage() {
   const deleteWorkspaceFor = (row: RoutingRow) =>
     row.workspace_id ?? writeWorkspaceId
   const deleteMutationFor = (row: RoutingRow) =>
-    isOperator
+    isDeploymentWide
       ? row.kind === "alias"
         ? deleteAlias
         : deletePolicy
@@ -235,17 +235,15 @@ export function RoutingPage() {
           ) : undefined
         }
       >
-        {/* Three readings of the same page, because what a caller may do here
-            differs: an operator sees the deployment-wide capabilities, an
-            admin sees what their own workspace writes reach, and a member is
-            told who manages these rather than offered a control they would
-            be refused. */}
+        {/* Says how far an edit here reaches, because that is what differs
+            between the deployment's page and a workspace's, and then who may
+            make one. */}
         Model names your callers send as{" "}
         <code className="font-mono text-caption">model</code>. Each policy picks
         the model that serves a request and the backups tried, in order, when it
         fails.{" "}
-        {isOperator
-          ? null
+        {isDeploymentWide
+          ? "Every policy on this deployment, across all organizations and workspaces."
           : canEdit
             ? "What you create here applies in the selected workspace, and can name any model your organization has a provider key for."
             : "These are the ones in force in your workspaces; your organization's admins manage them."}
@@ -267,7 +265,7 @@ export function RoutingPage() {
         // creating one is what makes the page non-empty. The heading's action
         // survives.
         returnFocusRef={createButtonRef}
-        isDeploymentWide={isOperator}
+        isDeploymentWide={isDeploymentWide}
         workspaceId={writeWorkspaceId}
         onClose={closeCreate}
       />
@@ -349,7 +347,7 @@ export function RoutingPage() {
           if (!pendingDelete) return
           const onSuccess = () => setPendingDelete(undefined)
           const rowWorkspace = deleteWorkspaceFor(pendingDelete)
-          if (isOperator) {
+          if (isDeploymentWide) {
             const deployment = {
               name: pendingDelete.name,
               userId: pendingDelete.user_id,

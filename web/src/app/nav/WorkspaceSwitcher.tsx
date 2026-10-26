@@ -1,7 +1,15 @@
 import { Button, Popover } from "@heroui/react"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
-import { FiCheck, FiChevronDown, FiMail, FiPlus } from "react-icons/fi"
+import type { IconType } from "react-icons"
+import {
+  FiCheck,
+  FiChevronDown,
+  FiHardDrive,
+  FiMail,
+  FiPlus,
+  FiSettings,
+} from "react-icons/fi"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { ProductMark } from "@/design-system/ProductMark"
 import { CreateOrganizationForm } from "@/features/organization/CreateOrganizationForm"
@@ -16,7 +24,9 @@ import {
 } from "@/shared/api/organizations"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import type { NavContext } from "./registry"
 import { NAV_TRANSITION, navBandRowClass, navIndicatorClass } from "./rowStyles"
+import type { NavPath } from "./types"
 
 // The menu's own rhythm, which is the rail's: a 44px row and a 32px heading
 // block. The eyebrow above the organization is shorter (28px), because it opens
@@ -55,9 +65,42 @@ function MailMark() {
   return <FiMail aria-hidden="true" className="size-5 shrink-0" />
 }
 
-// The organization and the workspace the shell is looking at, and the control
-// that changes the second. Sits above the nav rather than in it because it
-// scopes the destinations below it rather than being one.
+// A row that moves the shell to another scope: the deployment, or the
+// organization's own management pages. Checked when that scope is the one on
+// screen, as the organization and workspace rows are.
+function ScopeRow({
+  label,
+  icon: Icon,
+  isCurrent,
+  onPress,
+}: {
+  label: string
+  icon: IconType
+  isCurrent: boolean
+  onPress: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className={`${MENU_ROW} ${isCurrent ? MENU_ROW_CURRENT : MENU_ROW_RESTING}`}
+      onClick={onPress}
+    >
+      <Icon aria-hidden="true" className="size-5 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {isCurrent ? (
+        <CheckMark />
+      ) : (
+        <span aria-hidden="true" className="size-4 shrink-0" />
+      )}
+    </button>
+  )
+}
+
+// The scope the shell is looking at, and the one control that changes it:
+// the deployment (operators), the organization's own pages (owners and admins),
+// or a workspace. Sits above the nav rather than in it because it scopes the
+// destinations below it rather than being one, and it heads every rail, so the
+// way between scopes is always in the same place.
 //
 // It scopes what the gateway both records and resolves per workspace: members,
 // API keys, the request log, and the spend and volume charts over it. Two
@@ -71,8 +114,20 @@ export function WorkspaceSwitcher({
   isCollapsed,
   onNavigate,
   createHold,
+  scope = "workspace",
+  workspaceLanding = "/",
+  organizationLanding,
+  deploymentLanding,
 }: {
   isCollapsed: boolean
+  /** Which rail is showing, so the trigger and the checks name it. */
+  scope?: NavContext
+  /** Where choosing a workspace from another scope lands. */
+  workspaceLanding?: NavPath
+  /** Where the organization row goes, absent for a caller who cannot manage it. */
+  organizationLanding?: NavPath
+  /** Where the deployment row goes, absent for a caller who does not operate it. */
+  deploymentLanding?: NavPath
   /**
    * Called when a row in the menu takes the caller to another page, so the
    * shell can close the mobile drawer the switcher sits in.
@@ -147,6 +202,24 @@ export function WorkspaceSwitcher({
     ? "Loading…"
     : (selected?.name ?? "No workspace")
 
+  const title =
+    scope === "deployment"
+      ? "Deployment"
+      : scope === "organization"
+        ? organizationName
+        : workspaceName
+  const subtitle =
+    scope === "deployment"
+      ? "All organizations"
+      : scope === "organization"
+        ? "Organization"
+        : organizationName
+  const goTo = (to: NavPath) => {
+    setOpen(false)
+    onNavigate?.()
+    void navigate({ to })
+  }
+
   return (
     <>
       <Popover isOpen={open} onOpenChange={setOpen}>
@@ -166,7 +239,11 @@ export function WorkspaceSwitcher({
           // No `title` companion, which HeroUI's Button does not take: collapsed,
           // the popover itself is what names the current workspace (it marks it
           // with a check), and this label is what assistive tech reads.
-          aria-label={`Switch workspace, currently ${workspaceName} in ${organizationName}`}
+          aria-label={
+            scope === "workspace"
+              ? `Switch workspace, currently ${workspaceName} in ${organizationName}`
+              : `Switch scope, currently ${title}`
+          }
           // A row, not a box. It had a border and its own fill, which made the
           // rail open with an outlined card sitting above a list of flat rows;
           // the artboard draws it blended into the chrome, distinguished by its
@@ -203,10 +280,10 @@ export function WorkspaceSwitcher({
             <>
               <span className="flex min-w-0 flex-1 flex-col gap-px">
                 <span className="truncate text-sm leading-[1.125rem] font-semibold tracking-[-0.01em] text-foreground">
-                  {workspaceName}
+                  {title}
                 </span>
                 <span className="truncate text-shell-secondary font-medium text-muted">
-                  {organizationName}
+                  {subtitle}
                 </span>
               </span>
               <FiChevronDown
@@ -224,6 +301,17 @@ export function WorkspaceSwitcher({
             aria-label="Switch workspace or organization"
             className="flex w-[19.75rem] flex-col"
           >
+            {deploymentLanding ? (
+              <>
+                <ScopeRow
+                  label="Deployment"
+                  icon={FiHardDrive}
+                  isCurrent={scope === "deployment"}
+                  onPress={() => goTo(deploymentLanding)}
+                />
+                <div className={MENU_DIVIDER} />
+              </>
+            ) : null}
             <p className={`${MENU_HEADING} min-h-7`}>Organization</p>
             {/* The switch is the one write this menu makes that changes what
               every other page is looking at, so its failure is reported here
@@ -282,6 +370,14 @@ export function WorkspaceSwitcher({
                 <CheckMark />
               </div>
             )}
+            {organizationLanding ? (
+              <ScopeRow
+                label="Manage organization"
+                icon={FiSettings}
+                isCurrent={scope === "organization"}
+                onPress={() => goTo(organizationLanding)}
+              />
+            ) : null}
             {invitationCount > 0 || hasNoOrganization ? (
               <button
                 type="button"
@@ -337,6 +433,7 @@ export function WorkspaceSwitcher({
               <ul className="flex flex-col">
                 {memberships.map((membership) => {
                   const isCurrent =
+                    scope === "workspace" &&
                     membership.workspace_id === selected?.workspace_id
                   return (
                     <li key={membership.workspace_id}>
@@ -347,7 +444,8 @@ export function WorkspaceSwitcher({
                         }`}
                         onClick={() => {
                           select(membership.workspace_id)
-                          setOpen(false)
+                          if (scope === "workspace") setOpen(false)
+                          else goTo(workspaceLanding)
                         }}
                       >
                         <span className="min-w-0 flex-1 truncate">

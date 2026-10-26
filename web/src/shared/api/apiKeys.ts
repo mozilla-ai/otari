@@ -10,28 +10,26 @@ import type {
   UpdateOwnKeyRequest,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
-import { useDeploymentOperator } from "@/shared/api/organizations"
 import { fetchAllRows } from "@/shared/api/paging"
 import { FEDERATION_RULES, KEYS, workspaceMeta } from "@/shared/api/queryKeys"
+import { useIsDeploymentScope } from "@/shared/hooks/DeploymentScope"
 
-// Which of the two key surfaces this caller may act on.
+// Which of the two key surfaces this page acts on.
 //
 // `/keys` is deployment-wide and refuses anyone who does not operate the
 // deployment; `/organizations/me/keys` serves the caller's own keys, in
 // workspaces they belong to (otari-ai#1941). Both answer identical shapes, so
-// the key hooks below differ only in the prefix they ask. Same construction as
-// `useUsageScope` above, for the same reasons: the organization context is what
-// the shell already reads, an errored context takes the wider surface, and the
-// base is part of every query key it feeds.
+// the key hooks below differ only in the prefix they ask. Decided by the page's
+// scope, as `useUsageScope` is, and the base is part of every query key it feeds.
 export function useKeysScope(): {
   base: string
   isReady: boolean
   isDeploymentWide: boolean
 } {
-  const { isOperator: isDeploymentWide, isSettled } = useDeploymentOperator()
+  const isDeploymentWide = useIsDeploymentScope()
   return {
     base: isDeploymentWide ? "/keys" : "/organizations/me/keys",
-    isReady: isSettled,
+    isReady: true,
     isDeploymentWide,
   }
 }

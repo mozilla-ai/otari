@@ -11,9 +11,9 @@ import type {
   UsageSummary,
 } from "@/client"
 import { ApiError, apiFetch } from "@/shared/api/client"
-import { useDeploymentOperator } from "@/shared/api/organizations"
 import { USAGE, workspaceMeta } from "@/shared/api/queryKeys"
 import { isoAgo } from "@/shared/helpers/timeRange"
+import { useIsDeploymentScope } from "@/shared/hooks/DeploymentScope"
 
 // ---------- activity / request log ----------
 
@@ -72,19 +72,17 @@ function usageParams(filters: UsageFilters): URLSearchParams {
 // **An errored context is ready, not still waiting.** Treating a failure as
 // perpetual loading disables every usage hook for the session: the pages then
 // issue no request at all and state that a gateway serving traffic has none.
-// A failure takes the deployment-wide surface, as every operator gate does
-// (`useDeploymentOperator`): the server refuses `/usage` to a non-operator, so
-// the cost is a refusal the page reports, never a cross-tenant read.
+// Deployment-wide only on the deployment's own pages (`DeploymentScope`), and
+// the caller's organization everywhere else, whoever is asking: the page decides
+// what it reports, not the role. The server refuses `/usage` to a non-operator,
+// who is never offered those pages.
 //
 // The base is part of every query key it feeds, so two callers on one browser
 // can never read each other's cached rows.
 //
 // `"organization"` pins the narrow surface regardless of who is asking. It
 // exists for the organization-wide Usage page (otari-ai#1963), whose question is
-// "this organization", so for an operator the caller-derived scope would answer
-// a different one: `/usage` reads every tenant on the deployment, and a page
-// titled with the organization would silently overstate it. A pinned base needs
-// no context answer to be known, so it is ready on first paint.
+// "this organization" even if a deployment page were ever to embed it.
 export type UsageScope = "caller" | "organization"
 
 export function useUsageScope(scope: UsageScope = "caller"): {
@@ -92,11 +90,10 @@ export function useUsageScope(scope: UsageScope = "caller"): {
   isReady: boolean
   isDeploymentWide: boolean
 } {
-  const operator = useDeploymentOperator()
-  const isDeploymentWide = scope === "caller" && operator.isOperator
+  const isDeploymentWide = useIsDeploymentScope() && scope === "caller"
   return {
     base: isDeploymentWide ? "/usage" : "/organizations/me/usage",
-    isReady: scope === "organization" || operator.isSettled,
+    isReady: true,
     isDeploymentWide,
   }
 }

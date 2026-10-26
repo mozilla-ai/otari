@@ -57,6 +57,7 @@ import {
   formatPct,
   formatUsd,
 } from "@/shared/helpers/format"
+import { useIsDeploymentScope } from "@/shared/hooks/DeploymentScope"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -111,14 +112,16 @@ function useWindows() {
 // The queries every overview variant is built on: the three summary windows
 // behind the usage tiles, and the newest few requests. Every filter carries the
 // shell's selected workspace, so the tiles, the sparklines and the
-// recent-requests strip narrow together with whatever sits beside them. The
-// usage hooks pick the surface for the caller (deployment-wide for an operator,
-// organization-scoped otherwise; see useUsageScope), which is what lets the
-// operator page and the organization page share this derivation.
+// recent-requests strip narrow together with whatever sits beside them, except
+// on the deployment's page, which reports every workspace. The usage hooks pick
+// the surface for the page (deployment-wide there, organization-scoped
+// otherwise; see useUsageScope), which is what lets the two overviews share
+// this derivation.
 function useUsageOverview() {
   const w = useWindows()
   const { selected: workspace } = useSelectedWorkspace()
-  const scope = workspace?.workspace_id
+  const isDeploymentWide = useIsDeploymentScope()
+  const scope = isDeploymentWide ? undefined : workspace?.workspace_id
 
   const todayFilters = useMemo(
     () => ({ workspace_id: scope, start_date: w.today }),
@@ -332,30 +335,12 @@ function UsageKpiCells({
 /**
  * The landing route, which is the one page nobody navigates to on purpose.
  *
- * The operator page's status panels read deployment-wide endpoints (provider
- * health, budgets, keys, accounts), and since otari-ai#1880 those answer 403
- * to anyone who is not an operator of the deployment. The gate is here rather
- * than on the queries because the hooks do not all take an `enabled` flag, and
- * a component that is not rendered runs none of them: that is what keeps a
- * tenant's first page from being a row of failed requests.
+ * The organization's overview for everyone, operator included. The
+ * deployment's own overview, whose panels read deployment-wide endpoints, is
+ * `DeploymentOverview`, on the deployment's rail.
  *
- * Decided from the organization context, which is where `useUsageScope` and the
- * nav rail take the same answer from, so nothing on screen can hold a different
- * one (otari-ai#1936). Two sources compose into a page that reports nothing
- * while being wrong: the deployment-wide panels beside usage tiles quietly
- * reading `/organizations/me/usage`, every number disagreeing with its
- * neighbor and each query happy with its own. It also costs no request, since
- * the shell reads this context before it paints.
- *
- * So an errored context lands on the operator page, as it does for the usage
- * hooks behind its tiles and for every other operator gate
- * (`useDeploymentOperator`): its panels report their own refusals, where the
- * reverse would hide the deployment's state from the one caller who owns it.
- * An errored context is an answer, not a wait: holding the page on a loading
- * state that no retry clears renders nothing at all.
- *
- * The one failure that is not sent there is a caller with no organization,
- * who has no deployment to operate and no organization to report on.
+ * A caller with no organization has no organization to report on, and is sent
+ * to their invitations or told how to get one.
  */
 export function OverviewIndex() {
   const { answer, isSettled } = useDeploymentOperator()
@@ -388,10 +373,7 @@ export function OverviewIndex() {
       <NoOrganizationOverview />
     )
   }
-  if (answer === "not-operator") {
-    return <OrganizationOverview />
-  }
-  return <OperatorOverviewIndex />
+  return <OrganizationOverview />
 }
 
 /**
@@ -443,7 +425,7 @@ function NoOrganizationOverview() {
 }
 
 /**
- * The landing page for a signed-in caller who does not operate the deployment.
+ * The landing page for a signed-in caller in an organization.
  *
  * The 11 Aug roles matrix has Overview as "my usage" for every role
  * (otari-ai#1946), so this is a real page rather than a card apologizing for
@@ -454,11 +436,8 @@ function NoOrganizationOverview() {
  * organization for an admin, the workspaces they belong to for a member;
  * otari#837), so nothing here re-derives roles for them.
  *
- * Two things the operator page has are deliberately absent. The attention strip
- * reads provider health and the deployment's budgets, neither of which is this
- * caller's to see. And there is no `useDeploymentOperator` anywhere below this
- * line: this *is* the non-operator branch, so asking again is how otari-ai#2080
- * happened.
+ * The attention strip the deployment page has is deliberately absent: it reads
+ * provider health and the deployment's budgets, which belong to that page.
  */
 function OrganizationOverview() {
   const { scope, today, period, previous, recent } = useUsageOverview()
@@ -643,11 +622,12 @@ function OrganizationOverview() {
   )
 }
 
-// The operator index uses the provider lists to make the empty gateway a
+// The deployment's overview uses the provider lists to make the empty gateway a
 // useful getting-started page: the `config.yml` instances and the deployment's
 // hosted providers, either of which serves a request. Both queries are
-// operator-gated, so this only runs once the gate above has answered.
-function OperatorOverviewIndex() {
+// operator-gated, and only the deployment's rail, which is operator-only,
+// renders this.
+export function DeploymentOverview() {
   const providers = useProviders()
   const hosted = useHostedProviders()
   if (providers.isLoading || hosted.isLoading) {

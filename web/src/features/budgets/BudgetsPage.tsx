@@ -45,10 +45,7 @@ import {
   useDeleteBudget,
   useUpdateBudget,
 } from "@/shared/api/budgets"
-import {
-  useDeploymentOperator,
-  useOrganizationContext,
-} from "@/shared/api/organizations"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { useUpdateUser, useUsers } from "@/shared/api/users"
 import {
   useAllWorkspaceBudgetDefaults,
@@ -542,7 +539,7 @@ function isOrganizationOwned(budget: Budget): boolean {
 }
 
 /**
- * The deployment's own budgets page, which is what an operator sees.
+ * The deployment's own budgets page, on the deployment's rail.
  *
  * Deployment-wide end to end: `/budgets`, the gateway's `users` table, and
  * every workspace's member default, all behind `require_deployment_operator`.
@@ -550,7 +547,7 @@ function isOrganizationOwned(budget: Budget): boolean {
  * rather than reshaping this one, because the two surfaces answer to different
  * callers and read different rows.
  */
-function DeploymentBudgetsPage() {
+export function DeploymentBudgetsPage() {
   const budgets = useBudgets()
   const users = useUsers()
   const workspaces = useWorkspaces()
@@ -1170,36 +1167,19 @@ function CreateBudgetDialog({
 /**
  * Spend & budgets, picking the page for whoever is asking.
  *
- * One route with two pages behind it, the way Routing does since otari#867: an
- * operator gets the deployment's budgets, and an organization owner or admin
- * gets their own organization's, which is the surface otari-ai#1943 added. Not
- * two rail rows, because it is one destination in the design and one row in the
- * roles matrix; and not one merged page, because the two read different tables
- * and every deployment-wide read here answers 403 to a tenant.
- *
- * Held until the context lands rather than defaulting to one of them. Guessing
- * would either flash the operator page at an admin and swap it, or fire the
- * deployment-wide reads as an admin and paint their refusals; the shell already
- * waits on this query, so the cost is a spinner that is usually already over.
+ * The organization's own budgets, whoever is looking, operator included: the
+ * deployment's budgets are `DeploymentBudgetsPage`, on the deployment's rail.
  */
 export function BudgetsPage() {
   const organization = useOrganizationContext()
-  const { answer, isSettled } = useDeploymentOperator()
 
-  if (!isSettled) {
+  if (organization.isPending) {
     return <PageLoading label="Loading spend and budgets…" />
   }
-  // No organization means no budgets of its own and none to operate; the
-  // index is where such a caller is told how to get in.
-  if (answer === "no-organization") {
+  // No organization means no budgets of its own; the index is where such a
+  // caller is told how to get in.
+  if (!organization.data) {
     return <Navigate to="/" replace />
   }
-  // An errored context lands on the operator page, as every operator gate does
-  // (`useDeploymentOperator`): its reads say in their own words when they are
-  // refused, where the reverse would hide the deployment's budgets from the one
-  // caller who owns them.
-  if (answer === "not-operator" && organization.data) {
-    return <OrganizationBudgetsPage organization={organization.data} />
-  }
-  return <DeploymentBudgetsPage />
+  return <OrganizationBudgetsPage organization={organization.data} />
 }
