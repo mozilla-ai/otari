@@ -11,7 +11,9 @@ So a value copied onto another span, another session or another workspace
 opens as nothing.
 
 A value without the ``otc1.`` prefix is a bare ``OTARI_SECRET_KEY`` Fernet token,
-the form content was stored in before; it opens as it always did.
+the form content was stored in before; it opens as it always did. Its payload
+names only its workspace and its span, so that form is bound to those two and
+not to its session.
 
 Each session has data keys of its own, made for its workspace and itself (KMS
 binds both as encryption context), so a key that leaked would open one session.
@@ -485,7 +487,11 @@ def _allowed(content: object) -> dict[str, str]:
 
 
 def _open_legacy(sealed: str, *, workspace_id: uuid.UUID, span_id: str) -> dict[str, str]:
-    """A bare Fernet token, as content was sealed before data keys, naming its row in the payload."""
+    """A bare Fernet token, as content was sealed before data keys, naming its row in the payload.
+
+    NOTE: the payload names the workspace and the span and not the session, so this
+    form is bound to those two alone. It takes no session argument for that reason.
+    """
     try:
         payload = json.loads(decrypt_secret(sealed))
     except (SecretBoxUnavailableError, SecretDecryptionError, ValueError):

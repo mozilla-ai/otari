@@ -51,7 +51,9 @@ content.
   `gateway_trace_content_unopened`.
 
 Content sealed by earlier versions with `OTARI_SECRET_KEY` alone still reads
-back; nothing needs re-encrypting.
+back; nothing needs re-encrypting. That older form is bound only to its
+workspace and span, not its session, and ages out within
+`trace_session_max_age_days`.
 
 ## Sealing content with AWS KMS
 
