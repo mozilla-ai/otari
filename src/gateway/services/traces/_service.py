@@ -6,7 +6,8 @@ import dataclasses
 import math
 import uuid
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -190,20 +191,24 @@ class TraceService:
         async with self._uow:
             return await self._barriers.generation(workspace_id)
 
-    async def turn_content_off[T](
-        self, workspace_id: uuid.UUID, *, authorize: Callable[[], Awaitable[None]], switch: Callable[[], Awaitable[T]]
-    ) -> T:
-        """Turn a workspace's content off with ``switch``, so nothing taken in before it is stored after it.
+    @asynccontextmanager
+    async def content_stopped(self, workspace_id: uuid.UUID) -> AsyncIterator[None]:
+        """Hold a block that turns a workspace's content off, so nothing captured before it is stored after it.
 
-        The order is the rule: ``authorize`` first, so only a manager ends the
-        generation; the generation ends before the switch, so a failure there changes
-        nothing; and again after it, for an export that read the switch on in between.
+        The generation moves on before the block and again after it: before, so
+        content already captured is dropped however late it is written, and after,
+        for an export let in while the block ran.
+
+        NOTE: callers must authorize the change before opening this, because entering
+        it already drops what the workspace's exports are holding.
         """
-        await authorize()
         await self.stop_content(workspace_id)
-        result = await switch()
-        await self.stop_content(workspace_id)
-        return result
+        try:
+            yield
+        finally:
+            # Also where the block failed: it may have committed the switch and then
+            # failed, and an export let in while it ran holds content either way.
+            await self.stop_content(workspace_id)
 
     async def stop_content(self, workspace_id: uuid.UUID) -> None:
         """Keep none of the content already captured in the workspace that is not stored yet, on any replica."""

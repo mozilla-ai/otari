@@ -791,6 +791,28 @@ def _as(client: TestClient, cookie: str, method: str, path: str, **kwargs: Any) 
         client.cookies.clear()
 
 
+def test_a_member_who_manages_nothing_cannot_turn_a_workspaces_content_off(
+    client: TestClient, world: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """Refused before the generation moves: moving it drops what the workspace's exports are holding."""
+    workspace_id = _workspace_id(db_session_factory, "One")
+
+    def generation() -> int:
+        with db_session_factory() as session:
+            moved = session.scalars(
+                select(col(TraceContentBarrier.generation)).where(col(TraceContentBarrier.workspace_id) == workspace_id)
+            ).all()
+            return int(moved[0]) if moved else 0
+
+    before = generation()
+    refused = _as(
+        client, world["member"], "PATCH", f"/workspaces/{workspace_id}", json={"trace_content_enabled": False}
+    )
+
+    assert refused.status_code == status.HTTP_403_FORBIDDEN
+    assert generation() == before
+
+
 def test_a_workspace_keeps_no_content_until_its_managers_turn_it_on(
     client: TestClient, world: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
