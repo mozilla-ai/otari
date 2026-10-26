@@ -304,7 +304,7 @@ For each file/image block it resolves the **target model's** capabilities, then:
 | Target model                                          | Documents                                  | Images                                                        |
 | ----------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------- |
 | **Natively capable** (e.g. Anthropic, OpenAI, GPT-4o) | forwarded unchanged                        | forwarded unchanged                                           |
-| **Text-only** (most local models)                     | extracted to text (markitdown) and inlined | captioned by a vision model / OCR, or dropped with a log line |
+| **Text-only** (most local models)                     | extracted to text and inlined              | captioned by a vision model / OCR, or dropped with a log line |
 
 
 A natively capable model is sent an uploaded document only when it is a PDF,
@@ -476,8 +476,12 @@ Three things to know:
 
 ## Dependencies
 
-Text/office/PDF extraction uses [markitdown](https://github.com/microsoft/markitdown)
-(MIT); scanned-PDF rasterization uses [pypdfium2](https://github.com/pypdfium2-team/pypdfium2)
-(Apache-2.0). Both are permissively licensed, deliberately avoiding AGPL PDF
-libraries since Otari is a network service. OCR is optional; install the
+PDF text extraction and scanned-PDF rasterization use
+[pypdfium2](https://github.com/pypdfium2-team/pypdfium2) (Apache-2.0), deliberately
+avoiding AGPL PDF libraries since Otari is a network service. Word, PowerPoint and
+Excel files (`.docx`, `.pptx`, `.xlsx`) are read with the Python standard library and
+come out as Markdown: headings, list items and tables are kept, formatting is not.
+HTML, Markdown, CSV, JSON and other text files are read as text. A legacy binary Office
+file (`.doc`, `.ppt`, `.xls`) is not extracted. Extracted text stops at 16 MiB, and an
+Office file whose XML inflates past 256 MiB is not extracted. OCR is optional; install the
 `ocr` extra (`uv sync --extra ocr` in a checkout) to enable it.

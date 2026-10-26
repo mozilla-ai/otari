@@ -1,6 +1,6 @@
 """Unit tests for the content normalizer.
 
-The heavy extraction and vision boundaries (markitdown, the vision side-call)
+The extraction and vision boundaries (file extraction, the vision side-call)
 are monkeypatched and the files service is a stand-in, so these tests run with
 no optional deps and no database.
 """

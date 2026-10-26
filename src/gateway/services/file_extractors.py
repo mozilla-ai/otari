@@ -1,37 +1,64 @@
 """Extract a text representation of an uploaded file for text-only models.
 
-Text/office/PDF extraction goes through `markitdown` (MIT) which converts a
-broad set of formats to Markdown. When a PDF carries no extractable text (a
-scanned/image-only PDF), :func:`rasterize_pdf` renders its pages to PNGs via
-`pypdfium2` (Apache-2.0) so the caller can fall back to the vision path —
-deliberately avoiding AGPL-licensed PDF libraries since the gateway is a
-network service.
+PDF text, and the page images :func:`rasterize_pdf` renders when a PDF carries
+no text (a scanned or image-only PDF) for the caller's vision fallback, come
+from `pypdfium2` (Apache-2.0), deliberately avoiding AGPL-licensed PDF libraries
+since the gateway is a network service. Office documents (docx, pptx, xlsx) are
+zip archives of XML and are read with the standard library: a text-only model
+needs their text, not their layout.
 
-All heavy dependencies are imported lazily so the gateway starts (and the rest
-of the test suite runs) even when the optional extras aren't installed.
+pypdfium2 and the OCR backend are imported lazily so the gateway starts even
+when they are not installed.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
+import codecs
 import io
 import mimetypes
-import os
-import tempfile
+import posixpath
+import re
 import threading
+import zipfile
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any
+from typing import IO
+from xml.etree import ElementTree
 
 from gateway.log_config import logger
 
-# The shared MarkItDown, built on first use by _get_converter. Typed loosely
-# because markitdown ships no stubs (see the mypy override in pyproject.toml).
-_converter: Any | None = None
-_converter_lock = threading.Lock()
+# PDFium is not thread-safe, not even across separate documents, and
+# extractions and rasterizations run concurrently in the default executor.
+_PDFIUM_LOCK = threading.Lock()
 
-# MIME → file extension hints for formats markitdown keys off the suffix.
+# The most text one extraction returns, far past any model's context window.
+_MAX_TEXT_BYTES = 16 * 1024 * 1024
+# The most of a text or HTML upload that is decoded to produce that text.
+_MAX_TEXT_INPUT_BYTES = 4 * _MAX_TEXT_BYTES
+# The most XML one office file may inflate to. A small upload can decompress to
+# gigabytes, and the text ceiling does not stop markup that holds no text.
+_MAX_ARCHIVE_XML_BYTES = 256 * 1024 * 1024
+# The most XML elements held in memory at once: a whole part when it is parsed
+# outright, one paragraph or row when it is streamed. Bytes alone do not bound
+# memory, since each tiny element costs far more parsed than it does as text.
+_MAX_HELD_ELEMENTS = 1_000_000
+# Column XFD, the last one a spreadsheet may address.
+_MAX_SHEET_COLUMNS = 16_384
+
+# The number formats a spreadsheet application builds in for dates and times
+# (ECMA-376 Part 1, 18.8.30); a workbook's own formats it declares in full.
+_BUILTIN_DATE_FORMATS = frozenset({"14", "15", "16", "17", "18", "19", "20", "21", "22", "45", "46", "47"})
+# Day zero of a workbook's serial dates. 1899-12-30 rather than 1900-01-01
+# absorbs the leap day 1900 never had, which the format counts for every date
+# after February 1900.
+_EPOCH_1900 = datetime(1899, 12, 30)
+_EPOCH_1904 = datetime(1904, 1, 1)
+
+# MIME → file extension, for a block that carries no filename.
 _MIME_TO_EXT: dict[str, str] = {
     "application/pdf": ".pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
@@ -46,6 +73,18 @@ _MIME_TO_EXT: dict[str, str] = {
     "application/xml": ".xml",
     "text/xml": ".xml",
 }
+
+# Formats read as text even when they are not UTF-8. Any other extension is
+# read as text only when it decodes as UTF-8, so a binary upload is refused.
+_TEXT_EXTENSIONS = frozenset(
+    {".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".jsonl", ".xml", ".yaml", ".yml", ".log"}
+)
+_HTML_EXTENSIONS = frozenset({".html", ".htm"})
+
+# Subtrees whose text would repeat or mislead: an alternate-content fallback
+# repeats its choice, paragraph and run properties hold tab stops rather than
+# tabs, and phonetic runs annotate East Asian spreadsheet text.
+_SKIPPED = frozenset({"Fallback", "pPr", "rPr", "rPh"})
 
 
 @dataclass(frozen=True)
@@ -75,67 +114,461 @@ def _resolve_extension(mime_type: str, filename: str | None) -> str:
     return mimetypes.guess_extension(mime) or ".bin"
 
 
-def _get_converter() -> Any | None:
-    """Return the process-wide MarkItDown, building it on first use.
+class _ExtractionTooLarge(Exception):
+    """An office file inflated past ``_MAX_ARCHIVE_XML_BYTES``."""
 
-    Built once and shared. Constructing a ``MarkItDown`` initializes magika,
-    which loads an ONNX model and starts its own inference thread pool, costing
-    several megabytes and nine threads. The threads go back when the instance is
-    collected but the memory does not, so building one per call grew the resident
-    set without bound. The lock matters because extractions run concurrently in
-    the default executor: an unlocked check lets every racing caller build its
-    own before the first finishes, which is the leak this fixes.
+
+class _TextSink:
+    """Output lines, up to ``_MAX_TEXT_BYTES``."""
+
+    def __init__(self) -> None:
+        self._parts: list[str] = []
+        self._remaining = _MAX_TEXT_BYTES
+        self.full = False
+
+    def add(self, line: str) -> bool:
+        """Append ``line``, cutting it at the ceiling; False once the ceiling is reached."""
+        if self.full:
+            return False
+        self._remaining, self.full = _append_text_with_byte_limit(self._parts, line + "\n", self._remaining)
+        return not self.full
+
+    def text(self) -> str:
+        return "".join(self._parts).strip()
+
+
+class _Archive:
+    """An office file's zip, every byte of XML read counted against ``_MAX_ARCHIVE_XML_BYTES``."""
+
+    def __init__(self, data: bytes) -> None:
+        self._zip = zipfile.ZipFile(io.BytesIO(data))
+        self._names = frozenset(self._zip.namelist())
+        self.remaining = _MAX_ARCHIVE_XML_BYTES
+
+    def has(self, name: str) -> bool:
+        return name in self._names
+
+    def parse(self, name: str) -> ElementTree.Element:
+        root: ElementTree.Element | None = None
+        with self._zip.open(name) as raw:
+            for held, (_, element) in enumerate(ElementTree.iterparse(_CappedReader(raw, self), events=("start",))):
+                if held >= _MAX_HELD_ELEMENTS:
+                    raise _ExtractionTooLarge
+                root = element if root is None else root
+        if root is None:
+            raise ValueError(f"{name} is empty")
+        return root
+
+    def iter_at_depth(self, name: str, depth: int) -> Iterator[ElementTree.Element]:
+        """Yield each element ``depth`` levels below the root once it is complete, then free it.
+
+        Streams the member, so a long document or sheet holds one paragraph or
+        row in memory at a time rather than its whole tree.
+        """
+        stack: list[ElementTree.Element] = []
+        held = 0
+        with self._zip.open(name) as raw:
+            for event, element in ElementTree.iterparse(_CappedReader(raw, self), events=("start", "end")):
+                if event == "start":
+                    stack.append(element)
+                    held += 1
+                    if held > _MAX_HELD_ELEMENTS:
+                        raise _ExtractionTooLarge
+                    continue
+                stack.pop()
+                if len(stack) == depth:
+                    yield element
+                    stack[-1].remove(element)
+                    held = len(stack)
+
+
+class _CappedReader:
+    """A zip member's stream, drawing on its archive's budget."""
+
+    def __init__(self, raw: IO[bytes], archive: _Archive) -> None:
+        self._raw = raw
+        self._archive = archive
+
+    def read(self, size: int = -1, /) -> bytes:
+        limit = self._archive.remaining + 1
+        chunk = self._raw.read(limit if size < 0 else min(size, limit))
+        self._archive.remaining -= len(chunk)
+        if self._archive.remaining < 0:
+            raise _ExtractionTooLarge
+        return chunk
+
+
+def _local(tag: str) -> str:
+    """``tag`` without its namespace, so transitional and strict OOXML read alike."""
+    return tag.rpartition("}")[2]
+
+
+def _relationship_id(element: ElementTree.Element) -> str | None:
+    """The namespaced ``r:id`` attribute, which a slide or sheet entry carries beside a plain ``id``."""
+    return next((value for key, value in element.attrib.items() if key.startswith("{") and _local(key) == "id"), None)
+
+
+def _relationships(archive: _Archive, part: str) -> list[tuple[str, str, str]]:
+    """``(id, type, member)`` for each internal relationship of ``part``; ``""`` is the package itself."""
+    base = posixpath.dirname(part)
+    rels = posixpath.join(base, "_rels", posixpath.basename(part) + ".rels")
+    if not archive.has(rels):
+        return []
+    found = []
+    for relationship in archive.parse(rels):
+        target = relationship.get("Target") or ""
+        if not target or relationship.get("TargetMode") == "External":
+            continue
+        member = target.lstrip("/") if target.startswith("/") else posixpath.normpath(posixpath.join(base, target))
+        found.append((relationship.get("Id") or "", relationship.get("Type") or "", member))
+    return found
+
+
+def _main_part(archive: _Archive, default: str) -> str:
+    return next(
+        (member for _, kind, member in _relationships(archive, "") if kind.endswith("/officeDocument")), default
+    )
+
+
+def _inline_text(element: ElementTree.Element) -> str:
+    """The text of ``element``'s runs, each nested paragraph on a line of its own."""
+    parts: list[str] = []
+
+    def visit(node: ElementTree.Element) -> None:
+        for child in node:
+            name = _local(child.tag)
+            if name in _SKIPPED:
+                continue
+            if name == "t":
+                parts.append(child.text or "")
+            elif name == "tab":
+                parts.append("\t")
+            elif name in ("br", "cr"):
+                parts.append("\n")
+            else:
+                if name == "p" and parts:
+                    parts.append("\n")
+                visit(child)
+
+    visit(element)
+    return "".join(parts)
+
+
+def _markdown_table(rows: list[list[str]]) -> list[str]:
+    rows = [row for row in rows if any(row)]
+    if not rows:
+        return []
+    width = max(len(row) for row in rows)
+    lines = []
+    for index, row in enumerate(rows):
+        cells = [" ".join(cell.split()).replace("|", "\\|") for cell in row] + [""] * (width - len(row))
+        lines.append("| " + " | ".join(cells) + " |")
+        if index == 0:
+            lines.append("|" + " --- |" * width)
+    return [*lines, ""]
+
+
+def _table_rows(table: ElementTree.Element) -> list[list[str]]:
+    return [
+        [_inline_text(cell) for cell in row if _local(cell.tag) == "tc"] for row in table if _local(row.tag) == "tr"
+    ]
+
+
+def _word_prefix(paragraph: ElementTree.Element) -> str:
+    """The Markdown a Word paragraph's style stands for: a heading level or a list item."""
+    properties = next((child for child in paragraph if _local(child.tag) == "pPr"), None)
+    for child in properties if properties is not None else ():
+        name = _local(child.tag)
+        if name == "pStyle":
+            style = next((value for key, value in child.attrib.items() if _local(key) == "val"), "").lower()
+            if style == "title":
+                return "# "
+            if match := re.fullmatch(r"heading(\d)", style):
+                return "#" * min(int(match.group(1)), 6) + " "
+        elif name == "numPr":
+            return "- "
+    return ""
+
+
+def _write_blocks(elements: Iterable[ElementTree.Element], sink: _TextSink, *, word: bool) -> bool:
+    """Write the paragraphs and tables under ``elements`` to ``sink``; False once it is full."""
+    for element in elements:
+        name = _local(element.tag)
+        if name in _SKIPPED:
+            continue
+        if name == "p":
+            text = _inline_text(element).strip()
+            if text and not sink.add((_word_prefix(element) if word else "") + text):
+                return False
+        elif name == "tbl":
+            if not all(sink.add(line) for line in _markdown_table(_table_rows(element))):
+                return False
+        elif not _write_blocks(element, sink, word=word):
+            return False
+    return True
+
+
+def _docx_text(archive: _Archive, sink: _TextSink) -> None:
+    # document > body > paragraph or table
+    for block in archive.iter_at_depth(_main_part(archive, "word/document.xml"), 2):
+        if not _write_blocks([block], sink, word=True):
+            return
+
+
+def _pptx_text(archive: _Archive, sink: _TextSink) -> None:
+    presentation = _main_part(archive, "ppt/presentation.xml")
+    targets = {rid: member for rid, _, member in _relationships(archive, presentation)}
+    slide_ids = (_relationship_id(e) for e in archive.parse(presentation).iter() if _local(e.tag) == "sldId")
+    slides = [targets[rid] for rid in slide_ids if rid in targets and archive.has(targets[rid])]
+    for number, member in enumerate(slides, start=1):
+        if not sink.add(f"## Slide {number}") or not _write_blocks([archive.parse(member)], sink, word=False):
+            return
+        sink.add("")
+
+
+@dataclass(frozen=True)
+class _Workbook:
+    """What reading a cell needs from outside its sheet."""
+
+    shared: list[str]
+    # Indexes of the cell styles whose number format shows a date or a time.
+    date_styles: frozenset[int]
+    date1904: bool
+
+
+def _is_date_format(code: str) -> bool:
+    """Whether a custom number format shows a date or time, ignoring its literals, colors and locales."""
+    bare = re.sub(r'"[^"]*"|\[[^\]]*\]|[\\_*].', "", code).lower()
+    return re.search(r"[dyhs]", bare) is not None
+
+
+def _date_styles(archive: _Archive, styles: str | None) -> frozenset[int]:
+    if styles is None or not archive.has(styles):
+        return frozenset()
+    root = archive.parse(styles)
+    custom = {e.get("numFmtId"): e.get("formatCode") or "" for e in root.iter() if _local(e.tag) == "numFmt"}
+    cell_formats = next((child for child in root if _local(child.tag) == "cellXfs"), None)
+    dates = set()
+    for index, cell_format in enumerate(cell_formats if cell_formats is not None else ()):
+        format_id = cell_format.get("numFmtId") or "0"
+        code = custom.get(format_id)
+        if _is_date_format(code) if code is not None else format_id in _BUILTIN_DATE_FORMATS:
+            dates.add(index)
+    return frozenset(dates)
+
+
+def _serial_date(value: str, date1904: bool) -> str:
+    """A date cell's stored day count as ISO 8601: a date, a time of day, or both."""
+    try:
+        serial = float(value)
+        moment = (_EPOCH_1904 if date1904 else _EPOCH_1900) + timedelta(seconds=round(serial * 86_400))
+    except (ValueError, OverflowError):
+        return value
+    if serial.is_integer():
+        return moment.date().isoformat()
+    if 0 <= serial < 1:
+        return moment.time().isoformat()
+    return moment.isoformat(sep=" ")
+
+
+def _cell_value(cell: ElementTree.Element, book: _Workbook) -> str:
+    kind = cell.get("t")
+    if kind == "inlineStr":
+        inline = next((child for child in cell if _local(child.tag) == "is"), None)
+        return "" if inline is None else _inline_text(inline)
+    value = next((child.text or "" for child in cell if _local(child.tag) == "v"), "")
+    if kind == "s":
+        return book.shared[int(value)] if value.isdecimal() and int(value) < len(book.shared) else ""
+    if kind == "b":
+        return {"0": "FALSE", "1": "TRUE"}.get(value, value)
+    style = cell.get("s") or ""
+    if value and kind in (None, "n") and style.isdecimal() and int(style) in book.date_styles:
+        return _serial_date(value, book.date1904)
+    return value
+
+
+def _column_index(reference: str | None, default: int) -> int:
+    letters = re.match(r"[A-Za-z]{1,3}", reference or "")
+    if letters is None:
+        return default
+    index = 0
+    for letter in letters.group().upper():
+        index = index * 26 + ord(letter) - ord("A") + 1
+    return index - 1
+
+
+def _sheet_rows(archive: _Archive, member: str, book: _Workbook) -> list[list[str]]:
+    rows: list[list[str]] = []
+    size = 0
+    # worksheet > sheetData > row
+    for row in archive.iter_at_depth(member, 2):
+        if _local(row.tag) != "row":
+            continue
+        cells: list[str] = []
+        for cell in row:
+            if _local(cell.tag) != "c":
+                continue
+            column = _column_index(cell.get("r"), len(cells))
+            value = _cell_value(cell, book)
+            if not value or column >= _MAX_SHEET_COLUMNS:
+                continue
+            if column >= len(cells):
+                cells.extend([""] * (column - len(cells) + 1))
+            cells[column] = value
+        rows.append(cells)
+        size += sum(len(cell) + 3 for cell in cells)
+        if size > _MAX_TEXT_BYTES:
+            break
+    return rows
+
+
+def _xlsx_text(archive: _Archive, sink: _TextSink) -> None:
+    workbook = _main_part(archive, "xl/workbook.xml")
+    relationships = _relationships(archive, workbook)
+    targets = {rid: member for rid, _, member in relationships}
+    parts = {kind.rpartition("/")[2]: member for _, kind, member in relationships}
+    strings = parts.get("sharedStrings")
+    root = archive.parse(workbook)
+    properties = next((e for e in root if _local(e.tag) == "workbookPr"), None)
+    book = _Workbook(
+        # sst > si
+        shared=[_inline_text(item) for item in archive.iter_at_depth(strings, 1)]
+        if strings and archive.has(strings)
+        else [],
+        date_styles=_date_styles(archive, parts.get("styles")),
+        date1904=properties is not None and properties.get("date1904") in ("1", "true"),
+    )
+    for sheet in root.iter():
+        member = targets.get(_relationship_id(sheet) or "") if _local(sheet.tag) == "sheet" else None
+        if member is None or not archive.has(member):
+            continue
+        lines = [f"## {sheet.get('name') or 'Sheet'}", *_markdown_table(_sheet_rows(archive, member, book))]
+        if not all(sink.add(line) for line in lines):
+            return
+
+
+_OFFICE_READERS: dict[str, Callable[[_Archive, _TextSink], None]] = {
+    ".docx": _docx_text,
+    ".docm": _docx_text,
+    ".pptx": _pptx_text,
+    ".pptm": _pptx_text,
+    ".xlsx": _xlsx_text,
+    ".xlsm": _xlsx_text,
+}
+
+
+class _HTMLText(HTMLParser):
+    """The visible text of an HTML document as light Markdown: headings, list items and table rows."""
+
+    _HIDDEN = frozenset({"script", "style", "noscript", "template"})
+    _BLOCKS = frozenset(
+        {
+            "address", "article", "aside", "blockquote", "br", "dd", "div", "dl", "dt", "figcaption",
+            "footer", "header", "hr", "main", "nav", "ol", "p", "pre", "section", "table", "title", "ul",
+        }
+    )  # fmt: skip
+    _OPENERS = {"li": "\n- ", "tr": "\n|", "td": " ", "th": " "} | {f"h{n}": "\n" + "#" * n + " " for n in range(1, 7)}
+    _CLOSERS = {"td": " |", "th": " |"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._hidden = 0
+        self._preformatted = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "pre":
+            self._preformatted += 1
+        if tag in self._HIDDEN:
+            self._hidden += 1
+        elif tag in self._OPENERS:
+            self._parts.append(self._OPENERS[tag])
+        elif tag in self._BLOCKS:
+            self._parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "pre":
+            self._preformatted = max(0, self._preformatted - 1)
+        if tag in self._HIDDEN:
+            self._hidden = max(0, self._hidden - 1)
+        elif tag in self._CLOSERS:
+            self._parts.append(self._CLOSERS[tag])
+        elif tag in self._BLOCKS or tag in self._OPENERS:
+            self._parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        # Outside <pre>, a line break in the source is only whitespace.
+        if not self._hidden:
+            self._parts.append(data if self._preformatted else " ".join(data.splitlines()))
+
+    def text(self) -> str:
+        lines: list[str] = []
+        marker = ""
+        for raw in "".join(self._parts).splitlines():
+            line = " ".join(raw.split())
+            # A list item or heading whose text sits in a nested block leaves
+            # its marker alone on a line; it belongs to the next one.
+            if line == "-" or (line and set(line) == {"#"}):
+                marker = line + " "
+            elif line:
+                lines.append(marker + line)
+                marker = ""
+        return "\n".join(lines)
+
+
+def _decode_text(data: bytes, *, lenient: bool) -> str | None:
+    """The start of ``data`` as text, or None when it is not text.
+
+    ``lenient`` falls back to Windows-1252 for a format known to be text.
+    The decoders are incremental so a character the cut splits is held back
+    rather than failing the decode.
     """
-    global _converter
-    with _converter_lock:
-        if _converter is None:
-            try:
-                from markitdown import MarkItDown
-            except ImportError:
-                return None
-            _converter = MarkItDown(enable_plugins=False)
-    return _converter
+    head = data[:_MAX_TEXT_INPUT_BYTES]
+    if head.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return codecs.getincrementaldecoder("utf-16")(errors="replace").decode(head)
+    if b"\x00" in head[:8192]:
+        return None
+    try:
+        return codecs.getincrementaldecoder("utf-8-sig")().decode(head)
+    except UnicodeDecodeError:
+        return head.decode("cp1252", errors="replace") if lenient else None
 
 
 def _extract_sync(data: bytes, extension: str) -> ExtractionResult:
-    # Building the converter initializes magika (ONNX model load), which can fail
-    # for reasons other than a missing package. Keep that a failed extraction so
-    # the caller still gets its PDF-rasterize / vision fallback.
+    sink = _TextSink()
     try:
-        converter = _get_converter()
+        if extension == ".pdf":
+            pdf = extract_bounded_pdf_text_sync(data, max_pages=None, max_text_bytes=_MAX_TEXT_BYTES)
+            sink.add(pdf.text.replace("\r\n", "\n"))
+        elif reader := _OFFICE_READERS.get(extension):
+            reader(_Archive(data), sink)
+        else:
+            text = _decode_text(data, lenient=extension in _TEXT_EXTENSIONS or extension in _HTML_EXTENSIONS)
+            if text is None:
+                return ExtractionResult("", False, f"unsupported format {extension}")
+            if extension in _HTML_EXTENSIONS:
+                parser = _HTMLText()
+                parser.feed(text)
+                parser.close()
+                text = parser.text()
+            sink.add(text)
+    except _ExtractionTooLarge:
+        return ExtractionResult("", False, "document inflates past the extraction limit")
     except Exception as exc:  # noqa: BLE001 — surface as a failed extraction, not a 500
-        logger.warning("markitdown converter unavailable: %s", exc)
+        logger.warning("text extraction failed for %s: %s", extension, exc)
         return ExtractionResult("", False, f"extraction error: {exc}")
-    if converter is None:
-        return ExtractionResult("", False, "markitdown not installed")
 
-    # markitdown's stable API is path-based; write to a temp file with the right
-    # suffix so format detection works across library versions. We close the
-    # handle before markitdown re-opens the path and unlink it ourselves —
-    # NamedTemporaryFile's auto-delete-on-close would race the re-open on Windows.
-    tmp = tempfile.NamedTemporaryFile(suffix=extension, delete=False)  # noqa: SIM115
-    try:
-        tmp.write(data)
-        tmp.close()
-        result = converter.convert(tmp.name)
-    except Exception as exc:  # noqa: BLE001 — surface as a failed extraction, not a 500
-        logger.warning("markitdown extraction failed for %s: %s", extension, exc)
-        return ExtractionResult("", False, f"extraction error: {exc}")
-    finally:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp.name)
-
-    text = (result.text_content or "").strip()
+    text = sink.text()
     if not text:
         return ExtractionResult("", False, "no extractable text")
-    return ExtractionResult(text, True, "ok")
+    return ExtractionResult(text, True, "truncated" if sink.full else "ok")
 
 
 async def extract_text_from_file(data: bytes, mime_type: str, filename: str | None) -> ExtractionResult:
     """Extract a Markdown/text representation of ``data``.
 
     Returns ``ok=False`` (with bytes intact for a possible vision fallback) when
-    the format is unsupported, the library is missing, or no text could be read.
+    the format is unsupported, the document is too large, or no text could be read.
     """
     extension = _resolve_extension(mime_type, filename)
     return await asyncio.to_thread(_extract_sync, data, extension)
@@ -153,16 +586,16 @@ def _append_text_with_byte_limit(parts: list[str], value: str, remaining: int) -
 def extract_bounded_pdf_text_sync(
     data: bytes,
     *,
-    max_pages: int,
+    max_pages: int | None,
     max_text_bytes: int,
 ) -> BoundedPDFExtractionResult:
-    """Extract bounded PDF text synchronously inside the retrieval worker.
+    """Extract PDF text up to fixed bounds, never rasterizing.
 
-    This path is deliberately separate from uploaded-file extraction. It checks
-    the page count before reading page text, never rasterizes, and stops building
-    output at the fixed intermediate UTF-8 byte ceiling.
+    A PDF of more than ``max_pages`` pages is refused before any page text is
+    read, and output stops at ``max_text_bytes`` of UTF-8. ``max_pages=None``
+    reads every page, for an upload already bounded by the files size limit.
     """
-    if max_pages <= 0 or max_text_bytes <= 0:
+    if (max_pages is not None and max_pages <= 0) or max_text_bytes <= 0:
         raise ValueError("PDF extraction limits must be positive")
 
     try:
@@ -170,37 +603,38 @@ def extract_bounded_pdf_text_sync(
     except ImportError:
         return BoundedPDFExtractionResult("", False)
 
-    pdf = pdfium.PdfDocument(data)
-    try:
-        if len(pdf) > max_pages:
-            return BoundedPDFExtractionResult("", False)
+    with _PDFIUM_LOCK:
+        pdf = pdfium.PdfDocument(data)
+        try:
+            if max_pages is not None and len(pdf) > max_pages:
+                return BoundedPDFExtractionResult("", False)
 
-        parts: list[str] = []
-        remaining = max_text_bytes
-        truncated = False
-        for index in range(len(pdf)):
-            page = pdf[index]
-            try:
-                text_page = page.get_textpage()
+            parts: list[str] = []
+            remaining = max_text_bytes
+            truncated = False
+            for index in range(len(pdf)):
+                page = pdf[index]
                 try:
-                    page_text = text_page.get_text_range().strip()
+                    text_page = page.get_textpage()
+                    try:
+                        page_text = text_page.get_text_range().strip()
+                    finally:
+                        text_page.close()
                 finally:
-                    text_page.close()
-            finally:
-                page.close()
-            if not page_text:
-                continue
-            prefix = "\n\n" if parts else ""
-            remaining, prefix_truncated = _append_text_with_byte_limit(parts, prefix, remaining)
-            if prefix_truncated or remaining == 0:
-                truncated = index < len(pdf) - 1 or bool(page_text)
-                break
-            remaining, page_truncated = _append_text_with_byte_limit(parts, page_text, remaining)
-            if page_truncated or remaining == 0:
-                truncated = page_truncated or index < len(pdf) - 1
-                break
-    finally:
-        pdf.close()
+                    page.close()
+                if not page_text:
+                    continue
+                prefix = "\n\n" if parts else ""
+                remaining, prefix_truncated = _append_text_with_byte_limit(parts, prefix, remaining)
+                if prefix_truncated or remaining == 0:
+                    truncated = index < len(pdf) - 1 or bool(page_text)
+                    break
+                remaining, page_truncated = _append_text_with_byte_limit(parts, page_text, remaining)
+                if page_truncated or remaining == 0:
+                    truncated = page_truncated or index < len(pdf) - 1
+                    break
+        finally:
+            pdf.close()
 
     text = "".join(parts).strip()
     if not text:
@@ -216,17 +650,18 @@ def _rasterize_sync(data: bytes, max_pages: int) -> list[bytes]:
         return []
 
     images: list[bytes] = []
-    pdf = pdfium.PdfDocument(data)
-    try:
-        for index in range(min(len(pdf), max_pages)):
-            page = pdf[index]
-            bitmap = page.render(scale=2.0)
-            pil_image = bitmap.to_pil()
-            buffer = io.BytesIO()
-            pil_image.save(buffer, format="PNG")
-            images.append(buffer.getvalue())
-    finally:
-        pdf.close()
+    with _PDFIUM_LOCK:
+        pdf = pdfium.PdfDocument(data)
+        try:
+            for index in range(min(len(pdf), max_pages)):
+                page = pdf[index]
+                bitmap = page.render(scale=2.0)
+                pil_image = bitmap.to_pil()
+                buffer = io.BytesIO()
+                pil_image.save(buffer, format="PNG")
+                images.append(buffer.getvalue())
+        finally:
+            pdf.close()
     return images
 
 
