@@ -281,6 +281,48 @@ describe("SessionContent", () => {
     await vi.waitFor(() => expect(opened).toHaveBeenCalled())
   })
 
+  it("shows a failed break-glass attempt's error only until the dialog closes", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) =>
+      (init?.method ?? "GET").toUpperCase() === "POST"
+        ? new Response(JSON.stringify({ detail: "The reason is too short" }), {
+            status: 422,
+            headers: { "Content-Type": "application/json" },
+          })
+        : new Response(JSON.stringify({ items: [], has_more: false }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+    )
+    const detail = traceDetail({ spans: [{ ...tool, content_private: true }] })
+    renderWith(<SessionContent detail={detail} onBreakGlass={vi.fn()} />)
+    const open = () =>
+      userEvent.click(
+        screen.getByRole("button", { name: "Open by break-glass" }),
+      )
+
+    await open()
+    await userEvent.type(
+      screen.getByRole("textbox", { name: /Reason/ }),
+      "HR matter 17, approved by legal",
+    )
+    await userEvent.click(
+      screen.getByRole("button", { name: "Open and record" }),
+    )
+    expect(
+      await screen.findAllByText(/The reason is too short/),
+    ).not.toHaveLength(0)
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    await open()
+
+    expect(
+      screen.queryByText(/The reason is too short/),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: /Reason/ })).toHaveValue(
+      "HR matter 17, approved by legal",
+    )
+  })
+
   it("offers no break-glass to someone who is not an owner", () => {
     mockApi()
     renderWith(

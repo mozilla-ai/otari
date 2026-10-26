@@ -124,6 +124,11 @@ function BreakGlassAction({
   const [isOpen, setIsOpen] = useState(false)
   const [reason, setReason] = useState("")
   const trimmed = reason.trim()
+  // The reason stays for a second try; a failed attempt's error does not.
+  const close = () => {
+    setIsOpen(false)
+    breakGlass.reset()
+  }
 
   const submit = () => {
     if (breakGlass.isPending || trimmed.length < BREAK_GLASS_REASON_MIN) return
@@ -154,7 +159,7 @@ function BreakGlassAction({
         <FormDialog
           isOpen
           onOpenChange={(open) => {
-            if (!open) setIsOpen(false)
+            if (!open) close()
           }}
           title="Open this session by break-glass"
           description="For an investigation its owner cannot be asked to share for, such as an HR or legal matter. The opening is recorded with your reason and shown to every owner of this organization. The session's owner is not told."
