@@ -98,7 +98,6 @@ dependencies = [
     "pyyaml>=6.0",
     "sqlalchemy[asyncio]>=2.1.5",
     "sqlmodel>=0.0.24",
-    "trafilatura>=2.0.0",
     "uvicorn[standard]>=0.54.0",
     "opentelemetry-proto>=1.39.1",
     "webauthn>=2.5.0",
@@ -311,10 +310,6 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["testcontainers.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = ["trafilatura.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

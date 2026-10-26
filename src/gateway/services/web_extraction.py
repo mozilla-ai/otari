@@ -69,16 +69,9 @@ def _apply_worker_limits(memory_bytes: int) -> None:
 
 
 def _extract_html(value: str) -> ExtractedText:
-    import trafilatura
+    from gateway.services.file_extractors import html_main_text
 
-    result = trafilatura.extract(
-        value,
-        output_format="markdown",
-        include_comments=False,
-        include_tables=True,
-        favor_recall=True,
-    )
-    text = str(result).strip() if result else ""
+    text = html_main_text(value)
     if not text:
         raise ExtractionError("HTML has no extractable text")
     return _truncate_worker_text(text)
