@@ -11,7 +11,9 @@ So a value copied onto another span, another session or another workspace
 opens as nothing.
 
 A value without the ``otc1.`` prefix is a bare ``OTARI_SECRET_KEY`` Fernet token,
-the form content was stored in before; it opens as it always did.
+the form content was stored in before; it opens as it always did. Its payload
+names only its workspace and its span, so that form is bound to those two and
+not to its session.
 
 Each session has data keys of its own, made for its workspace and itself (KMS
 binds both as encryption context), so a key that leaked would open one session.
@@ -108,7 +110,9 @@ class SpanContent:
     A batch fetches the keys it lacks all at once and waits for them at most
     ``_KEY_SOURCE_BUDGET_S`` in all, so a slow source costs a batch its content
     and never the batch, however many workspaces it spans. Writing and reading
-    pause apart: a read that fails does not stop capture, nor a write reads. Expired keys are
+    pause apart, and reading pauses per wrapper: a read that fails does not stop
+    capture, nor a write reads, nor one wrapper's outage the rows of another.
+    Expired keys are
     dropped on every call and by a timer of their own, so an idle process holds
     none past its age; dropping a reference cannot make Python overwrite the
     bytes, which stay in memory until reused.
@@ -119,7 +123,7 @@ class SpanContent:
         self._write_keys: OrderedDict[Session, _WriteKey] = OrderedDict()
         self._open_keys: OrderedDict[tuple[str, bytes, Session], tuple[bytes, float]] = OrderedDict()
         self._write_paused_until = 0.0
-        self._read_paused_until = 0.0
+        self._read_paused_until: dict[str, float] = {}
         self._sweep: asyncio.TimerHandle | None = None
         # Per workspace: new keys it may still ask for, and when that was last topped up.
         self._new_key_allowance: dict[uuid.UUID, tuple[float, float]] = {}
@@ -262,7 +266,7 @@ class SpanContent:
                     "unavailable", f"the content key source failed ({type(exc).__name__})"
                 )
         if failure is not None:
-            self._failed(failure, "sealed")
+            self._write_failed(failure)
             return held, failure.reason, limited
         if held:
             self._check_failure = None
@@ -318,7 +322,7 @@ class SpanContent:
         try:
             data_key = await self._open_key(wrapper, wrapped, (workspace_id, trace_id), keys_opened)
         except ContentKeyError as exc:
-            self._failed(exc, "opened")
+            self._read_failed(exc, wrapper)
             UNOPENED.labels(reason=exc.reason).inc()
             return {}
         if data_key is None:
@@ -349,7 +353,7 @@ class SpanContent:
         if keys_opened is not None:
             if cache_key in keys_opened:
                 return keys_opened[cache_key]
-            if self._read_paused():
+            if self._read_paused(wrapper):
                 return None
             keys_opened[cache_key] = await _within_budget(
                 self._keys.open_data_key(wrapper, wrapped, _context(*session))
@@ -359,7 +363,7 @@ class SpanContent:
         if cached is not None:
             self._open_keys.move_to_end(cache_key)
             return cached[0]
-        if self._read_paused():
+        if self._read_paused(wrapper):
             return None
         data_key = await _within_budget(self._keys.open_data_key(wrapper, wrapped, _context(*session)))
         self._open_keys[cache_key] = (data_key, monotonic())
@@ -405,26 +409,37 @@ class SpanContent:
     def _write_paused(self) -> bool:
         return monotonic() < self._write_paused_until
 
-    def _read_paused(self) -> bool:
-        return monotonic() < self._read_paused_until
+    def _read_paused(self, wrapper: str) -> bool:
+        return monotonic() < self._read_paused_until.get(wrapper, 0.0)
 
-    def _failed(self, exc: ContentKeyError, action: str) -> None:
+    def _write_failed(self, exc: ContentKeyError) -> None:
+        """Stop asking the wrapper new keys are made with, which would fail every span the same way."""
         if exc.reason == "rejected":
             return
-        # A key source that is down or refusing would fail every span the same way.
-        # Writing and reading pause apart: one bad read must not stop capture.
-        until = monotonic() + _PAUSE_AFTER_FAILURE_S
-        if action == "sealed":
-            self._write_paused_until = until
-        else:
-            self._read_paused_until = until
-        logger.warning(
-            "Trace content could not be %s (%s: %s); the key source is not asked again for %.0fs",
-            action,
-            exc.reason,
-            exc,
-            _PAUSE_AFTER_FAILURE_S,
-        )
+        self._write_paused_until = monotonic() + _PAUSE_AFTER_FAILURE_S
+        _log_failure("sealed", exc)
+
+    def _read_failed(self, exc: ContentKeyError, wrapper: str) -> None:
+        """Stop asking the one wrapper that failed.
+
+        Per wrapper, because a deployment opens rows of every wrapper it has
+        configured and one of them being down says nothing about the others.
+        Apart from writing, because one bad read must not stop capture.
+        """
+        if exc.reason == "rejected":
+            return
+        self._read_paused_until[wrapper] = monotonic() + _PAUSE_AFTER_FAILURE_S
+        _log_failure("opened", exc)
+
+
+def _log_failure(action: str, exc: ContentKeyError) -> None:
+    logger.warning(
+        "Trace content could not be %s (%s: %s); the key source is not asked again for %.0fs",
+        action,
+        exc.reason,
+        exc,
+        _PAUSE_AFTER_FAILURE_S,
+    )
 
 
 def _collect(task: "asyncio.Future[Any]") -> None:
@@ -472,7 +487,11 @@ def _allowed(content: object) -> dict[str, str]:
 
 
 def _open_legacy(sealed: str, *, workspace_id: uuid.UUID, span_id: str) -> dict[str, str]:
-    """A bare Fernet token, as content was sealed before data keys, naming its row in the payload."""
+    """A bare Fernet token, as content was sealed before data keys, naming its row in the payload.
+
+    NOTE: the payload names the workspace and the span and not the session, so this
+    form is bound to those two alone. It takes no session argument for that reason.
+    """
     try:
         payload = json.loads(decrypt_secret(sealed))
     except (SecretBoxUnavailableError, SecretDecryptionError, ValueError):

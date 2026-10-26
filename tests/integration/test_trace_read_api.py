@@ -697,6 +697,37 @@ def test_a_share_lets_its_audience_read_until_its_owner_ends_it_and_records_each
     assert missing.status_code == status.HTTP_404_NOT_FOUND
 
 
+def test_sharing_a_session_twice_leaves_one_share_to_end(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    path = "/organizations/me/traces/s-one/shares"
+
+    first = _as(client, world["member"], "POST", path, json={"audience": "organization_admins", "note": "first"})
+    again = _as(client, world["member"], "POST", path, json={"audience": "organization_admins", "note": "second"})
+    assert (first.status_code, again.status_code) == (status.HTTP_201_CREATED, status.HTTP_201_CREATED), again.text
+    # The running share stands, so the owner has one share to end, and it carries
+    # the reason they last gave rather than the one they first gave.
+    assert again.json()["id"] == first.json()["id"]
+    assert again.json()["note"] == "second"
+    [listed] = _as(client, world["member"], "GET", path).json()["items"]
+    assert listed["note"] == "second"
+
+    ended = _as(client, world["member"], "DELETE", f"{path}/{first.json()['id']}")
+    assert ended.status_code == status.HTTP_204_NO_CONTENT
+    assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
+
+    # Ended, so the next share is a new one rather than the old one coming back.
+    third = _as(client, world["member"], "POST", path, json={"audience": "organization_admins", "note": "third"})
+    assert third.status_code == status.HTTP_201_CREATED, third.text
+    assert third.json()["id"] != first.json()["id"]
+
+
 def test_a_share_with_the_operator_opens_for_the_operator(
     client: TestClient,
     world: dict[str, str],
@@ -758,6 +789,28 @@ def _as(client: TestClient, cookie: str, method: str, path: str, **kwargs: Any) 
         return client.request(method, f"{API_ROOT}{path}", **kwargs)
     finally:
         client.cookies.clear()
+
+
+def test_a_member_who_manages_nothing_cannot_turn_a_workspaces_content_off(
+    client: TestClient, world: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """Refused before the generation moves: moving it drops what the workspace's exports are holding."""
+    workspace_id = _workspace_id(db_session_factory, "One")
+
+    def generation() -> int:
+        with db_session_factory() as session:
+            moved = session.scalars(
+                select(col(TraceContentBarrier.generation)).where(col(TraceContentBarrier.workspace_id) == workspace_id)
+            ).all()
+            return int(moved[0]) if moved else 0
+
+    before = generation()
+    refused = _as(
+        client, world["member"], "PATCH", f"/workspaces/{workspace_id}", json={"trace_content_enabled": False}
+    )
+
+    assert refused.status_code == status.HTTP_403_FORBIDDEN
+    assert generation() == before
 
 
 def test_a_workspace_keeps_no_content_until_its_managers_turn_it_on(

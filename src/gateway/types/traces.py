@@ -363,8 +363,14 @@ class SessionOwners(Protocol):
         """Whether ``user_id`` names a person who currently sees ``workspace_id``."""
         ...
 
-    async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
-        """Which of these (workspace, user) pairs :meth:`is_member` holds for, asked at once."""
+    async def content_kept_for(
+        self, pairs: Collection[tuple[uuid.UUID, str | None]]
+    ) -> set[tuple[uuid.UUID, str | None]]:
+        """Which of these (workspace, user) pairs may have content kept, asked at once.
+
+        A pair qualifies where :meth:`is_member` holds for it and the workspace
+        still keeps what its sessions were about.
+        """
         ...
 
 

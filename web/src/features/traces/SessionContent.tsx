@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 
 import type {
   TraceContentShare,
@@ -14,6 +14,7 @@ import { TextArea } from "@/design-system/forms/TextArea"
 import {
   useBreakGlass,
   useEndTraceShare,
+  useShareReads,
   useShareTrace,
   useTraceShares,
 } from "@/shared/api/traces"
@@ -73,26 +74,30 @@ export function SessionContent({
 
   if (access === "break_glass") {
     return (
-      <InfoBanner tone="warning">
-        Opened by break-glass, without its owner's share. The opening is
-        recorded with your reason, and every owner of the organization can see
-        it.
-      </InfoBanner>
+      <Band>
+        <InfoBanner tone="warning">
+          Opened by break-glass, without its owner's share. The opening is
+          recorded with your reason, and every owner of the organization can see
+          it.
+        </InfoBanner>
+      </Band>
     )
   }
   if (access === "share" && detail.content_share) {
     const share = detail.content_share
     return (
-      <InfoBanner>
-        Shared with you by the person whose session this is.
-        {share.note ? ` Their note: “${share.note}”.` : ""} They can see that
-        you read it, and when.
-      </InfoBanner>
+      <Band>
+        <InfoBanner>
+          Shared with you by the person whose session this is.
+          {share.note ? ` Their note: “${share.note}”.` : ""} They can see that
+          you read it, and when.
+        </InfoBanner>
+      </Band>
     )
   }
   if (holdsPrivate) {
     return (
-      <div className="flex flex-col gap-3">
+      <Band>
         <InfoBanner>
           What this session was about is private to the person whose session it
           is. They can share it with the organization's admins, or with the team
@@ -101,7 +106,7 @@ export function SessionContent({
         {onBreakGlass ? (
           <BreakGlassAction detail={detail} onOpened={onBreakGlass} />
         ) : null}
-      </div>
+      </Band>
     )
   }
   // On ownership alone, not on the content having opened: during a key-source
@@ -111,6 +116,21 @@ export function SessionContent({
     return <OwnerSharing detail={detail} canShare={holdsContent} />
   }
   return null
+}
+
+/**
+ * The band the session's notice sits in, above the peek's two panes.
+ *
+ * Drawn by whatever has something to say rather than by the caller: a wrapper
+ * around a null child still draws its own border, and an ordinary session says
+ * nothing at all.
+ */
+function Band({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex shrink-0 flex-col gap-3 border-b border-border px-4 py-3">
+      {children}
+    </div>
+  )
 }
 
 function BreakGlassAction({
@@ -146,7 +166,11 @@ function BreakGlassAction({
   return (
     <>
       <div>
-        <Button variant="ghost" onPress={() => setIsOpen(true)}>
+        <Button
+          variant="ghost"
+          className="min-h-11 md:min-h-9"
+          onPress={() => setIsOpen(true)}
+        >
           Open by break-glass
         </Button>
       </div>
@@ -189,7 +213,7 @@ function OwnerSharing({
   const platformBreakGlass = useDeployment().trace_platform_break_glass
   const traceId = detail.summary.trace_id
   const workspaceId = detail.summary.workspace_id
-  const shares = useTraceShares(traceId, workspaceId, true)
+  const shares = useTraceShares(traceId, workspaceId)
   const endShare = useEndTraceShare()
   const [isSharing, setIsSharing] = useState(false)
   // Pages are offsets over an order that moves as shares end, so a share can
@@ -206,7 +230,7 @@ function OwnerSharing({
   if (!canShare && items.length === 0 && !shares.error) return null
 
   return (
-    <div className="flex flex-col gap-3">
+    <Band>
       <InfoBanner>
         Otari shows what this session was about, its prompts, commands and file
         paths, only to you. {exceptionalAccess(platformBreakGlass)} Share it
@@ -215,7 +239,11 @@ function OwnerSharing({
       <ErrorBanner error={shares.error ?? endShare.error} />
       {canShare ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="primary" onPress={() => setIsSharing(true)}>
+          <Button
+            variant="primary"
+            className="min-h-11 md:min-h-9"
+            onPress={() => setIsSharing(true)}
+          >
             Share this session
           </Button>
         </div>
@@ -224,6 +252,7 @@ function OwnerSharing({
         <div>
           <Button
             variant="ghost"
+            className="min-h-11 md:min-h-9"
             onPress={() => void shares.fetchNextPage()}
             isDisabled={shares.isFetchingNextPage}
           >
@@ -238,6 +267,8 @@ function OwnerSharing({
             <ShareRow
               key={share.id}
               share={share}
+              traceId={traceId}
+              workspaceId={workspaceId}
               isEnding={endShare.isPending}
               onEnd={() =>
                 endShare.mutate({ traceId, workspaceId, shareId: share.id })
@@ -253,7 +284,7 @@ function OwnerSharing({
           onClose={() => setIsSharing(false)}
         />
       ) : null}
-    </div>
+    </Band>
   )
 }
 
@@ -264,15 +295,36 @@ function shareState(share: TraceContentShare): string {
 
 function ShareRow({
   share,
+  traceId,
+  workspaceId,
   isEnding,
   onEnd,
 }: {
   share: TraceContentShare
+  traceId: string
+  workspaceId: string
   isEnding: boolean
   onEnd: () => void
 }) {
-  const reads = share.reads ?? []
-  const readCount = share.read_count ?? reads.length
+  const [isPaging, setIsPaging] = useState(false)
+  const newest = share.reads ?? []
+  const readCount = share.read_count ?? newest.length
+  const earlier = useShareReads(traceId, workspaceId, share.id, isPaging)
+  // Offsets over a log that grows at its head, so a read can appear on two pages.
+  const paged = [
+    ...new Map(
+      (earlier.data?.pages ?? [])
+        .flatMap((page) => page.items)
+        .map((read) => [`${read.reader_email}-${read.read_at}`, read]),
+    ).entries(),
+  ]
+  const reads =
+    isPaging && earlier.data
+      ? paged
+      : newest.map(
+          (read) => [`${read.reader_email}-${read.read_at}`, read] as const,
+        )
+
   return (
     <li className="flex flex-col gap-1 border border-border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -280,28 +332,42 @@ function ShareRow({
           {AUDIENCE_LABELS[share.audience]}, {shareState(share)}
         </span>
         {share.active ? (
-          <Button variant="ghost" onPress={onEnd} isDisabled={isEnding}>
+          <Button
+            variant="ghost"
+            className="min-h-11 shrink-0 md:min-h-9"
+            onPress={onEnd}
+            isDisabled={isEnding}
+          >
             Stop sharing
           </Button>
         ) : null}
       </div>
       {share.note ? <span className="text-caption">“{share.note}”</span> : null}
+      <ErrorBanner error={earlier.error} />
       {reads.length === 0 ? (
         <span className="text-caption">Nobody has read it.</span>
       ) : (
         <ul className="flex flex-col text-caption" aria-label="Who read it">
-          {reads.map((read) => (
-            <li key={`${read.reader_email}-${read.read_at}`}>
+          {reads.map(([key, read]) => (
+            <li key={key}>
               Read by {read.reader_email} on {formatDateTime(read.read_at)}
             </li>
           ))}
-          {readCount > reads.length ? (
-            <li>
-              The newest {reads.length} of {readCount} reads.
-            </li>
-          ) : null}
         </ul>
       )}
+      {readCount > reads.length || earlier.hasNextPage ? (
+        <Button
+          variant="ghost"
+          className="min-h-11 self-start md:min-h-9"
+          isDisabled={earlier.isFetching}
+          onPress={() => {
+            if (!isPaging) setIsPaging(true)
+            else void earlier.fetchNextPage()
+          }}
+        >
+          {`Show earlier reads (${readCount} in all)`}
+        </Button>
+      ) : null}
     </li>
   )
 }

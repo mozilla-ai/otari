@@ -27,6 +27,7 @@ import { Tooltip } from "@/design-system/overlays/Tooltip"
 import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
 import { CostCard } from "./CostCard"
 import { ExplainCard } from "./ExplainCard"
+import { CONTENT_PRIVATE } from "./exceptionalAccess"
 import {
   formatDuration,
   formatRelativeTime,
@@ -189,20 +190,28 @@ function PreviewBody({
   input,
   output,
   statusMessage,
+  contentPrivate,
   level,
   format,
 }: {
   input: unknown
   output: unknown
   statusMessage?: string
+  contentPrivate?: boolean
   level: Observation["level"]
   format: Format
 }) {
-  if (input == null && output == null && !statusMessage) {
+  if (input == null && output == null && !statusMessage && !contentPrivate) {
     return <span className="text-caption text-subtle">No input or output</span>
   }
   return (
     <>
+      {contentPrivate ? (
+        <section className="flex flex-col gap-1.5">
+          <h3 className="text-overline">What this was about</h3>
+          <p className="text-body text-muted">{CONTENT_PRIVATE}</p>
+        </section>
+      ) : null}
       {statusMessage ? (
         <section className="flex flex-col gap-1.5">
           <h3 className="text-overline">{STATUS_TITLE[level]}</h3>
@@ -809,6 +818,8 @@ export function TracePeek({
         ) : null}
       </div>
 
+      {notice}
+
       <div ref={bodyRef} className="relative flex min-h-0 flex-1 overflow-auto">
         {error ? (
           <div className="flex-1 p-4">
@@ -900,7 +911,6 @@ export function TracePeek({
                   Back to the spans
                 </Button>
               </div>
-              {notice}
               {activeTab === "attributes" && observation ? (
                 <Attributes trace={trace} observation={observation} />
               ) : !observation && trace.gateway ? (
@@ -922,11 +932,13 @@ export function TracePeek({
                   {observation.explain &&
                   observation.input == null &&
                   observation.output == null &&
-                  !observation.statusMessage ? null : (
+                  !observation.statusMessage &&
+                  !observation.contentPrivate ? null : (
                     <PreviewBody
                       input={observation.input}
                       output={observation.output}
                       statusMessage={observation.statusMessage}
+                      contentPrivate={observation.contentPrivate}
                       level={observation.level}
                       format={format}
                     />

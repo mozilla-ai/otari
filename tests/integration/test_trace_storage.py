@@ -52,7 +52,7 @@ class _Members:
     async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
         return user_id is not None and user_id not in self.gone
 
-    async def members(self, pairs: Any) -> set[tuple[uuid.UUID, str | None]]:
+    async def content_kept_for(self, pairs: Any) -> set[tuple[uuid.UUID, str | None]]:
         return {pair for pair in pairs if await self.is_member(*pair)}
 
 
@@ -964,6 +964,21 @@ async def test_an_upload_admitted_before_an_erasure_and_finished_long_after_is_n
     assert result.accepted == 0
     async_db.expire_all()
     assert (await async_db.execute(select(Trace.trace_id))).scalars().all() == []
+
+
+async def test_forgetting_erasures_goes_a_batch_at_a_time(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A batch per block, so a write holding one of these rows waits for a batch and not for the table."""
+    monkeypatch.setattr(trace_service_module, "FORGET_ERASURES_BATCH", 2)
+    workspace, _ = tenants
+    for user in ("u1", "u2", "u3", "u4", "u5"):
+        await store.write((_write(workspace, f"s-{user}", _span("tool-1"), user_id=user),))
+
+    forgotten = await store.expire_erasures(now=datetime.now(UTC))
+
+    assert forgotten == 5
+    assert await store.expire_erasures(now=datetime.now(UTC)) == 0
 
 
 async def test_an_upload_still_held_when_its_users_erasure_is_forgotten_is_never_stored(

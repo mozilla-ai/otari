@@ -26,6 +26,7 @@ from sqlalchemy import (
     Uuid,
     false,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -111,6 +112,15 @@ class TraceSpan(Base):
         Index("ix_trace_spans_trace_tool_call", "workspace_id", "trace_id", "tool_call_id"),
         # Finds the session a request from the usage log was traced into.
         Index("ix_trace_spans_request_id", "request_id"),
+        # Finds the workspace's spans that still hold content, for deleting it a batch
+        # at a time. Partial, so it covers only those rows and a cleared one leaves it:
+        # without that, each batch steps over every span it has already cleared.
+        Index(
+            "ix_trace_spans_workspace_sealed",
+            "workspace_id",
+            postgresql_where=text("content_sealed IS NOT NULL"),
+            sqlite_where=text("content_sealed IS NOT NULL"),
+        ),
     )
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
@@ -200,6 +210,19 @@ class TraceContentShare(Base):
             "audience IN ('organization_admins', 'deployment_operator')", name="check_trace_content_shares_audience"
         ),
         Index("ix_trace_content_shares_trace", "workspace_id", "trace_id"),
+        # A session has at most one running share per audience, so ending the share a
+        # reader can see ends the reading. Partial, so the ended ones stay for their
+        # read history. Serializing on the owner's barrier row is what keeps a second
+        # from being staged; this is the invariant that keeps one from being stored.
+        Index(
+            "uq_trace_content_shares_running",
+            "workspace_id",
+            "trace_id",
+            "audience",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+            sqlite_where=text("revoked_at IS NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -208,7 +231,13 @@ class TraceContentShare(Base):
     audience: Mapped[str] = mapped_column(String(32))
     # Why the owner shared it, in their words: shown to whoever reads through it.
     note: Mapped[str | None] = mapped_column(String(SHARE_NOTE_MAX_LENGTH))
-    shared_by_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    # Null once that account is gone, as ``reader_user_id`` on a read is: the share
+    # and the reads recorded against it are the owner's record of who opened their
+    # session, and must outlive whoever made it. Reading through it still stops,
+    # because a gone account is no member of the workspace.
+    shared_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("user.id", ondelete="SET NULL"), index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
     )
@@ -226,9 +255,9 @@ class TraceContentRead(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    share_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("trace_content_shares.id", ondelete="CASCADE"), index=True
-    )
+    # No index of its own: the composite above starts with this column and serves
+    # the foreign key's checks as well as the reads keyed on it.
+    share_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("trace_content_shares.id", ondelete="CASCADE"))
     reader_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("user.id", ondelete="SET NULL"), index=True
     )
@@ -265,6 +294,10 @@ class TraceUserBarrier(Base):
     """
 
     __tablename__ = "trace_user_barriers"
+    # Finds the rows the retention sweep may forget. A write makes a row for every
+    # user it stores for, so the table holds one per user who has written a trace
+    # since the last sweep and a scan of it would grow with the traffic.
+    __table_args__ = (Index("ix_trace_user_barriers_erased_at", "erased_at"),)
 
     user_id: Mapped[str] = mapped_column(String, primary_key=True)
     erased_at: Mapped[datetime | None] = mapped_column(UtcDateTime())

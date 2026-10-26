@@ -1826,6 +1826,27 @@ async def workspace_members(
     }
 
 
+async def workspaces_keeping_content_for(
+    db: AsyncSession, pairs: Collection[tuple[uuid.UUID, str | None]]
+) -> set[tuple[uuid.UUID, str | None]]:
+    """Which of these (workspace, user) pairs may have content kept, in five queries.
+
+    A current member of a workspace that still keeps what its sessions were about.
+    The switch is read here rather than trusted from the export's admission, because
+    turning it off and moving the workspace's content generation on are two commits:
+    an export admitted between them carries a generation that is still current.
+    """
+    members = await workspace_members(db, pairs)
+    if not members:
+        return set()
+    keeping = {
+        workspace.id
+        for workspace in await WorkspaceRepository(db).get_by_ids({workspace_id for workspace_id, _ in members})
+        if workspace.trace_content_enabled
+    }
+    return {pair for pair in members if pair[0] in keeping}
+
+
 class DatabaseSessionOwners:
     """:class:`SessionOwners` over this deployment's memberships, on the request's session."""
 
@@ -1835,8 +1856,10 @@ class DatabaseSessionOwners:
     async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
         return await is_workspace_member(self._db, workspace_id, user_id)
 
-    async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
-        return await workspace_members(self._db, pairs)
+    async def content_kept_for(
+        self, pairs: Collection[tuple[uuid.UUID, str | None]]
+    ) -> set[tuple[uuid.UUID, str | None]]:
+        return await workspaces_keeping_content_for(self._db, pairs)
 
 
 class NoSessionOwners:
@@ -1845,7 +1868,9 @@ class NoSessionOwners:
     async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
         return False
 
-    async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
+    async def content_kept_for(
+        self, pairs: Collection[tuple[uuid.UUID, str | None]]
+    ) -> set[tuple[uuid.UUID, str | None]]:
         return set()
 
 

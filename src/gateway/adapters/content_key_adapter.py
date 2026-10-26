@@ -18,9 +18,11 @@ import json
 import re
 import secrets
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from functools import partial
 from time import monotonic
 from typing import TYPE_CHECKING, Any
+from weakref import WeakKeyDictionary
 
 from gateway.log_config import logger
 from gateway.ports.content_key_port import ContentKeyError, ContentKeyFailure, ContentKeyPort, DataKey, DataKeySource
@@ -53,6 +55,25 @@ _KMS_DENIED = frozenset({"AccessDeniedException", "DisabledException", "NotFound
 _KMS_REJECTED = frozenset({"InvalidCiphertextException", "IncorrectKeyException"})
 
 
+@dataclass(frozen=True)
+class _AllowedKeys:
+    """The key ARNs content may open under, and whether every configured id answered.
+
+    Taken together, so a read deciding whether an unlisted key is a tampered row or
+    an outage reads both from the same resolution.
+    """
+
+    arns: frozenset[str]
+    at: float
+    complete: bool
+
+    def stale(self) -> bool:
+        """Whether it is old enough to resolve again. A partial set is trusted only briefly,
+        so one throttled DescribeKey does not shut a key out for minutes."""
+        ttl = _ALLOWED_KEYS_TTL_S if self.complete else _PARTIAL_KEYS_TTL_S
+        return monotonic() - self.at >= ttl
+
+
 class SecretKeyContentKeys(DataKeySource):
     """Wraps a data key with ``OTARI_SECRET_KEY``, sealing its context beside it.
 
@@ -75,7 +96,10 @@ class SecretKeyContentKeys(DataKeySource):
         try:
             body = json.loads(decrypt_secret(wrapped.decode()))
         except SecretBoxUnavailableError:
-            raise ContentKeyError("unavailable", "OTARI_SECRET_KEY is not set") from None
+            # Rejected rather than unavailable: an unset key is a standing state no
+            # retry changes, and it says nothing about the source the deployment
+            # seals with now, whose rows must keep opening.
+            raise ContentKeyError("rejected", "no OTARI_SECRET_KEY is set to open this data key") from None
         except (SecretDecryptionError, UnicodeDecodeError, ValueError):
             raise ContentKeyError("rejected", "no configured OTARI_SECRET_KEY opens this data key") from None
         if not isinstance(body, dict) or body.get("c") != context or not isinstance(body.get("k"), str):
@@ -141,10 +165,14 @@ class AwsKmsContentKeys(DataKeySource):
         self._client = client
         self._executor: ThreadPoolExecutor | None = None
         self._key_id = key_id
-        self._key_ids = (key_id, *previous_key_ids)
-        self._allowed_arns: frozenset[str] | None = None
-        self._allowed_at = 0.0
-        self._allowed_complete = True
+        # Deduplicated, keeping the order given: a key listed twice would be
+        # described twice in the one round trip below.
+        self._key_ids = tuple(dict.fromkeys((key_id, *previous_key_ids)))
+        self._allowed: _AllowedKeys | None = None
+        # One per loop: a lock binds to the loop that first waits on it, and this
+        # adapter outlives any one loop. Weakly keyed, so a loop that is gone takes
+        # its lock with it.
+        self._resolving: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = WeakKeyDictionary()
 
     async def new_data_key(self, context: dict[str, str]) -> DataKey:
         response = await self._call(
@@ -157,10 +185,25 @@ class AwsKmsContentKeys(DataKeySource):
         return DataKey(wrapper=self.wrapper, plaintext=response["Plaintext"], wrapped=response["CiphertextBlob"])
 
     async def open_data_key(self, wrapped: bytes, context: dict[str, str]) -> bytes:
-        allowed = await self._allowed()
-        response = await self._call("Decrypt", self._client.decrypt, CiphertextBlob=wrapped, EncryptionContext=context)
-        if response.get("KeyId") not in allowed:
-            if not self._allowed_complete:
+        # Neither call needs the other's answer, so both go at once: a read costs one
+        # round trip however many keys the deployment lists, which is what keeps it
+        # inside the deadline its caller allows for opening one key.
+        answers = await asyncio.gather(
+            self._allowed_keys(),
+            self._call("Decrypt", self._client.decrypt, CiphertextBlob=wrapped, EncryptionContext=context),
+            return_exceptions=True,
+        )
+        allowed, response = answers
+        if isinstance(response, BaseException):
+            # The ciphertext's own refusal outranks a key that could not be described:
+            # it says this row does not open, where the other says not yet.
+            raise response
+        if isinstance(allowed, BaseException):
+            raise allowed
+        if response.get("KeyId") not in allowed.arns:
+            # ``complete`` comes from the same snapshot as the ARNs, because a refresh
+            # running beside this read would otherwise decide which answer this is.
+            if not allowed.complete:
                 # It may be under the key that could not be described: an outage, not a tampered row.
                 raise ContentKeyError("unavailable", "the KMS key this data key was made under could not be described")
             raise ContentKeyError("rejected", "the data key was made under a KMS key this deployment does not list")
@@ -173,33 +216,59 @@ class AwsKmsContentKeys(DataKeySource):
         if executor is not None:
             executor.shutdown(wait=False, cancel_futures=True)
 
-    async def _allowed(self) -> frozenset[str]:
-        """The key ARNs content may open under, resolved from the configured ids every few minutes.
+    async def _allowed_keys(self) -> "_AllowedKeys":
+        """The keys content may open under, resolved from the configured ids every few minutes.
 
-        Each id is resolved on its own, so a listed key that is gone or not
-        describable costs only what it sealed, and an alias pointed at a new key is
-        followed without a restart.
+        One resolution serves every reader waiting on it: a read happens on the
+        request path, so readers arrive together and each starting its own would
+        ask the key source once per reader for the same answer.
         """
-        now = monotonic()
-        ttl = _ALLOWED_KEYS_TTL_S if self._allowed_complete else _PARTIAL_KEYS_TTL_S
-        if self._allowed_arns is not None and now - self._allowed_at < ttl:
-            return self._allowed_arns
+        held = self._allowed
+        if held is not None and not held.stale():
+            return held
+        async with self._resolution_lock():
+            # Resolved while this read waited for the lock, which is the usual case
+            # for every reader but the first.
+            held = self._allowed
+            if held is not None and not held.stale():
+                return held
+            self._allowed = await self._describe_keys()
+            return self._allowed
+
+    def _resolution_lock(self) -> asyncio.Lock:
+        """The lock readers of this loop queue on while the key set is resolved."""
+        loop = asyncio.get_running_loop()
+        lock = self._resolving.get(loop)
+        if lock is None:
+            lock = self._resolving[loop] = asyncio.Lock()
+        return lock
+
+    async def _describe_keys(self) -> "_AllowedKeys":
+        """Describe every configured id at once, keeping the answers that came back.
+
+        Each answer stands on its own, so a listed key that is gone or not
+        describable costs only what it sealed, an alias pointed at a new key is
+        followed without a restart, and the resolution takes one round trip rather
+        than one per key.
+        """
+        described = await asyncio.gather(
+            *(self._call("DescribeKey", self._client.describe_key, KeyId=key_id) for key_id in self._key_ids),
+            return_exceptions=True,
+        )
         arns: set[str] = set()
         failure: ContentKeyError | None = None
-        for key_id in self._key_ids:
-            try:
-                described = await self._call("DescribeKey", self._client.describe_key, KeyId=key_id)
-            except ContentKeyError as exc:
-                failure = failure or exc
-                continue
-            arns.add(described["KeyMetadata"]["Arn"])
+        for answer in described:
+            if isinstance(answer, ContentKeyError):
+                failure = failure or answer
+            elif isinstance(answer, BaseException):
+                raise answer
+            else:
+                arns.add(answer["KeyMetadata"]["Arn"])
         if not arns:
             raise failure or ContentKeyError("unavailable", "no configured KMS key could be described")
         if failure is not None:
             logger.warning("A configured trace content KMS key could not be described and is skipped (%s)", failure)
-        # A partial set is trusted only briefly, so one throttled DescribeKey does not shut out a key for minutes.
-        self._allowed_arns, self._allowed_at, self._allowed_complete = frozenset(arns), now, failure is None
-        return self._allowed_arns
+        return _AllowedKeys(arns=frozenset(arns), at=monotonic(), complete=failure is None)
 
     async def _call(self, operation: str, method: Any, **kwargs: Any) -> Any:
         from botocore.exceptions import BotoCoreError, ClientError
