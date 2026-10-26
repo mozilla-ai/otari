@@ -45,9 +45,9 @@ every key it issues.
 opencode names a model as `<provider id>/<model>`, and the provider id here is
 `otari`, from your config. Everything after `otari/` is sent to Otari unchanged,
 so write it as Otari spells it: `otari/openai:gpt-4o`,
-`otari/anthropic:claude-sonnet-4-6`. [Model format](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#model-format) has
+`otari/anthropic:claude-sonnet-4-6`. [Model format](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#model-format) has
 the spellings Otari accepts, and
-[Listing available models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#listing-available-models) shows which
+[Listing available models](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#listing-available-models) shows which
 models your key can use.
 
 ## See also

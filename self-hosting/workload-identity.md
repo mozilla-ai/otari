@@ -394,6 +394,6 @@ issuer, for instance, puts `system:serviceaccount:<namespace>:<name>` in `sub`.
 
 ## Related documentation
 
-- [Access control](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides): API keys, service keys and budgets.
+- [Access control](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides): API keys, service keys and budgets.
 - [Configuration](configuration.md): where `federation_issuers` and `federation_member_rules` are set.
-- [Use with Claude Code](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-claude-code): routing Claude Code through Otari.
+- [Use with Claude Code](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/agents-and-frameworks/use-with-claude-code): routing Claude Code through Otari.

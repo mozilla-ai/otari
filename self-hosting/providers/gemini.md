@@ -3,7 +3,7 @@
 Serve Google's Gemini models through Otari with a Gemini API key from Google AI
 Studio. For Gemini on Google Cloud, use the `vertexai` provider instead. See
 any-llm's [supported providers](https://docs.mozilla.ai/any-llm/providers/) for
-the current provider list and [Models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models) for Otari's model-name
+the current provider list and [Models](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models) for Otari's model-name
 format.
 
 ## Before you start
@@ -30,7 +30,7 @@ To keep the provider in configuration instead, declare it under
 `hosted_providers:` in `config.yml` (see
 [Hosted providers in config.yml](../configuration.md#hosted-providers-in-configyml)).
 Otari does not read `GEMINI_API_KEY` from its environment unless a declaration
-names it; see [Configuring a provider](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#configuring-a-provider).
+names it; see [Configuring a provider](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#configuring-a-provider).
 
 ## Choose a model
 
@@ -49,7 +49,7 @@ rejected.
 
 Chat completions take only text-generation models. Send an embedding model such
 as `gemini-embedding-001` to `POST /api/v1/embeddings` instead (see the
-[API reference](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference)).
+[API reference](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference)).
 
 ## Verify
 

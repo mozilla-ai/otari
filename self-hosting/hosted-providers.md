@@ -24,7 +24,7 @@ candidate model in this order:
 A request no rung serves is refused with `424` and the code
 `provider_not_configured`. A provider's native environment variable (such as
 `OPENAI_API_KEY`) is never a rung; see
-[Configuring a provider](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#configuring-a-provider).
+[Configuring a provider](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#configuring-a-provider).
 
 ### Organization provider keys
 
@@ -36,7 +36,7 @@ removes it), otherwise the organization's oldest key. A key a workspace set to
 
 The models a key serves, its serving switches and what a refusal on that path
 returns are described in
-[Who is shown which models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#who-is-shown-which-models).
+[Who is shown which models](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#who-is-shown-which-models).
 
 ### Hosted provider names
 
@@ -181,7 +181,7 @@ key, at its `api_base` when one is set:
 
 On a deployment that hosts at least one provider, an organization API key is
 shown a priced model only where something would serve it; see
-[Listing available models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#listing-available-models).
+[Listing available models](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#listing-available-models).
 
 ## The `hosted_providers:` block
 
@@ -356,7 +356,7 @@ deployment pays that upstream bill, so the request also goes through
 A request on any other credential never reaches either port, unless it may run a
 gateway tool on the deployment's account: that tool's calls are gated and
 charged the same way, and the model call is not (see
-[Pricing a gateway-run tool](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/tools#pricing-a-gateway-run-tool)). The core's billing
+[Pricing a gateway-run tool](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/tools#pricing-a-gateway-run-tool)). The core's billing
 adapter does nothing, so with no overlay a hosted-provider request is served and
 recorded as deployment-paid on its usage row, and no organization is charged.
 

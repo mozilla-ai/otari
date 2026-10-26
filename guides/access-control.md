@@ -110,7 +110,7 @@ The plaintext key is returned only when it is created or rotated. Store it then.
 Rotation preserves the key record and invalidates the previous secret.
 A key can also be declared in config.yml with a secret you choose, in which
 case config.yml owns it and writes it back whenever its entry changes; see
-[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#budgets-and-api-keys-in-config).
+[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#budgets-and-api-keys-in-config).
 Rotating a declared key through the API lasts until config.yml changes the
 key's entry or its secret, which restores the secret config.yml declares.
 
@@ -121,7 +121,7 @@ A backend on Google Cloud, or behind another OpenID Connect issuer, can
 authenticate as a key with its platform identity token instead of the key's
 secret, once the operator trusts the issuer and gives the key a federation
 rule. With `federation_member_rules` on, an organization owner or admin can give
-their own key one instead; see [Workload identity](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/operations/workload-identity).
+their own key one instead; see [Workload identity](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/operations/workload-identity).
 
 `/api/v1/keys` manages every key in the caller's organization and requires the
 deployment operator's standing. A signed-in member without it manages their own
@@ -188,7 +188,7 @@ Two budget forms exist:
 - A scoped budget limits an organization, workspace, membership, or API key and
   can optionally narrow the limit to one provider.
 
-A routing fallback to another provider must also pass that provider's budgets, as [Routing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing#what-is-billed-and-what-the-caller-sees) describes.
+A routing fallback to another provider must also pass that provider's budgets, as [Routing](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/routing#what-is-billed-and-what-the-caller-sees) describes.
 
 A budget caps up to three things over its period, each set independently and
 each unlimited when left unset, and can also limit each user on it per minute:
@@ -334,7 +334,7 @@ Hosted providers, the provider keys the deployment itself owns and pays for,
 are managed only by a deployment operator, on every route under
 `/api/v1/hosted-providers`, reads included; organization owners and admins
 manage their own organization's provider keys instead. See
-[Hosted providers and BYO credentials](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#who-manages-hosted-providers).
+[Hosted providers and BYO credentials](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers#who-manages-hosted-providers).
 
 ## Dashboard sessions and identity
 
@@ -412,7 +412,7 @@ turned back on.
 3. Set the provider's client ID and secret (`google_client_id` and
    `google_client_secret`, or `github_client_id` and `github_client_secret`).
 4. Where an edge serves the dashboard elsewhere, set `ui_base_url` too; see
-   [The interface address](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#the-interface-address).
+   [The interface address](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#the-interface-address).
 
 #### How provider accounts are linked
 
@@ -527,7 +527,7 @@ where anyone can create an organization that would otherwise make it an open
 relay. Over any 24 hours an organization can send only so many invitation
 emails, and an address can receive only so many from every organization
 together, so revoking and inviting again cannot flood it; the settings and their
-defaults are under [Mail](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#mail). An invitation over a limit is
+defaults are under [Mail](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#mail). An invitation over a limit is
 still created, and its link is returned to share by hand, as when mail is off:
 the link costs the deployment nothing, and refusing would stop a legitimate
 admin partway through a bulk invite. The counts are kept in `rate_limit_store`,
@@ -675,7 +675,7 @@ the window in which a transferred domain still admits people.
 ## Related documentation
 
 - [Track spend per end user](end-users.md)
-- [Hosted providers and BYO credentials](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers)
+- [Hosted providers and BYO credentials](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers)
 - [Admin dashboard](dashboard.md)
-- [Configuration](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration)
-- [API reference](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference)
+- [Configuration](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration)
+- [API reference](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference)

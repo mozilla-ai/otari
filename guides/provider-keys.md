@@ -8,8 +8,8 @@ A provider key is not an [API key](api-keys.md): your application sends an API
 key to Otari, and Otari calls the provider with a provider key, so the
 application never sees the provider key. Where a request's credential comes
 from when the organization has no key for a model (a deployment's own providers,
-or its [hosted providers](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers)) is in
-[The credential ladder](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#the-credential-ladder).
+or its [hosted providers](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers)) is in
+[The credential ladder](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers#the-credential-ladder).
 
 Only organization owners and admins can add or remove provider keys, or change
 which keys a workspace can use.
@@ -28,7 +28,7 @@ which keys a workspace can use.
 If the organization has several keys for one provider, mark one as the default
 so workspaces inherit it: on **Providers**, click the **star icon** next to the
 key. How a workspace picks among several keys is in
-[Organization provider keys](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#organization-provider-keys).
+[Organization provider keys](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers#organization-provider-keys).
 
 ## Control workspace access
 

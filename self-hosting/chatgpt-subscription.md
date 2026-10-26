@@ -60,7 +60,7 @@ Remove `api_key` when the proxy is intentionally keyless. The `models` list is
 needed only when the proxy has no working model-listing endpoint.
 
 Models use the instance name, for example `chatgpt:gpt-5`. See
-[Named provider instances](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#named-provider-instances).
+[Named provider instances](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#named-provider-instances).
 
 ## Pricing
 

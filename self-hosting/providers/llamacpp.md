@@ -1,7 +1,7 @@
 # Connect a llama.cpp server
 
 Serve a model you run yourself with llama.cpp's `llama-server` through Otari.
-See [Models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models) for Otari's model-name format.
+See [Models](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models) for Otari's model-name format.
 
 ## Before you start
 

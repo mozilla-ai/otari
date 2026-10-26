@@ -385,7 +385,7 @@ code, and how long that copy lives (see
 - `OTARI_PROVIDER_ACCOUNT_PEPPER`: the key for the digest that names the provider
 account a copy is in. Without it, provider copies are off whatever
 `files_provider_upload_enabled` says (see
-[Provider copies](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#provider-copies)).
+[Provider copies](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#provider-copies)).
 - `file_understanding_enabled`: master switch for content normalization.
 - `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:
 how images are handled for text-only models. The describe model may be a local

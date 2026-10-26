@@ -2,8 +2,7 @@
 
 Otari is an LLM gateway: one endpoint between your applications and the model
 providers they call. Applications send it OpenAI- or Anthropic-style requests,
-and Otari routes each one to any of 40+ providers through
-[any-llm](https://github.com/mozilla-ai/any-llm).
+and Otari routes each one to any of the 40+ supported providers.
 
 On the way through, it:
 
@@ -21,12 +20,18 @@ On the way through, it:
 
 ## Two ways to run it
 
-You can use the gateway mozilla.ai runs at [otari.ai](https://otari.ai), or
-run Otari yourself with your own database and provider keys. The two differ in
-who runs the gateway, its base URL, where its data lives and who bills you, not
-in the API your applications call. The [Quickstart](quickstart.md) starts on
-otari.ai, and the [Self-hosted quickstart](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting) runs your
-own gateway.
+You can use our hosted version at [otari.ai](https://otari.ai), or
+run Otari yourself (see [Self-hosted quickstart](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting)). 
+
+
+### Integrations
+
+Point an agent or a framework at Otari:
+[Claude Code](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/agents-and-frameworks/use-with-claude-code), [Codex](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/agents-and-frameworks/use-with-codex),
+[OpencCde](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/agents-and-frameworks/use-with-opencode), [Pydantic AI](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/agents-and-frameworks/use-with-pydantic-ai),
+[LangChain](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/agents-and-frameworks/use-with-langchain) and [LangGraph](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/agents-and-frameworks/use-with-langgraph)...
+
+Missing an option? Don't hesitate to [open an issue on github](https://github.com/mozilla-ai/otari/issues/new/choose).
 
 ## Where to go next
 
@@ -35,20 +40,7 @@ own gateway.
 - **Guides**: how to do one thing with Otari, such as give each end user their
   own budget, add guardrails, or read agent traces.
 - **Self-Hosting**: running your own gateway, starting with the
-  [Self-hosted quickstart](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting), and its
-  [configuration](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration) and providers.
+  [Self-hosted quickstart](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting), and its
+  [configuration](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration) and providers.
 - **Reference**: the API, models, routing, tools and protocols: every endpoint,
   field, error code and limit.
-
-### Integrations
-
-Point an agent or a framework at Otari:
-[Claude Code](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-claude-code), [Codex](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-codex),
-[opencode](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-opencode), [Pydantic AI](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-pydantic-ai),
-[LangChain](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-langchain) and [LangGraph](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-langgraph).
-
-### For contributors
-
-- [Architecture](https://github.com/mozilla-ai/otari/blob/main/ARCHITECTURE.md): one process over one database, and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
-- [Backend domains](https://github.com/mozilla-ai/otari/blob/main/DOMAINS.md): what each backend domain owns, and the layer shape each domain moves toward.
-- [Load test](https://github.com/mozilla-ai/otari/blob/main/loadtest/README.md): compares two builds under load on one machine, route by route, and fails when the second got slower or runs more database statements per request. CI runs it on a PR against its base.

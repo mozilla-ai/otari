@@ -6,9 +6,9 @@ What a key can carry, and who may manage which keys, is in
 [Access control](access-control.md#api-keys).
 
 Send the key as a bearer token (`Authorization: Bearer <key>`); the other
-accepted headers are in [Authentication](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference#authentication). The
+accepted headers are in [Authentication](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference#authentication). The
 base URL to send it to, and the form each SDK expects, are in
-[Base URL](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference#base-url).
+[Base URL](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference#base-url).
 
 ## Create a key
 
@@ -48,6 +48,6 @@ a service key: [Track spend per end user](end-users.md).
 - **Delete** on a key's row removes the key permanently.
 
 A key declared in `config.yml` is owned by that file; see
-[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#budgets-and-api-keys-in-config).
+[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#budgets-and-api-keys-in-config).
 To authenticate a backend with its platform identity instead of a stored
-secret, see [Workload identity](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/operations/workload-identity).
+secret, see [Workload identity](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/operations/workload-identity).

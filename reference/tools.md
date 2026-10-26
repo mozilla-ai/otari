@@ -201,7 +201,7 @@ an [organization search or fetch key](#organization-search-keys) is priced at th
 deployment's price by default, and the organization's own override replaces it.
 
 Where the deployment charges organizations for what its account runs (see
-[Deployment-paid credentials](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#deployment-paid-credentials)),
+[Deployment-paid credentials](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers#deployment-paid-credentials)),
 those tool calls are charged to the organization's funds whoever pays for the
 model call: a request on the organization's own model key that searches on the
 deployment's search tool is charged for the searches, and one on a hosted model
@@ -252,7 +252,7 @@ price, then at its old `<provider>:<search-tool-name>` row, or under
 reported cost, when it reports one, comes first. How that rate is reserved and
 settled, and how `require_pricing` refuses a missing one with a
 `402 pricing_required`, is in
-[Per-request pricing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#per-request-pricing-audio-moderations-rerank-and-completion-models).
+[Per-request pricing](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#per-request-pricing-audio-moderations-rerank-and-completion-models).
 The deployment pays for a search on one of its tools, so only its own price, or
 an override the deployment operator set, prices it; a search an organization key
 served takes the organization's own override.
@@ -636,7 +636,7 @@ is unacceptable.
 
 ### Fetch providers
 
-A fetch instance, under `fetch_tools` (see [Search tools](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#search-tools)),
+A fetch instance, under `fetch_tools` (see [Search tools](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#search-tools)),
 names a provider for `otari_web_fetch` and for enriching search results.
 `web_fetch_default_tool` names the instance the fetch tool runs on, and the one
 that enriches search results unless the search instance names its own
@@ -690,7 +690,7 @@ one, and never with the provider's own message.
 The in-loop tool searches with the deployment's in-loop default:
 `web_search_default_tool` when it names a search instance, else the legacy
 settings below while they are set, else the only search instance when there is
-exactly one (see [Search tools](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#search-tools)).
+exactly one (see [Search tools](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#search-tools)).
 `web_search_default_tool: none` turns it off. A workspace's
 [organization search key](#organization-search-keys) comes before all of them.
 
@@ -878,7 +878,7 @@ provider for production. A runnable example lives under `demo/web-search/`.
 
 `POST /api/v1/search` lets the caller submit a query directly
 instead of waiting for a model to request one. Configure its named providers
-through [`search_tools`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#search-tools) or the Search tools API.
+through [`search_tools`](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#search-tools) or the Search tools API.
 
 A SearXNG search tool can reuse `web_search_url`, so model-initiated and direct
 search can share one backend. They remain distinct surfaces with separate
@@ -909,7 +909,7 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
   `search` price set on the dashboard's Web search pricing page or through the
   API), else `otari:web_search`; a price for one of DeepSeek's models never prices
   it. A key restricted to some models runs it when
-  [`allowed_tools`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides#users-and-identities), its own or its
+  [`allowed_tools`](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides#users-and-identities), its own or its
   user's, names it; `deepseek:*` in `allowed_models` grants DeepSeek's models
   alone. Name it apart from a DeepSeek fetch instance, such as `deepseek` and
   `deepseek-fetch`. DeepSeek's

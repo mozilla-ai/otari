@@ -2,7 +2,7 @@
 
 The guardrail file schema, the five gate types, what each harness can see at
 each event, and the `otari hook` and `otari guardrails` commands. The
-[Agent Guardrails guide](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/guardrails/agent-guardrails) covers installation and first
+[Agent Guardrails guide](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/guardrails/agent-guardrails) covers installation and first
 use, and explains why the moments work the way they do.
 
 Contents:
@@ -201,7 +201,7 @@ No entry sees a path a shell command is about to touch: before the command runs
 there is only its text. A `path` gate catches `echo x >> CHANGELOG.md` at
 `stop.working_tree`, after the file changed, and a shell read at no moment at
 all. The guide explains the consequences under
-[Why a write rule names both moments](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/guardrails/agent-guardrails#why-a-write-rule-names-both-moments).
+[Why a write rule names both moments](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/guardrails/agent-guardrails#why-a-write-rule-names-both-moments).
 
 Each gate type accepts only certain entries:
 
@@ -811,7 +811,7 @@ own run; any other gate, from when `otari hook` started, since what it waits on
 is the hook starting and reading the evidence. A judge gate run with `claude`
 also carries the model it ran on and the tokens it used. Otari books them as the
 session's usage, under the source `otari-hook`, and prices them like the
-session's own requests (see [Agent traces](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/observability/traces#claude-code-without-routing)).
+session's own requests (see [Agent traces](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/observability/traces#claude-code-without-routing)).
 A judge run with Codex carries no usage yet.
 
 A report is written to `~/.otari/outbox/`, under the server and key it is for,

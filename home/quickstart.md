@@ -10,7 +10,7 @@ and see it in the workspace's usage. It takes about five minutes, and all you
 need is an otari.ai account.
 
 To run Otari on your own machine instead, follow the
-[Self-hosted quickstart](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting).
+[Self-hosted quickstart](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting).
 
 ## 1. Open your workspace
 
@@ -89,8 +89,8 @@ they send is recorded against your workspace.
 
 ## Next steps
 
-- [Base URL](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference#base-url): the base URL each SDK and region takes.
-- [Use with Claude Code](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-claude-code): point Claude Code at otari.ai.
-- [Access control](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides): workspaces, members, keys and budgets.
-- [Routing policies](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing): fall back to another model when one fails.
-- [Inference Guardrails](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/guardrails/guardrails): check requests and responses.
+- [Base URL](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference#base-url): the base URL each SDK and region takes.
+- [Use with Claude Code](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/agents-and-frameworks/use-with-claude-code): point Claude Code at otari.ai.
+- [Access control](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides): workspaces, members, keys and budgets.
+- [Routing policies](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/routing): fall back to another model when one fails.
+- [Inference Guardrails](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/guardrails/guardrails): check requests and responses.

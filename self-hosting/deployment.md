@@ -69,7 +69,7 @@ errors, latency and spend without reading the usage log:
 | `gateway_tokens_total` | `provider`, `model`, `type` | Input and output tokens |
 | `gateway_request_cost_dollars` | `provider`, `model` | Each request's cost in USD |
 | `gateway_abandoned_attempts_total` | `provider`, `model`, `reason`, `position` | Attempts given up before their first chunk |
-| `gateway_refusals_total` | `code`, `budget_scope` | Responses refused with an [`Otari-Error-Code`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference#error-codes), by that code and, for `budget_exceeded`, the scope that refused (`user`, `api_token`, ...; empty otherwise) |
+| `gateway_refusals_total` | `code`, `budget_scope` | Responses refused with an [`Otari-Error-Code`](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference#error-codes), by that code and, for `budget_exceeded`, the scope that refused (`user`, `api_token`, ...; empty otherwise) |
 
 `model` is the model as the provider was sent it. A request that names its own
 `provider:model` adds a series per distinct model, so restrict keys to the
@@ -119,7 +119,7 @@ docker compose --profile object-storage up -d
 ```
 
 The `object-storage` profile runs an S3-compatible store for uploaded files;
-[Object storage with Docker Compose](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/files#object-storage-with-docker-compose)
+[Object storage with Docker Compose](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/files#object-storage-with-docker-compose)
 has the settings that use it.
 
 Web search needs no container when `web_search_provider` names a licensed API
@@ -127,7 +127,7 @@ Web search needs no container when `web_search_provider` names a licensed API
 services are optional; requests that require an unconfigured backend fail
 without affecting ordinary inference.
 
-See [Built-in tools](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/tools) and [Guardrails](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/guardrails/guardrails).
+See [Built-in tools](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/tools) and [Guardrails](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/guardrails/guardrails).
 
 ## Upgrading from hosted or hybrid mode
 

@@ -3,7 +3,7 @@
 Serve OpenAI models (GPT-4o, GPT-4.1, the o-series, and others) through Otari
 with your OpenAI API key. See any-llm's
 [supported providers](https://docs.mozilla.ai/any-llm/providers/) for the
-current provider list and [Models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models) for Otari's model-name format.
+current provider list and [Models](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models) for Otari's model-name format.
 
 ## Before you start
 
@@ -29,7 +29,7 @@ To keep the provider in configuration instead, declare it under
 `hosted_providers:` in `config.yml` (see
 [Hosted providers in config.yml](../configuration.md#hosted-providers-in-configyml)).
 Otari does not read `OPENAI_API_KEY` from its environment unless a declaration
-names it; see [Configuring a provider](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#configuring-a-provider).
+names it; see [Configuring a provider](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#configuring-a-provider).
 
 ### Optional settings
 

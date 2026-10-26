@@ -147,7 +147,7 @@ token is booked once even though a request repeats its usage on several spans:
   keyed by the response id, at the model that served it, with its cache reads
   and cache writes, and a second row for its compactions' tokens. The 1-hour
   share of its cache writes is kept as its own count and bills at twice the
-  input rate ([Cache and tiered pricing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#cache-and-tiered-pricing)),
+  input rate ([Cache and tiered pricing](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#cache-and-tiered-pricing)),
   except from a streamed request's SDK span, which splits out only the writes
   made before the first output token, so all of its writes bill at the
   cache-write rate. When the SDK and the API both export the request, the
@@ -198,6 +198,6 @@ read the enforcement ledger.
 
 ## Related documentation
 
-- [API reference](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference)
-- [Configuration](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration)
+- [API reference](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference)
+- [Configuration](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration)
 - [Access control](access-control.md)

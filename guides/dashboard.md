@@ -63,7 +63,7 @@ organization, so the account menu names you even before you join one.
 6. Create an API key from the setup guide or the Keys page.
 7. Send a request and confirm it appears under Activity.
 
-The [Self-hosted quickstart](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting) includes a complete request example.
+The [Self-hosted quickstart](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting) includes a complete request example.
 
 ## The setup guide
 
@@ -89,9 +89,9 @@ The workspace view contains day-to-day gateway operations:
 | Sessions | Recorded agent sessions | [Agent traces](traces.md) |
 | Usage | Aggregates and time series | [Observability](#observability) |
 | Playground | In-product chat and comparisons | [Playground](#playground) |
-| Models | The catalog grouped by model | [Models and Routing](#models-and-routing), [Models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#the-catalog-grouped-by-model) |
-| Routing | Routing policies, aliases and Automatic fallback | [Models and Routing](#models-and-routing), [Routing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing) |
-| Tools | Built-in tools, MCP servers and guardrails for the workspace | [Built-in tools](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/tools) |
+| Models | The catalog grouped by model | [Models and Routing](#models-and-routing), [Models](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#the-catalog-grouped-by-model) |
+| Routing | Routing policies, aliases and Automatic fallback | [Models and Routing](#models-and-routing), [Routing](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/routing) |
+| Tools | Built-in tools, MCP servers and guardrails for the workspace | [Built-in tools](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/tools) |
 | API keys | Workspace API keys | [API keys](access-control.md#api-keys) |
 | Members | Workspace members | [Access control](access-control.md#organizations-and-workspaces) |
 
@@ -103,7 +103,7 @@ The organization view contains tenant-wide administration:
 | Workspaces, Members | Workspaces and organization members, with invitations | [Organization](#organization) |
 | Email domains | Domains whose colleagues join automatically | [Email-domain auto-join](access-control.md#email-domain-auto-join) |
 | Spend and budgets | Budgets and the spend ceilings holding them | [Budgets](access-control.md#budgets) |
-| Providers (under General) | The organization's own provider keys, the models each one offers, and what the organization pays for them | [Organization provider keys](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#organization-provider-keys), [Who is shown which models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#who-is-shown-which-models) |
+| Providers (under General) | The organization's own provider keys, the models each one offers, and what the organization pays for them | [Organization provider keys](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers#organization-provider-keys), [Who is shown which models](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#who-is-shown-which-models) |
 | Guardrails, Org settings (under General) | Organization guardrail policy and settings | [Guardrails](guardrails.md) |
 
 The deployment view, opened from the account menu, holds what belongs to the
@@ -113,8 +113,8 @@ gateway process rather than to any organization on it:
 | --- | --- | --- |
 | Settings | The running configuration, and the Rate limit rules card | [Settings](#settings) |
 | Accounts | Every account on the deployment | [Deployment-wide account administration](access-control.md#deployment-wide-account-administration) |
-| Hosted providers | The provider keys the deployment serves inference on | [The Hosted providers page](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#the-hosted-providers-page) |
-| Web search pricing, Code execution pricing | What the deployment charges per successful call of a tool it runs itself | [Pricing a gateway-run tool](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/tools#pricing-a-gateway-run-tool) |
+| Hosted providers | The provider keys the deployment serves inference on | [The Hosted providers page](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers#the-hosted-providers-page) |
+| Web search pricing, Code execution pricing | What the deployment charges per successful call of a tool it runs itself | [Pricing a gateway-run tool](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/tools#pricing-a-gateway-run-tool) |
 
 Accounts, Hosted providers and the two pricing pages are listed only for a
 deployment operator, and answer anyone else that they are not available to them.
@@ -131,7 +131,7 @@ a request that would run it is refused.
 Providers answers to the
 organization role rather than to deployment authority: its owners and admins
 manage the keys, the models each key offers, and the rate each model is billed
-at. Which rate applies is in [Pricing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#pricing).
+at. Which rate applies is in [Pricing](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers#pricing).
 
 ### What a page shows depends on who is signed in
 
@@ -150,7 +150,7 @@ What a page shows can depend on who is signed in, not only on the deployment:
   deployment turns on `federation_member_rules`, a key's actions menu offers
   Workload identity… to the operator, and to an organization owner or admin on
   their own keys; see
-  [Rules on a member's own key](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/operations/workload-identity#rules-on-a-members-own-key).
+  [Rules on a member's own key](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/operations/workload-identity#rules-on-a-members-own-key).
 - **Overview.** Everyone lands on their own spend, traffic and recent requests.
   An organization owner or admin also gets a budget-health figure, read from the
   spend ceilings holding their organization, while a deployment operator gets
@@ -174,18 +174,18 @@ offering on one of that organization's keys links to. An offering the
 deployment supplies the credential for says so instead, because its rate is the
 deployment price list's rather than a tenant's. A metered rate that differs from
 the provider's list price is marked with the list price. What the page requests
-is in [Browsing the grouped catalog](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#browsing-the-grouped-catalog).
+is in [Browsing the grouped catalog](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#browsing-the-grouped-catalog).
 
 Routing lists each policy with its main model, its backups in order, and who it
 applies to; the empty list offers a fallback directly. In the policy forms,
 models are chosen by model and then by provider. How to create and edit a policy
-there is in [Failover](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing#failover).
+there is in [Failover](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/routing#failover).
 
 Routing's **Automatic fallback** section, read from
 `GET /api/v1/organizations/me/automatic-fallbacks`, lists every model your
 organization sent requests to in the last 30 days, most requested first, with
 its offerings in the order a request sent by catalog id tries them for your
-organization (see [Catalog spellings](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#catalog-spellings)). Beside each
+organization (see [Catalog spellings](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#catalog-spellings)). Beside each
 it counts the requests (an absorbed attempt is not one), the successful ones a
 later offering served, and the ones that named one offering or a policy rather
 than the catalog id and so had no automatic fallback. A model most of whose
@@ -209,7 +209,7 @@ at runtime and others require a restart. The server marks that distinction in th
 settings response. Its Rate limit rules card adds, edits and removes limits on
 requests per minute, tokens per minute and requests in flight; rules from
 config.yml are listed there read-only (see
-[Rate limit rules](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#rate-limit-rules)).
+[Rate limit rules](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#rate-limit-rules)).
 
 ### Entering a rate
 
@@ -222,7 +222,7 @@ Activity's "Price this model", offered on a served request that carried no cost
 (a failed attempt billed nothing, so its error is the guide instead), which
 opens per request for a rerank, audio or moderation request and per image for
 an image generation. What each unit bills is in
-[Per-request pricing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#per-request-pricing-audio-moderations-rerank-and-completion-models).
+[Per-request pricing](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#per-request-pricing-audio-moderations-rerank-and-completion-models).
 
 ## Playground
 
@@ -235,7 +235,7 @@ Activity and Usage.
 A question can carry files. Attach them with the paperclip in the composer or
 drop them anywhere on the page; each uploads at once and shows as a chip with
 its name and size until the question is sent. The model reads them the way an
-API request's [uploaded files](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/files) are read, so a text-only local model is
+API request's [uploaded files](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/files) are read, so a text-only local model is
 given their extracted text. When comparing, both models get the same files. A
 saved conversation remembers which files each question carried. Removing a
 chip takes the file off that question and keeps the upload: the Files dialog
@@ -249,7 +249,7 @@ collapsed row with its status, opening to the arguments the model sent and what
 the tool returned (a long result is shortened for display). This activity is
 shown in the Playground only and is not saved with a conversation; a request
 made through the API still returns just the final message, as
-[What clients receive](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/tools#what-clients-receive) describes.
+[What clients receive](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/tools#what-clients-receive) describes.
 
 Two things are worth knowing about how it is billed and what it stores.
 
@@ -355,18 +355,18 @@ email domain of the identity's verified address; see
 
 Mail is optional: when an invitation email does not go out, you get the accept
 link to share. See [Invitations](access-control.md#invitations) and
-[Mail](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#mail).
+[Mail](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#mail).
 
 ## Custom documentation
 
 The dashboard's Documentation link opens docs.otari.ai unless `docs_url` names
-another site; see [Documentation links](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#documentation-links).
+another site; see [Documentation links](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#documentation-links).
 
 ## Legal pages
 
 `terms_url` and `privacy_url` name where this deployment's terms of service and
 privacy notice live. The account menu links each row it has an address for; see
-[Configuration](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#legal-pages).
+[Configuration](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#legal-pages).
 
 ## Development
 

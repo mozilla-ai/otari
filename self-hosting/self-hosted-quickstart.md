@@ -122,9 +122,9 @@ credential for them, and records every request.
 
 ## Next steps
 
-- [Admin dashboard](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/dashboard/dashboard): manage keys, users and providers in the browser.
-- [Access control](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides): give each application its own key and budget.
-- [Models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models): connect more providers and choose model names.
+- [Admin dashboard](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/dashboard/dashboard): manage keys, users and providers in the browser.
+- [Access control](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides): give each application its own key and budget.
+- [Models](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models): connect more providers and choose model names.
 - [Connect a llama.cpp server](providers/llamacpp.md): serve a model you run yourself.
-- [Routing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing): fall back to another model when one fails.
+- [Routing](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/routing): fall back to another model when one fails.
 - [Deployment](deployment.md): run Otari in production.

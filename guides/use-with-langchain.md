@@ -49,8 +49,8 @@ routes to: Otari translates the Chat Completions request for Anthropic, Mistral,
 Gemini and the rest, so the same chain switches provider by changing only
 `model`. Write `model` as Otari spells it, `provider:model`
 (`ChatOtari(model="anthropic:claude-sonnet-4-6")`), or as a routing policy or
-alias name; [Model format](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#model-format) has every spelling and
-[Listing available models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models#listing-available-models) shows which your
+alias name; [Model format](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#model-format) has every spelling and
+[Listing available models](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#listing-available-models) shows which your
 key can use.
 
 ## Agents and tools
@@ -108,7 +108,7 @@ print()
 Give each project its own Otari key, so its usage and spend are reported apart, a
 budget on the key caps that project alone, and revoking the key stops only that
 project. See [Access control](access-control.md) and
-[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#budgets-and-api-keys-in-config).
+[Budgets and API keys in config](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#budgets-and-api-keys-in-config).
 
 ## Without the package
 

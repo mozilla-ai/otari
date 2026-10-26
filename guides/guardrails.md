@@ -4,7 +4,7 @@ Not to be confused with [Agent Guardrails](agent-guardrails.md), which checks
 what a coding agent does to a repository. This page is about inference time:
 what a model is asked, and what it answers.
 
-A guardrail is a request-level check Otari runs on the input before the provider is ever called. The caller opts in per request via a top-level `guardrails` field (a sibling of `tools`, not an entry inside it), and the model can't see or decline it. An organization can also mandate a guardrail on every request from its workspaces, and an operator can mandate one on a [routing policy](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing); [How the layers compose](#how-the-layers-compose) says which setting wins.
+A guardrail is a request-level check Otari runs on the input before the provider is ever called. The caller opts in per request via a top-level `guardrails` field (a sibling of `tools`, not an entry inside it), and the model can't see or decline it. An organization can also mandate a guardrail on every request from its workspaces, and an operator can mandate one on a [routing policy](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/routing); [How the layers compose](#how-the-layers-compose) says which setting wins.
 
 Guardrails work on `/api/v1/chat/completions`, `/api/v1/messages`, and `/api/v1/responses`.
 
@@ -415,7 +415,7 @@ own words and the reason a build failed all stay in the gateway's log, for the
 same reason a remote endpoint stays out of a 502 body: none of it is the caller's
 to see or to fix.
 
-A definition stops serving a profile when a [routing policy](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing)
+A definition stops serving a profile when a [routing policy](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/routing)
 mandates the same profile, since the policy is the outer layer
 ([How the layers compose](#how-the-layers-compose)): the check then goes to the
 policy entry's `url`, or to the deployment's `guardrails_url` when it names none.
@@ -423,7 +423,7 @@ policy entry's `url`, or to the deployment's `guardrails_url` when it names none
 ## How the layers compose
 
 Three layers can name a guardrail: the caller's request, the caller's
-organization, and a [routing policy](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing) the operator wrote. They are
+organization, and a [routing policy](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/routing) the operator wrote. They are
 merged by profile, and each layer may add a check or tighten one but never
 weaken what another asked for: `block` beats `monitor` for both `mode` and
 `on_unavailable`. So a caller who sends `"mode": "monitor"` for a profile their

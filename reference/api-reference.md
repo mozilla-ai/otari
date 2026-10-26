@@ -246,7 +246,7 @@ and anything else is refused with a 422. Tags are stored without redaction, so
 never put a secret in one.
 
 A client that can add a header but not a body field, such as Claude Code (see
-[Use with Claude Code](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-claude-code#tag-claude-code-traffic)), sends
+[Use with Claude Code](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/agents-and-frameworks/use-with-claude-code#tag-claude-code-traffic)), sends
 the same tags in an `Otari-Tags` header, on the same three surfaces:
 
 ```
@@ -268,7 +268,7 @@ never forwarded to the provider.
 What reaches the provider depends on the surface. Chat Completions and Messages
 never forward the caller's `metadata`. On Messages, `metadata.user_id` names the
 billed user and is not a tag; the provider gets an
-[end-user identifier](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#end-user-identifiers) derived from it in
+[end-user identifier](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#end-user-identifiers) derived from it in
 its place. Responses forwards `metadata`, minus
 `spend_logs_metadata`, because the Responses API stores it.
 
@@ -290,10 +290,10 @@ often fill it with one. In Otari it names the user a request is billed to, so it
 is not free-form. A request made with an API key may name only that key's own
 user: any other value is refused with
 `403 'user' field does not match the authenticated API key's user`. A key's
-`reject_user_mismatch` (see [Mismatched `user` fields](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides#mismatched-user-fields)), or the
+`reject_user_mismatch` (see [Mismatched `user` fields](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides#mismatched-user-fields)), or the
 deployment-wide setting of the same name, can accept other values instead, in
 which case the value is ignored and spend stays with the key's user. A
-[service key](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides#service-keys-and-end-users) may name its own end
+[service key](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides#service-keys-and-end-users) may name its own end
 users, and a master-key request must name the user to bill. Chat Completions
 and Responses never send `user` to the provider.
 
@@ -414,7 +414,7 @@ in `usage` what the gateway metered and what it charged:
   the request was not priced.
 
 How a rerank model is priced, per search unit or per input token, is described in
-[Per-request pricing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#per-request-pricing-audio-moderations-rerank-and-completion-models).
+[Per-request pricing](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#per-request-pricing-audio-moderations-rerank-and-completion-models).
 
 ## Search
 
@@ -438,7 +438,7 @@ for the tool's name or `*`. With neither set, it follows the key's model access,
 or its user's when the key has none: unrestricted model access runs every search
 tool, and restricted model access runs only a tool named by its deprecated
 `<provider>:<tool>` entry in `allowed_models`
-([access control](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides#users-and-identities)).
+([access control](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides#users-and-identities)).
 
 **Request.**
 
@@ -562,7 +562,7 @@ and llama-server also take:
 ```
 
 `model` is `<provider>:<model>`, where the provider is an entry under
-[`decision_providers`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#decision-providers). The answer comes back
+[`decision_providers`](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#decision-providers). The answer comes back
 as the provider returned it, keyed like the questions, with `probabilities`,
 `confidence` and `usage`. `images` takes data URLs for a vision decision model
 served by llama-server; other providers refuse it.
@@ -758,7 +758,7 @@ Anthropic answers it, whose message names each failing field.
 | `all_candidates_rejected` | 400 | Every model a routing policy or a catalog ID tried rejected the request as invalid | |
 | `insufficient_funds` | 402 | The model is served on a credential the deployment pays for, and the organization has no funds paid in to cover it. Nothing was sent upstream | |
 | `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price, a direct search has no price (see [Search](#search)), or a gateway-run tool the request declares has no row to price its calls ([Tools](tools.md#pricing-a-gateway-run-tool)). An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
-| `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: an operator adds the provider as a [hosted provider](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers) (switching on the model), or the organization adds its own provider key. A provider's environment variable alone serves nothing | |
+| `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: an operator adds the provider as a [hosted provider](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers) (switching on the model), or the organization adds its own provider key. A provider's environment variable alone serves nothing | |
 | `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401, or a 403 other than one rejecting the request, which is a 400). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 | `end_user_limit_reached` | 403 | A service key already has as many end users as its `max_end_users` allows, so a request that would create a new end user or revive a deleted one is refused. End users it already has are unaffected | |
@@ -772,7 +772,7 @@ budget limit`) from a request whose estimated cost is larger than the budget it
 has left (`... has $X of budget remaining, less than this request's estimated
 cost of $Y`); see [Budgets](access-control.md#budgets). Its `Retry-After` is
 when the budget resets, which may be days away for a monthly budget; see
-[Refusals and `Retry-After`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides#refusals-and-retry-after).
+[Refusals and `Retry-After`](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides#refusals-and-retry-after).
 
 ### Provider failures
 

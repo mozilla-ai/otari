@@ -36,7 +36,7 @@ the policy moves on to the next; a provider nothing declares has none, keyless
 local backends included, and an entry that names no key has none, whatever the
 provider's own environment variable holds. A candidate nothing declares that one of the
 deployment's hosted providers serves is sent on the deployment's own credential, as a single model is
-([hosted providers](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/providers/hosted-providers#deployment-paid-credentials)). When no candidate has a credential, the request is
+([hosted providers](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers#deployment-paid-credentials)). When no candidate has a credential, the request is
 refused with `424 provider_not_configured`. A candidate whose provider rejects
 the configured credential (401, or a 403 that does not reject the request itself) moves on too; when every candidate
 either lacks a credential or had it rejected, and at least one was rejected, the
@@ -72,7 +72,7 @@ caller with no finite budget.
 In a policy that can fall over, each candidate gets one upstream call unless a
 retry count is configured, so a throttled provider hands over to the next
 candidate at once rather than after its SDK's own retries. See
-[Provider retries](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#provider-retries).
+[Provider retries](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#provider-retries).
 
 ## Load balance across providers (weighted routing)
 
@@ -111,7 +111,7 @@ Caller allow-lists filter candidates before weights are normalized. Use
 
 The priority router keeps its candidates in the order written. Each request goes
 to the first one that has room under its
-[`per: model` rate limits](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/self-hosting/configuration#rate-limit-rules):
+[`per: model` rate limits](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#rate-limit-rules):
 
 ```yaml
 rate_limits:
@@ -227,7 +227,7 @@ service cannot run; `monitor` lets the request continue and records the skipped
 check. Only input checks can be mandated by a policy.
 
 Organization-mandated and request-provided guardrails compose with policy
-guardrails. See [Guardrails](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/guardrails/guardrails).
+guardrails. See [Guardrails](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/guardrails/guardrails).
 
 ## Explain a policy
 
@@ -271,7 +271,7 @@ harness runs the subagent with its own provider credentials.
 The fields and errors are in the
 [API reference](api-reference.md#routing-recommendations), and the Claude Code
 plugin that asks is in
-[Use with Claude Code](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/agents-and-frameworks/use-with-claude-code#let-otari-choose-a-subagents-model).
+[Use with Claude Code](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/agents-and-frameworks/use-with-claude-code#let-otari-choose-a-subagents-model).
 
 ## Managing policies at runtime
 

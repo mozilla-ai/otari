@@ -93,4 +93,4 @@ The page is built on five operator endpoints under `/api/v1/health-checks`:
 `GET` for the status, `POST /run` to start a run, `POST /disable-failing` to
 switch off every failing model (what **Disable all** calls), and `GET` and
 `PATCH /settings`.
-See the [API reference](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference).
+See the [API reference](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference).

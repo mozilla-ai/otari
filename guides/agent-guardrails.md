@@ -16,7 +16,7 @@ output at inference time. A gate checks agent actions and repository diffs.
 
 This page walks through setting them up. Every field, gate type, command-line
 option and limit is specified in the
-[Agent Guardrails reference](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference).
+[Agent Guardrails reference](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference).
 
 Contents:
 
@@ -62,7 +62,7 @@ Five commands apply here:
 | `otari guardrails generate` | Proposes gates from the repository's own AGENTS.md or CLAUDE.md. |
 
 Their options are listed under
-[Command-line reference](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#command-line-reference).
+[Command-line reference](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#command-line-reference).
 
 ## Guardrails and gates
 
@@ -117,7 +117,7 @@ permission in the file untouched. Re-run it when the guardrail gains its first
 `command` gate or its first gate naming `pre_tool_use.read_target`, so the
 `PreToolUse` matcher picks up the tool that gate needs. An ordinary `path` gate
 needs no re-run. What `setup` writes is shown under
-[Registering it by hand](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#registering-it-by-hand).
+[Registering it by hand](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#registering-it-by-hand).
 
 ### Codex
 
@@ -135,7 +135,7 @@ This is per developer and per repository: a teammate who clones the repository
 and runs `otari hook setup --harness codex` accepts them separately.
 
 The Codex integration is newer and less exercised than the Claude Code one; see
-[Registering it for Codex](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#registering-it-for-codex)
+[Registering it for Codex](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#registering-it-for-codex)
 for what it cannot see.
 
 ## Writing a gate
@@ -182,7 +182,7 @@ Name the tool in the phrase, not the file. A phrase matches a contiguous run of
 tokens, so `sed -i '' 's/x/y/' CHANGELOG.md` never fires a
 `"sed -i CHANGELOG.md"` phrase, and `head -5 .env` never fires a `head .env`
 one. The matching rules and a measured table of what matches are under
-[`command`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#command).
+[`command`](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#command).
 
 ### Keeping secrets out of the transcript
 
@@ -191,7 +191,7 @@ A rule about secrets is two gates: a `path` gate that runs at
 for the shell reads (`cat .env`) the first one cannot see. A read has no
 end-of-turn moment to fall back on; see
 [Reads have no second moment](#reads-have-no-second-moment). The `path` half
-is shown under [Refusing a read](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#refusing-a-read).
+is shown under [Refusing a read](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#refusing-a-read).
 
 ## Where the files live
 
@@ -229,7 +229,7 @@ Start with the single file `otari hook setup` scaffolds. Splitting it later
 moves gates between files rather than migrating them. When you split, group by
 concern rather than by gate type: a file is the unit someone shares or lifts
 out of another repository. The rules a set of files must meet are under
-[Composing several files](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#composing-several-files).
+[Composing several files](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#composing-several-files).
 
 Keep verifier scripts in `.otari/verifiers/`, a sibling of both shapes, so no
 non-guardrail file sits under the scanned directory. A `verifier` gate names
@@ -249,7 +249,7 @@ does not match looks the same as a clean result.
    An error is a gate that cannot do its job whatever the session does; a
    warning is a gate that may not mean what you intended. Each finding is
    listed under
-   [Validation errors and warnings](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#validation-errors-and-warnings).
+   [Validation errors and warnings](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#validation-errors-and-warnings).
 
 2. Dry-run it against the paths and commands you expect a session to touch:
 
@@ -277,10 +277,10 @@ does not match looks the same as a clean result.
    Check that the gates you meant to fire say `fires`. Nothing is contacted and
    no model is called, so a `judge` gate says `would run` rather than running.
    The labels are defined under
-   [Dry-run output](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#dry-run-output).
+   [Dry-run output](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#dry-run-output).
 
 3. Where a warning describes a design you intend, name its code in the gate's
-   [`accept_warnings`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#accept_warnings-on-any-gate).
+   [`accept_warnings`](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#accept_warnings-on-any-gate).
 
 4. Make warnings fail too, which is what a CI invocation wants:
 
@@ -305,7 +305,7 @@ That checks the change from where the branch left `origin/main` to the working
 tree, untracked files included. Without `--base` it checks the uncommitted
 change, the way a `Stop` event does. Which gate types can run against a change,
 and how the exit status is decided, is under
-[`otari guardrails check`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#otari-guardrails-check).
+[`otari guardrails check`](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#otari-guardrails-check).
 
 To run it on every pull request:
 
@@ -361,7 +361,7 @@ only where it keeps content (see
 [Keeping what a span was about](traces.md#keeping-what-a-span-was-about)).
 `OTARI_HOOK_REPORT=off` turns reporting off. What a report carries, how it is
 queued and sent, and what a judge gate's usage costs are in
-[What `otari hook` reports](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#what-otari-hook-reports).
+[What `otari hook` reports](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#what-otari-hook-reports).
 
 ## Generating gates from AGENTS.md or CLAUDE.md
 
@@ -382,7 +382,7 @@ otari guardrails generate
 Rerunning it after AGENTS.md changes proposes from scratch and asks about every
 candidate again, including ones a prior run declined. Where it writes, and its
 options, are under
-[`otari guardrails generate`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#otari-guardrails-generate).
+[`otari guardrails generate`](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#otari-guardrails-generate).
 
 ## Your own guardrail in `~/.otari/`
 
@@ -403,13 +403,13 @@ directory, in the same two shapes a repository uses:
 every repository where the hook runs, nobody else gets them, and a repository
 cannot turn them off. Their IDs gain a `user:` prefix; how the two sets compose,
 and what happens when one side fails to load, is under
-[Composing several files](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#composing-several-files).
+[Composing several files](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#composing-several-files).
 
 1. Write the gates as you would in a repository. A `verifier` gate names its
    script relative to your home directory, for example
    `verifier: .otari/verifiers/lint-before-stop.sh`, and the script must be
    inside `~/.otari/verifiers/`; see
-   [`verifier`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#verifier) for the ownership rule
+   [`verifier`](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#verifier) for the ownership rule
    it must meet.
 2. Run `otari guardrails validate` in a repository. It checks your files with
    the repository's and lists which gates come from where. Use `--repo-only`
@@ -425,7 +425,7 @@ every machine.
 write a user-level entry. To make your gates apply in every repository:
 
 1. Add the entries `setup` writes (shown under
-   [Registering it by hand](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#registering-it-by-hand))
+   [Registering it by hand](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#registering-it-by-hand))
    to `~/.claude/settings.json`, with the widest `PreToolUse` matcher,
    `Edit|Write|NotebookEdit|Read|Bash`, because one entry now serves the gates
    of every repository.
@@ -459,7 +459,7 @@ write a user-level entry. To make your gates apply in every repository:
   relevant does not pay for it, and give one that must run a `priority`. A cap
   limits how many run per event, and raising it does not raise the time they
   share, so a high cap suits fast judges; see
-  [`judge`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#judge). Set
+  [`judge`](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#judge). Set
   `OTARI_HOOK_JUDGE_DRY_RUN` to see which calls would be made without making
   them.
 - **Run `otari guardrails validate --strict` and `otari guardrails check` in
@@ -540,8 +540,8 @@ gates.
   through the shell leaves no signal a guardrail can raise afterwards.
 - A blocking `Stop` gate has a finite budget in Claude Code, and Codex's Code
   Mode bypasses `PreToolUse`; see
-  [How the harness integrations collect evidence](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#how-the-harness-integrations-collect-evidence)
-  and [Registering it for Codex](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#registering-it-for-codex).
+  [How the harness integrations collect evidence](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#how-the-harness-integrations-collect-evidence)
+  and [Registering it for Codex](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#registering-it-for-codex).
 - A verifier from a branch you check out to review runs on the next `Stop`
   event without you deciding to run it; see
-  [`verifier`](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#verifier).
+  [`verifier`](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#verifier).

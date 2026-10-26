@@ -186,7 +186,7 @@ one for its cost, each with a row per part.
   Requests priced whole, as a gateway prices a routed request, are split by
   model instead. A session with nothing priced says so rather than $0.00.
 
-A judge gate that [reports its model calls](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#what-otari-hook-reports)
+A judge gate that [reports its model calls](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/agent-guardrails/agent-guardrails-reference#what-otari-hook-reports)
 is priced like a request and counted in the session's cost, though not in any
 turn's. Its check shows the model, the tokens and the cost, and **At a glance**
 says what the judge gates cost in all.
