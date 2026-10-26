@@ -262,9 +262,9 @@ class TraceContentRead(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     # Cleared when the share goes with its session; the columns below still say what was read.
-    share_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("trace_content_shares.id", ondelete="SET NULL"), index=True
-    )
+    # No index of its own: the composite above starts with this column and serves
+    # the foreign key's checks as well as the reads keyed on it.
+    share_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("trace_content_shares.id", ondelete="SET NULL"))
     workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     trace_id: Mapped[str] = mapped_column(String(TRACE_ID_MAX_LENGTH))
     session_user_id: Mapped[str | None] = mapped_column(String)
