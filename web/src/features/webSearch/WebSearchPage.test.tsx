@@ -164,9 +164,12 @@ function mockApi(
     priceRefusal?: string
     /** Answers a settings write with this refusal. */
     settingsRefusal?: string
+    /** Refuse only the first price write, or price delete, then accept. */
+    priceFailsOnce?: boolean
   } = {},
 ) {
   const requests: Request[] = []
+  let priceFailures = opts.priceFailsOnce ? 1 : 0
   const rates = opts.rates ?? {
     "model:otari:web_search": rate("otari:web_search", 0.01),
     "search:exa": rate("exa", 0.005, "search"),
@@ -226,6 +229,10 @@ function mockApi(
         : jsonResponse({ ...SEARCH_TOOLS.stored[0], ...body })
     }
     if (path.pathname.startsWith(`${API_ROOT}/pricing`)) {
+      if ((method === "POST" || method === "DELETE") && priceFailures > 0) {
+        priceFailures -= 1
+        return jsonResponse({ detail: "Database unavailable" }, 500)
+      }
       if (method === "POST") {
         return opts.priceRefusal
           ? jsonResponse({ detail: opts.priceRefusal }, 422)
@@ -361,6 +368,42 @@ describe("WebSearchPage", () => {
     })
   })
 
+  it("names builtin_fetch outright, since a cleared fetch default falls back to config.yml's", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({
+      settings: { web_fetch_default_tool: "tabstack" },
+    })
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: /^Stop using tabstack as the default/,
+      }),
+    )
+    await waitFor(() =>
+      expect(writes(requests, "PATCH", "/tool-settings")[0]?.body).toEqual({
+        web_fetch_default_tool: "builtin_fetch",
+      }),
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Make builtin_fetch the default" }),
+    )
+    await waitFor(() =>
+      expect(writes(requests, "PATCH", "/tool-settings")[1]?.body).toEqual({
+        web_fetch_default_tool: "builtin_fetch",
+      }),
+    )
+  })
+
+  it("reads none in any case as the model's search turned off", async () => {
+    mockApi({ settings: { web_search_default_tool: "None" } })
+    await renderPage()
+
+    expect(
+      await screen.findByRole("switch", { name: "The model can search" }),
+    ).not.toBeChecked()
+  })
+
   it("turns the model's search off with none", async () => {
     const user = userEvent.setup()
     const requests = mockApi()
@@ -454,7 +497,7 @@ describe("WebSearchPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Test exa" }))
 
-    expect(await screen.findByText("Worked: 3 hits")).toBeInTheDocument()
+    expect(await screen.findByText("Worked: 3 hits.")).toBeInTheDocument()
     expect(writes(requests, "POST", "/search-tools/exa/test")[0].body).toEqual({
       query: "otari web search",
       url: null,
@@ -612,5 +655,75 @@ describe("WebSearchPage", () => {
     await user.tab()
 
     await waitFor(() => expect(providerReads()).toBeGreaterThan(before))
+  })
+
+  it("retries only the price when an edit's update went through and its price did not", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({ priceFailsOnce: true })
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Edit exa" }))
+    const dialog = await screen.findByRole("dialog", { name: "Configure exa" })
+    await user.type(within(dialog).getByLabelText(/API key/), "sk-rotated")
+    const price = within(dialog).getByLabelText("Price per call, USD")
+    await user.clear(price)
+    await user.type(price, "0.007")
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(writes(requests, "POST", "/pricing")).toHaveLength(1),
+    )
+
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(writes(requests, "POST", "/pricing")).toHaveLength(2),
+    )
+    // The update is not sent again with a stale updated_at, which the API
+    // would refuse with 412.
+    expect(writes(requests, "PATCH", "/search-tools/exa")).toHaveLength(1)
+  })
+
+  it("retries only the price delete when removing a tool went through and its price did not", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({ priceFailsOnce: true })
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Remove exa" }))
+    const confirm = await screen.findByRole("alertdialog")
+    await user.click(
+      within(confirm).getByRole("button", { name: "Remove permanently" }),
+    )
+    await waitFor(() =>
+      expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(1),
+    )
+    await user.click(
+      within(confirm).getByRole("button", { name: "Remove permanently" }),
+    )
+
+    await waitFor(() =>
+      expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(2),
+    )
+    expect(writes(requests, "DELETE", "/search-tools/exa")).toHaveLength(1)
+  })
+
+  it("drops an unsaved test's result once the settings it ran on change", async () => {
+    const user = userEvent.setup()
+    mockApi()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add search tool" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await pickOption(user, "Provider", "exa", dialog)
+    await user.type(within(dialog).getByLabelText(/API key/), "sk-new")
+    await user.click(within(dialog).getByRole("button", { name: "Test" }))
+    expect(
+      await within(dialog).findByText("Worked: 3 hits."),
+    ).toBeInTheDocument()
+
+    await user.type(within(dialog).getByLabelText(/API key/), "x")
+    expect(
+      within(dialog).queryByText("Worked: 3 hits."),
+    ).not.toBeInTheDocument()
   })
 })

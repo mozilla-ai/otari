@@ -24,7 +24,9 @@ import {
   BUILTIN_FETCH,
   describeOptions,
   servesTheModel,
+  TEST_INPUT,
   type ToolPrice,
+  testOutcome,
   type WebToolKind,
   type WebToolRow,
 } from "./webTools"
@@ -73,15 +75,11 @@ const COPY: Readonly<
   },
 }
 
-const TEST_INPUT: Readonly<
-  Record<WebToolKind, { query?: string; url?: string }>
-> = {
-  search: { query: "otari web search" },
-  fetch: { url: "https://example.com" },
-}
+/** The fallback row's key: a tool's name never holds a "/", so no tool can take it. */
+const FALLBACK_ROW = "/fallback"
 
 function rowKey(row: WebToolTableRow): string {
-  return row.type === "tool" ? row.tool.name : "fallback"
+  return row.type === "tool" ? row.tool.name : FALLBACK_ROW
 }
 
 /** A problem worth a mark: a square dot and a sentence, as Badge's stories show. */
@@ -195,7 +193,7 @@ function ToolActions({
             label="Stop using as default"
             ariaLabel={
               tool.kind === "search"
-                ? `Stop using ${tool.name} as the default; the default goes back to automatic`
+                ? `Stop using ${tool.name} as the default; the default goes back to the configuration file's, else automatic`
                 : `Stop using ${tool.name} as the default; ${BUILTIN_FETCH} takes over`
             }
             isDisabled={isSettingDefault}
@@ -211,7 +209,7 @@ function ToolActions({
           onPress={() =>
             test.mutate({
               name: tool.name,
-              body: { query: null, url: null, ...TEST_INPUT[tool.kind] },
+              body: TEST_INPUT[tool.kind],
             })
           }
         />
@@ -247,11 +245,7 @@ function ToolActions({
         <span className="text-caption">Testing…</span>
       ) : test.data ? (
         <span role="status" className="text-caption">
-          {test.data.ok
-            ? tool.kind === "search"
-              ? `Worked: ${test.data.hits ?? 0} hits`
-              : `Worked: ${test.data.characters ?? 0} characters`
-            : `Failed: ${test.data.error ?? "unknown error"}`}
+          {testOutcome(tool.kind, test.data)}
         </span>
       ) : test.error ? (
         <span role="status" className="text-caption text-danger">
@@ -371,17 +365,25 @@ export function WebToolsTable({
     providers.find((entry) => entry.id === tool.provider)
   const toolCount = rows.filter((row) => row.type === "tool").length
 
-  // The fetch default is builtin_fetch whenever nothing else is named, so
-  // making builtin_fetch the default clears the setting, and it is never
-  // stopped. A search default cleared goes back to automatic.
+  // Fetch names builtin_fetch outright, since a cleared setting falls back to
+  // the configuration file's, which may name another tool; builtin_fetch is
+  // the one fetch default nothing replaces, so it is never stopped. Search has
+  // no value meaning "automatic", so stopping clears the setting.
   const defaultActionOf = (tool: WebToolRow): DefaultAction => {
     if (kind === "fetch" && tool.name === BUILTIN_FETCH) {
       return defaultName === BUILTIN_FETCH
         ? { type: "none" }
-        : { type: "make", refusal: "", onPress: () => onSetDefault(null) }
+        : {
+            type: "make",
+            refusal: "",
+            onPress: () => onSetDefault(BUILTIN_FETCH),
+          }
     }
     if (tool.name === defaultName) {
-      return { type: "stop", onPress: () => onSetDefault(null) }
+      return {
+        type: "stop",
+        onPress: () => onSetDefault(kind === "fetch" ? BUILTIN_FETCH : null),
+      }
     }
     const refusal =
       kind === "search" && !servesTheModel(providerOf(tool))
@@ -521,7 +523,7 @@ export function WebToolsTable({
         emptyContent={copy.empty}
         mobileLayout="cards"
         onRowAction={(key) =>
-          key === "fallback"
+          key === FALLBACK_ROW
             ? undefined
             : setOpenKey((current) => (current === key ? null : key))
         }

@@ -1,26 +1,26 @@
-import type { ToolSettingField, UpdateToolSettingsRequest } from "@/client"
+import { useState } from "react"
+
+import type { ToolSettingField } from "@/client"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { AdvancedRows } from "@/features/tools/AdvancedRows"
-import type { FieldCopy } from "@/features/tools/ToolSettingRows"
-import { ToolSettingRow } from "@/features/tools/ToolSettingRows"
+import {
+  copyFor,
+  oneField,
+  type SettingCopy,
+  ToolSettingRow,
+} from "@/features/tools/ToolSettingRows"
 import { useUpdateToolSettings } from "@/shared/api/tools"
 import { useAutosave } from "@/shared/hooks/useAutosave"
+
+import { isNoSearch } from "./webTools"
 
 // The deployment-wide web search settings: which tool each of the model's web
 // tools uses, the per-request cap, how results come back, and the legacy
 // SearXNG backend while it exists. Each row saves itself, as on the Tools page.
 
-/** One settable field maps onto one key of the update request. */
-function oneField(
-  key: string,
-  value: boolean | number | string | null,
-): UpdateToolSettingsRequest {
-  return { [key]: value } as UpdateToolSettingsRequest
-}
-
-const COPY: Readonly<Record<string, FieldCopy & { defaultLabel?: string }>> = {
+const COPY: Readonly<Record<string, SettingCopy>> = {
   web_search_max_calls: {
     label: "Calls per request",
     help: "How many searches and fetches one request may make together, on any tool. A call past it gets a tool error the model can recover from.",
@@ -66,28 +66,17 @@ const BEHAVIOR_KEYS = [
   "web_search_intercept",
 ]
 const LEGACY_KEYS = ["web_search_url", "web_search_engines"]
-/** Left to the API, as the Tools page left it (#2110). */
+/** Set through the API only. */
 const OMITTED = ["web_search_purpose_hint"]
-
-function copyFor(
-  field: ToolSettingField,
-): FieldCopy & { defaultLabel?: string } {
-  return (
-    COPY[field.key] ?? {
-      label: field.key,
-      help: field.description ?? "",
-      placeholder: "",
-      isMachineReadable: true,
-    }
-  )
-}
 
 const isSet = (field: ToolSettingField | undefined) =>
   field !== undefined && field.value !== null && field.value !== ""
 
 /**
  * Whether the model may search on this deployment's tools: `none` turns it
- * off, and turning it back on leaves the default to the stars, or automatic.
+ * off, and turning it back on clears the setting, which leaves the default to
+ * the stars, the configuration file, or automatic. A configuration file that
+ * says `none` itself keeps search off, so the row says how to turn it on.
  */
 function ModelSearchRow({
   field,
@@ -99,18 +88,31 @@ function ModelSearchRow({
   commit: (value: string | null) => Promise<unknown>
 }) {
   const save = useAutosave()
+  const [wasTurnedOn, setWasTurnedOn] = useState(false)
+  const isOff = typeof field.value === "string" && isNoSearch(field.value)
   return (
     <SettingRow
       label="The model can search"
       configKey={field.key}
       help="Off: the model searches only on an organization's own key, never on these tools. On: it uses the starred search tool, else the only one, or the legacy backend while it is set."
       error={save.error}
+      note={
+        wasTurnedOn && isOff && !save.isSaving ? (
+          <p className="text-caption">
+            The configuration file sets none, so search stays off: star a search
+            tool to turn it on.
+          </p>
+        ) : null
+      }
       control={
         <Toggle
           label="The model can search"
-          isSelected={field.value !== "none"}
+          isSelected={!isOff}
           isDisabled={disabled || save.isSaving}
-          onChange={(next) => void save.run(() => commit(next ? null : "none"))}
+          onChange={(next) => {
+            setWasTurnedOn(next)
+            void save.run(() => commit(next ? null : "none"))
+          }}
         />
       }
     />
@@ -143,7 +145,7 @@ export function WebSearchSettings({
     })
 
   const renderField = (field: ToolSettingField) => {
-    const copy = copyFor(field)
+    const copy = copyFor(COPY, field)
     return (
       <ToolSettingRow
         key={field.key}

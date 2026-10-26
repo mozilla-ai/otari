@@ -204,8 +204,8 @@ export function useUpdateSearchTool() {
   })
 }
 
-// A default that named the deleted tool is read as unset from now on, so the
-// settings are read again with the tools.
+// A default that names the deleted tool reads as unset, so the settings are
+// read again with the tools.
 export function useDeleteSearchTool() {
   const queryClient = useQueryClient()
   return useMutation({

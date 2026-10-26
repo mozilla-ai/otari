@@ -26,10 +26,16 @@ export function RemoveWebToolDialog({
   // Not ticked for a tool that overrides config.yml's: the entry it gives way
   // to has the same name, so the same price.
   const [alsoPrice, setAlsoPrice] = useState(!tool.overridesConfig)
+  // Set once the tool is gone, so confirming again after a failed price
+  // delete retries only that, not a delete the API now answers with 404.
+  const [isToolRemoved, setIsToolRemoved] = useState(false)
 
   const confirm = async () => {
     try {
-      await remove.mutateAsync(tool.name)
+      if (!isToolRemoved) {
+        await remove.mutateAsync(tool.name)
+        setIsToolRemoved(true)
+      }
       if (alsoPrice) {
         await deletePrice.mutateAsync({ kind: tool.kind, modelKey: tool.name })
       }
@@ -71,7 +77,9 @@ export function RemoveWebToolDialog({
           <Checkbox
             isSelected={alsoPrice}
             onChange={setAlsoPrice}
-            isDisabled={remove.isPending || deletePrice.isPending}
+            isDisabled={
+              remove.isPending || deletePrice.isPending || isToolRemoved
+            }
           >
             <span className="flex flex-col gap-0.5">
               <span>Also delete its price</span>
@@ -84,7 +92,7 @@ export function RemoveWebToolDialog({
       }
       confirmLabel="Remove permanently"
       isPending={remove.isPending || deletePrice.isPending}
-      error={remove.error ?? deletePrice.error}
+      error={isToolRemoved ? deletePrice.error : remove.error}
       onConfirm={() => void confirm()}
     />
   )

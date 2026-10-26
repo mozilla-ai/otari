@@ -9,6 +9,7 @@ import type {
   SearchProviderInfo,
   SearchProviderOption,
   SearchToolsResponse,
+  SearchToolTestResponse,
   StoredSearchTool,
 } from "@/client"
 import type { RateRead } from "@/features/toolPricing/toolRates"
@@ -78,24 +79,61 @@ export function listWebTools(
         stored: undefined,
       }),
     )
-  const stored = tools.stored.map(
-    (tool): WebToolRow => ({
-      kind,
-      name: tool.name,
-      provider: tool.provider,
-      source: "stored",
-      apiBase: tool.api_base ?? "",
-      last4: tool.last4 ?? "",
-      hasKey: Boolean(tool.last4),
-      isKeyReadable: tool.decryptable,
-      overridesConfig: tool.shadows_config,
-      fetchTool: tool.fetch_tool ?? "",
-      timeout: tool.timeout ?? undefined,
-      options: tool.options ?? {},
-      stored: tool,
-    }),
-  )
+  const stored = tools.stored.map((tool) => storedToolRow(kind, tool))
   return [...configured, ...stored]
+}
+
+/** A stored tool as a row, from the list or from an update's answer. */
+export function storedToolRow(
+  kind: WebToolKind,
+  tool: StoredSearchTool,
+): WebToolRow {
+  return {
+    kind,
+    name: tool.name,
+    provider: tool.provider,
+    source: "stored",
+    apiBase: tool.api_base ?? "",
+    last4: tool.last4 ?? "",
+    hasKey: Boolean(tool.last4),
+    isKeyReadable: tool.decryptable,
+    overridesConfig: tool.shadows_config,
+    fetchTool: tool.fetch_tool ?? "",
+    timeout: tool.timeout ?? undefined,
+    options: tool.options ?? {},
+    stored: tool,
+  }
+}
+
+/** Whether a search default turns the model's search off: `none`, in any case. */
+export function isNoSearch(value: string): boolean {
+  return value.trim().toLowerCase() === "none"
+}
+
+/** What a connection test runs: a query for a search tool, a page for a fetch tool. */
+export const TEST_INPUT: Readonly<
+  Record<WebToolKind, { query: string | null; url: string | null }>
+> = {
+  search: { query: "otari web search", url: null },
+  fetch: { query: null, url: "https://example.com" },
+}
+
+/** What a connection test answered, in a line. */
+export function testOutcome(
+  kind: WebToolKind,
+  result: SearchToolTestResponse,
+): string {
+  if (!result.ok) return `Failed: ${result.error ?? "unknown error"}.`
+  if (kind === "search") {
+    const hits = result.hits ?? 0
+    return `Worked: ${hits} ${hits === 1 ? "hit" : "hits"}.`
+  }
+  return `Worked: ${result.characters ?? 0} characters of page text.`
+}
+
+/** A per-million rate as the dollars per call a price field holds, never in exponent form. */
+export function perCallText(perMillion: number): string {
+  return (perMillion / 1_000_000).toFixed(12).replace(/\.?0+$/, "")
 }
 
 /** The `otari:` price a tool with no price of its own falls back to, by kind. */
@@ -342,6 +380,30 @@ export function jsonOnlyOptions(
  */
 export function servesTheModel(provider: SearchProviderInfo | undefined) {
   return provider === undefined || Boolean(provider.tier)
+}
+
+/** A value with its object keys sorted and its unset (null) members dropped. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`
+  if (value !== null && typeof value === "object") {
+    const members = Object.entries(value)
+      .filter(([, member]) => member !== null && member !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, member]) => `${JSON.stringify(key)}:${canonical(member)}`)
+    return `{${members.join(",")}}`
+  }
+  return JSON.stringify(value)
+}
+
+/**
+ * Whether two option maps say the same thing: key order and unset values do
+ * not count, so an edit that leaves the options alone does not send them.
+ */
+export function sameOptions(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+): boolean {
+  return canonical(a) === canonical(b)
 }
 
 /** A short line for a tool's options, for its row's details. */

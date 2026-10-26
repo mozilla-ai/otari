@@ -5,7 +5,6 @@ import type {
   CreatedSearchTool,
   CreateSearchToolRequest,
   SearchProviderInfo,
-  SearchToolTestResponse,
   UpdateSearchToolRequest,
 } from "@/client"
 import { Button } from "@/design-system/actions/Button"
@@ -31,9 +30,14 @@ import { ProviderOptionFields } from "./ProviderOptionFields"
 import {
   buildOptions,
   nameProblem,
+  perCallText,
+  sameOptions,
   servesTheModel,
   splitOptions,
+  storedToolRow,
   suggestName,
+  TEST_INPUT,
+  testOutcome,
   type WebToolKind,
   type WebToolRow,
 } from "./webTools"
@@ -52,11 +56,6 @@ import {
 const NOUN: Readonly<Record<WebToolKind, string>> = {
   search: "search tool",
   fetch: "fetch tool",
-}
-
-const TEST_INPUT: Readonly<Record<WebToolKind, string>> = {
-  search: "otari web search",
-  fetch: "https://example.com",
 }
 
 const REDIRECT_WARNING =
@@ -79,14 +78,6 @@ const UNPRICED_RESULT: Readonly<Record<WebToolKind, string>> = {
 
 function capitalized(text: string) {
   return text.charAt(0).toUpperCase() + text.slice(1)
-}
-
-/** What a connection test answered, in a line. */
-function testOutcome(kind: WebToolKind, result: SearchToolTestResponse) {
-  if (!result.ok) return `Failed: ${result.error ?? "unknown error"}.`
-  return kind === "search"
-    ? `Worked: ${result.hits ?? 0} ${result.hits === 1 ? "hit" : "hits"}.`
-    : `Worked: ${result.characters ?? 0} characters of page text.`
 }
 
 interface Draft {
@@ -116,7 +107,7 @@ function initialDraft(
     fetchTool: editing?.fetchTool ?? "",
     options: split.typed,
     extraJson: split.extraJson,
-    price: currentPrice === undefined ? "" : String(toPerCall(currentPrice)),
+    price: currentPrice === undefined ? "" : perCallText(currentPrice),
   }
 }
 
@@ -165,8 +156,16 @@ export function WebToolDialog({
       currentPrice,
     ),
   )
+  // The price as the dialog opened with it, so an edit writes the price only
+  // when its field was changed, and never rewrites one it only displayed.
+  const [openedPrice] = useState(draft.price)
+  // The stored tool as last saved: an edit whose price fails after its update
+  // went through compares against this, with the update's own updated_at.
+  const [saved, setSaved] = useState(editing)
   const [isMoreOpen, setIsMoreOpen] = useState(false)
-  const [testInput, setTestInput] = useState(TEST_INPUT[kind])
+  const [testInput, setTestInput] = useState(
+    TEST_INPUT[kind].query ?? TEST_INPUT[kind].url ?? "",
+  )
   const [created, setCreated] = useState<{
     tool: CreatedSearchTool
     priceError: unknown
@@ -204,7 +203,11 @@ export function WebToolDialog({
       fetchTools.find((tool) => tool.name === enrichedBy)?.provider,
   )
 
-  const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch })
+  const set = (patch: Partial<Draft>) => {
+    setDraft({ ...draft, ...patch })
+    // An unsaved test describes the settings it ran on, not the changed ones.
+    if (!isEdit) testUnsaved.reset()
+  }
 
   const request = (): CreateSearchToolRequest => ({
     name,
@@ -222,23 +225,20 @@ export function WebToolDialog({
   // break (the API checks names and options only where a write sets them).
   const changes = (): UpdateSearchToolRequest => {
     const body: UpdateSearchToolRequest = {
-      expected_updated_at: editing?.stored?.updated_at ?? null,
+      expected_updated_at: saved?.stored?.updated_at ?? null,
     }
     const next = request()
     if (draft.apiKey !== "") body.api_key = draft.apiKey
-    if ((next.api_base ?? "") !== (editing?.apiBase ?? "")) {
+    if ((next.api_base ?? "") !== (saved?.apiBase ?? "")) {
       body.api_base = next.api_base
     }
-    if ((next.timeout ?? undefined) !== editing?.timeout) {
+    if ((next.timeout ?? undefined) !== saved?.timeout) {
       body.timeout = next.timeout
     }
-    if (kind === "search" && (next.fetch_tool ?? "") !== editing?.fetchTool) {
+    if (kind === "search" && (next.fetch_tool ?? "") !== saved?.fetchTool) {
       body.fetch_tool = next.fetch_tool
     }
-    if (
-      JSON.stringify(next.options ?? {}) !==
-      JSON.stringify(editing?.options ?? {})
-    ) {
+    if (!sameOptions(next.options ?? {}, saved?.options ?? {})) {
       body.options = next.options ?? {}
     }
     return body
@@ -260,9 +260,11 @@ export function WebToolDialog({
       try {
         const body = changes()
         if (Object.keys(body).length > 1) {
-          await update.mutateAsync({ name: editing.name, body })
+          const updated = await update.mutateAsync({ name: editing.name, body })
+          setSaved(storedToolRow(kind, updated))
+          setDraft((current) => ({ ...current, apiKey: "" }))
         }
-        if (price !== undefined && price !== currentPrice) {
+        if (price !== undefined && draft.price.trim() !== openedPrice) {
           await priceRequest(editing.name, price)
         }
         onClose()
@@ -292,7 +294,7 @@ export function WebToolDialog({
     const input =
       kind === "search"
         ? { query: testInput.trim(), url: null }
-        : { url: testInput.trim(), query: null }
+        : { query: null, url: testInput.trim() }
     if (editing) testSaved.mutate({ name: editing.name, body: input })
     else testUnsaved.mutate({ ...request(), ...input })
   }
@@ -403,13 +405,7 @@ export function WebToolDialog({
           onChange={(next) =>
             // The options and endpoint belong to the provider, so a change
             // drops them rather than carrying them to one that may refuse them.
-            setDraft({
-              ...draft,
-              provider: next,
-              apiBase: "",
-              options: {},
-              extraJson: "",
-            })
+            set({ provider: next, apiBase: "", options: {}, extraJson: "" })
           }
           placeholder="Choose a provider"
           options={providers.map((entry) => ({

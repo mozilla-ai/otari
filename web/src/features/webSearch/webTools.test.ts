@@ -11,13 +11,17 @@ import { pricingResponse } from "@/tests/fixtures"
 import {
   buildOptions,
   hasUnpricedCalls,
+  isNoSearch,
   listWebTools,
   nameProblem,
+  perCallText,
   priceOf,
   rateOnly,
+  sameOptions,
   servesTheModel,
   splitOptions,
   suggestName,
+  testOutcome,
 } from "./webTools"
 
 const read = (perMillion?: number, origin = "operator"): RateRead => ({
@@ -265,5 +269,46 @@ describe("servesTheModel", () => {
   it("is false for a provider the search library has no adapter for", () => {
     expect(servesTheModel(provider({ id: "searxng", tier: null }))).toBe(false)
     expect(servesTheModel(provider())).toBe(true)
+  })
+})
+
+describe("sameOptions", () => {
+  it("ignores key order and unset values", () => {
+    expect(
+      sameOptions({ a: 1, b: { y: 2, x: 1 } }, { b: { x: 1, y: 2 }, a: 1 }),
+    ).toBe(true)
+    expect(sameOptions({ a: 1, c: null }, { a: 1 })).toBe(true)
+    expect(sameOptions({ a: [1, 2] }, { a: [2, 1] })).toBe(false)
+    expect(sameOptions({ a: 1 }, { a: 2 })).toBe(false)
+  })
+})
+
+describe("perCallText", () => {
+  it("writes a rate out in full, never in exponent form", () => {
+    expect(perCallText(0.5)).toBe("0.0000005")
+    expect(perCallText(5000)).toBe("0.005")
+    expect(perCallText(1_000_000)).toBe("1")
+    expect(perCallText(0)).toBe("0")
+  })
+})
+
+describe("isNoSearch", () => {
+  it("matches none in any case, as the gateway does", () => {
+    expect(isNoSearch("None")).toBe(true)
+    expect(isNoSearch(" NONE ")).toBe(true)
+    expect(isNoSearch("exa")).toBe(false)
+    expect(isNoSearch("")).toBe(false)
+  })
+})
+
+describe("testOutcome", () => {
+  it("says what a test answered, counting hits in the singular too", () => {
+    expect(testOutcome("search", { ok: true, hits: 1 })).toBe("Worked: 1 hit.")
+    expect(testOutcome("fetch", { ok: true, characters: 120 })).toBe(
+      "Worked: 120 characters of page text.",
+    )
+    expect(testOutcome("search", { ok: false, error: "http_error" })).toBe(
+      "Failed: http_error.",
+    )
   })
 })

@@ -6,9 +6,13 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { ToolRateForm } from "@/features/toolPricing/ToolRateForm"
-import type { ToolRateRow } from "@/features/toolPricing/toolRates"
+import {
+  type PriceKind,
+  type ToolRateRow,
+  toRowId,
+} from "@/features/toolPricing/toolRates"
 import { useDeploymentOperator } from "@/shared/api/organizations"
-import { type PricedKey, usePricesInEffect } from "@/shared/api/pricing"
+import { usePricesInEffect } from "@/shared/api/pricing"
 import { useSettings } from "@/shared/api/settings"
 import {
   useSearchProviders,
@@ -26,6 +30,7 @@ import {
   BUILTIN_FETCH,
   FALLBACK_KEY,
   hasUnpricedCalls,
+  isNoSearch,
   listWebTools,
   priceOf,
   rateOnly,
@@ -54,8 +59,6 @@ type Dialog =
   | { type: "price"; row: ToolRateRow; current: number | undefined }
   | { type: "remove"; tool: WebToolRow }
 
-const keyId = ({ kind, modelKey }: PricedKey) => `${kind}:${modelKey}`
-
 export function WebSearchPage() {
   const { isOperator, isSettled } = useDeploymentOperator()
   const searchList = useSearchTools("search", isOperator)
@@ -72,11 +75,17 @@ export function WebSearchPage() {
   // whatever another page left in the cache.
   const searchTools = isOperator ? listWebTools("search", searchList.data) : []
   const fetchTools = isOperator ? listWebTools("fetch", fetchList.data) : []
-  const priceKeys: PricedKey[] = [
+  const priceKeys: { kind: PriceKind; modelKey: string }[] = [
     { kind: "model", modelKey: FALLBACK_KEY.search },
     { kind: "model", modelKey: FALLBACK_KEY.fetch },
-    ...searchTools.map((tool) => ({ kind: "search", modelKey: tool.name })),
-    ...fetchTools.map((tool) => ({ kind: "fetch", modelKey: tool.name })),
+    ...searchTools.map((tool) => ({
+      kind: "search" as const,
+      modelKey: tool.name,
+    })),
+    ...fetchTools.map((tool) => ({
+      kind: "fetch" as const,
+      modelKey: tool.name,
+    })),
   ]
   const reads = usePricesInEffect(priceKeys, isOperator)
 
@@ -94,14 +103,14 @@ export function WebSearchPage() {
   }
 
   const readOf = new Map(
-    priceKeys.map((key, index) => [keyId(key), reads[index]]),
+    priceKeys.map((key, index) => [toRowId(key), reads[index]]),
   )
   const fallbackRead = (kind: WebToolKind) =>
-    readOf.get(keyId({ kind: "model", modelKey: FALLBACK_KEY[kind] }))
+    readOf.get(toRowId({ kind: "model", modelKey: FALLBACK_KEY[kind] }))
   const toolPrice = (tool: WebToolRow): ToolPrice =>
     priceOf(
       tool,
-      readOf.get(keyId({ kind: tool.kind, modelKey: tool.name })),
+      readOf.get(toRowId({ kind: tool.kind, modelKey: tool.name })),
       fallbackRead(tool.kind),
     )
   const fallbackPrice = (kind: WebToolKind): ToolPrice =>
@@ -125,10 +134,9 @@ export function WebSearchPage() {
     const value = fields.find((field) => field.key === key)?.value
     return typeof value === "string" ? value : ""
   }
-  const searchDefault =
-    settingOf("web_search_default_tool") === "none"
-      ? ""
-      : settingOf("web_search_default_tool")
+  const searchDefault = isNoSearch(settingOf("web_search_default_tool"))
+    ? ""
+    : settingOf("web_search_default_tool")
   const fetchDefault = settingOf("web_fetch_default_tool") || BUILTIN_FETCH
   const takenNames = [...searchTools, ...fetchTools].map((tool) => tool.name)
 
