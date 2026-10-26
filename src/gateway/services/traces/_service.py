@@ -114,8 +114,9 @@ class TraceService:
         users' erasure rows (and, where it keeps content, its workspaces'
         generations), create the traces not stored yet, read their owners, insert
         the spans, grow the totals. Each runs in key order, so two writers sharing traces lock them in
-        the same order. Where it keeps content, it also asks whether its users are
-        still members of their workspaces, all at once.
+        the same order. Where it keeps content, it also asks which of its sessions may
+        have content kept, all at once: those whose user is still a member of a
+        workspace that still keeps it.
         """
         written_at = datetime.now(UTC)
         # Sealed before the block, so a key source's round trip holds no connection.
@@ -129,9 +130,10 @@ class TraceService:
             generations = await self._barriers.lock(
                 {trace.workspace_id for trace, held in zip(traces, sealed, strict=True) if held}
             )
-            # Asked under the user's lock, which removing a member takes too: content is
-            # kept only for someone who is still a member as it is stored.
-            members = await self._owners.members(
+            # Asked under both locks, which removing a member and turning the workspace's
+            # content off each take too: content is kept only for someone who is still a
+            # member of a workspace that still keeps it as it is stored.
+            keeping = await self._owners.content_kept_for(
                 {(trace.workspace_id, trace.user_id) for trace, held in zip(traces, sealed, strict=True) if held}
             )
             new_traces: dict[TraceKey, dict[str, Any]] = {}
@@ -162,7 +164,7 @@ class TraceService:
                             trace,
                             span,
                             held
-                            if _current(trace, generations) and (trace.workspace_id, trace.user_id) in members
+                            if _current(trace, generations) and (trace.workspace_id, trace.user_id) in keeping
                             else {},
                         ),
                     )

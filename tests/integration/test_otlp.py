@@ -23,17 +23,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
-from gateway.api.deps import NoSessionOwners, build_trace_service
+from gateway.adapters.content_key_adapter import build_content_key_port
+from gateway.api.deps import DatabaseSessionOwners, NoSessionOwners, build_trace_service
 from gateway.api.routes import otlp as otlp_routes
 from gateway.core.config import API_ROOT
-from gateway.core.unit_of_work import create_unit_of_work
+from gateway.core.unit_of_work import create_unit_of_work, session_for
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import OrganizationMember, Workspace
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.traces import TraceContentBarrier, TraceSpan
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
+from gateway.services.secret_box import generate_secret_key
+from gateway.services.traces import SpanContent
 from gateway.services.traces import _otlp as trace_otlp
+from gateway.types.traces import SpanRecord, TraceWrite
 
 
 def _usd(tokens: int, rate_per_million: str) -> Decimal:
@@ -671,6 +675,20 @@ def _agent_span(trace_id: str, span_id: str, **over: Any) -> dict[str, Any]:
     }
 
 
+def _content_span() -> SpanRecord:
+    now = datetime.now(UTC)
+    return SpanRecord(
+        span_id="tool-1",
+        kind="tool",
+        origin="otlp",
+        name="tool",
+        outcome="ok",
+        start_time=now,
+        end_time=now,
+        content={"command": "pytest -x"},
+    )
+
+
 def test_otlp_spans_over_the_cap_are_not_traced_but_the_export_is_taken(
     client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -754,6 +772,72 @@ def test_otlp_keeps_content_only_for_a_member_where_the_deployment_and_the_works
     monkeypatch.setattr(config, "trace_content_enabled", True)
     workspace_keeps(False)
     assert export(member) is False
+
+
+async def test_a_write_keeps_no_content_once_the_workspace_switch_is_off(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Turning the switch off and moving the generation on are two commits, so the write re-reads the switch.
+
+    An export let in between those two commits carries a generation that is still
+    current, so the generation alone would admit its content after the switch is off.
+    """
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    keys = build_content_key_port(cast(FastAPI, client.app).state.config)
+    _exempt_key(client, master_key_header)
+    with db_session_factory() as session:
+        key = session.scalars(select(APIKey).where(APIKey.key_name == "cc-otlp")).one()
+        workspace = session.get(Workspace, key.workspace_id)
+        workspace.trace_content_enabled = True
+        person = TenancyUser(
+            email="switch@example.test", full_name="Dev", active_organization_id=workspace.organization_id
+        )
+        session.add(person)
+        session.flush()
+        session.add(
+            OrganizationMember(
+                organization_id=workspace.organization_id, user_id=person.id, role="admin", status="active"
+            )
+        )
+        session.add(User(user_id=str(person.id)))
+        session.commit()
+        workspace_id, user_id = workspace.id, str(person.id)
+
+    async def store(trace_id: str) -> str | None:
+        async with create_unit_of_work() as uow:
+            session_owners = DatabaseSessionOwners(session_for(uow))
+            service = build_trace_service(uow, SpanContent(keys), session_owners)
+            # The generation the switch has not moved on from, as an export in flight carries.
+            generation = await service.content_generation(workspace_id)
+            await service.write(
+                [
+                    TraceWrite(
+                        workspace_id=workspace_id,
+                        trace_id=trace_id,
+                        user_id=user_id,
+                        api_key_id=None,
+                        session_source="otlp",
+                        spans=(_content_span(),),
+                        content_generation=generation,
+                    )
+                ]
+            )
+        with db_session_factory() as session:
+            sealed: str | None = session.scalars(
+                select(TraceSpan.content_sealed).where(TraceSpan.trace_id == trace_id)
+            ).one()
+            return sealed
+
+    assert await store("switch-on") is not None
+
+    with db_session_factory() as session:
+        session.get(Workspace, workspace_id).trace_content_enabled = False
+        session.commit()
+
+    assert await store("switch-off") is None
 
 
 def test_otlp_export_carries_the_content_generation_it_was_let_in_with(

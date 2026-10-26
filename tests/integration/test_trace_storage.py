@@ -52,7 +52,7 @@ class _Members:
     async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
         return user_id is not None and user_id not in self.gone
 
-    async def members(self, pairs: Any) -> set[tuple[uuid.UUID, str | None]]:
+    async def content_kept_for(self, pairs: Any) -> set[tuple[uuid.UUID, str | None]]:
         return {pair for pair in pairs if await self.is_member(*pair)}
 
 
