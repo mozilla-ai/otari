@@ -20,10 +20,11 @@ from gateway.core.database import create_session, init_db, reset_db, to_sync_url
     ("database_url", "expected"),
     [
         ("sqlite+aiosqlite:///./otari.db", "sqlite:///./otari.db"),
-        ("postgresql+asyncpg://u:p@host:5432/db", "postgresql://u:p@host:5432/db"),
+        ("postgresql+asyncpg://u:p@host:5432/db", "postgresql+psycopg2://u:p@host:5432/db"),
+        # SQLAlchemy 2.1 resolves a bare postgresql:// to psycopg 3, which is not installed.
+        ("postgresql://u:p@host:5432/db", "postgresql+psycopg2://u:p@host:5432/db"),
         # Already sync, or a driver with no async counterpart: left alone.
         ("sqlite:///./otari.db", "sqlite:///./otari.db"),
-        ("postgresql://u:p@host:5432/db", "postgresql://u:p@host:5432/db"),
         ("postgresql+psycopg2://u:p@host:5432/db", "postgresql+psycopg2://u:p@host:5432/db"),
     ],
 )
