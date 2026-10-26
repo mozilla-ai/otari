@@ -326,11 +326,11 @@ guardrail verdicts. A span whose content they may not open says so
 
 **Sharing.** A user shares one session at a time, from the session's page or with
 `POST /api/v1/organizations/me/traces/{trace_id}/shares`, naming the audience
-(`organization_admins` or `deployment_operator`), an optional note saying why,
-and how many days it lasts (30 by default, 90 at most). The share ends when it
-expires, when the user ends it (`DELETE .../shares/{share_id}`), or when the user
-loses the workspace: they leave it or the organization, or lose the admin role
-that was their only way into it. A share that ended stays ended if they return. Reads
+(`organization_admins` or `deployment_operator`) and an optional note saying why.
+The share has no end date of its own: it ends when the user ends it
+(`DELETE .../shares/{share_id}`), when the user loses the workspace (they leave it
+or the organization, or lose the admin role that was their only way into it), or
+when retention deletes the session. A share that ended stays ended if they return. Reads
 through a share are recorded, at most once an hour per reader so a page left open
 is one read, and the user sees who read it and when: `GET .../shares` lists every
 share, running ones first and ended ones after, with its newest reads and how

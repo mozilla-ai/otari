@@ -10,7 +10,6 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { RadioGroup } from "@/design-system/forms/RadioGroup"
-import { Select } from "@/design-system/forms/Select"
 import { TextArea } from "@/design-system/forms/TextArea"
 import {
   useBreakGlass,
@@ -38,12 +37,6 @@ const AUDIENCE_OPTIONS = [
     label: AUDIENCE_LABELS.deployment_operator,
     description: "For a support request about this session.",
   },
-] as const
-
-const DAY_OPTIONS = [
-  { value: "7", label: "7 days" },
-  { value: "30", label: "30 days" },
-  { value: "90", label: "90 days" },
 ] as const
 
 // The server refuses a shorter reason; the dialog does not offer to send one.
@@ -91,8 +84,7 @@ export function SessionContent({
     const share = detail.content_share
     return (
       <InfoBanner>
-        Shared with you by the person whose session this is, until{" "}
-        {formatDate(share.expires_at)}.
+        Shared with you by the person whose session this is.
         {share.note ? ` Their note: “${share.note}”.` : ""} They can see that
         you read it, and when.
       </InfoBanner>
@@ -240,7 +232,7 @@ function OwnerSharing({
         </div>
       ) : null}
       {items.length > 0 ? (
-        // Ended and expired shares stay listed, with who read them.
+        // Ended shares stay listed, with who read them.
         <ul className="flex flex-col gap-2" aria-label="Shares of this session">
           {items.map((share) => (
             <ShareRow
@@ -266,9 +258,8 @@ function OwnerSharing({
 }
 
 function shareState(share: TraceContentShare): string {
-  if (share.active) return `until ${formatDate(share.expires_at)}`
   if (share.revoked_at) return `ended ${formatDate(share.revoked_at)}`
-  return `expired ${formatDate(share.expires_at)}`
+  return `since ${formatDate(share.created_at)}`
 }
 
 function ShareRow({
@@ -330,7 +321,6 @@ function ShareDialog({
     "organization_admins",
   )
   const [note, setNote] = useState("")
-  const [days, setDays] = useState("30")
 
   const submit = () => {
     if (share.isPending) return
@@ -341,7 +331,6 @@ function ShareDialog({
         body: {
           audience,
           note: note.trim() || null,
-          days: Number(days),
         },
       },
       { onSuccess: onClose },
@@ -355,7 +344,7 @@ function ShareDialog({
         if (!open) onClose()
       }}
       title="Share this session"
-      description={`Otari shows this session's content only to you. ${exceptionalAccess(platformBreakGlass)} Whoever you share it with can read its prompts, commands and file paths until the share ends, you stop it, or you lose access to this workspace. Their reads are recorded, at most once an hour each, and listed here.`}
+      description={`Otari shows this session's content only to you. ${exceptionalAccess(platformBreakGlass)} Whoever you share it with can read its prompts, commands and file paths until you stop sharing, you lose access to this workspace, or the session is deleted. Their reads are recorded, at most once an hour each, and listed here.`}
       submitLabel="Share"
       onSubmit={submit}
       isPending={share.isPending}
@@ -375,12 +364,6 @@ function ShareDialog({
         onChange={setNote}
         rows={3}
         description="Shown to whoever reads it."
-      />
-      <Select
-        label="For"
-        value={days}
-        onChange={setDays}
-        options={DAY_OPTIONS}
       />
     </FormDialog>
   )

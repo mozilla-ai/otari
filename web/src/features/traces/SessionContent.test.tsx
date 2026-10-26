@@ -16,7 +16,6 @@ const SHARE: TraceContentShare = {
   audience: "organization_admins",
   note: "flaky test",
   created_at: "2026-10-23T10:00:00Z",
-  expires_at: "2026-11-22T10:00:00Z",
   revoked_at: null,
   active: true,
   read_count: 1,
@@ -144,7 +143,6 @@ describe("SessionContent", () => {
     expect(post?.body).toEqual({
       audience: "organization_admins",
       note: "please look",
-      days: 30,
     })
   })
 
@@ -186,7 +184,7 @@ describe("SessionContent", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("keeps ended and expired shares listed with who read them", async () => {
+  it("keeps ended shares listed with who read them", async () => {
     const reads = (email: string) => [
       {
         reader_user_id: null,
@@ -204,10 +202,10 @@ describe("SessionContent", () => {
       },
       {
         ...SHARE,
-        id: "expired",
+        id: "older",
         active: false,
-        expires_at: "2026-10-22T10:00:00Z",
-        reads: reads("expired@example.test"),
+        revoked_at: "2026-10-22T10:00:00Z",
+        reads: reads("older@example.test"),
         read_count: 12,
       },
     ])
@@ -224,9 +222,8 @@ describe("SessionContent", () => {
     expect(
       await screen.findByText(/Read by ended@example.test/),
     ).toBeInTheDocument()
-    expect(screen.getByText(/Read by expired@example.test/)).toBeInTheDocument()
-    expect(screen.getByText(/ended /)).toBeInTheDocument()
-    expect(screen.getByText(/expired /)).toBeInTheDocument()
+    expect(screen.getByText(/Read by older@example.test/)).toBeInTheDocument()
+    expect(screen.getAllByText(/, ended /)).toHaveLength(2)
     expect(screen.getByText("The newest 1 of 12 reads.")).toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: "Stop sharing" }),

@@ -181,7 +181,7 @@ class TraceGuardrailDefinition(Base):
 
 
 class TraceContentShare(Base):
-    """A session's owner letting others read what it was about, until it expires or is revoked.
+    """A session's owner letting others read what it was about, until it is ended.
 
     Without one, a session's content opens only for its owner. The audience is a
     role, never a person: the organization's owners and admins, or the deployment's
@@ -212,7 +212,7 @@ class TraceContentShare(Base):
     created_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
     )
-    expires_at: Mapped[datetime] = mapped_column(UtcDateTime())
+    # When it ended: its owner ended it, or lost the workspace.
     revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
 
 

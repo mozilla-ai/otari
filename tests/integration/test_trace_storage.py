@@ -702,7 +702,7 @@ async def test_concurrent_new_guardrail_versions_never_pass_the_workspace_cap(
         async with create_unit_of_work() as uow:
             try:
                 await TraceService(
-                    uow, TracesRepositories.on(uow), SpanContent.disabled(), NoSessionOwners(), _no_window
+                    uow, TracesRepositories.on(uow), SpanContent.disabled(), _Members(), _no_window
                 ).record_definition(workspace, version, definition_digest(version))
             except GuardrailVersionLimitError:
                 return False
@@ -1041,6 +1041,7 @@ async def test_content_is_not_stored_for_a_user_who_left_the_workspace_before_th
                 TracesRepositories.on(uow),
                 SpanContent(build_content_key_port(test_config)),
                 _Members(gone=frozenset({"alice"})),
+                _no_window,
             )
             result = await store.write(
                 (_write(workspace, "s-left", _span("tool-1", kind="tool", content={"prompt": "x"})),)

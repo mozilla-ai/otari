@@ -6,7 +6,7 @@
   allows it.
 - ``trace_content_shares`` and ``trace_content_reads``: a session's content
   opens only for its owner. A share lets the organization's admins, or the
-  deployment's operator, read it until it expires or the owner revokes it, and
+  deployment's operator, read it until the owner ends it or loses the workspace, and
   every read through it is kept for the owner to see. Both go with the session.
 - ``trace_content_barriers``: each workspace's content generation. Turning
   content off, or deleting it, moves the generation on, and a write stores
@@ -48,7 +48,6 @@ def upgrade() -> None:
         sa.Column("note", sa.String(length=500), nullable=True),
         sa.Column("shared_by_user_id", sa.Uuid(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint(
             "audience IN ('organization_admins', 'deployment_operator')", name="check_trace_content_shares_audience"

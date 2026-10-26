@@ -150,9 +150,7 @@ LIST_SEPARATOR = ","
 # and never searched: shown on the span, and only there.
 SPAN_CONTENT_KEYS = frozenset({"prompt", "command", "file_path", "gate.evidence", "gate.detail"})
 SPAN_CONTENT_MAX_LENGTH = 4_000
-# How long a share of a session's content lasts by default, and at most, and how long its note may be.
-SHARE_DEFAULT_DAYS = 30
-SHARE_MAX_DAYS = 90
+# How long the note on a share of a session's content may be.
 SHARE_NOTE_MAX_LENGTH = 500
 # What opening a session's content without its owner's share has to say for itself.
 BREAK_GLASS_REASON_MIN_LENGTH = 10
@@ -581,12 +579,12 @@ class ContentShare:
     audience: ShareAudience
     note: str | None
     created_at: datetime
-    expires_at: datetime
     revoked_at: datetime | None
     reads: tuple[ContentRead, ...] = ()
     """Its newest reads; ``read_count`` says how many there are in all."""
     read_count: int = 0
 
-    def active(self, now: datetime) -> bool:
+    @property
+    def active(self) -> bool:
         """Whether it still lets its audience read."""
-        return self.revoked_at is None and self.expires_at > now
+        return self.revoked_at is None
