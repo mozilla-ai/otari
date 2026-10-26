@@ -14816,7 +14816,7 @@ export interface components {
             changes_truncated: boolean;
             /**
              * Digest
-             * @description Identity of the pending snapshot; send it to `POST /hosted-providers/catalog-update` to apply, or to reject, to act on exactly this one.
+             * @description Identity of the pending snapshot, to act on exactly this one: send it as `digest` to `POST /hosted-providers/catalog-update` to apply it, or to `POST /pricing/refresh/reject` to discard it.
              * @default
              */
             digest: string;

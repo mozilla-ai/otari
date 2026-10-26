@@ -201,8 +201,8 @@ class PricingRefreshPreviewResponse(BaseModel):
     digest: str = Field(
         default="",
         description=(
-            "Identity of the pending snapshot; send it to `POST /hosted-providers/catalog-update` to apply, "
-            "or to reject, to act on exactly this one."
+            "Identity of the pending snapshot, to act on exactly this one: send it as `digest` to "
+            "`POST /hosted-providers/catalog-update` to apply it, or to `POST /pricing/refresh/reject` to discard it."
         ),
     )
     needs_review: bool = Field(
