@@ -2419,14 +2419,17 @@ export interface paths {
         };
         /**
          * List Models
-         * @description List all available models.
+         * @description List all available models, one entry per model however many providers serve it.
          *
-         *     Returns models auto-discovered from configured providers, enriched with
-         *     pricing data from the model_pricing table when available, and with each
-         *     model's token limits: the context window from the live models.dev catalog,
-         *     or from the pricing snapshot where it has none, and the output limit from the
-         *     live catalog alone. A limit neither knows is null. Models that only exist in the pricing
-         *     table are also included for backward compatibility.
+         *     Each `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a
+         *     request sends as `model` to let the gateway choose the provider: it tries the
+         *     model's offerings best first and falls back down the list. An entry's price,
+         *     token limits and capabilities are those of the offering tried first, at the
+         *     caller's own rate. A limit nobody knows is null.
+         *
+         *     Aliases and routing policies are listed beside the models. An
+         *     `instance:model` selector still pins a request to one provider, and
+         *     GET /api/v1/catalog/models/{model_id} lists the offerings of a model.
          */
         get: operations["models-list_models"];
         put?: never;
@@ -2510,7 +2513,7 @@ export interface paths {
         };
         /**
          * Get Model
-         * @description Get details for a specific model.
+         * @description Get details for a specific model, by catalog id, alias or `instance:model` selector.
          */
         get: operations["models-get_model"];
         put?: never;
@@ -23044,7 +23047,7 @@ export interface operations {
     "models-list_models": {
         parameters: {
             query?: {
-                /** @description Filter models by provider name */
+                /** @description Only the models this provider instance serves, described as served there. */
                 provider?: string | null;
             };
             header?: never;

@@ -709,8 +709,8 @@ def test_a_policy_does_not_withhold_its_candidates_from_the_catalog(client: Test
     entries = {model["id"]: model for model in resp.json()["data"]}
 
     # The default target, a conditional target, and an on_failure candidate.
-    assert {"openai:gpt-5-mini", "openai:gpt-5-nano", "anthropic:claude-haiku-4-5"} <= set(entries)
-    assert entries["openai:gpt-5-mini"]["pricing"]["input_price_per_million"] == 1.0
+    assert {"openai/gpt-5-mini", "openai/gpt-5-nano", "anthropic/claude-haiku-4-5"} <= set(entries)
+    assert entries["openai/gpt-5-mini"]["pricing"]["input_price_per_million"] == 1.0
 
 
 def test_a_price_aimed_at_a_static_policy_names_its_target(client: TestClient) -> None:

@@ -54,6 +54,7 @@ from gateway.services.model_discovery_service import (
 )
 from gateway.services.pricing_service import latest_price_version
 from gateway.services.provider_kwargs import normalize_pricing_key
+from gateway.services.selector_index_service import models_by_identity
 
 if TYPE_CHECKING:
     pass
@@ -187,24 +188,42 @@ async def list_models(
     auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     model_provider: RequestSessionModelProviderPortDep,
-    provider: Annotated[str | None, Query(description="Filter models by provider name")] = None,
+    provider: Annotated[
+        str | None, Query(description="Only the models this provider instance serves, described as served there.")
+    ] = None,
 ) -> ModelListResponse:
-    """List all available models.
+    """List all available models, one entry per model however many providers serve it.
 
-    Returns models auto-discovered from configured providers, enriched with
-    pricing data from the model_pricing table when available, and with each
-    model's token limits: the context window from the live models.dev catalog,
-    or from the pricing snapshot where it has none, and the output limit from the
-    live catalog alone. A limit neither knows is null. Models that only exist in the pricing
-    table are also included for backward compatibility.
+    Each `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a
+    request sends as `model` to let the gateway choose the provider: it tries the
+    model's offerings best first and falls back down the list. An entry's price,
+    token limits and capabilities are those of the offering tried first, at the
+    caller's own rate. A limit nobody knows is null.
+
+    Aliases and routing policies are listed beside the models. An
+    `instance:model` selector still pins a request to one provider, and
+    GET /api/v1/catalog/models/{model_id} lists the offerings of a model.
     """
+    return ModelListResponse(data=await _listing(db, config, auth, session_identity, model_provider, provider=provider))
+
+
+async def _listing(
+    db: AsyncSession,
+    config: GatewayConfig,
+    auth: tuple[APIKey | None, bool],
+    session_identity: TenancyUser | None,
+    model_provider: ModelProviderPort,
+    *,
+    provider: str | None = None,
+) -> list[ModelObject]:
+    """The caller's catalog, priced at their rate and folded into one row per model."""
     catalog = await build_merged_catalog(
         db, config, auth=auth, session_identity=session_identity, provider=provider, model_provider=model_provider
     )
-    models = sorted(catalog.models.values(), key=lambda m: m.id)
+    models = list(catalog.models.values())
     organization_id = await viewer_organization(db, auth, session_identity)
     await apply_organization_pricing(db, config, models, catalog.aliases, organization_id)
-    return ModelListResponse(data=models)
+    return models_by_identity(config, catalog.models_dev, models, organization_id=organization_id)
 
 
 # Served before GET /models/{model_id:path}, which FastAPI would otherwise match
@@ -294,7 +313,12 @@ async def get_model(
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     model_provider: RequestSessionModelProviderPortDep,
 ) -> ModelObject:
-    """Get details for a specific model."""
+    """Get details for a specific model, by catalog id, alias or `instance:model` selector."""
+    if ":" not in model_id:
+        listed = await _listing(db, config, auth, session_identity, model_provider)
+        found = next((obj for obj in listed if obj.id == model_id), None)
+        if found is not None:
+            return found
     obj, aliases = await _find_model(db, config, model_id, auth, session_identity, model_provider)
     organization_id = await viewer_organization(db, auth, session_identity)
     await apply_organization_pricing(db, config, [obj], aliases, organization_id)

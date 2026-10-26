@@ -365,7 +365,7 @@ def test_pricing_on_unaliased_model_still_lists_it(client: TestClient) -> None:
     resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     assert resp.status_code == 200
     ids = {m["id"] for m in resp.json()["data"]}
-    assert ids == {"myopusmodel", "housemodel", "anthropic:claude-haiku-4"}
+    assert ids == {"myopusmodel", "housemodel", "anthropic/claude-haiku-4"}
 
 
 def test_provider_filter_excludes_aliases(client: TestClient) -> None:

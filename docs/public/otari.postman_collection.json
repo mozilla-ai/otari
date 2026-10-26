@@ -4328,7 +4328,7 @@
         {
           "name": "List Models",
           "request": {
-            "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available, and with each\nmodel's token limits: the context window from the live models.dev catalog,\nor from the pricing snapshot where it has none, and the output limit from the\nlive catalog alone. A limit neither knows is null. Models that only exist in the pricing\ntable are also included for backward compatibility.",
+            "description": "List all available models, one entry per model however many providers serve it.\n\nEach `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a\nrequest sends as `model` to let the gateway choose the provider: it tries the\nmodel's offerings best first and falls back down the list. An entry's price,\ntoken limits and capabilities are those of the offering tried first, at the\ncaller's own rate. A limit nobody knows is null.\n\nAliases and routing policies are listed beside the models. An\n`instance:model` selector still pins a request to one provider, and\nGET /api/v1/catalog/models/{model_id} lists the offerings of a model.",
             "header": [],
             "method": "GET",
             "url": {
@@ -4342,7 +4342,7 @@
               ],
               "query": [
                 {
-                  "description": "Filter models by provider name",
+                  "description": "Only the models this provider instance serves, described as served there.",
                   "disabled": true,
                   "key": "provider",
                   "value": ""
@@ -4403,7 +4403,7 @@
         {
           "name": "Get Model",
           "request": {
-            "description": "Get details for a specific model.",
+            "description": "Get details for a specific model, by catalog id, alias or `instance:model` selector.",
             "header": [],
             "method": "GET",
             "url": {
