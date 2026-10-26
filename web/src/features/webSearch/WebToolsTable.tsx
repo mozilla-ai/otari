@@ -145,13 +145,13 @@ export function PriceCell({ price }: { price: ToolPrice }) {
   }
 }
 
-/** The row's actions, and its last connection test, as a Hosted providers row has them. */
 /** What the row's star does: make the tool the default, stop using it, or nothing. */
 type DefaultAction =
   | { type: "make"; refusal: string; onPress: () => void }
   | { type: "stop"; onPress: () => void }
   | { type: "none" }
 
+/** The row's actions, and its last connection test, as a Hosted providers row has them. */
 function ToolActions({
   tool,
   price,
