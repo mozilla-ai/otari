@@ -518,6 +518,30 @@ class TestDiscoverAllModels:
         ]
 
     @pytest.mark.asyncio
+    async def test_a_mismatch_that_clears_and_returns_is_warned_again(
+        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("gateway.services.model_discovery_service._warned_undiscovered", {})
+        config = self._make_config(
+            providers={"edge": {"provider_type": "openai", "api_base": "http://edge/v1", "models": ["m1"]}}
+        )
+        # The backend loses m1, serves it again, then loses it again.
+        listings = [[_make_model("m2")], [_make_model("m1")], [_make_model("m2")]]
+
+        with (
+            caplog.at_level(logging.WARNING),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", new_callable=AsyncMock) as listed,
+        ):
+            for listing in listings:
+                listed.return_value = listing
+                with patch("gateway.services.model_discovery_service.get_model_cache", return_value=ModelCache()):
+                    await discover_all_models(config)
+
+        warnings = [r.getMessage() for r in caplog.records if "does not list" in r.getMessage()]
+        assert warnings == ["Instance 'edge' declares models its backend does not list: m1; it lists: m2"] * 2
+
+    @pytest.mark.asyncio
     async def test_declared_models_the_backend_lists_are_not_warned(
         self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
     ) -> None:

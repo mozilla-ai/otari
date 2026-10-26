@@ -91,6 +91,8 @@ class ProbeBilling:
 
     async def require_funds_on_deposit(self, *, organization_id):
         GATES.append(("require_funds_on_deposit", str(organization_id)))
+        if "funds" in FAULTS:
+            raise RuntimeError("billing down")
         if FUNDS["available"] <= 0:
             raise InsufficientFundsError(FUNDS["available"])
 
@@ -706,12 +708,38 @@ def test_a_direct_search_on_the_deployments_account_is_refused_without_funds(
     key = _key(client)
     probe.FUNDS["available"] = Decimal("0")
 
-    response = _search(client, key)
+    with patch("gateway.api.routes.search.run_direct_search", new=AsyncMock()) as searched:
+        response = _search(client, key)
 
     assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
     assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    searched.assert_not_called()
     assert probe.LEDGER == []
     assert _user(client)["reserved"] == pytest.approx(0.0)
+    rows = client.get(f"{API_ROOT}/usage", params={"user_id": "billed"}, headers=MASTER).json()
+    assert [(row["status"], row["status_code"], row["model"]) for row in rows] == [("error", 402, "fake-search")]
+
+
+def test_a_direct_search_whose_funds_check_fails_is_refused_and_refunded(
+    billed_search: tuple[TestClient, ModuleType], gateway_logs: pytest.LogCaptureFixture
+) -> None:
+    """A billing port that raises is not a refusal for want of funds: the search answers 503 and holds nothing."""
+    client, probe = billed_search
+    key = _key(client)
+    probe.FAULTS.add("funds")
+
+    with patch("gateway.api.routes.search.run_direct_search", new=AsyncMock()) as searched:
+        response = _search(client, key)
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE, response.text
+    assert response.json()["detail"] == "This organization's funds could not be checked. Retry later."
+    searched.assert_not_called()
+    assert probe.LEDGER == []
+    assert _user(client)["reserved"] == pytest.approx(0.0)
+    rows = client.get(f"{API_ROOT}/usage", params={"user_id": "billed"}, headers=MASTER).json()
+    assert [(row["status"], row["status_code"], row["model"]) for row in rows] == [("error", 503, "fake-search")]
+    errors = [r.getMessage() for r in gateway_logs.records if r.levelno == logging.ERROR]
+    assert any("deployment-paid search" in message and "RuntimeError" in message for message in errors), errors
 
 
 def test_a_tool_admission_that_does_not_commit_is_not_served(billed: tuple[TestClient, ModuleType]) -> None:
