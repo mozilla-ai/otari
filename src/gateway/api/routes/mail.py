@@ -1,6 +1,6 @@
 """Outgoing mail settings, and the operator's way to prove they work.
 
-Two endpoints under ``/api/v1/settings``, operator-gated and standalone-only like
+Two endpoints under ``/api/v1/settings``, operator-gated like
 the rest of the management API:
 
 * ``GET /api/v1/settings/mail`` reports which transport (if any) this deployment
@@ -146,6 +146,7 @@ async def send_test_mail(
         "mail_test",
         to=recipient,
         subject="Otari test message",
+        preheader="Delivered over {{TRANSPORT}}. Nothing else is needed.",
         values={
             "UI_BASE_URL": config.effective_ui_base_url,
             "TRANSPORT": mailer.transport_name,

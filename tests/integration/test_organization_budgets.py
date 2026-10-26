@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.api.deps import get_api_key_service
 from gateway.core.config import API_ROOT
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyValidationError
@@ -44,7 +45,6 @@ from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.users import User as ApiUser
-from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -59,11 +59,9 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetCreate,
     OrganizationScopedBudgetUpdate,
 )
-from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 _BUDGETS = f"{API_ROOT}/organizations/me/budgets"
 _CEILINGS = f"{API_ROOT}/organizations/me/spend-ceilings"
@@ -551,11 +549,11 @@ def _service(async_db: AsyncSession) -> BudgetService:
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
-        OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
-        ApiKeyService(ApiKeyRepository(uow)),
+        OrganizationService(async_db, membership_listener=None),
+        get_api_key_service(uow),
         WorkspaceAccess(
             async_db,
-            OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+            OrganizationService(async_db, membership_listener=None),
         ),
     )
 

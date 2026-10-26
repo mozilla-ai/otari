@@ -6,7 +6,7 @@ password: an address on the roster with no password is an identity waiting for
 the signup and reset flows in #650, not one an operator should be able to take
 over.
 
-**Claiming a deployment.** First boot leaves a standalone deployment with an
+**Claiming a deployment.** First boot leaves a deployment with an
 operator identity that has no address and no password
 (`gateway.services.tenancy.provisioning_service`), and with the master key still
 accepted as the dashboard login. The first call here *by that identity* supplies

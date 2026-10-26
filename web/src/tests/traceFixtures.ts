@@ -1,4 +1,9 @@
-import type { TraceDetail, TraceSpan, TraceSummary } from "@/client"
+import type {
+  TraceDetail,
+  TraceGateSummary,
+  TraceSpan,
+  TraceSummary,
+} from "@/client"
 
 export function traceSummary(
   overrides: Partial<TraceSummary> = {},
@@ -43,12 +48,18 @@ export function traceSpan(overrides: Partial<TraceSpan> = {}): TraceSpan {
     provider: null,
     input_tokens: null,
     output_tokens: null,
+    cache_read_tokens: null,
+    cache_write_tokens: null,
+    reasoning_tokens: null,
     cost: null,
     tool_name: null,
     tool_type: null,
     tool_call_id: null,
     request_id: null,
+    otel_trace_id: null,
+    otel_span_id: null,
     attributes: {},
+    content: {},
     ...overrides,
   }
 }
@@ -71,6 +82,7 @@ export function traceDetail(overrides: Partial<TraceDetail> = {}): TraceDetail {
         errors: 0,
         input_tokens: 20,
         output_tokens: 4,
+        cache_read_tokens: 0,
         cost: 0.02,
       },
     ],
@@ -116,6 +128,28 @@ export function traceDetail(overrides: Partial<TraceDetail> = {}): TraceDetail {
       }),
     ],
     truncated: false,
+    gates: [],
+    tool_costs: [],
+    ...overrides,
+  }
+}
+
+export function gateSummary(
+  overrides: Partial<TraceGateSummary> = {},
+): TraceGateSummary {
+  return {
+    gate_id: "no-changelog",
+    passed: 0,
+    blocked: 0,
+    flagged: 0,
+    refused: 0,
+    undecided: 0,
+    span_id: "req-1",
+    gate_type: "path",
+    enforcement: "required",
+    message: null,
+    runs: ["pre_tool_use.edit_target"],
+    origin: "repo",
     ...overrides,
   }
 }

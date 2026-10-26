@@ -36,6 +36,7 @@ import type {
   WorkspaceBudgetDefault,
   WorkspaceCodeExecutionPolicy,
   WorkspaceMcpServer,
+  WorkspaceMcpServerHealth,
   WorkspaceMember,
   WorkspaceProviderKeyOverride,
   WorkspaceWebSearchConfig,
@@ -128,6 +129,7 @@ export function pricingResponse(
   overrides: Partial<PricingResponse> & Pick<PricingResponse, "model_key">,
 ): PricingResponse {
   return {
+    kind: "model",
     effective_at: "2026-01-01T00:00:00Z",
     input_price_per_million: 0,
     output_price_per_million: 0,
@@ -142,20 +144,22 @@ export function pricingResponse(
   }
 }
 
-// The surface names a standalone gateway hosts, kept in step with
-// STANDALONE_SURFACES in src/gateway/api/routes/bootstrap.py. A test that wants
-// a surface hidden overrides `surfaces` rather than editing this.
-export const STANDALONE_SURFACES = [
+// The surface names a gateway hosts, kept in step with SURFACES in
+// src/gateway/api/routes/bootstrap.py. A test that wants a surface hidden
+// overrides `surfaces` rather than editing this.
+export const SURFACES = [
   "admin",
   "budgets",
+  "health_checks",
+  "hosted_providers",
   "keys",
   "models",
   "organization_guardrails",
   "organization_providers",
+  "organization_usage",
   "organizations",
   "playground",
   "pricing",
-  "providers",
   "routing",
   "settings",
   "tools",
@@ -164,42 +168,17 @@ export const STANDALONE_SURFACES = [
   "workspaces",
 ]
 
-// The same list for a hosted (multi-tenant) deployment, kept in step with
-// HOSTED_SURFACES beside it: the process-global provider page drops, because a
-// credential keyed on an instance name alone is served to every tenant; the
-// Playground drops because a control plane serves no inference (otari#822); and
-// the organization-wide Usage page appears, being a destination only where "my
-// organization" is narrower than "everything" (otari-ai#1963).
-//
-// `organization_providers` is not part of that difference: it is on the
-// standalone list above too, because the page behind it is where an
-// organization's models are offered, priced and switched, which is a tenant's
-// question whether or not the deployment has more than one tenant.
-const HOSTED_DROPS = new Set(["providers", "playground"])
-
-export const HOSTED_SURFACES = [
-  ...STANDALONE_SURFACES.filter((surface) => !HOSTED_DROPS.has(surface)),
-  "organization_usage",
-]
-
-/** The deployment bootstrap, standalone by default. See useDeployment. */
+/** The deployment bootstrap. See useDeployment. */
 export function bootstrap(
   overrides: Partial<DeploymentBootstrap> = {},
 ): DeploymentBootstrap {
   return {
-    deployment_type: "standalone",
-    session_type: "local_operator",
-    surfaces: [...STANDALONE_SURFACES],
+    surfaces: [...SURFACES],
     // The master key, because an unclaimed deployment is what a fixture
     // describes by default; a test about the password login overrides it.
     sign_in_methods: ["master_key"],
-    management_url: null,
-    // Null, because a standalone gateway is its own data plane: the address that
-    // served this page is the address that serves the API. The hosted-mode
-    // snippet tests set it.
-    data_plane_url: null,
-    // Null, because a fixture describes a deployment whose documentation is the
-    // bundled guide; the tests about an operator-configured docs site set it.
+    // Null, so Documentation links open docs.otari.ai; the tests about an
+    // operator-configured docs site set it.
     docs_url: null,
     // Unset, like docs_url: this fixture's deployment publishes none. The
     // account-menu tests set them.
@@ -222,6 +201,8 @@ export function bootstrap(
     oauth_providers: [],
     mail_ready: false,
     feedback_enabled: true,
+    // Off, the setting default: the workload identity tests turn it on.
+    federation_member_rules: false,
     // Off by default, matching the config default; the public-catalog tests
     // turn it on.
     public_catalog: false,
@@ -256,7 +237,7 @@ export function organizationContext(
 ): OrganizationContext {
   return {
     organization_member_id: "22222222-2222-2222-2222-222222222222",
-    // The identity a standalone first boot provisions: a name (OPERATOR_FULL_NAME
+    // The identity first boot provisions: a name (OPERATOR_FULL_NAME
     // in provisioning_service.py) and no address, since the master key is what
     // signs it in. A test about a rostered member overrides it.
     caller: {
@@ -274,8 +255,7 @@ export function organizationContext(
     // omits the field entirely for a caller in no workspace, which is why the
     // shell treats absent and empty the same way.
     workspace_memberships: [],
-    byo_provider_keys_allowed: true,
-    // True by default because the fixture models the standalone deployment whose
+    // True by default because the fixture models a fresh deployment whose
     // one identity is both its operator and its organization's owner, which is
     // what most tests here are about. A test about a tenant who is *not* an
     // operator says so, and that is the case that reads the organization-scoped
@@ -340,8 +320,8 @@ export function organizationMember(
     // other one passes null.
     attribution_user_id: "33333333-3333-3333-3333-333333333333",
     invitation_id: null,
-    // A standalone operator identity has no sign-in address; a ported platform
-    // row does. Both shapes have to render, so the builder ships neither and a
+    // The local operator identity has no sign-in address; a member who signed
+    // up does. Both shapes have to render, so the builder ships neither and a
     // test names the one it is about.
     email: null,
     full_name: "Operator",
@@ -510,6 +490,7 @@ export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     expires_at: null,
     is_active: true,
     allowed_models: null,
+    allowed_tools: null,
     exclude_from_budget: false,
     reject_user_mismatch: null,
     is_service_key: false,
@@ -565,6 +546,7 @@ export function user(overrides: Partial<User> = {}): User {
     reserved_requests: 0,
     budget_id: null,
     allowed_models: null,
+    allowed_tools: null,
     budget_started_at: null,
     next_budget_reset_at: null,
     blocked: false,
@@ -712,6 +694,7 @@ export function organizationPricingOverride(
   return {
     id: "99999999-9999-9999-9999-999999999999",
     organization_id: "11111111-1111-1111-1111-111111111111",
+    kind: "model",
     model_key: "openai:gpt-4o",
     input_price_per_million: 2.5,
     output_price_per_million: 10,
@@ -865,14 +848,30 @@ export function workspaceMcpServer(
     url: "https://mcp.example.com/github",
     purpose_hint: null,
     // Null is how "no allow-list" is stored, which is the neutral state a
-    // builder wants. Not interchangeable with `[]` as a stored value, even
-    // though `mcp_client` happens to read both as "expose everything".
+    // builder wants. Not interchangeable with `[]`, which admits no tool.
     allowed_tools: null,
     enabled: true,
     // The token is write-only, so this is all a response ever says about it.
     has_token: false,
+    // Never checked, which is how a row stored before checks existed reads.
+    health: null,
     created_at: "2026-08-01T00:00:00+00:00",
     updated_at: "2026-08-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+export function workspaceMcpServerHealth(
+  overrides: Partial<WorkspaceMcpServerHealth> = {},
+): WorkspaceMcpServerHealth {
+  return {
+    status: "healthy",
+    checked_at: "2026-08-01T00:00:00+00:00",
+    error: null,
+    http_status: null,
+    tool_count: 2,
+    missing_allowed_tools: [],
+    tools: ["list_issues", "get_issue"],
     ...overrides,
   }
 }

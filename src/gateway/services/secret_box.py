@@ -13,6 +13,7 @@ so a key can be rotated by prepending a new one and re-encrypting stored rows
 over time. Generate one with :func:`generate_secret_key`.
 """
 
+import functools
 import re
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
@@ -20,6 +21,7 @@ from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from gateway.core.env import otari_env
 
 SECRET_KEY_ENV = "SECRET_KEY"
+_GENERATE_HINT = "Generate one with `otari gen-secret-key`."
 
 
 class SecretBoxUnavailableError(RuntimeError):
@@ -51,6 +53,11 @@ def _load_keys() -> list[str]:
     return [key for key in re.split(r"[\s,]+", raw.strip()) if key]
 
 
+def configured_secret_keys() -> list[str]:
+    """The configured ``OTARI_SECRET_KEY`` keys, the one new material is made with first. Empty when unset."""
+    return _load_keys()
+
+
 def shares_secret_key(value: str) -> bool:
     """Whether ``value`` is one of the configured ``OTARI_SECRET_KEY`` keys."""
     return value in _load_keys()
@@ -69,12 +76,21 @@ def get_secret_box() -> MultiFernet:
     """
     keys = _load_keys()
     if not keys:
-        raise SecretBoxUnavailableError("OTARI_SECRET_KEY is not set; it is required to store provider credentials.")
+        raise SecretBoxUnavailableError(
+            f"OTARI_SECRET_KEY is not set or is empty; it is required to store provider credentials. {_GENERATE_HINT}"
+        )
+    return _box_for(tuple(keys))
+
+
+# Keyed on the keys themselves, so a changed OTARI_SECRET_KEY builds a new box
+# while a read that opens many rows builds one.
+@functools.lru_cache(maxsize=1)
+def _box_for(keys: tuple[str, ...]) -> MultiFernet:
     try:
         fernets = [Fernet(key.encode()) for key in keys]
     except (ValueError, TypeError):
         # Do not include the offending value: it is key material.
-        raise SecretBoxUnavailableError("OTARI_SECRET_KEY is not a valid Fernet key.") from None
+        raise SecretBoxUnavailableError(f"OTARI_SECRET_KEY is not a valid Fernet key. {_GENERATE_HINT}") from None
     return MultiFernet(fernets)
 
 

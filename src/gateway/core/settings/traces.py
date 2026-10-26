@@ -29,6 +29,15 @@ class TraceSettings(BaseModel):
             "that keeps reusing one session id gets a new trace rather than one that never ends."
         ),
     )
+    trace_content_enabled: Annotated[bool, OMITTED] = Field(
+        default=False,
+        description=(
+            "Keep what an instrumented coding agent reports a span was about: the prompt that opened a turn, the "
+            "command a tool ran or the file it touched, and what a guardrail gate checked. Stored encrypted with "
+            "OTARI_SECRET_KEY, and not kept at all without it; the agent has to send it too (Claude Code's "
+            "OTEL_LOG_TOOL_DETAILS and OTEL_LOG_USER_PROMPTS, otari hook's OTARI_HOOK_REPORT_CONTENT). Off by default."
+        ),
+    )
     trace_queue_max_spans: Annotated[int, OMITTED] = Field(
         default=10_000,
         gt=0,

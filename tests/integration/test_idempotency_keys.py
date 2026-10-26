@@ -42,6 +42,8 @@ from gateway.core.config import (
     REQUEST_ID_HEADER,
     RESPONSE_DURATION_HEADER,
     ROUTER_TASK_HEADER,
+    SERVER_TIMING_HEADER,
+    TAGS_HEADER,
     GatewayConfig,
 )
 from gateway.core.unit_of_work import UnitOfWork
@@ -140,7 +142,8 @@ def test_retry_replays_the_original_response_without_billing_again(
 
     assert second.status_code == 200, second.text
     assert provider.await_count == 1
-    assert second.json() == first.json()
+    assert second.content == first.content
+    assert "system_fingerprint" not in second.json()
     assert second.json()["usage"]["cost_usd"] == first.json()["usage"]["cost_usd"]
     assert second.headers[REQUEST_ID_HEADER] == first.headers[REQUEST_ID_HEADER]
     for name in (PROVIDER_HEADER, MODEL_HEADER, ATTEMPT_COUNT_HEADER, FALLBACK_HEADER):
@@ -148,6 +151,8 @@ def test_retry_replays_the_original_response_without_billing_again(
     # The original's duration would misdescribe a replay, which never reached a provider.
     assert RESPONSE_DURATION_HEADER in first.headers
     assert RESPONSE_DURATION_HEADER not in second.headers
+    assert SERVER_TIMING_HEADER in first.headers
+    assert SERVER_TIMING_HEADER not in second.headers
     assert second.headers[IDEMPOTENT_REPLAYED_HEADER] == "true"
     assert IDEMPOTENT_REPLAYED_HEADER not in first.headers
     assert _usage_rows(db_session_factory) == 1
@@ -257,6 +262,25 @@ def test_reusing_a_key_with_different_routing_headers_is_refused(
 
     assert refused.status_code == 422, refused.text
     assert provider.await_count == 1
+
+
+def test_reusing_a_key_with_different_tags_headers_is_refused(
+    client: TestClient, master_key_header: dict[str, str], user: None
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+    headers = _keyed(master_key_header, "reused-tags")
+
+    assert _post_chat(client, headers, provider).status_code == 200
+    refused = _post_chat(client, {**headers, TAGS_HEADER: "run=1"}, provider)
+    assert refused.status_code == 422, refused.text
+    replayed = _post_chat(client, headers, provider)
+    assert replayed.headers[IDEMPOTENT_REPLAYED_HEADER] == "true"
+
+    tagged = _keyed(master_key_header, "reused-tags-value")
+    assert _post_chat(client, {**tagged, TAGS_HEADER: "run=1"}, provider).status_code == 200
+    refused = _post_chat(client, {**tagged, TAGS_HEADER: "run=2"}, provider)
+    assert refused.status_code == 422, refused.text
+    assert provider.await_count == 2
 
 
 def test_reusing_a_key_with_another_value_of_a_repeated_header_is_refused(

@@ -9,11 +9,6 @@ This works the same way Otari's other "frontier capabilities" do: it
 inspects the request, decides what to do per attachment, and only does work the
 target model actually needs.
 
-> Standalone mode only. Hybrid mode routes to frontier providers that already
-> understand documents/images, so attachments pass through untouched.
-
-
-
 ## Uploading a file
 
 ```bash
@@ -49,8 +44,7 @@ curl http://localhost:8000/api/v1/chat/completions \
 Before you use a local or self-hosted model here (for example
 `ollama:llama3`), make sure Otari is configured for that backend under
 `providers`: set its route (`api_base`, when needed) and any backend
-credentials it expects (such as an API key or token). In standalone mode,
-Otari also requires pricing for that model key by default: add pricing, enable
+credentials it expects (such as an API key or token). Otari also requires pricing for that model key by default: add pricing, enable
 `default_pricing` if it covers the model, or set `require_pricing: false` for
 an intentionally unpriced backend.
 
@@ -85,6 +79,7 @@ Mind the base URL: Anthropic's SDK appends `/v1` itself, so it takes
 
 ```python
 from anthropic import Anthropic
+
 client = Anthropic(base_url="http://localhost:8000/api", api_key="<your-api-key>")
 meta = client.files.upload(file=("report.pdf", open("report.pdf", "rb"), "application/pdf"))
 client.files.download(meta.id)  # Otari serves every stored file's bytes back
@@ -109,9 +104,7 @@ takes the dashboard session rather than an API key. A file uploaded there
 belongs to the signed-in person in the workspace the switcher has selected, the
 same owner a Playground completion runs as, so its `file_id` resolves in their
 messages and in nobody else's. The same person's files uploaded with one of
-their keys in that workspace are listed there too. A hosted control plane does
-not serve these routes, because the data plane that runs its completions could
-not read a file stored on the control plane.
+their keys in that workspace are listed there too.
 
 ## Files and code execution
 
@@ -191,7 +184,8 @@ request asked for code over that file:
   file ID of the caller's choosing from reaching the provider, whose files are
   scoped to the account rather than to the caller;
 - 400: a file with too little left for a copy to expire no later than it does;
-- 400: `files_provider_upload_enabled` set to `false`;
+- 400: `files_provider_upload_enabled` set to `false`, or
+  `OTARI_PROVIDER_ACCOUNT_PEPPER` unset;
 - 400: `file_understanding_enabled` set to `false`, because nothing then reads
   the block;
 - 400: a routing policy with no candidate whose provider can hold a copy;
@@ -261,6 +255,16 @@ answers 404 for it. A provider that merely refused is retried on a later event
 naming the same file, where the response offers one; an allowance it ran past
 is not, because the allowance only shrinks.
 
+Gemini is the exception to keeping the provider's ID: its code returns what it
+produced as bytes in the reply, with no ID at all. Otari stores each such file
+under a new ID of its own and puts that ID where the bytes were. On Messages
+that is a `code_execution_output` entry in the `code_execution_tool_result`, the
+shape an Anthropic reply has; on Chat Completions it is a `file_id` on the
+`code_execution_output` item (see [Code-execution executor](tools.md#code-execution-executor)).
+The same allowances apply, and a file past them, or one the store refused, stays
+in the reply as bytes. A chart the model also shows inline stays in the
+message's `images` as well.
+
 `files_output_max_files` and `files_output_max_bytes` (20 files and 64 MB by
 default, the latter also bounded by `files_max_bytes`) are each spent twice
 over, once per source: one call may store that many files from Otari's own
@@ -311,14 +315,31 @@ document block the caller wrote inline is forwarded as written.
 Scanned/image-only PDFs (no extractable text) are rasterized page-by-page and
 sent through the image path.
 
+Gemini refuses a request past 20 MB, attachments included. Once a request's
+attachments to a Gemini model would pass `files_gemini_inline_max_bytes` (16 MiB
+by default, counted as sent, base64-encoded, which leaves room for the rest of
+the request), Otari uploads each further one to Gemini's Files API with the key
+the request is served with, a hosted provider's included, and sends a reference
+to it instead of the bytes. An
+upload is remembered for 47 hours, one less than Gemini keeps the file, so an
+agent resending the same conversation does not upload it again. Where Gemini
+refuses the upload, the request is answered with a 400 before it reaches the
+provider. A request that may fall back to a provider other than Gemini is sent
+as it is, since a Gemini file reference means nothing to the fallback, and so is
+one to Vertex AI, which has no Files API in any-llm.
+
 ### Capability resolution
 
 Otari must know whether the target model is natively multimodal. It uses,
 in order:
 
 1. `model_capabilities` **config override**: authoritative.
-2. **any-llm provider metadata**: trusted only for hosted providers.
-3. **Default: extract**, safe, since a needless extraction still yields a
+2. **Known model exceptions**: a hosted model its provider's flag over-reports
+  and that drops the file silently rather than refusing it. Today that is
+  DeepSeek's `deepseek-v4-pro`, which answers as if no image came, while its
+  provider takes images on `deepseek-flash`; its images are read as text.
+3. **any-llm provider metadata**: trusted only for hosted providers.
+4. **Default: extract**, safe, since a needless extraction still yields a
   correct answer while a wrong passthrough silently drops the file.
 
 > any-llm's capability flags are set per provider *class*, so they over-report
@@ -349,7 +370,9 @@ resolve; with it on, the same fault stops the boot.
 `files_output_max_files` and `files_output_max_bytes` each bound what one
 code-execution call may store from its sandbox and, separately, what one
 request may copy from a provider's, and `files_provider_copy_max_sec` bounds
-how long that copying may take (see above). An expired file answers 404 at once, and the
+how long that copying may take (see above). `files_gemini_inline_max_bytes` is
+the inline attachment budget for a Gemini request (see
+[What Otari does per attachment](#what-otari-does-per-attachment)). An expired file answers 404 at once, and the
 background sweep (`files_sweep_interval_sec`, hourly by default, `0` to
 disable) then reclaims its bytes and row along with those of deleted files and
 of uploads that never completed.
@@ -358,7 +381,8 @@ a copy of an attached file may be stored at the provider that runs a request's
 code, and how long that copy lives (see
 [A file the provider's own code execution reads](#a-file-the-providers-own-code-execution-reads)).
 - `OTARI_PROVIDER_ACCOUNT_PEPPER`: the key for the digest that names the provider
-account a copy is in. Required while `files_provider_upload_enabled` is on (see
+account a copy is in. Without it, provider copies are off whatever
+`files_provider_upload_enabled` says (see
 [Provider copies](configuration.md#provider-copies)).
 - `file_understanding_enabled`: master switch for content normalization.
 - `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:

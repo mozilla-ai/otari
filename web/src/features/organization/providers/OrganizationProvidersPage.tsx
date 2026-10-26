@@ -1,5 +1,6 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
+import type { IconType } from "react-icons"
 import {
   FiArchive,
   FiEdit2,
@@ -56,6 +57,7 @@ import {
   useProviderKeyEncryption,
   useRestoreOrgProviderKey,
   useSetOrgProviderKeyDefault,
+  useUnsetOrgProviderKeyDefault,
   useUpdateOrgProviderKey,
 } from "@/shared/api/organizations"
 import { useOrganizationPricing } from "@/shared/api/pricing"
@@ -64,6 +66,12 @@ import { providerDisplayName } from "@/shared/helpers/providers"
 import { useUrlState } from "@/shared/helpers/urlState"
 
 import { ProviderModelsPanel } from "./ProviderModelsPanel"
+
+// The star filled is the key that is the default, so the glyph shows the state
+// its press toggles.
+const FilledStar: IconType = (props) => (
+  <FiStar {...props} fill="currentColor" />
+)
 
 // Every period one model can carry, which is what the editor reads. Generous
 // rather than tuned: the read is narrowed to a single model, so this bounds the
@@ -83,14 +91,8 @@ const URL_DEFAULTS = {
 // The organization's own upstream credentials: one BYO key per provider that
 // every workspace under the tenant inherits.
 //
-// Not the workspace rail's `/providers`, which manages `provider_credentials`,
-// keyed on an instance name and therefore owned by the process rather than by
-// anyone in particular. The two pages look alike and are not the same thing.
-// A standalone deployment reports both surfaces and shows both pages, under
-// different labels; a hosted one reports `organization_providers` alone, since
-// one `provider_credentials` row would serve every tenant
-// (`STANDALONE_SURFACES` / `HOSTED_SURFACES` in
-// `src/gateway/api/routes/bootstrap.py`).
+// Not the deployment rail's Hosted providers, the keys the process serves
+// every tenant on. The two pages look alike and are not the same thing.
 //
 // The per-workspace half of the same API (`/workspaces/{id}/provider-keys`:
 // pin, disable, restrict to models) is deliberately not here. Those are one
@@ -323,6 +325,7 @@ export function OrganizationProvidersPage() {
   const restore = useRestoreOrgProviderKey()
   const remove = useDeleteOrgProviderKey()
   const setDefault = useSetOrgProviderKeyDefault()
+  const unsetDefault = useUnsetOrgProviderKeyDefault()
 
   const [adding, setAdding] = useState(false)
   const [addOpenCount, setAddOpenCount] = useState(0)
@@ -515,10 +518,18 @@ export function OrganizationProvidersPage() {
                 }
               />
               <RowAction
-                icon={FiStar}
-                label="Make default"
-                isDisabled={row.is_org_default || setDefault.isPending}
-                onPress={() => setDefault.mutate(row.id)}
+                icon={row.is_org_default ? FilledStar : FiStar}
+                label={
+                  row.is_org_default
+                    ? "Default provider, click to remove"
+                    : "Make default provider"
+                }
+                isDisabled={setDefault.isPending || unsetDefault.isPending}
+                onPress={() =>
+                  (row.is_org_default ? unsetDefault : setDefault).mutate(
+                    row.id,
+                  )
+                }
               />
               <RowAction
                 icon={FiEdit2}
@@ -583,7 +594,8 @@ export function OrganizationProvidersPage() {
           overrides.error ??
           archive.error ??
           restore.error ??
-          setDefault.error
+          setDefault.error ??
+          unsetDefault.error
         }
       />
 

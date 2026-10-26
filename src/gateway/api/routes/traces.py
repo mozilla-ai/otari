@@ -37,7 +37,7 @@ from gateway.schemas.traces import (
     summary_public,
 )
 from gateway.services.traces import run_trace_retention
-from gateway.types.traces import TraceFilter, TraceScope
+from gateway.types.traces import TraceBucketGrain, TraceFilter, TraceScope, TraceSort, TraceSortKey
 
 MAX_PAGE_SIZE = 100
 # Traces expire on the scale of days, so an hourly pass is soon enough.
@@ -50,8 +50,8 @@ def _filters(
         uuid.UUID | None,
         Query(description="Only sessions in this workspace. Narrows the caller's scope; never widens it."),
     ] = None,
-    start: Annotated[datetime | None, Query(description="Last activity at or after this instant (ISO 8601).")] = None,
-    end: Annotated[datetime | None, Query(description="Last activity before this instant (ISO 8601).")] = None,
+    start: Annotated[datetime | None, Query(description="Sessions active at or after this instant (ISO 8601).")] = None,
+    end: Annotated[datetime | None, Query(description="Sessions started before this instant (ISO 8601).")] = None,
     user_id: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description="Owning users.")] = None,
     api_key_id: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description="API keys.")] = None,
     harness: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description="Agent harnesses.")] = None,
@@ -62,7 +62,10 @@ def _filters(
     has_error: Annotated[
         bool | None, Query(description="Only sessions with, or without, an unrecovered error.")
     ] = None,
-    q: Annotated[str | None, Query(max_length=64, description="A trace id, or the start of one.")] = None,
+    q: Annotated[
+        str | None,
+        Query(max_length=128, description="Part of a trace id, session name, harness or user id, in any case."),
+    ] = None,
 ) -> TraceFilter:
     return TraceFilter(
         workspace_ids=(workspace_id,) if workspace_id is not None else (),
@@ -73,7 +76,7 @@ def _filters(
         harnesses=tuple(harness or ()),
         session_sources=tuple(session_source or ()),
         has_error=has_error,
-        trace_id_prefix=q or None,
+        search=(q or "").strip() or None,
     )
 
 
@@ -91,9 +94,18 @@ def build_trace_router(router: APIRouter, scope_dependency: Callable[..., Any]) 
         filters: FiltersDep,
         skip: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 50,
+        sort: Annotated[
+            TraceSortKey,
+            Query(description="What to order by. Latency runs from a session's start to its last activity."),
+        ] = "last_activity",
+        order: Annotated[Literal["asc", "desc"], Query(description="The direction of `sort`.")] = "desc",
     ) -> TraceListPublic:
-        """List agent sessions, most recently active first."""
-        return list_public(await traces.search(scope, filters, limit=limit, offset=skip))
+        """List agent sessions, most recently active first unless ``sort`` says otherwise."""
+        return list_public(
+            await traces.search(
+                scope, filters, limit=limit, offset=skip, sort=TraceSort(key=sort, descending=order == "desc")
+            )
+        )
 
     @router.get("/count", response_model=TraceCountPublic)
     async def count_traces(traces: TraceServiceDep, scope: ScopeDep, filters: FiltersDep) -> TraceCountPublic:
@@ -105,9 +117,17 @@ def build_trace_router(router: APIRouter, scope_dependency: Callable[..., Any]) 
         traces: TraceServiceDep,
         scope: ScopeDep,
         filters: FiltersDep,
-        bucket: Annotated[Literal["hour", "day"], Query()] = "hour",
+        bucket: Annotated[TraceBucketGrain, Query()] = "hour",
     ) -> TraceSeriesPublic:
-        """Count sessions per bucket of their start, split by whether any span failed unrecovered."""
+        """Count the sessions active in each bucket, split by whether they failed.
+
+        A session is active from its start to its last activity, so a long one counts in every bucket it ran
+        through. Here ``start`` and ``end`` bound the buckets: a session that began before
+        ``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are
+        aligned to their size in UTC and only the populated ones are returned. A session failed when it holds an
+        unrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so
+        a session whose only errors are tools' counts as succeeded.
+        """
         return series_public(bucket, await traces.series(scope, filters, bucket=bucket))
 
     @router.get("/requests/{request_id}", response_model=TraceSummaryPublic)

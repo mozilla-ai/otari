@@ -4,6 +4,7 @@ from typing import Never
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.api_keys import APIKey
@@ -11,10 +12,13 @@ from gateway.repositories.base_repository import BaseRepository
 
 
 class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
-    """Query API keys in the open block of a Unit of Work."""
+    """Query API keys.
 
-    def __init__(self, uow: UnitOfWork) -> None:
-        super().__init__(uow, APIKey)
+    Built on a Unit of Work, and on the request's session for authentication, which only reads.
+    """
+
+    def __init__(self, db: AsyncSession | UnitOfWork) -> None:
+        super().__init__(db, APIKey)
 
     async def get_workspace_id_for_key(self, key_id: str) -> uuid.UUID | None:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""
@@ -43,6 +47,22 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         for key in result.scalars():
             if key.end_user_budget_ids and budget_id in key.end_user_budget_ids:
                 key.end_user_budget_ids = [listed for listed in key.end_user_budget_ids if listed != budget_id]
+
+    async def access_lists(self) -> list[tuple[str | None, list[str] | None, list[str] | None]]:
+        """Each active key's user and its ``allowed_models`` and ``allowed_tools``, for the startup check."""
+        result = await self.db.execute(
+            select(APIKey.user_id, APIKey.allowed_models, APIKey.allowed_tools).where(APIKey.is_active.is_(True))
+        )
+        return [(user_id, models, tools) for user_id, models, tools in result.all()]
+
+    async def keys_reading_tools_off_models(self, user_id: str) -> list[APIKey]:
+        """A user's keys with a model list of their own and no ``allowed_tools``.
+
+        Filtered here rather than in SQL: an explicit ``None`` in a JSON column is
+        stored as JSON ``null``, which ``IS NULL`` does not match.
+        """
+        result = await self.db.execute(select(APIKey).where(APIKey.user_id == user_id))
+        return [key for key in result.scalars() if key.allowed_models is not None and key.allowed_tools is None]
 
     async def get_by_config_name(self, config_name: str) -> APIKey | None:
         """Return the key config.yml declares under this name, or None."""
@@ -96,5 +116,6 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         for key in result.scalars():
             released.append(str(key.config_name))
             key.config_name = None
+            key.declared_digest = None
         await self.db.flush()
         return released

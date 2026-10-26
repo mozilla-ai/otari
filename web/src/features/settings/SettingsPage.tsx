@@ -17,11 +17,10 @@ import { MaintenanceModeCard } from "@/features/settings/MaintenanceModeCard"
 import { RateLimitsCard } from "@/features/settings/RateLimitsCard"
 import { useRotateMasterKey } from "@/shared/api/auth"
 import {
-  useReencryptProviderCredentials,
-  useStoredProviders,
-} from "@/shared/api/providers"
+  useHostedProviders,
+  useReencryptHostedProviders,
+} from "@/shared/api/hostedProviders"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.
@@ -330,7 +329,9 @@ function ConfigRow({
     // a `w-56` control and a sentence stopped fitting side by side.
     <div className="flex flex-wrap items-start justify-between gap-6 py-4">
       <div className="min-w-0">
-        <code className="font-mono text-body">{field.key}</code>
+        {/* `break-words`: at a larger text size the longest keys are wider
+            than a phone, and a snake_case name has no space to wrap at. */}
+        <code className="font-mono text-body break-words">{field.key}</code>
         {field.description ? (
           // `max-w-prose` for the reason the page header carries one: these
           // rows became full-bleed with the rest of the page, and the longest
@@ -518,14 +519,18 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
 }
 
 function SecretKeyRow() {
-  const storedProviders = useStoredProviders()
-  const reencrypt = useReencryptProviderCredentials()
-  const result = reencrypt.data
-  const storedCount = storedProviders.data?.length ?? 0
-  const unreadableCount = (storedProviders.data ?? []).filter(
+  const hostedProviders = useHostedProviders()
+  const reencrypt = useReencryptHostedProviders()
+  // A configured hosted provider holds no ciphertext, so only stored ones count.
+  const storedHosted = (hostedProviders.data?.data ?? []).filter(
+    (provider) => provider.source === "database",
+  )
+  const unreadableCount = storedHosted.filter(
     (provider) => !provider.decryptable,
   ).length
-  const hasStoredKeys = storedCount > 0
+  const hasStoredKeys = storedHosted.length > 0
+  const isPending = reencrypt.isPending
+  const result = isPending ? undefined : reencrypt.data
 
   return (
     <div className="flex flex-col gap-4 py-4">
@@ -547,16 +552,14 @@ function SecretKeyRow() {
           <Button
             size="sm"
             variant="ghost"
-            isDisabled={!hasStoredKeys || reencrypt.isPending}
+            isDisabled={!hasStoredKeys || isPending}
             onPress={() => reencrypt.mutate()}
           >
-            {reencrypt.isPending
-              ? "Re-encrypting…"
-              : "Re-encrypt provider keys"}
+            {isPending ? "Re-encrypting…" : "Re-encrypt provider keys"}
           </Button>
         </div>
       </div>
-      <ErrorBanner error={storedProviders.error ?? reencrypt.error} />
+      <ErrorBanner error={hostedProviders.error ?? reencrypt.error} />
       {unreadableCount > 0 ? (
         <InfoBanner tone="warning">
           {unreadableCount} stored provider key
@@ -573,7 +576,7 @@ function SecretKeyRow() {
             ? ` ${result.unreadable} still need replacement.`
             : " All decryptable stored keys now use the primary secret key."}
         </p>
-      ) : !storedProviders.isLoading && !hasStoredKeys ? (
+      ) : !hostedProviders.isLoading && !hasStoredKeys ? (
         <p className="text-sm text-muted">
           No stored provider keys need re-encryption.
         </p>
@@ -613,7 +616,6 @@ function groupFields(
 export function SettingsPage() {
   const settings = useSettings()
   const updateSettings = useUpdateSettings()
-  const { deployment_type } = useDeployment()
 
   const data = settings.data
   const isPending = updateSettings.isPending
@@ -652,11 +654,7 @@ export function SettingsPage() {
   // Shown under "Settable only" too: the rules are editable even though the
   // rows in the group beside them are startup-only. Not before the settings
   // answer, or the card would render first and then move under its group.
-  // Not on a hosted control plane, which serves no request a rule could limit.
-  const showRules =
-    data !== undefined &&
-    deployment_type !== "hosted" &&
-    rateLimitRulesMatch(search)
+  const showRules = data !== undefined && rateLimitRulesMatch(search)
   const rulesAfter = rulesCardAfter(groups, groupFields(allFields))
 
   return (
@@ -727,7 +725,7 @@ export function SettingsPage() {
 
       {data ? (
         <p className="pt-6 text-xs text-subtle">
-          Mode: {data.mode} · Version {data.version}
+          Version {data.version}
           {data.require_pricing ? " · require_pricing on" : ""}
         </p>
       ) : null}

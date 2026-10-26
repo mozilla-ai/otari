@@ -4,7 +4,7 @@
 Claude Code plugin hooked on ``agent.spawn``, in the moment between deciding to
 start a subagent and starting it. Whatever this build bound to
 ``AgentModelRecommenderPort`` answers: the core puts one choice question to the
-configured decision model, and a hosted build may bind a recommender of its
+configured decision model, and a bootstrap may bind a recommender of its
 own. The harness runs the subagent on the answer against its own provider
 credentials.
 
@@ -104,9 +104,9 @@ async def recommend_model_for_agent(
     session and the spawning tool call, the subagent type, the task, the
     parent's model and the model the caller asked for, if any. The recommender
     this build binds picks one of the candidate models and the answer names it.
-    A standalone deployment asks the decision model `agent_recommender_model`
+    By default the deployment asks the decision model `agent_recommender_model`
     names to choose among `agent_recommender_candidates` for Claude Code and
-    among the request's own `candidates` for pi; a hosted build may bind a
+    among the request's own `candidates` for pi; a bootstrap may bind a
     recommender of its own, which the caller never configures. Where
     the recommender reports them, the answer also carries a one-line reason
     and its probability for each candidate.

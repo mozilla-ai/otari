@@ -10,12 +10,28 @@ from typing import Any
 
 import pytest
 
-from gateway.services.traces import AnsweredCall, RequestTrace, SessionRef, TurnFacts, harness_of, read_turn
+from gateway.services.traces import (
+    AnsweredCall,
+    RequestTrace,
+    SessionRef,
+    TurnFacts,
+    harness_of,
+    is_subagent,
+    read_turn,
+)
 from gateway.services.traces import resolve_session as resolve
-from gateway.services.traces._collector import client_tool_span_id
+from gateway.services.traces._collector import call_id_digest, client_tool_span_id
 
 _WORKSPACE = uuid.uuid4()
 _CLAUDE_CODE = {"user-agent": "claude-cli/2.1.291 (external, sdk-cli)", "x-claude-code-session-id": "b57732d4"}
+_CODEX_THREAD = "0199e5a1-7c2b-7d4e-9f10-2a3b4c5d6e7f"
+_CODEX_SUBAGENT_THREAD = "0199e5a1-8d3c-7e5f-a021-3b4c5d6e7f80"
+_CODEX = {
+    "originator": "codex_exec",
+    "user-agent": "codex_exec/0.154.0 (Linux 6.8.0; x86_64) unknown (codex_exec; 0.154.0)",
+    "session-id": _CODEX_THREAD,
+    "thread-id": _CODEX_THREAD,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -25,6 +41,37 @@ _CLAUDE_CODE = {"user-agent": "claude-cli/2.1.291 (external, sdk-cli)", "x-claud
 
 def test_claude_codes_own_session_header_names_the_session() -> None:
     assert resolve(_CLAUDE_CODE, session_label=None, tags=None) == SessionRef(source="harness", key="b57732d4")
+
+
+def test_codexs_own_session_header_names_the_session() -> None:
+    assert resolve(_CODEX, session_label=None, tags=None) == SessionRef(source="harness", key=_CODEX_THREAD)
+
+
+def test_a_codex_subagent_is_a_session_of_its_own_thread() -> None:
+    subagent = _CODEX | {"thread-id": _CODEX_SUBAGENT_THREAD}
+
+    assert resolve(subagent, session_label=None, tags=None) == SessionRef(source="harness", key=_CODEX_SUBAGENT_THREAD)
+
+
+def test_a_codex_request_without_a_thread_id_is_keyed_on_its_session_id() -> None:
+    headers = {key: value for key, value in _CODEX.items() if key != "thread-id"}
+
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key=_CODEX_THREAD)
+
+
+@pytest.mark.parametrize("marker", ["originator", "user-agent"])
+def test_either_header_codex_marks_its_requests_with_is_enough(marker: str) -> None:
+    headers = {marker: _CODEX[marker], "session-id": _CODEX_THREAD}
+
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key=_CODEX_THREAD)
+    assert harness_of(headers) == "codex"
+
+
+def test_a_session_id_header_from_another_client_names_no_session() -> None:
+    headers = {"user-agent": "python-httpx/0.28", "session-id": _CODEX_THREAD, "thread-id": _CODEX_THREAD}
+
+    assert resolve(headers, session_label=None, tags=None) is None
+    assert harness_of(headers) == "python-httpx"
 
 
 @pytest.mark.parametrize(
@@ -60,10 +107,30 @@ def test_the_same_label_from_two_users_is_two_sessions() -> None:
 
 
 @pytest.mark.parametrize(
+    ("ref", "name"),
+    [
+        (SessionRef(source="client", key="hackbot-1234"), "hackbot-1234"),
+        (SessionRef(source="client", key="the run Alice started"), None),
+        (SessionRef(source="client", key="alice@example.com"), None),
+        (SessionRef(source="client", key="api-key-123456"), None),
+        (SessionRef(source="client", key="API_KEY_0123456789abcdef0123456789abcdef"), None),
+        (SessionRef(source="client", key="ASIAIOSFODNN7EXAMPLE"), None),
+        (SessionRef(source="client", key="alice@example.com:42"), None),
+        (SessionRef(source="client", key="src/secret/notes.txt:42"), None),
+        (SessionRef(source="harness", key="b57732d4"), None),
+        (SessionRef(source="otlp", key="chat-1"), None),
+    ],
+)
+def test_only_an_identifier_shaped_key_the_client_chose_names_the_session(ref: SessionRef, name: str | None) -> None:
+    assert ref.name == name
+
+
+@pytest.mark.parametrize(
     ("headers", "expected"),
     [
         (_CLAUDE_CODE, "claude-code"),
         ({"user-agent": "claude-cli/2.1.291"}, "claude-code"),
+        (_CODEX, "codex"),
         ({"user-agent": "opencode/0.15 ai-sdk"}, "opencode"),
         ({"user-agent": "OpenAI/Python 1.99"}, "openai"),
         ({}, None),
@@ -71,6 +138,12 @@ def test_the_same_label_from_two_users_is_two_sessions() -> None:
 )
 def test_the_harness_comes_from_the_user_agents_product_name(headers: dict[str, str], expected: str | None) -> None:
     assert harness_of(headers) == expected
+
+
+def test_a_claude_code_subagent_is_marked_by_its_agent_header() -> None:
+    assert is_subagent(_CLAUDE_CODE | {"x-claude-code-agent-id": "a1b2c3"})
+    assert not is_subagent(_CLAUDE_CODE)
+    assert not is_subagent(_CLAUDE_CODE | {"x-claude-code-agent-id": " "})
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +183,49 @@ def test_messages_tool_results_answer_the_calls_the_history_named() -> None:
     )
 
 
+_OPERATOR_NOTE = {"role": "system", "content": [{"type": "text", "text": "x"}]}
+_EFFORT_CHANGE = {"role": "system", "content": [], "output_config": {"effort": "low"}}
+
+
+@pytest.mark.parametrize(
+    ("prompt", "trailing"),
+    [
+        ([{"type": "text", "text": "x"}] * 3, [_OPERATOR_NOTE]),
+        ("x", [_OPERATOR_NOTE]),
+        ("x", [_OPERATOR_NOTE, _EFFORT_CHANGE]),
+    ],
+)
+def test_messages_a_prompt_under_trailing_system_messages_opens_a_turn(
+    prompt: Any, trailing: list[dict[str, Any]]
+) -> None:
+    """Claude Code follows the user's input with a mid-conversation system message, its own context."""
+    assert read_turn("messages", [{"role": "user", "content": prompt}, *trailing]).opens_turn
+
+
+def test_messages_tool_results_under_a_trailing_system_message_answer_their_calls() -> None:
+    history = [
+        {"role": "user", "content": [{"type": "text", "text": "x"}]},
+        _OPERATOR_NOTE,
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "x"}]},
+        _OPERATOR_NOTE,
+    ]
+
+    assert read_turn("messages", history) == TurnFacts(
+        opens_turn=False, answered=(AnsweredCall(call_id="toolu_1", name="Bash", is_error=False, position=3),)
+    )
+
+
+def test_messages_a_system_message_after_a_server_tool_use_opens_no_turn() -> None:
+    history = [
+        {"role": "user", "content": "x"},
+        {"role": "assistant", "content": [{"type": "server_tool_use", "id": "srvtoolu_1", "name": "web_search"}]},
+        _OPERATOR_NOTE,
+    ]
+
+    assert read_turn("messages", history) == TurnFacts(opens_turn=False)
+
+
 def test_chat_trailing_tool_messages_answer_the_assistants_calls() -> None:
     history = [
         {"role": "user", "content": "x"},
@@ -146,7 +262,7 @@ def test_an_empty_or_unexpected_input_says_nothing(dialect: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _trace(*, session: SessionRef | None, turn: TurnFacts | None) -> RequestTrace:
+def _trace(*, session: SessionRef | None, turn: TurnFacts | None, subagent: bool = False) -> RequestTrace:
     return RequestTrace(
         request_id="req-2",
         workspace_id=_WORKSPACE,
@@ -158,6 +274,7 @@ def _trace(*, session: SessionRef | None, turn: TurnFacts | None) -> RequestTrac
         session=session,
         harness="claude-code",
         turn=turn,
+        subagent=subagent,
     )
 
 
@@ -169,6 +286,32 @@ def test_a_request_in_a_session_writes_into_the_sessions_trace() -> None:
     assert write.trace_id == session.trace_id(_WORKSPACE, "alice")
     assert (write.session_source, write.harness) == ("harness", "claude-code")
     assert write.spans[0].opens_turn is True
+
+
+def test_a_session_the_client_named_is_written_under_that_name() -> None:
+    named = _trace(session=SessionRef(source="client", key="hackbot-1234"), turn=None).finish(
+        status_code=200, completed=True
+    )
+    harness = _trace(session=SessionRef(source="harness", key="b57732d4"), turn=None).finish(
+        status_code=200, completed=True
+    )
+
+    assert (named.session_source, named.name, named.harness) == ("client", "hackbot-1234", "claude-code")
+    assert harness.name is None
+
+
+def test_a_subagents_request_opens_no_turn_but_records_the_tools_it_answers() -> None:
+    answered = (AnsweredCall(call_id="toolu_1", name="Bash", is_error=False),)
+
+    prompt = _trace(session=None, turn=TurnFacts(opens_turn=True), subagent=True).finish(
+        status_code=200, completed=True
+    )
+    results = _trace(session=None, turn=TurnFacts(opens_turn=False, answered=answered), subagent=True).finish(
+        status_code=200, completed=True
+    )
+
+    assert prompt.spans[0].opens_turn is False
+    assert [span.tool_name for span in results.spans if span.kind == "tool"] == ["Bash"]
 
 
 def test_answered_calls_become_client_tool_spans_ending_when_this_request_arrived() -> None:
@@ -185,9 +328,21 @@ def test_answered_calls_become_client_tool_spans_ending_when_this_request_arrive
     tools = [span for span in write.spans if span.kind == "tool"]
     assert [(span.span_id, span.tool_name, span.outcome, span.tool_type) for span in tools] == [
         (client_tool_span_id("toolu_1", 0), "Bash", "ok", "client"),
-        (client_tool_span_id("toolu_2", 0), None, "error", "client"),
+        (client_tool_span_id("toolu_2", 0), None, "ok", "client"),
     ]
+    # An error result the agent read is marked, not counted as the session's error.
+    assert [span.attributes.get("otari.tool.succeeded") for span in tools] == [None, False]
     assert all(span.start_time is None and span.end_time is not None for span in tools)
+
+
+def test_a_call_id_is_kept_on_its_tool_span_as_a_digest() -> None:
+    call_id = "toolu_01Vd8AQi5j3wv6NtfNJFHkdM"
+    turn = TurnFacts(opens_turn=False, answered=(AnsweredCall(call_id=call_id, name="Read", is_error=False),))
+
+    write = _trace(session=None, turn=turn).finish(status_code=200, completed=True)
+
+    (tool,) = [span for span in write.spans if span.kind == "tool"]
+    assert tool.tool_call_id == call_id_digest(_WORKSPACE, call_id)
 
 
 def test_a_client_tool_span_id_never_carries_the_call_id() -> None:
@@ -199,7 +354,7 @@ def test_a_client_tool_span_id_never_carries_the_call_id() -> None:
 
     (tool,) = [span for span in write.spans if span.kind == "tool"]
     assert tool.span_id == client_tool_span_id("my private\u0000note", 0)
-    assert "private" not in tool.span_id and tool.tool_call_id is None
+    assert "private" not in tool.span_id and "private" not in (tool.tool_call_id or "")
 
 
 def test_a_call_id_reused_later_in_the_session_is_its_own_span_and_a_retry_is_not() -> None:

@@ -6,6 +6,8 @@ goes over this adapter's own connection.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from functools import cached_property
@@ -44,9 +46,21 @@ _FILE_CALL_ERRORS = (AnyLLMError, AnthropicError, httpx.HTTPError, ValidationErr
 
 _NOT_FOUND = 404
 
+# The providers a request references a large attachment in by URI, once it is in their storage.
+_ATTACHMENT_PROVIDERS = frozenset({LLMProvider.GEMINI})
+# How long one call to put an attachment there may take, and how long to wait for
+# the provider to finish processing it (video and large PDFs are processed before
+# they can be referenced), asking this often.
+_ATTACHMENT_CALL_SECONDS = 120.0
+_PROCESSING_SECONDS = 120.0
+_POLL_SECONDS = 1.0
+
 
 class AnyLlmProviderFiles(ProviderFilePort):
-    """Opens any-llm sessions over the files of Anthropic and OpenAI accounts."""
+    """The files providers hold, through any-llm.
+
+    Sessions over Anthropic and OpenAI files, and Gemini attachment uploads.
+    """
 
     def serves(self, provider: LLMProvider) -> bool:
         return provider in _FILE_PROVIDERS
@@ -55,6 +69,44 @@ class AnyLlmProviderFiles(ProviderFilePort):
         self, *, provider: LLMProvider, instance: str, credential: ResolvedCredential
     ) -> ProviderFileSession:
         return _AnyLlmFileSession(provider=provider, provider_instance=instance, credential=credential)
+
+    async def upload_attachment(
+        self, *, provider: LLMProvider, credential: ResolvedCredential, data: bytes, filename: str, mime_type: str
+    ) -> str:
+        if provider not in _ATTACHMENT_PROVIDERS:
+            logger.warning("Provider %s reads no attachment by URI", provider.value)
+            raise ProviderUploadFailedError
+        try:
+            llm = AnyLLM.create(
+                provider.value,
+                **{
+                    **credential.client_args,
+                    "api_key": credential.api_key,
+                    "api_base": credential.api_base,
+                    "timeout": _ATTACHMENT_CALL_SECONDS,
+                },
+            )
+            metadata = await llm.aupload_file(data, filename=filename or None, mime_type=mime_type)
+            deadline = time.monotonic() + _PROCESSING_SECONDS
+            while metadata.status == "PROCESSING" and time.monotonic() < deadline:
+                await asyncio.sleep(_POLL_SECONDS)
+                metadata = await llm.aretrieve_file(metadata.id)
+        except Exception as exc:  # noqa: BLE001 - the Gemini SDK can raise its own error types
+            # The class and status only: a provider's error body can echo what it was sent.
+            logger.warning(
+                "Provider %s refused an attachment: %s (status %s)",
+                provider.value,
+                type(exc).__name__,
+                getattr(exc, "status_code", None) or getattr(exc, "code", None),
+            )
+            raise ProviderUploadFailedError from exc
+        uri = (metadata.model_extra or {}).get("uri")
+        if metadata.status not in (None, "ACTIVE") or not isinstance(uri, str) or not uri:
+            logger.warning(
+                "Provider %s left attachment %s unusable (state %s)", provider.value, metadata.id, metadata.status
+            )
+            raise ProviderUploadFailedError
+        return uri
 
 
 def _declared_size(download: AsyncFileDownload) -> int:

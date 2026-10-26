@@ -4,7 +4,7 @@
 # so without this the whole install + vite build runs a second time under QEMU for
 # the non-native arch on every publish. The output is JavaScript, CSS, and PNGs,
 # which are architecture-independent, so one native build serves both images.
-FROM --platform=$BUILDPLATFORM node:26-slim AS web
+FROM --platform=$BUILDPLATFORM node:26-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec AS web
 
 WORKDIR /app/web
 
@@ -23,15 +23,12 @@ COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY web ./
-# DocsPage.tsx imports the operator guide with Vite's `?raw`, so the build reads
-# it from outside web/. .dockerignore excludes docs/ but re-includes this file.
-COPY docs/dashboard.md /app/docs/dashboard.md
 
 # web/vite.config.ts writes to ../src/gateway/static/dashboard, so the bundle
 # lands at /app/src/gateway/static/dashboard for the runtime stage to copy.
 RUN pnpm run build
 
-FROM python:3.14-slim AS builder
+FROM python:3.14-slim@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1 AS builder
 
 WORKDIR /app
 
@@ -49,9 +46,13 @@ COPY any-fetch ./any-fetch
 # fresh container spends its first seconds compiling each dependency it imports.
 RUN UV_COMPILE_BYTECODE=1 uv sync --frozen --no-dev --extra e2b --extra metrics --extra redis
 
-FROM python:3.14-slim AS runtime
+FROM python:3.14-slim@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1 AS runtime
 
 WORKDIR /app
+
+# pip before 26.2.2 trusts its vendored certifi, which still carries the
+# distrusted emSign roots, whatever the system trust store says.
+RUN pip install --no-cache-dir --upgrade "pip>=26.2.2"
 
 RUN useradd -m -u 1000 otari && chown otari:otari /app
 

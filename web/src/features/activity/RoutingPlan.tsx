@@ -1,4 +1,5 @@
 import type { UsageEntry } from "@/client"
+import { Chip } from "@/design-system/indicators/Chip"
 import { useRequestGroups } from "@/shared/api/usage"
 import {
   describeAttemptOutcome,
@@ -50,7 +51,7 @@ export function RoutingPlan({ entry }: { entry: UsageEntry }) {
       <span className="text-sm text-foreground">{summary}</span>
       <div className="overflow-x-auto border border-control-border">
         <table
-          className="w-full text-xs"
+          className="w-full text-xs whitespace-nowrap"
           aria-label={`Routing plan for ${entry.policy_name}`}
         >
           {/* No `text-muted` here: `text-overline` on each `<th>` sets the color
@@ -58,25 +59,25 @@ export function RoutingPlan({ entry }: { entry: UsageEntry }) {
               keep in step for no effect. */}
           <thead>
             <tr className="border-b border-border">
-              <th scope="col" className="px-3 py-2 text-left text-overline">
+              <th scope="col" className="px-3 py-1.5 text-left text-overline">
                 #
               </th>
-              <th scope="col" className="px-3 py-2 text-left text-overline">
+              <th scope="col" className="px-3 py-1.5 text-left text-overline">
                 Target
               </th>
-              <th scope="col" className="px-3 py-2 text-left text-overline">
+              <th scope="col" className="px-3 py-1.5 text-left text-overline">
                 Selected as
               </th>
-              <th scope="col" className="px-3 py-2 text-left text-overline">
+              <th scope="col" className="px-3 py-1.5 text-left text-overline">
                 Outcome
               </th>
               {/* Every attempt's `latency_ms` is measured from the start of the
                   request, not from the start of that attempt, so this is the same
                   "Total time" the row column shows, not a per-candidate duration. */}
-              <th scope="col" className="px-3 py-2 text-right text-overline">
+              <th scope="col" className="px-3 py-1.5 text-right text-overline">
                 Total time
               </th>
-              <th scope="col" className="px-3 py-2 text-right text-overline">
+              <th scope="col" className="px-3 py-1.5 text-right text-overline">
                 Cost
               </th>
             </tr>
@@ -89,29 +90,37 @@ export function RoutingPlan({ entry }: { entry: UsageEntry }) {
                   attempt.status === "success" ? "bg-primary-subtle" : ""
                 }`}
               >
-                <td className="px-3 py-2 tabular-nums">
+                <td className="px-3 py-1.5 tabular-nums">
                   {attempt.attempt_position ?? "?"}
                 </td>
-                <td className="px-3 py-2 break-all text-foreground">
-                  {findPricingSelector(attempt)}
-                  {attempt.id === entry.id ? (
-                    <span className="ml-2 border border-border px-1.5 py-0.5 text-xs text-subtle">
-                      this row
+                {/* Takes the width the other lanes leave and cuts a long target
+                    short, so Total time and Cost stay on screen. The summary
+                    above names the served target in full. */}
+                <td className="w-full max-w-0 px-3 py-1.5 text-foreground">
+                  <span className="flex items-center gap-2">
+                    <span
+                      className="min-w-0 truncate"
+                      title={findPricingSelector(attempt)}
+                    >
+                      {findPricingSelector(attempt)}
                     </span>
-                  ) : null}
+                    {attempt.id === entry.id ? (
+                      <Chip className="shrink-0">this row</Chip>
+                    ) : null}
+                  </span>
                 </td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-1.5">
                   {describeSelectionReason(attempt.selection_reason) ?? "—"}
                 </td>
                 <td
-                  className={`px-3 py-2 ${attempt.status === "success" ? "" : "text-warning"}`}
+                  className={`px-3 py-1.5 ${attempt.status === "success" ? "" : "text-warning"}`}
                 >
                   {describeAttemptOutcome(attempt)}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                <td className="px-3 py-1.5 text-right tabular-nums">
                   {formatLatencyCell(attempt.latency_ms)}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                <td className="px-3 py-1.5 text-right tabular-nums">
                   {formatUSD(attempt.cost)}
                 </td>
               </tr>

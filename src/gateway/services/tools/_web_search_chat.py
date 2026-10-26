@@ -6,13 +6,14 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from gateway.schemas.tools import OtariToolCallError, OtariToolCallSource
 from gateway.services.tools._chat_tool_calls import call_limit_error, chat_entry
-from gateway.services.tools._web_display import hits_to_show, search_query
+from gateway.services.tools._web_display import hits_to_show, search_query, take_last_hits
 from gateway.services.tools._web_names import WEB_RETRIEVAL_RESULT_MAX_BYTES
 from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
+    from any_search import SearchHit
     from gateway.services._tool_loop import ToolBackend
     from gateway.services.tools._native import NativeCall
 
@@ -36,14 +37,17 @@ class ChatWebSearchRendering:
     def ran(self, call: NativeCall, pool: ToolBackend) -> list[Any]:
         """The ended entry: ``failed``, or ``completed`` with the hits the backend kept.
 
-        A search that failed on the old backend carries no ``error``: that backend
-        raises or returns only a text, and the text is the model's, not the caller's.
+        A failed search's ``error`` is the failure the search backend kept: the
+        provider, its status, the tag and whether a retry may help. One that failed
+        on the old backend carries none: that backend raises or returns only a text,
+        and the text is the model's, not the caller's.
         """
         if call.failed:
-            return [_entry(call, "failed")]
-        take_last_results = getattr(pool, "take_last_results", None)
-        results: list[dict[str, Any]] = take_last_results() if take_last_results is not None else []
-        return [_entry(call, "completed", sources=_sources(results))]
+            take_last_failure = getattr(pool, "take_last_failure", None)
+            failure = take_last_failure() if take_last_failure is not None else None
+            error = OtariToolCallError.model_validate(failure.as_dict()) if failure is not None else None
+            return [_entry(call, "failed", error=error)]
+        return [_entry(call, "completed", sources=_sources(take_last_hits(pool) or []))]
 
     def refused(self, call: NativeCall) -> list[Any]:
         """The ended entry for a search the use cap refused before it ran."""
@@ -68,7 +72,7 @@ def _entry(
     )
 
 
-def _sources(results: list[dict[str, Any]]) -> list[OtariToolCallSource]:
+def _sources(results: Iterable[SearchHit | Mapping[str, Any]]) -> list[OtariToolCallSource]:
     """Each hit's URL, title and date, never its text, within the byte limit of the model-facing result.
 
     The title and date are capped already; the limit is the backstop for the URL,

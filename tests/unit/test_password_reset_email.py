@@ -17,6 +17,7 @@ def _render(**overrides: object) -> tuple[str, str, str]:
         **{  # type: ignore[arg-type]
             "reset_link": RESET_LINK,
             "expiry_hours": 2,
+            "asset_root": None,
             **overrides,
         }
     )
@@ -56,7 +57,7 @@ def test_render_account_exists_email_says_how_the_account_signs_in(
     has_password: bool, provider: str | None, expected: str
 ) -> None:
     message = render_account_exists_email(
-        sign_in_link="https://gw.example.com/", has_password=has_password, provider=provider
+        sign_in_link="https://gw.example.com/", has_password=has_password, provider=provider, asset_root=None
     )
 
     assert message.subject == "You already have an Otari account"

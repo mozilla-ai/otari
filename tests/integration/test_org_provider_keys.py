@@ -45,8 +45,7 @@ from gateway.schemas.providers import (
     OrgProviderKeyUpdateRequest,
     WorkspaceProviderKeyOverrideRequest,
 )
-from gateway.services.provider_kwargs import resolve_provider_selector
-from gateway.services.provider_store_service import apply_to_config, reset_provider_cache
+from gateway.services.provider_kwargs import resolve_provider_selector, settle_configured_providers
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import OrgProviderKeyService
 from gateway.services.tenancy.org_provider_key_service import (
@@ -184,6 +183,20 @@ async def test_plain_member_cannot_create_a_key(async_db: AsyncSession) -> None:
         await service.create_key_for_user(user=member, request=_create_request())
 
 
+async def test_plain_member_cannot_set_or_remove_the_default(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    member = await _member(async_db, organization, role="member", full_name="Member")
+    service = OrgProviderKeyService(async_db)
+    key = await service.create_key_for_user(user=owner, request=_create_request())
+    await service.set_org_default_for_user(user=owner, key_id=key.id)
+
+    with pytest.raises(NotAuthorizedError):
+        await service.set_org_default_for_user(user=member, key_id=key.id)
+    with pytest.raises(NotAuthorizedError):
+        await service.unset_org_default_for_user(user=member, key_id=key.id)
+
+
 async def test_plain_member_cannot_list_keys(async_db: AsyncSession) -> None:
     """The list read is management-gated too (otari-ai#1944): a row names the
     provider, the endpoint and the credential's last four, and the roles matrix
@@ -290,6 +303,21 @@ async def test_set_org_default_refuses_an_archived_key(async_db: AsyncSession) -
 
     with pytest.raises(OrgProviderKeyArchivedError):
         await service.set_org_default_for_user(user=owner, key_id=key.id)
+
+
+async def test_unset_org_default_clears_the_flag_and_is_idempotent(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    key = await service.create_key_for_user(user=owner, request=_create_request())
+    await service.set_org_default_for_user(user=owner, key_id=key.id)
+
+    unset = await service.unset_org_default_for_user(user=owner, key_id=key.id)
+    assert unset.is_org_default is False
+    assert (await service.list_keys_for_user(user=owner)).data[0].is_org_default is False
+
+    again = await service.unset_org_default_for_user(user=owner, key_id=key.id)
+    assert again.is_org_default is False
 
 
 async def test_the_partial_unique_index_admits_only_one_default_per_org_and_provider(
@@ -775,11 +803,10 @@ async def test_a_config_entry_without_a_credential_does_not_shadow_an_organizati
     await refresh_org_provider_cache(async_db)
 
     # The config.yml entry is there in name only (``api_key: ${OPENAI_API_KEY}``
-    # with the variable empty). Once the deployment overlay is applied it is
+    # with the variable empty). Once the configured providers are settled it is
     # gone, so the selector is bare and the organization's own key serves it.
     config = GatewayConfig(providers={"openai": {"api_key": ""}})
-    reset_provider_cache()
-    apply_to_config(config)
+    settle_configured_providers(config)
     assert "openai" not in config.providers
 
     resolved = resolve_provider_selector(config, "openai:gpt-4o", workspace_id=workspace.id)

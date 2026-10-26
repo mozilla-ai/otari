@@ -83,12 +83,23 @@ from gateway.services.external_usage_service import (
     MAX_EVENTS_PER_BATCH,
     ExternalEventsRequest,
     ExternalUsageEvent,
+    PricedEvent,
     claude_usage_events,
     ingest_external_events,
     is_reserved_source,
     token_count,
 )
-from gateway.services.traces import OtlpSpan, TraceWriter, record_otlp_export
+from gateway.services.traces import (
+    CLAUDE_CODE_USAGE_SOURCE,
+    HOOK_SCOPE,
+    HOOK_USAGE_SOURCE,
+    OtlpSpan,
+    PricedRequest,
+    TraceWriter,
+    gate_usage_event_id,
+    record_otlp_export,
+    record_priced_requests,
+)
 
 router = APIRouter(tags=["otel"])
 
@@ -208,8 +219,12 @@ def _hex_ids_to_base64(document: Any) -> None:
                 _hex_id_to_base64(record)
 
 
-def _any_value(value: Any) -> Any:
-    """Unwrap an OTLP AnyValue protobuf into a Python scalar (or None)."""
+def _any_value(value: Any, *, arrays: bool = False) -> Any:
+    """Unwrap an OTLP AnyValue protobuf into a Python scalar (or None).
+
+    With ``arrays``, an array becomes a tuple of its elements, each unwrapped the
+    same way, so a nested array or map is a None inside it.
+    """
     kind = value.WhichOneof("value")
     if kind == "string_value":
         return value.string_value
@@ -219,11 +234,16 @@ def _any_value(value: Any) -> Any:
         return value.double_value
     if kind == "bool_value":
         return value.bool_value
+    if kind == "array_value" and arrays:
+        return tuple(_any_value(item) for item in value.array_value.values)
     return None
 
 
-def _attributes(kv_list: Any) -> dict[str, Any]:
-    return {kv.key: _any_value(kv.value) for kv in kv_list}
+def _attributes(kv_list: Any, *, arrays: bool = False) -> dict[str, Any]:
+    # Only a trace asks for arrays. The usage and telemetry readers stringify or
+    # hash what they get (a metric's series key is every attribute's str()), so an
+    # array there would change what they store.
+    return {kv.key: _any_value(kv.value, arrays=arrays) for kv in kv_list}
 
 
 def _nanos_to_dt(nanos: int) -> datetime | None:
@@ -296,22 +316,16 @@ def _build_event(
     """
     provider: Any
     duration: Any
-    # No GenAI or Claude Code OTLP shape carries the 5m/1h cache-write split, so every cache write stays in
-    # the base (5m) bucket. Claude Code writes with both TTLs (measured on real session
-    # transcripts, roughly a quarter to a third of creation tokens are 5m and the rest
-    # 1h), so either default is wrong for the other share: 5m undercharges the 1h
-    # tokens, 1h overcharges the 5m ones. Anthropic prices a 1h write at 2x base input
-    # against 1.25x for a 5m one, so booking the base bucket keeps an imported estimate
-    # from ever reading above true cost. Callers holding the real split use
-    # POST /api/v1/usage/external-events, which takes cache_write_1h_tokens directly.
-    # No branch below reassigns this today: it stays a variable rather than a literal at
-    # the construction site as the seam for an emitter that does report the split.
+    # Neither Claude Code's events nor the GenAI attributes read below carry the 5m/1h cache-write split, so
+    # every write books at the cache-write rate. That is below the 2x input a Claude model's 1h write costs,
+    # so an imported estimate never reads above true cost. A caller holding the split sends
+    # cache_write_1h_tokens to POST /api/v1/usage/external-events.
     cache_write_1h = 0
     reasoning = 0
     event_name = attrs.get("event.name")
     if event_name == "api_request":
         # Claude Code: cache reads/writes are additive (outside input_tokens).
-        source = "claude_code"
+        source = CLAUDE_CODE_USAGE_SOURCE
         provider = "anthropic"
         model = attrs.get("model")
         event_id = attrs.get("request_id") or fallback_event_id
@@ -392,7 +406,7 @@ def _build_event(
     return source, event
 
 
-def _otlp_span(span: Any) -> OtlpSpan:
+def _otlp_span(span: Any, scope: str) -> OtlpSpan:
     """Read the fields a trace keeps out of one received span."""
     return OtlpSpan(
         trace_id=span.trace_id.hex(),
@@ -402,7 +416,8 @@ def _otlp_span(span: Any) -> OtlpSpan:
         start_time=_nanos_to_dt(span.start_time_unix_nano),
         end_time=_nanos_to_dt(span.end_time_unix_nano),
         failed=span.status.code == _STATUS_CODE_ERROR,
-        attributes=_attributes(span.attributes),
+        attributes=_attributes(span.attributes, arrays=True),
+        scope=scope,
     )
 
 
@@ -457,12 +472,29 @@ async def _release_after_auth(db: AsyncSession) -> None:
     await release_session(db)
 
 
+def _record_priced(request: Request, priced: list[PricedEvent], *, api_key: APIKey, config: GatewayConfig) -> None:
+    """Hand each priced event's cost to the session it names: the session's cost is the ledger's."""
+    writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
+    if writer is None or not priced:
+        return
+    record_priced_requests(
+        writer,
+        (PricedRequest(e.source_event_id, e.session_label, e.timestamp, e.cost, e.source, e.rates) for e in priced),
+        budget_exempt=api_key.exclude_from_budget,
+        workspace_id=api_key.workspace_id,
+        user_id=api_key.user_id,
+        api_key_id=api_key.id,
+        retention=timedelta(days=config.trace_retention_days),
+    )
+
+
 async def _ingest(
     pairs: list[tuple[str, ExternalUsageEvent]],
     *,
     api_key: APIKey,
     db: AsyncSession,
     config: GatewayConfig,
+    priced: list[PricedEvent] | None = None,
 ) -> int:
     """Group events by their derived source and ingest each group (chunked).
 
@@ -482,6 +514,7 @@ async def _ingest(
                 api_key=api_key,
                 is_master_key=False,
                 reject_user_mismatch=config.reject_user_mismatch,
+                priced=priced,
             )
             rejected += result.rejected
             logger.info(
@@ -516,13 +549,13 @@ async def receive_traces(
     assert isinstance(parsed, ExportTraceServiceRequest)
 
     pairs: list[tuple[str, ExternalUsageEvent]] = []
-    received: list[Any] = []
+    received: list[tuple[str, Any]] = []
     for resource_spans in parsed.resource_spans:
         for scope_spans in resource_spans.scope_spans:
             scope = scope_spans.scope.name
             claude = scope.startswith(CLAUDE_SCOPE_PREFIX)
             for span in scope_spans.spans:
-                received.append(span)
+                received.append((scope, span))
                 duration = None
                 if span.start_time_unix_nano and span.end_time_unix_nano:
                     duration = (span.end_time_unix_nano - span.start_time_unix_nano) / 1_000_000
@@ -539,9 +572,21 @@ async def receive_traces(
                     )
                     pairs.extend((CLAUDE_SOURCE, event) for event in events)
                     continue
+                attrs = _attributes(span.attributes)
+                if scope == HOOK_SCOPE:
+                    # A judge's calls are made for the agent's session, so they are booked to it.
+                    attrs = {
+                        **attrs,
+                        "otari.client_name": HOOK_USAGE_SOURCE,
+                        "otari.session_label": attrs.get("session.id"),
+                    }
                 mapped = _build_event(
-                    _attributes(span.attributes),
-                    fallback_event_id=span.span_id.hex() or None,
+                    attrs,
+                    fallback_event_id=gate_usage_event_id(
+                        scope, span.name, span.span_id.hex(), span.parent_span_id.hex()
+                    )
+                    or span.span_id.hex()
+                    or None,
                     default_timestamp=_nanos_to_dt(span.start_time_unix_nano),
                     duration_ms=duration,
                 )
@@ -549,9 +594,10 @@ async def receive_traces(
                     pairs.append(mapped)
 
     response = ExportTraceServiceResponse()
+    priced: list[PricedEvent] = []
     if pairs:
         with retryable_on_database_outage("otlp traces ingest"):
-            rejected = await _ingest(pairs, api_key=api_key, db=db, config=config)
+            rejected = await _ingest(pairs, api_key=api_key, db=db, config=config, priced=priced)
         if rejected:
             response.partial_success.rejected_spans = rejected
             response.partial_success.error_message = f"{rejected} usage event(s) rejected (see gateway logs)"
@@ -562,14 +608,16 @@ async def receive_traces(
     if writer is not None and received:
         record_otlp_export(
             writer,
-            (_otlp_span(span) for span in received),
+            (_otlp_span(span, scope) for scope, span in received),
             total=len(received),
             budget_exempt=api_key.exclude_from_budget,
             workspace_id=api_key.workspace_id,
             user_id=api_key.user_id,
             api_key_id=api_key.id,
             retention=timedelta(days=config.trace_retention_days),
+            content_enabled=config.trace_content_enabled,
         )
+    _record_priced(request, priced, api_key=api_key, config=config)
     return _otlp_response(content_type, response)
 
 
@@ -624,10 +672,12 @@ async def receive_logs(
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Too many events in one OTLP export")
 
     response = ExportLogsServiceResponse()
+    priced: list[PricedEvent] = []
     with retryable_on_database_outage("otlp logs ingest"):
-        rejected = await _ingest(pairs, api_key=api_key, db=db, config=config) if pairs else 0
+        rejected = await _ingest(pairs, api_key=api_key, db=db, config=config, priced=priced) if pairs else 0
         if telemetry:
             rejected += (await ingest_telemetry(db, telemetry, api_key=api_key, storage=storage)).rejected
+    _record_priced(request, priced, api_key=api_key, config=config)
     if rejected:
         response.partial_success.rejected_log_records = rejected
         response.partial_success.error_message = f"{rejected} log record(s) rejected (see gateway logs)"

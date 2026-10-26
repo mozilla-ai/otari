@@ -12,14 +12,15 @@ Built on the Unit of Work. Flushes, never commits.
 import uuid
 from collections.abc import Collection, Sequence
 from datetime import datetime
+from typing import Any, cast
 
 from pydantic import BaseModel
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import CursorResult, and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.pricing import ModelPricing, OrganizationModelPricing
+from gateway.models.pricing import MODEL_KIND, ModelPricing, OrganizationModelPricing, PricingKind
 from gateway.repositories.base_repository import BaseRepository
 
 # The bound `services.pricing_service` chunks its own key lookups at, for the
@@ -62,6 +63,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
                 select(OrganizationModelPricing)
                 .where(
                     col(OrganizationModelPricing.organization_id) == organization_id,
+                    col(OrganizationModelPricing.kind) == MODEL_KIND,
                     col(OrganizationModelPricing.model_key).in_(chunk),
                     col(OrganizationModelPricing.effective_from) <= as_of,
                     # The half-open period, stated in SQL rather than walked in
@@ -105,6 +107,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
                     func.max(col(ModelPricing.effective_at)).label("effective_at"),
                 )
                 .where(
+                    col(ModelPricing.kind) == MODEL_KIND,
                     col(ModelPricing.model_key).in_(chunk),
                     col(ModelPricing.effective_at) <= as_of,
                 )
@@ -115,6 +118,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
                 select(ModelPricing).join(
                     newest,
                     and_(
+                        col(ModelPricing.kind) == MODEL_KIND,
                         col(ModelPricing.model_key) == newest.c.model_key,
                         col(ModelPricing.effective_at) == newest.c.effective_at,
                     ),
@@ -134,6 +138,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
         organization_id: uuid.UUID,
         *,
         model_key: str | None = None,
+        kind: PricingKind | None = None,
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[list[OrganizationModelPricing], int]:
@@ -146,6 +151,8 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
         where = [col(OrganizationModelPricing.organization_id) == organization_id]
         if model_key is not None:
             where.append(col(OrganizationModelPricing.model_key) == model_key)
+        if kind is not None:
+            where.append(col(OrganizationModelPricing.kind) == kind)
         total = (
             await self.db.execute(select(func.count()).select_from(OrganizationModelPricing).where(*where))
         ).scalar_one()
@@ -156,6 +163,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
                     .where(*where)
                     .order_by(
                         col(OrganizationModelPricing.model_key),
+                        col(OrganizationModelPricing.kind),
                         col(OrganizationModelPricing.effective_from).desc(),
                     )
                     .offset(skip)
@@ -166,6 +174,38 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
             .all()
         )
         return list(rows), int(total)
+
+    async def ids_for_keys(self, model_keys: Sequence[str]) -> list[tuple[uuid.UUID, uuid.UUID, str]]:
+        """Every override above ``model_keys``, as ``(id, organization_id, model_key)``.
+
+        Bounded by the overrides tenants hold on the keys given, which a caller
+        then decides about one by one.
+        """
+        found: list[tuple[uuid.UUID, uuid.UUID, str]] = []
+        for start in range(0, len(model_keys), _KEY_CHUNK):
+            chunk = list(model_keys[start : start + _KEY_CHUNK])
+            result = await self.db.execute(
+                select(
+                    OrganizationModelPricing.id,
+                    OrganizationModelPricing.organization_id,
+                    OrganizationModelPricing.model_key,
+                ).where(OrganizationModelPricing.kind == MODEL_KIND, OrganizationModelPricing.model_key.in_(chunk))
+            )
+            found.extend((row_id, organization_id, key) for row_id, organization_id, key in result.all())
+        return found
+
+    async def delete_ids(self, override_ids: Sequence[uuid.UUID]) -> int:
+        """Delete the overrides named by id, returning how many went."""
+        deleted = 0
+        for start in range(0, len(override_ids), _KEY_CHUNK):
+            chunk = list(override_ids[start : start + _KEY_CHUNK])
+            result = cast(
+                CursorResult[Any],
+                await self.db.execute(delete(OrganizationModelPricing).where(OrganizationModelPricing.id.in_(chunk))),
+            )
+            deleted += result.rowcount
+        await self.db.flush()
+        return deleted
 
     async def flush(self) -> None:
         """Push staged changes so the database's constraints answer before the commit."""

@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.api.deps import get_api_key_service
 from gateway.core.unit_of_work import OutsideUnitOfWorkError, UnitOfWork
 from gateway.exceptions.budget_exceptions import (
     BudgetStillReferencedError,
@@ -28,7 +29,6 @@ from gateway.models.budgets import (
 )
 from gateway.models.tenancy import Organization, User, Workspace
 from gateway.models.users import User as ApiUser
-from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import (
     BudgetRepositories,
     BudgetRepository,
@@ -43,11 +43,9 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 pytestmark = pytest.mark.asyncio
 
@@ -216,7 +214,7 @@ async def test_count_member_policies_and_users_for_budget(async_db: AsyncSession
         assert await budgets.count_users_for_budget(free.budget_id) == 0
 
 
-async def test_minute_limits_for_user_reads_only_a_live_users_limiting_budget(async_db: AsyncSession) -> None:
+async def test_minute_limits_for_user_reads_a_live_users_budget(async_db: AsyncSession) -> None:
     acme = await _organization(async_db, slug="acme")
     limiting = Budget(organization_id=acme.id, name="limiting", rpm_limit=5, tpm_limit=None)
     unlimited = Budget(organization_id=acme.id, name="unlimited")
@@ -236,7 +234,8 @@ async def test_minute_limits_for_user_reads_only_a_live_users_limiting_budget(as
     async with uow:
         budgets = BudgetRepository(uow)
         assert await budgets.minute_limits_for_user("limited") == (limiting.budget_id, 5, None)
-        assert await budgets.minute_limits_for_user("unlimited") is None
+        # A budget without per-minute limits is still the one a per: budget rule counts by.
+        assert await budgets.minute_limits_for_user("unlimited") == (unlimited.budget_id, None, None)
         assert await budgets.minute_limits_for_user("unbudgeted") is None
         assert await budgets.minute_limits_for_user("deleted") is None
         assert await budgets.minute_limits_for_user("missing") is None
@@ -325,11 +324,11 @@ async def test_list_in_scopes_matches_what_the_organization_surface_lists(async_
     service = BudgetService(
         uow,
         BudgetRepositories.on(uow),
-        OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
-        ApiKeyService(ApiKeyRepository(uow)),
+        OrganizationService(async_db, membership_listener=None),
+        get_api_key_service(uow),
         WorkspaceAccess(
             async_db,
-            OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+            OrganizationService(async_db, membership_listener=None),
         ),
     )
     surface = await service.list_organization_ceilings(user=acme_owner)

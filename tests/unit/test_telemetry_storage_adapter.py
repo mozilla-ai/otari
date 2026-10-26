@@ -165,7 +165,7 @@ async def test_record_stores_nothing_for_an_empty_export() -> None:
 
 @pytest.mark.asyncio
 async def test_adapter_without_a_session_refuses_rather_than_storing_nothing() -> None:
-    """Every surface behind this port is standalone-only, so a session-less
+    """Every surface behind this port has a session, so a session-less
     request is a wiring mistake and must not look like a successful no-op."""
     adapter = DatabaseTelemetryStorageAdapter(None)
 

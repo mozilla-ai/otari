@@ -160,7 +160,7 @@ describe("PublicCatalogPage", () => {
     expect(
       within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }),
     ).toHaveAttribute("href", "#/models/z-ai/glm-5.3")
-    expect(screen.getByText(/deployment's list rates/)).toBeInTheDocument()
+    expect(screen.getByText(/cheapest offering/)).toBeInTheDocument()
     // A visitor has no organization to ask about, and asking would be a 401.
     expect(
       fetchMock.mock.calls.some(([url]) =>
@@ -177,11 +177,15 @@ describe("PublicCatalogPage", () => {
       name: "Offerings of GLM-5.3",
     })
     expect(within(grid).getAllByRole("row")).toHaveLength(3)
+    // Where a price comes from is the deployment's business, not a visitor's.
+    expect(
+      within(grid).queryByRole("columnheader", { name: "Price from" }),
+    ).toBeNull()
     expect(screen.queryByRole("link", { name: "Edit rate" })).toBeNull()
     expect(screen.queryByRole("link", { name: "Set your rate" })).toBeNull()
     expect(screen.queryByRole("link", { name: /route across/ })).toBeNull()
     expect(screen.queryByText(/Your effective price/)).toBeNull()
-    expect(screen.getByRole("link", { name: "← All models" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "← Models" })).toHaveAttribute(
       "href",
       "#/models",
     )
@@ -218,13 +222,9 @@ describe("PublicCatalogPage", () => {
       "href",
       "#/",
     )
-    // The bundled guide sits behind sign-in, so a visitor gets the docs on GitHub.
     expect(
       within(nav).getByRole("link", { name: "Documentation" }),
-    ).toHaveAttribute(
-      "href",
-      "https://github.com/mozilla-ai/otari/blob/main/docs/index.md",
-    )
+    ).toHaveAttribute("href", "https://docs.otari.ai/")
     expect(within(nav).getByRole("link", { name: "GitHub" })).toHaveAttribute(
       "href",
       "https://github.com/mozilla-ai/otari",
@@ -242,7 +242,7 @@ describe("PublicCatalogPage", () => {
     mockApi()
     renderPage(undefined, true, {
       site_url: "https://otari.ai/",
-      docs_url: "https://docs.otari.ai/en/",
+      docs_url: "https://docs.example.com/",
     })
 
     expect(screen.getByRole("link", { name: "Otari home" })).toHaveAttribute(
@@ -256,7 +256,7 @@ describe("PublicCatalogPage", () => {
     )
     expect(
       within(nav).getByRole("link", { name: "Documentation" }),
-    ).toHaveAttribute("href", "https://docs.otari.ai/en/")
+    ).toHaveAttribute("href", "https://docs.example.com/")
     await screen.findByRole("list", { name: "Models" })
   })
 

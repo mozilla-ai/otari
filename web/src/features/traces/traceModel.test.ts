@@ -57,9 +57,42 @@ describe("labels", () => {
       "Bash",
     )
     expect(spanLabel(traceSpan({ kind: "step" }))).toBe("Request")
+    expect(
+      spanLabel(
+        traceSpan({
+          kind: "tool",
+          tool_name: "Bash",
+          content: { command: "pytest -x\n  --lf" },
+        }),
+      ),
+    ).toBe("Bash · pytest -x")
+    expect(
+      spanLabel(
+        traceSpan({
+          kind: "tool",
+          tool_name: "Edit",
+          content: { file_path: "src/app.py" },
+        }),
+      ),
+    ).toBe("Edit · src/app.py")
+    const deep = `/private/tmp/${"a".repeat(100)}/repo/CHANGELOG.md`
+    expect(
+      spanLabel(
+        traceSpan({
+          kind: "tool",
+          tool_name: "Edit",
+          content: { file_path: deep },
+        }),
+      ).endsWith("/repo/CHANGELOG.md"),
+    ).toBe(true)
   })
 
-  it("names a session by its agent, or as a single request", () => {
+  it("names a session by the id its client chose, its agent, or as a single request", () => {
+    expect(
+      sessionName(
+        traceSummary({ name: "hackbot-1234", session_source: "client" }),
+      ),
+    ).toBe("hackbot-1234")
     expect(sessionName(traceSummary())).toBe("claude-code")
     expect(
       sessionName(traceSummary({ harness: null, session_source: "none" })),

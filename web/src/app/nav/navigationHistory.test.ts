@@ -9,8 +9,8 @@ import type { NavItem } from "./types"
 const WORKSPACE_KEY = "otari.dashboard.lastWorkspaceLocation"
 const ORGANIZATION_KEY = "otari.dashboard.lastOrganizationLocation"
 
-// What the shell's own predicate answers for a deployment that hosts every
-// surface, which is the ordinary standalone gateway.
+// What the shell's own predicate answers for a deployment that publishes every
+// surface, which is the ordinary gateway.
 const showsEverything = () => true
 // And what it answers for one that does not. The predicate is given the entry,
 // so a surface is all a test needs to withhold to hide a destination.
@@ -48,9 +48,9 @@ describe("rail location memory", () => {
 
   it("ignores a path the registry does not declare", () => {
     rememberLocation("/usage", showsEverything)
-    rememberLocation("/docs", showsEverything)
+    rememberLocation("/account", showsEverything)
 
-    // The guide and the 404 splat are not places to return to, so the last real
+    // The account page and the 404 splat are not places to return to, so the last real
     // destination stands rather than being replaced by one.
     expect(lastLocation("workspace", showsEverything)).toEqual({ to: "/usage" })
   })

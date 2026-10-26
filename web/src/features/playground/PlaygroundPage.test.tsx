@@ -28,7 +28,9 @@ import {
   SelectedWorkspaceProvider,
   useSelectedWorkspace,
 } from "@/shared/hooks/SelectedWorkspace"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
+  bootstrap,
   catalogModelSummary,
   catalogResponse,
   organizationContext,
@@ -358,12 +360,14 @@ function renderPage() {
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <QueryClientProvider client={client}>
-      <SelectedWorkspaceProvider>
-        <WorkspacePicker />
-        <PlaygroundPage />
-      </SelectedWorkspaceProvider>
-    </QueryClientProvider>,
+    <DeploymentProvider value={bootstrap()}>
+      <QueryClientProvider client={client}>
+        <SelectedWorkspaceProvider>
+          <WorkspacePicker />
+          <PlaygroundPage />
+        </SelectedWorkspaceProvider>
+      </QueryClientProvider>
+    </DeploymentProvider>,
     { wrapper: withRouter({ url: "/playground" }) },
   )
 }
@@ -447,6 +451,21 @@ describe("the Playground before the first question", () => {
     expect(
       await screen.findByText("No models to chat with"),
     ).toBeInTheDocument()
+    expect(
+      await screen.findByRole("link", { name: "Hosted providers" }),
+    ).toHaveAttribute("href", "/admin/hosted-providers")
+  })
+
+  it("points a caller who does not operate the deployment at the organization's providers", async () => {
+    mockApi({
+      catalog: { ...CATALOG, models: [] },
+      context: { ...context(), deployment_operator: false },
+    })
+    renderPage()
+
+    expect(
+      await screen.findByRole("link", { name: "Providers" }),
+    ).toHaveAttribute("href", "/organization/provider-keys")
   })
 })
 
@@ -899,7 +918,7 @@ describe("comparing two models", () => {
     // The two models are each sent their own column's history, so a column
     // carrying an earlier conversation answers a different prompt from the one
     // beside it, and a rating over that pair is a judgment on an unequal
-    // contest. The hosted original kept the first panel's transcript; this
+    // contest. otari.ai's original kept the first panel's transcript; this
     // deliberately does not.
     mockApi()
     mockStream([delta("an answer"), "[DONE]"])

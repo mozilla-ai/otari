@@ -46,6 +46,13 @@ class GatewayUsage(CompletionUsage):
     Recorded for attribution only: the provider already bills them as output, so they
     are never priced on top of ``completion_tokens``.
     """
+    provider_web_searches: int = 0
+    """Searches the provider ran itself during the call and bills per search.
+
+    Anthropic reports these as ``usage.server_tool_use.web_search_requests``. They
+    are not tokens: settlement prices them as ``web_search`` calls under the
+    ``<provider>:web_search`` label, never through the token meters.
+    """
 
     @staticmethod
     def external_extras(usage: CompletionUsage) -> dict[str, Any]:
@@ -119,9 +126,17 @@ def cache_read_tokens_of(usage: CompletionUsage) -> int:
 
 
 def cache_write_tokens_of(usage: CompletionUsage) -> int:
-    """Return the cache-write count carried by ``usage`` (0 for non-Anthropic)."""
+    """Return the cache-write count carried by ``usage``.
+
+    Handles both :class:`GatewayUsage` (explicit field) and a plain
+    ``CompletionUsage`` (falls back to ``prompt_tokens_details.cache_write_tokens``,
+    which any-llm fills for the providers that bill a cache write on Chat
+    Completions, such as Anthropic and Gemini's context caches).
+    """
     if isinstance(usage, GatewayUsage):
         return usage.cache_write_tokens
+    if usage.prompt_tokens_details is not None:
+        return usage.prompt_tokens_details.cache_write_tokens or 0
     return 0
 
 
@@ -142,6 +157,11 @@ def cache_tokens_in_prompt_of(usage: CompletionUsage) -> bool:
     if isinstance(usage, GatewayUsage):
         return usage.cache_tokens_in_prompt
     return True
+
+
+def provider_web_searches_of(usage: CompletionUsage) -> int:
+    """Return the searches the provider ran itself, which only a :class:`GatewayUsage` carries."""
+    return usage.provider_web_searches if isinstance(usage, GatewayUsage) else 0
 
 
 def reasoning_tokens_of(usage: CompletionUsage) -> int:

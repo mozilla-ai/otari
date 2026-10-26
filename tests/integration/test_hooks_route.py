@@ -5,15 +5,17 @@ Covers auth, the pass/fail/blocked shapes, and the parser's strictness
 """
 
 import time
-from collections.abc import Generator
+from collections.abc import Callable
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT, PLATFORM_TOKEN_ENV_VAR, GatewayConfig
+from gateway.core.config import API_ROOT
+from gateway.models.traces import TraceGuardrailDefinition
+from otari_agent.domain.definitions import GateDefinition, definition_body, definition_digest, gates_from_body
 from otari_agent.domain.evaluators import _command_segments, _contains_subsequence
-
-from .conftest import build_test_client
 
 _VALID_POLICY = """\
 schema_version: "1.0"
@@ -242,76 +244,6 @@ def test_many_distinct_short_globs_and_paths_trip_the_comparisons_bound(
     )
     assert response.status_code == 422
     assert "comparisons" in response.json()["detail"]
-
-
-class TestHybridMode:
-    """The Hook Server answers on a hybrid gateway too.
-
-    A gate evaluates only the policy and evidence the caller sent in the same
-    request, so it needs no local tenancy, no provider and no database. Mounted
-    on the standalone side of ``_register_core_routers``' hybrid early return,
-    the endpoint 404s on a hybrid gateway and ``otari hook`` fails open against
-    it forever, which is silent: fail-open is what the command promises for an
-    unreachable gateway, so nothing tells the caller their gates stopped
-    running.
-    """
-
-    @pytest.fixture(scope="class")
-    def hybrid_client(self, postgres_url: str) -> Generator[TestClient]:
-        # The platform token is resolved once and cached on the config, so it
-        # need only be in the environment until that resolution happens, which
-        # is what the explicit ``_resolve_platform_token()`` forces here (it is
-        # otherwise lazy, and would fire later against an environment the
-        # context has already restored). Left set for the whole fixture, it
-        # would make the next standalone app built in this process refuse to
-        # start.
-        with pytest.MonkeyPatch.context() as env:
-            env.setenv(PLATFORM_TOKEN_ENV_VAR, "test-platform-token")
-            config = GatewayConfig(
-                mode="hybrid",
-                database_url=postgres_url,
-                master_key="test-master-key",
-                auto_migrate=False,
-                require_pricing=False,
-                model_discovery=False,
-                bootstrap_api_key=False,
-                platform={"base_url": "http://localhost:8100/api/v1"},
-            )
-            config._resolve_platform_token()
-        yield from build_test_client(config)
-
-    def test_is_mounted_and_evaluates(self, hybrid_client: TestClient) -> None:
-        response = hybrid_client.post(
-            f"{API_ROOT}/hooks/check",
-            json={
-                "policy_yaml": _VALID_POLICY,
-                "path_source": "stop.working_tree",
-                "paths": ["scratch/notes.txt"],
-            },
-            headers={"Authorization": "Bearer any-platform-user-token"},
-        )
-        assert response.status_code == 200, response.text
-        body = response.json()
-        assert body["blocked"] is True
-        assert body["results"][0]["outcome"] == "fail"
-
-    def test_still_requires_a_token(self, hybrid_client: TestClient) -> None:
-        """Hybrid cannot validate the token locally, but it does require one.
-
-        The same thing the stateless MCP route does in this mode. Weaker than
-        the standalone check on purpose: this endpoint reads no tenant data and
-        bills nothing, and what one request can cost is bounded by the route's
-        own work budgets rather than by who sent it.
-        """
-        response = hybrid_client.post(
-            f"{API_ROOT}/hooks/check",
-            json={
-                "policy_yaml": _VALID_POLICY,
-                "path_source": "stop.working_tree",
-                "paths": ["README.md"],
-            },
-        )
-        assert response.status_code == 401
 
 
 _COMMAND_POLICY = """\
@@ -1552,3 +1484,81 @@ def test_read_evidence_leaves_a_write_only_policy_alone(client: TestClient, mast
     body = response.json()
     assert body["blocked"] is False
     assert all(result["outcome"] == "not_applicable" for result in body["results"])
+
+
+def _definition(**overrides: object) -> dict[str, object]:
+    gate = GateDefinition(
+        gate_id="no-changelog",
+        gate_type="path",
+        enforcement="required",
+        origin="repo",
+        runs=("pre_tool_use.edit_target",),
+        message="CHANGELOG.md is generated.",
+    )
+    return {**definition_body((gate,)), **overrides}
+
+
+def _exempt_key(client: TestClient, master_key_header: dict[str, str], *, exempt: bool = True) -> dict[str, str]:
+    client.post(f"{API_ROOT}/users", json={"user_id": "alice"}, headers=master_key_header)
+    response = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "hook", "user_id": "alice", "exclude_from_budget": exempt},
+        headers=master_key_header,
+    )
+    return {"Otari-Key": f"Bearer {response.json()['key']}"}
+
+
+def test_a_guardrail_definition_is_kept_once_under_its_fingerprint(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    api_key_header = _exempt_key(client, master_key_header)
+    body = _definition()
+
+    first = client.post(f"{API_ROOT}/hooks/guardrails", json=body, headers=api_key_header)
+    again = client.post(f"{API_ROOT}/hooks/guardrails", json=body, headers=api_key_header)
+
+    assert (first.status_code, again.status_code) == (200, 200)
+    assert first.json() == {"digest": body["digest"]}
+    with db_session_factory() as session:
+        [stored] = session.scalars(select(TraceGuardrailDefinition)).all()
+    assert stored.digest == body["digest"]
+    assert stored.gates[0]["message"] == "CHANGELOG.md is generated."
+
+
+def test_a_definition_whose_fingerprint_does_not_match_its_gates_is_refused(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    api_key_header = _exempt_key(client, master_key_header)
+    response = client.post(f"{API_ROOT}/hooks/guardrails", json=_definition(digest="0" * 64), headers=api_key_header)
+
+    assert response.status_code == 422
+    assert "does not match these gates" in response.text
+
+
+def test_the_master_key_cannot_store_a_definition(client: TestClient, master_key_header: dict[str, str]) -> None:
+    response = client.post(f"{API_ROOT}/hooks/guardrails", json=_definition(), headers=master_key_header)
+
+    assert response.status_code == 403
+
+
+def test_a_key_that_may_not_export_traces_cannot_store_a_definition(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/guardrails",
+        json=_definition(),
+        headers=_exempt_key(client, master_key_header, exempt=False),
+    )
+
+    assert response.status_code == 403
+
+
+def test_a_definition_naming_one_gate_twice_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
+    body = _definition()
+    body["gates"] = [*body["gates"], *body["gates"]]  # type: ignore[misc]
+    body["digest"] = definition_digest(gates_from_body(body["gates"]))  # type: ignore[arg-type]
+
+    response = client.post(f"{API_ROOT}/hooks/guardrails", json=body, headers=_exempt_key(client, master_key_header))
+
+    assert response.status_code == 422
+    assert "each gate_id may appear once" in response.text

@@ -1,4 +1,4 @@
-"""The resolver: which provider, key and options one web search or fetch runs with (design G).
+"""The resolver: which provider, key and options one web search or fetch runs with.
 
 Search, in order:
 
@@ -7,9 +7,8 @@ Search, in order:
    ``direct_credential``, the workspace's organization key for an unnamed
    call, is given: the key's provider, key and options then serve the call,
    and the instance keeps its name and timeout.
-2. Else the policy's credential: the workspace's organization key, or in
-   hybrid the control plane's.
-3. Else the in-loop default (design E, rule 6).
+2. Else the policy's credential: the workspace's organization key.
+3. Else the in-loop default.
 4. Else nothing, which the caller turns into its refusal.
 
 Fetch, in order: a named fetch instance; for enrichment, the search
@@ -28,7 +27,7 @@ endpoint leaves out the workspace's, and the instance's when an organization
 key serves the call. Fetch takes neither a workspace nor a request layer,
 since both hold search options. The count the layers name is taken out of
 the options, for the caller to apply as its door does. Where a library
-runs the call, each option is checked as the instance's are (design E): a
+runs the call, each option is checked as the instance's are: a
 request's option the provider does not take, or takes only from the
 deployment, is refused, and the other layers' are dropped with a warning that
 names the layer and the key, never the value. What the old code runs takes
@@ -46,6 +45,7 @@ import any_fetch
 import any_search
 from gateway.core.settings.tools import (
     BUILTIN_FETCH,
+    BUILTIN_FETCH_INSTANCE,
     BUILTIN_FETCH_PROVIDER,
     PROVIDER_DEFAULT_OPTIONS,
     SEARCH_PROVIDERS_REQUIRING_API_BASE,
@@ -59,7 +59,6 @@ from gateway.core.settings.tools import (
     default_api_base,
     effective_fetch_instances,
     effective_search_instances,
-    in_loop_default,
     option_problems,
     validate_search_tool_transport,
 )
@@ -75,10 +74,16 @@ from gateway.models.tools import (
     WebFetchCredential,
     WebSearchCredential,
     WebToolCredential,
-    WebToolCredentialSource,
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
+from gateway.services.tools._web_search._default import in_loop_default
 from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
+from gateway.types.tool_charges import (
+    ORGANIZATION_KEY_LABEL_PREFIX,
+    RateKey,
+    gateway_tool_pricing_key,
+    instance_rate_key,
+)
 
 # What runs a resolved call: one of the libraries, or the old code, which in
 # the loop is the old backend and on the direct endpoint the old SearXNG client
@@ -91,13 +96,9 @@ Runner = Literal["library", "old"]
 DIRECT_TIMEOUT_S = 30.0
 IN_LOOP_TIMEOUT_S = 15.0
 
-# The rows that price any backend of each tool (design L), under the key the
-# pricing service gives a gateway-run tool. Spelled out here rather than imported,
-# since the pricing modules import this package.
-_SEARCH_FALLBACK_RATE = f"otari:{WEB_SEARCH_TOOL_NAME}"
-_FETCH_FALLBACK_RATE = f"otari:{WEB_FETCH_TOOL_NAME}"
-# The label of a call an organization key serves, before the provider: never a pricing row.
-_ORG_LABEL_PREFIX = "org"
+# The rows that price any backend of each tool.
+_SEARCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_SEARCH_TOOL_NAME)
+_FETCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_FETCH_TOOL_NAME)
 _NO_OPTIONS: Mapping[str, Any] = MappingProxyType({})
 
 
@@ -108,9 +109,10 @@ class _Resolved:
     ``name`` is the instance's, ``None`` where a credential serves an in-loop
     call. ``api_key`` and ``api_base`` go to the library as they are, ``""``
     meaning none. ``options`` are the layered options without the count, for
-    the caller to apply as its door does (design G, item 3). ``label`` and
-    ``rate_keys`` are what billing records (design L). ``on_credential`` says
-    a credential serves the call rather than an instance.
+    the caller to apply as its door does. ``label`` and
+    ``rate_keys`` are what billing records. ``on_credential`` says
+    a credential serves the call rather than an instance, and ``tenant_endpoint``
+    that the credential names its own ``api_base``, which a tenant chose.
     """
 
     name: str | None
@@ -121,8 +123,9 @@ class _Resolved:
     options: Mapping[str, Any] = field(repr=False, hash=False)
     timeout: float
     label: str | None
-    rate_keys: tuple[str, ...]
+    rate_keys: tuple[RateKey, ...]
     on_credential: bool = False
+    tenant_endpoint: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -138,6 +141,39 @@ class ResolvedFetch(_Resolved):
     """What one web fetch runs on, always through any-fetch: the count is ``max_chars``."""
 
     max_chars: int | None
+
+
+@dataclass(frozen=True)
+class InLoopSearch:
+    """What one request's in-loop searches run on through the libraries, and the fetch that enriches their hits."""
+
+    search: ResolvedSearch
+    enrichment: ResolvedFetch
+
+
+def resolve_in_loop_search(
+    config: ToolSettings, policy: ResolvedWebSearchConfig | None, *, request_options: Mapping[str, Any] | None = None
+) -> InLoopSearch | None:
+    """The in-loop search on the libraries, or ``None`` when the old backend serves it or nothing does.
+
+    Raises what :func:`resolve_search` raises for a request option the provider
+    does not take, and what it and :func:`resolve_fetch` raise for a credential
+    they cannot use.
+    """
+    search = resolve_search(config, policy, requested=None, request_options=request_options)
+    return in_loop_search_for(config, policy, search) if search is not None else None
+
+
+def in_loop_search_for(
+    config: ToolSettings, policy: ResolvedWebSearchConfig | None, search: ResolvedSearch
+) -> InLoopSearch | None:
+    """``search`` with the fetch that enriches its hits, or ``None`` when the old backend runs it.
+
+    Raises what :func:`resolve_fetch` raises for a fetch credential it cannot use.
+    """
+    if search.runner != "library":
+        return None
+    return InLoopSearch(search, resolve_fetch(config, policy, requested=None, for_search=search))
 
 
 def resolve_search(
@@ -217,6 +253,11 @@ def resolve_fetch(
     return _fetch_on_instance(instances.get(configured_fetch_default(config)) or instances[BUILTIN_FETCH])
 
 
+def builtin_fetch_resolved() -> ResolvedFetch:
+    """``builtin_fetch`` as :func:`resolve_fetch` answers it, for code that holds no config."""
+    return _fetch_on_instance(BUILTIN_FETCH_INSTANCE)
+
+
 def _fetch_instances(config: ToolSettings) -> dict[str, ToolInstance]:
     """The fetch instances any-fetch can run, each other one left out with a warning, as if it named nothing."""
     served = set(any_fetch.AnyFetch.get_supported_providers())
@@ -239,6 +280,7 @@ def _search_on_instance(
     workspace: Mapping[str, Any] = _NO_OPTIONS,
     request: Mapping[str, Any],
 ) -> ResolvedSearch:
+    """A search on ``instance``: its runner, its layered options and the rate keys it is billed under."""
     runner: Runner = "library" if instance.library_backed else "old"
     own = dict(instance.options)
     # Contract C8: a searxng instance that names no engines searches the deployment's.
@@ -274,8 +316,8 @@ def _search_on_instance(
         max_results=max_results,
         timeout=instance.timeout or (IN_LOOP_TIMEOUT_S if in_loop else DIRECT_TIMEOUT_S),
         label=label,
-        # On the direct endpoint, the instance's own row alone (contract C5).
-        rate_keys=(label, _SEARCH_FALLBACK_RATE) if in_loop else (label,),
+        # On the direct endpoint, the instance's own row alone.
+        rate_keys=_instance_rate_keys("search", instance, _SEARCH_FALLBACK_RATE if in_loop else None),
         fetch_tool=instance.fetch_tool,
     )
 
@@ -327,7 +369,7 @@ def _search_on_credential(
         requires_key, default_base = metadata.requires_api_key, metadata.default_api_base
         requires_base = metadata.requires_api_base and not default_base
     elif provider in (*WEB_SEARCH_PROVIDERS, *SEARCH_PROVIDERS_WITHOUT_ADAPTER):
-        # Tavily, Brave and SearXNG until their adapters exist (decision 28).
+        # Tavily, Brave and SearXNG until their adapters exist.
         runner = "old"
         requires_key, default_base = provider in WEB_SEARCH_PROVIDERS, None
         requires_base = provider in SEARCH_PROVIDERS_REQUIRING_API_BASE
@@ -352,7 +394,7 @@ def _search_on_credential(
     max_results = _count(options, "max_results")
     label, rate_keys = _credential_billing(credential, _SEARCH_FALLBACK_RATE)
     if in_loop and runner == "old":
-        # Design L: in the loop, the old backend records an organization key's calls with no label.
+        # In the loop, the old backend records an organization key's calls with no label.
         label = None
     return ResolvedSearch(
         name=name,
@@ -366,10 +408,20 @@ def _search_on_credential(
         label=label,
         rate_keys=rate_keys,
         on_credential=True,
+        tenant_endpoint=_base(credential.api_base) != "",
     )
 
 
+def _instance_rate_keys(
+    kind: Literal["search", "fetch"], instance: ToolInstance, fallback: str | None
+) -> tuple[RateKey, ...]:
+    """The instance's rate key, then ``fallback``."""
+    own = instance_rate_key(kind, instance.name, instance.provider)
+    return (own, fallback) if fallback is not None else (own,)
+
+
 def _fetch_on_instance(instance: ToolInstance) -> ResolvedFetch:
+    """A fetch on ``instance``: its checked options, its label and the rate keys it is billed under."""
     options = _layered(
         "fetch",
         instance.provider,
@@ -392,7 +444,7 @@ def _fetch_on_instance(instance: ToolInstance) -> ResolvedFetch:
         timeout=instance.timeout
         or (NETWORK_DEADLINE_SECONDS if instance.provider == BUILTIN_FETCH_PROVIDER else IN_LOOP_TIMEOUT_S),
         label=label,
-        rate_keys=(label, _FETCH_FALLBACK_RATE),
+        rate_keys=_instance_rate_keys("fetch", instance, _FETCH_FALLBACK_RATE),
     )
 
 
@@ -429,6 +481,7 @@ def _fetch_on_credential(credential: WebFetchCredential) -> ResolvedFetch | None
         label=label,
         rate_keys=rate_keys,
         on_credential=True,
+        tenant_endpoint=_base(credential.api_base) != "",
     )
 
 
@@ -450,20 +503,12 @@ def _check(credential: WebToolCredential, *, requires_key: bool, requires_base: 
 
 
 def _credential_layer(credential: WebToolCredential) -> str:
-    if credential.source == WebToolCredentialSource.HYBRID:
-        return "the control plane's credential"
     return "the organization's key"
 
 
-def _credential_billing(credential: WebToolCredential, fallback: str) -> tuple[str | None, tuple[str, ...]]:
-    """The label and rate keys of a call a credential serves (design L).
-
-    A hybrid data plane settles nothing itself, so the control plane's
-    credential carries neither (design K).
-    """
-    if credential.source == WebToolCredentialSource.HYBRID:
-        return None, ()
-    return f"{_ORG_LABEL_PREFIX}:{credential.provider}", (fallback,)
+def _credential_billing(credential: WebToolCredential, fallback: str) -> tuple[str | None, tuple[RateKey, ...]]:
+    """The label and rate keys of a call a credential serves."""
+    return f"{ORGANIZATION_KEY_LABEL_PREFIX}{credential.provider}", (fallback,)
 
 
 def _layered(

@@ -20,7 +20,7 @@ Run \`otari gen-secret-key\` and store the result; it is shown once.
 2. Create an API key.
 3. Point a client at this gateway's base URL.
    - The base URL is the origin this dashboard is served from.
-   - Hosted deployments use the data-plane URL instead.
+   - A proxy in front of it may publish another.
 
 > A budget is enforced at reservation time, not at settlement, so a burst
 > cannot overshoot it.
@@ -73,10 +73,9 @@ export const Dark: Story = {
 
 /**
  * `components` merges over the prose set, for an element whose behavior belongs
- * to the caller. This is how `DocsPage` supplies a link that rewrites its href
- * against the repository, a table wrapped in a focusable scroller, and a code
- * block with a copy control: presentation stays in the component, anything that
- * has to know about the application arrives through this prop.
+ * to the caller, such as a link that rewrites its href: presentation stays in
+ * the component, anything that has to know about the application arrives
+ * through this prop.
  */
 export const CallerOverride: Story = {
   args: {

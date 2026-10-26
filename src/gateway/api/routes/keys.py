@@ -10,6 +10,7 @@ from sqlmodel import col
 
 from gateway.api.deps import (
     ApiKeyFormatPortDep,
+    ApiKeyServiceDep,
     BudgetServiceDep,
     CallerOrganization,
     get_config,
@@ -26,17 +27,19 @@ from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey
 from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
+from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
 from gateway.services.budgets import BudgetService, check_path_external_id
-from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
-from gateway.services.workspace_scope import organization_default_workspace_id
-
-# A key inherits its user's default allow-list and may narrow it, never broaden
-# it, so a key list that is not a subset of the user's is rejected on write.
-_KEY_EXCEEDS_USER_DETAIL = (
-    "This key's allowed_models exceeds its user's default; a key can only narrow "
-    "the user's model access, not broaden it."
+from gateway.services.model_access import (
+    KEY_MODELS_EXCEED_USER_DETAIL,
+    KEY_TOOLS_EXCEED_USER_DETAIL,
+    is_allowlist_subset,
+    tools_within_user,
+    validate_allowed_models,
+    validate_allowed_tools,
 )
+from gateway.services.organizations import AccessLists
+from gateway.services.workspace_scope import organization_default_workspace_id
 
 router = APIRouter(
     prefix="/keys",
@@ -45,16 +48,6 @@ router = APIRouter(
 )
 
 SURFACE = Surface("keys")
-
-
-# Every key surface reads the keys a person created, and none of them reads the
-# ones this deployment minted for itself: an internal key carries a stored
-# credential (``models/api_keys.APIKey.internal_secret``), so a rotation or a
-# revoke through these routes would leave the holder presenting a key that no
-# longer authenticates, with nothing on screen to explain it. A read is excluded
-# for the same reason a write is, because the id a read hands back is what a write
-# is aimed with, and a 404 is the answer a route with no business in a row gives.
-NOT_INTERNAL = col(APIKey.internal_secret).is_(None)
 
 
 async def _load_key_in_organization(
@@ -84,7 +77,6 @@ async def _load_key_in_organization(
         .where(
             col(APIKey.id) == key_id,
             col(Workspace.organization_id) == organization_id,
-            NOT_INTERNAL,
         )
     )
     if owner_user_id is not None:
@@ -111,6 +103,11 @@ class CreateKeyRequest(BaseModel):
         default=None,
         description="Model allow-list: null = any model, [] = deny all, or canonical "
         "instance:model entries (with instance:* / instance:prefix* wildcards).",
+    )
+    allowed_tools: list[str] | None = Field(
+        default=None,
+        description="Search tool allow-list for POST /api/v1/search: null = inherit the user's, [] = no tool, "
+        "or search tool names ('*' for every search tool). A model wildcard never grants a tool.",
     )
     exclude_from_budget: bool = Field(
         default=False,
@@ -149,6 +146,13 @@ class CreateKeyRequest(BaseModel):
         description="Budgets a request may start a new end user on by naming one in Otari-End-User-Budget. "
         "Null allows end_user_budget_id alone. When both are set, end_user_budget_id must be on the list.",
     )
+    max_end_users: int | None = Field(
+        default=None,
+        ge=0,
+        description="Most live end users this key may have on the budgets it assigns (all of its owner's end users "
+        "when it assigns none). A request that would create one more is refused with 403 and "
+        "end_user_limit_reached; deleting end users frees room. Null is no cap.",
+    )
     workspace_id: uuid.UUID | None = Field(
         default=None,
         description="Workspace this key belongs to, which must be one in the caller's "
@@ -174,12 +178,14 @@ class CreateKeyResponse(BaseModel):
     expires_at: str | None
     is_active: bool
     allowed_models: list[str] | None
+    allowed_tools: list[str] | None
     exclude_from_budget: bool
     reject_user_mismatch: bool | None
     capture_agent_telemetry: bool | None
     is_service_key: bool
     end_user_budget_id: str | None
     end_user_budget_ids: list[str]
+    max_end_users: int | None
     metadata: dict[str, Any]
 
 
@@ -199,6 +205,7 @@ class KeyInfo(BaseModel):
     expires_at: str | None
     is_active: bool
     allowed_models: list[str] | None
+    allowed_tools: list[str] | None
     exclude_from_budget: bool
     reject_user_mismatch: bool | None
     capture_agent_telemetry: bool | None
@@ -206,9 +213,11 @@ class KeyInfo(BaseModel):
     end_user_budget_id: str | None
     # The budgets a request may start an end user on: the key's list, or its default alone.
     end_user_budget_ids: list[str]
+    max_end_users: int | None = None
     workspace_id: uuid.UUID
-    # Set while config.yml declares this key: every start writes the declared
-    # secret and settings back, so a change made here lasts until the next one.
+    # Set while config.yml declares this key: a start writes the declared secret
+    # and settings back when the key's entry changed, so a change made here lasts
+    # until config.yml changes the entry.
     config_name: str | None = None
     metadata: dict[str, Any]
 
@@ -226,6 +235,7 @@ class KeyInfo(BaseModel):
             expires_at=key.expires_at.isoformat() if key.expires_at else None,
             is_active=bool(key.is_active),
             allowed_models=list(key.allowed_models) if key.allowed_models is not None else None,
+            allowed_tools=list(key.allowed_tools) if key.allowed_tools is not None else None,
             exclude_from_budget=bool(key.exclude_from_budget),
             reject_user_mismatch=None if key.reject_user_mismatch is None else bool(key.reject_user_mismatch),
             capture_agent_telemetry=(
@@ -234,6 +244,7 @@ class KeyInfo(BaseModel):
             is_service_key=bool(key.is_service_key),
             end_user_budget_id=key.end_user_budget_id,
             end_user_budget_ids=key.assignable_end_user_budgets(),
+            max_end_users=key.max_end_users,
             config_name=key.config_name,
             metadata=dict(key.metadata_) if key.metadata_ else {},
         )
@@ -258,12 +269,16 @@ class UpdateKeyRequest(BaseModel):
     # unrestricted, [] = deny all, list = restrict. A plain default cannot tell
     # "absent" from "explicit null", so the handler checks model_fields_set.
     allowed_models: list[str] | None = None
+    # Tri-state the same way: null = inherit the user's search tool access.
+    allowed_tools: list[str] | None = None
     is_service_key: bool | None = None
     # Tri-state via model_fields_set: absent = unchanged, null = end users this
     # key creates from now on are uncapped. End users already created keep theirs.
     end_user_budget_id: str | None = None
     # Tri-state via model_fields_set: absent = unchanged, null = the default alone.
     end_user_budget_ids: list[str] | None = Field(default=None, max_length=MAX_END_USER_BUDGETS)
+    # Tri-state via model_fields_set: absent = unchanged, null = no cap.
+    max_end_users: int | None = Field(default=None, ge=0)
     metadata: dict[str, Any] | None = None
 
 
@@ -292,6 +307,7 @@ async def create_key(
     """
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)
+        allowed_tools = validate_allowed_tools(config, request.allowed_tools)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     # Before anything is staged: the check runs in a Unit of Work block, and the
@@ -338,8 +354,10 @@ async def create_key(
 
     # A key must not grant more than its user's default (a freshly created user
     # has no default, so this only bites when attaching to a restricted user).
-    if not is_allowlist_subset(allowed_models, user.allowed_models):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
+    if not is_allowlist_subset(allowed_models, user.allowed_models, tool_keys=config.legacy_search_tool_keys()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=KEY_MODELS_EXCEED_USER_DETAIL)
+    if not tools_within_user(config, allowed_tools, user_tools=user.allowed_tools, user_models=user.allowed_models):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=KEY_TOOLS_EXCEED_USER_DETAIL)
 
     # Checked rather than left to the foreign key: an id naming no workspace is
     # a bad request, and letting it reach the constraint answered 500 "Database
@@ -381,12 +399,14 @@ async def create_key(
         user_id=user_id,
         expires_at=request.expires_at,
         allowed_models=allowed_models,
+        allowed_tools=allowed_tools,
         exclude_from_budget=request.exclude_from_budget,
         reject_user_mismatch=request.reject_user_mismatch,
         capture_agent_telemetry=request.capture_agent_telemetry,
         is_service_key=request.is_service_key,
         end_user_budget_id=request.end_user_budget_id,
         end_user_budget_ids=end_user_budget_ids,
+        max_end_users=request.max_end_users,
         metadata_=request.metadata,
     )
 
@@ -422,7 +442,7 @@ async def list_keys(
     statement = (
         select(APIKey)
         .join(Workspace, col(Workspace.id) == col(APIKey.workspace_id))
-        .where(col(Workspace.organization_id) == organization_id, NOT_INTERNAL)
+        .where(col(Workspace.organization_id) == organization_id)
     )
     if workspace_id is not None:
         statement = statement.where(col(APIKey.workspace_id) == workspace_id)
@@ -455,6 +475,7 @@ async def update_key(
     config: Annotated[GatewayConfig, Depends(get_config)],
     organization_id: CallerOrganization,
     budgets: BudgetServiceDep,
+    api_keys: ApiKeyServiceDep,
 ) -> KeyInfo:
     """Update an API key in the caller's organization.
 
@@ -471,7 +492,23 @@ async def update_key(
         check_list="end_user_budget_ids" in fields,
     )
 
-    # Tri-state via model_fields_set, like allowed_models below: both columns
+    # The access lists the same way. A supplied null clears (models: unrestricted;
+    # tools: inherit the user's); [] denies all; a list restricts.
+    stored = AccessLists(key.allowed_models, key.allowed_tools)
+    try:
+        access = await api_keys.check_access_lists(
+            config,
+            AccessLists(
+                request.allowed_models if "allowed_models" in fields else stored.models,
+                request.allowed_tools if "allowed_tools" in fields else stored.tools,
+            ),
+            stored=stored,
+            owner_id=key.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    # Tri-state via model_fields_set, like the lists above: both columns
     # are nullable and the dashboard's edit form sends null to clear them
     # ("Blank clears the expiry"), which an ``is not None`` guard silently
     # dropped. ``is_active`` and ``exclude_from_budget`` are not nullable, so
@@ -488,27 +525,16 @@ async def update_key(
         key.reject_user_mismatch = request.reject_user_mismatch
     if "capture_agent_telemetry" in request.model_fields_set:
         key.capture_agent_telemetry = request.capture_agent_telemetry
-    # Tri-state: only touch the allow-list when the field was supplied. A supplied
-    # null clears to unrestricted; [] denies all; a list restricts.
-    if "allowed_models" in request.model_fields_set:
-        try:
-            new_allowed = validate_allowed_models(config, request.allowed_models)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        # Enforce narrow-only against the key's user default (see create_key).
-        if key.user_id is not None:
-            user_default = (
-                await db.execute(select(User.allowed_models).where(User.user_id == key.user_id))
-            ).scalar_one_or_none()
-            if not is_allowlist_subset(new_allowed, user_default):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
-        key.allowed_models = new_allowed
+    key.allowed_models = access.models
+    key.allowed_tools = access.tools
     if request.is_service_key is not None:
         key.is_service_key = request.is_service_key
     if "end_user_budget_id" in request.model_fields_set:
         key.end_user_budget_id = request.end_user_budget_id
     if "end_user_budget_ids" in request.model_fields_set:
         key.end_user_budget_ids = end_user_budget_ids
+    if "max_end_users" in request.model_fields_set:
+        key.max_end_users = request.max_end_users
     if request.metadata is not None:
         key.metadata_ = request.metadata
 
@@ -578,6 +604,54 @@ async def delete_key(
     except DATABASE_ERRORS as exc:
         await db.rollback()
         raise database_error("delete key", exc) from None
+
+
+@router.post("/{key_id}/federation-rules", status_code=status.HTTP_201_CREATED)
+async def create_federation_rule(
+    key_id: str,
+    request: FederationRuleCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    organization_id: CallerOrganization,
+    api_keys: ApiKeyServiceDep,
+) -> FederationRulePublic:
+    """Let an OpenID Connect identity token authenticate as this key, in place of its secret.
+
+    The issuer must be one of the deployment's ``federation_issuers``, else 400. A token authenticates when it is
+    signed by that issuer, its ``aud`` contains ``audience``, and it carries the rule's ``subject`` and verified
+    ``email``, whichever the rule sets. A rule naming the identity of an existing rule answers 409: the same issuer,
+    audience, subject and email on this key, or on another key the same issuer and audience with a subject or email
+    in common and no contradicting value.
+    """
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    allowed = [entry.issuer for entry in config.federation_issuers]
+    return await api_keys.add_federation_rule(key.id, request, allowed_issuers=allowed)
+
+
+@router.get("/{key_id}/federation-rules")
+async def list_federation_rules(
+    key_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    api_keys: ApiKeyServiceDep,
+) -> list[FederationRulePublic]:
+    """List the identities that may authenticate as this key, oldest first."""
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    return await api_keys.list_federation_rules(key.id)
+
+
+@router.delete("/{key_id}/federation-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_federation_rule(
+    key_id: str,
+    rule_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    api_keys: ApiKeyServiceDep,
+) -> Response:
+    """Remove a federation rule. Tokens it matched stop authenticating with the next request."""
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    await api_keys.delete_federation_rule(key.id, rule_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 ExternalId = Annotated[str, Path(description="The id the service names the end user by in a request's user field")]

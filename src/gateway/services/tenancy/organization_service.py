@@ -6,7 +6,7 @@ An ID that names another tenant's row answers not-found, so a caller cannot prob
 
 A deployment can hold more than one organization.
 Creating, listing and switching organizations therefore belong here rather than in an overlay.
-No organization a caller can reach is ever deleted, because its usage history must keep pointing at it.
+An organization is deleted only while it holds no usage, because usage history must keep pointing at its organization.
 """
 
 import asyncio
@@ -26,15 +26,18 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyConflictError, TenancyValidationError
 from gateway.exceptions.identity_exceptions import TermsNotAcceptedError
 from gateway.exceptions.organizations_exceptions import (
+    DefaultOrganizationDeletionError,
     InvitationAlreadyPendingError,
     InvitationAlreadyUsedError,
     InvitationClosedError,
     InvitationExpiredError,
     InvitationNotFoundError,
     InvitationPasswordNotAcceptedError,
+    LastOrganizationError,
     MembershipUpdateError,
     NoActiveOrganizationError,
     NotAuthorizedError,
+    OrganizationInUseError,
     OrganizationMemberAddressUnprovenError,
     OrganizationMemberAddressUnresolvedError,
     OrganizationMemberAlreadyExistsError,
@@ -115,8 +118,11 @@ from gateway.services.tenancy.invitation_email import render_invitation_email
 # pins it.
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.password_policy import validate_new_password
-from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME, password_claims_deployment
-from gateway.services.tenancy.workspace_listener import WorkspaceListener
+from gateway.services.tenancy.provisioning_service import (
+    DEFAULT_ORGANIZATION_SLUG,
+    DEFAULT_WORKSPACE_NAME,
+    password_claims_deployment,
+)
 
 
 def _validated_organization_name(name: str | None) -> str:
@@ -316,16 +322,13 @@ class OrganizationService:
         *,
         membership_listener: MembershipListener | None,
         uow: UnitOfWork | None = None,
-        workspace_listener: WorkspaceListener,
     ):
         """Build the service on a session.
 
         A service that changes workspace membership needs a listener and a Unit of Work over the same session,
         because the listener writes through that Unit of Work's open block. A read-only service needs neither.
-        ``workspace_listener`` sets up each workspace this service creates, inside the same transaction.
         """
         self.db = db
-        self._workspace_listener = workspace_listener
         self._membership_listener = membership_listener
         self._uow = uow
         self.organizations = OrganizationRepository(db)
@@ -334,10 +337,6 @@ class OrganizationService:
         self.workspaces = WorkspaceMemberRepository(db)
         self.workspace_rows = WorkspaceRepository(db)
         self.invitations = InvitationRepository(db)
-
-    async def _start_new_workspace(self, workspace_id: uuid.UUID) -> None:
-        """Stage what a workspace this service just created starts with, inside the open transaction."""
-        await self._workspace_listener.workspace_created(workspace_id)
 
     # ------------------------------------------------------------------
     # Context resolution and authorization
@@ -516,10 +515,6 @@ class OrganizationService:
                 has_password=user.hashed_password is not None,
                 claims_deployment=await password_claims_deployment(self.db, user),
             ),
-            # The platform answers "does this org have a self-hosted gateway
-            # attached". A standalone deployment reading this *is* that gateway,
-            # so its own provider credentials are always available to it.
-            byo_provider_keys_allowed=True,
             deployment_operator=await DeploymentUserService(self.db).has_administration_access(user),
             provider_key_encryption_available=secret_box_configured(),
         )
@@ -568,9 +563,9 @@ class OrganizationService:
         The reachable stale case is a membership that was suspended after the
         pointer was set: falling back to the caller's oldest live membership
         keeps the dashboard usable instead of refusing every page. A pointer at a
-        *deleted* organization is not reachable at all in this edition, since
-        nothing deletes one and the foreign key would refuse; the check survives
-        for a database that arrived by another route.
+        *deleted* organization is not reachable, since a deletion moves every
+        pointer first and the foreign key would refuse otherwise; the check
+        survives for a database that arrived by another route.
 
         Unlike the platform this never provisions an organization as a fallback:
         first boot owns that (see `provisioning_service`), and every later
@@ -654,7 +649,6 @@ class OrganizationService:
                     organization_id=organization.id,
                     created_by_user_id=user.id,
                 )
-                await self._start_new_workspace(workspace.id)
                 # Through the assignment path rather than a bare
                 # ``WorkspaceMemberRepository.create``, so this is the same
                 # create-member-then-materialize-defaults step every other
@@ -783,7 +777,6 @@ class OrganizationService:
             organization_id=organization.id,
             created_by_user_id=identity.id,
         )
-        await self._start_new_workspace(workspace.id)
         await self._apply_workspace_assignments(
             user_id=identity.id,
             assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="owner")],
@@ -890,6 +883,76 @@ class OrganizationService:
             workspace_memberships=await self._caller_workspace_memberships(user=user, organization=updated),
         )
 
+    async def delete_active_organization_for_user(self, *, user: User) -> OrganizationMembershipContextPublic:
+        """Delete the caller's organization, if nothing has been recorded against it, and move them out.
+
+        Owners and admins only. Three refusals: the deployment's default
+        organization, the caller's only organization, and an organization whose
+        workspaces still hold keys, usage, aliases or policies. That last one is
+        the database's answer rather than a count, as in ``delete_workspace``:
+        those foreign keys are ON DELETE RESTRICT, and the rollback takes every
+        write below back with it.
+
+        ``user.active_organization_id`` has no ON DELETE action, so every identity
+        pointed here is moved first: onto its oldest other live membership, else
+        onto the default organization, where it holds no membership and so
+        resolves to none, as it did here. The caller moves into their oldest
+        other organization, whose context is returned.
+        """
+        organization = await self.get_active_organization_for_user(user)
+        await self.require_active_organization_management_access(user=user, organization=organization)
+        if organization.slug == DEFAULT_ORGANIZATION_SLUG:
+            raise DefaultOrganizationDeletionError
+        listener = self._require_membership_listener()
+
+        try:
+            async with self._require_unit_of_work():
+                # Serializes this against the invariant checks that lock the same
+                # row, and each workspace lock against a member joining it after
+                # the listener's snapshot (see ``delete_workspace``).
+                await self.organizations.lock(organization.id)
+                workspace_ids = await self.workspace_rows.get_ids_by_organization(organization.id)
+                for workspace_id in workspace_ids:
+                    await self.workspace_rows.lock(workspace_id)
+
+                pointed = await self.users.get_ids_by_active_organization(organization.id)
+                elsewhere = await self.members.first_active_organization_ids(
+                    {user.id, *pointed}, excluding=organization.id
+                )
+                destination_id = elsewhere.get(user.id)
+                if destination_id is None:
+                    raise LastOrganizationError
+                default = await self.organizations.get_by_slug(DEFAULT_ORGANIZATION_SLUG)
+                fallback_id = default.id if default is not None else destination_id
+                moves: dict[uuid.UUID, list[uuid.UUID]] = {}
+                for pointed_id in pointed:
+                    if pointed_id != user.id:
+                        moves.setdefault(elsewhere.get(pointed_id, fallback_id), []).append(pointed_id)
+                for target_id, user_ids in moves.items():
+                    await self.users.move_active_organization(user_ids, target_id)
+                await self.users.set_active_organization(user, destination_id)
+
+                for workspace_id in workspace_ids:
+                    member_ids = await self.workspaces.ids_for_workspace(workspace_id)
+                    await listener.workspace_deleted(workspace_id, member_ids)
+                await self.organizations.delete(organization)
+
+                destination = await self.organizations.get(destination_id)
+                membership = await self.members.get_active_by_organization_and_user(destination_id, user.id)
+                if destination is None or membership is None:
+                    # The membership was read active a few statements ago, so
+                    # only a concurrent removal reaches this.
+                    raise LastOrganizationError
+        except IntegrityError:
+            raise OrganizationInUseError from None
+
+        return await self._to_context(
+            user=user,
+            membership=membership,
+            organization=destination,
+            workspace_memberships=await self._caller_workspace_memberships(user=user, organization=destination),
+        )
+
     # ------------------------------------------------------------------
     # Membership
     # ------------------------------------------------------------------
@@ -952,6 +1015,7 @@ class OrganizationService:
                 reserved=float(row.reserved),
                 blocked=row.blocked,
                 allowed_models=row.allowed_models,
+                allowed_tools=row.allowed_tools,
             )
             for user_id, row in spend_rows.items()
         }
@@ -1480,6 +1544,7 @@ class OrganizationService:
                     role=membership.role,
                     accept_link=accept_link,
                     expiry_hours=config.invitation_expiry_hours,
+                    asset_root=mailer.asset_root,
                 ),
             )
             mail_sent = delivery.delivered

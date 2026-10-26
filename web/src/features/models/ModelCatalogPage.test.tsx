@@ -1,7 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, render, screen, waitFor, within } from "@testing-library/react"
+import { useRouter } from "@tanstack/react-router"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { ReactElement } from "react"
+import type { ReactElement, ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
@@ -13,6 +21,7 @@ import type {
   OrganizationContext,
 } from "@/client"
 import { ModelCatalogPage } from "@/features/models/ModelCatalogPage"
+import { ModelDetailPage } from "@/features/models/ModelDetailPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
@@ -227,6 +236,56 @@ function renderPage(ui: ReactElement, url = "/models") {
   )
 }
 
+// The catalog with a real model page behind its cards. The providers sit
+// outside the router here, unlike `renderPage`, so the model page has them too.
+// The page carries a probe for the browser's Back, which the test router's
+// memory history otherwise has no control for.
+function renderWithModelPage(url = "/models") {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const Router = withRouter({
+    url,
+    routes: [
+      {
+        path: "/models/$vendor/$model",
+        element: (
+          <>
+            <ModelDetailPage modelId="z-ai/glm-5.3" />
+            <BrowserBack />
+          </>
+        ),
+      },
+    ],
+  })
+  return render(<ModelCatalogPage />, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <DeploymentProvider value={bootstrap()}>
+        <QueryClientProvider client={client}>
+          <Router>{children}</Router>
+        </QueryClientProvider>
+      </DeploymentProvider>
+    ),
+  })
+}
+
+function BrowserBack() {
+  const router = useRouter()
+  return (
+    <button type="button" onClick={() => router.history.back()}>
+      Browser back
+    </button>
+  )
+}
+
+/** The query of the first catalog list request, the one the URL alone set. */
+function firstListRequest(fetchMock: ReturnType<typeof mockApi>) {
+  const url = fetchMock.mock.calls
+    .map(([input]) => String(input))
+    .find((call) => call.includes(`${API_ROOT}/catalog/models?`))
+  return new URL(String(url), "http://localhost").searchParams
+}
+
 describe("ModelCatalogPage", () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -364,6 +423,205 @@ describe("ModelCatalogPage", () => {
     // The rail says one provider is in force.
     // The rail names the vendor and filters on the instance id (otari#990).
     expect(screen.getByRole("checkbox", { name: "Fireworks AI" })).toBeChecked()
+  })
+
+  it("goes back from a model to the list as it was left", async () => {
+    mockApi()
+    renderWithModelPage()
+    const user = userEvent.setup()
+
+    await screen.findByRole("list", { name: "Models" })
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search models" }),
+      "glm",
+    )
+    await user.click(screen.getByRole("button", { name: "Capabilities" }))
+    await user.click(screen.getByRole("checkbox", { name: "Reasoning" }))
+    await user.click(screen.getByRole("button", { name: /Newest/ }))
+    await user.click(screen.getByRole("option", { name: "Name" }))
+    const list = screen.getByRole("list", { name: "Models" })
+    await waitFor(() =>
+      expect(within(list).queryByText(/Kimi K2.6/)).toBeNull(),
+    )
+
+    await user.click(within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }))
+    await user.click(await screen.findByRole("link", { name: "← Models" }))
+
+    const search = await screen.findByRole("searchbox", {
+      name: "Search models",
+    })
+    expect(search).toHaveValue("glm")
+    expect(screen.getByRole("checkbox", { name: "Reasoning" })).toBeChecked()
+    expect(screen.getByRole("button", { name: /Name/ })).toBeInTheDocument()
+
+    // Clear empties the search box too, which shows the URL while unfocused.
+    await user.click(screen.getByRole("button", { name: "Clear" }))
+    await waitFor(() => expect(search).toHaveValue(""))
+  })
+
+  it("returns to the list as it was left by the browser's Back too", async () => {
+    mockApi()
+    renderWithModelPage("/models?q=glm&capability=reasoning")
+    const user = userEvent.setup()
+    const list = await screen.findByRole("list", { name: "Models" })
+
+    await user.click(within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Browser back" }),
+    )
+
+    expect(
+      await screen.findByRole("searchbox", { name: "Search models" }),
+    ).toHaveValue("glm")
+    expect(screen.getByRole("checkbox", { name: "Reasoning" })).toBeChecked()
+  })
+
+  it("links back to the list from a model opened from the table", async () => {
+    localStorage.setItem("otari.dashboard.modelsView", "table")
+    mockApi()
+    renderWithModelPage("/models?q=glm&column=input&order=desc")
+    const user = userEvent.setup()
+    const table = await screen.findByRole("grid", { name: "Models" })
+
+    await user.click(within(table).getByText("GLM-5.3"))
+
+    const back = await screen.findByRole("link", { name: "← Models" })
+    const search = new URLSearchParams(back.getAttribute("href")?.split("?")[1])
+    expect(search.get("q")).toBe("glm")
+    expect(search.get("column")).toBe("input")
+    expect(search.get("order")).toBe("desc")
+  })
+
+  it("reads every filter, sort and page from the URL", async () => {
+    const fetchMock = mockApi()
+    renderPage(
+      <ModelCatalogPage />,
+      "/models?q=glm&input=image&output=text&provider=fireworks&vendor=Z.ai" +
+        "&capability=reasoning&context=128000&max_input=3&pricing=priced" +
+        "&source=discovered&released=365&sort=name&page=1&size=50",
+    )
+
+    await screen.findByRole("list", { name: "Models" })
+    await waitFor(() =>
+      expect(firstListRequest(fetchMock).get("search")).toBe("glm"),
+    )
+    const request = firstListRequest(fetchMock)
+    expect(request.getAll("input_modality")).toEqual(["image"])
+    expect(request.getAll("output_modality")).toEqual(["text"])
+    expect(request.getAll("provider")).toEqual(["fireworks"])
+    expect(request.getAll("vendor")).toEqual(["Z.ai"])
+    expect(request.getAll("capability")).toEqual(["reasoning"])
+    expect(request.get("min_context")).toBe("128000")
+    expect(request.get("max_input")).toBe("3")
+    expect(request.get("pricing")).toBe("priced")
+    expect(request.get("source")).toBe("discovered")
+    expect(request.get("released_within_days")).toBe("365")
+    expect(request.get("sort")).toBe("name")
+    expect(request.get("direction")).toBe("asc")
+    expect(request.get("skip")).toBe("50")
+    expect(request.get("limit")).toBe("50")
+  })
+
+  it("reads the table's sort from the URL", async () => {
+    localStorage.setItem("otari.dashboard.modelsView", "table")
+    const fetchMock = mockApi()
+    renderPage(<ModelCatalogPage />, "/models?column=input&order=desc")
+
+    await screen.findByRole("grid", { name: "Models" })
+    const request = firstListRequest(fetchMock)
+    expect(request.get("sort")).toBe("input")
+    expect(request.get("direction")).toBe("desc")
+  })
+
+  it("sends a search from the URL no longer than the API accepts", async () => {
+    const fetchMock = mockApi()
+    renderPage(<ModelCatalogPage />, `/models?q=${"a".repeat(250)}`)
+
+    await screen.findByRole("list", { name: "Models" })
+    expect(firstListRequest(fetchMock).get("search")).toHaveLength(200)
+  })
+
+  it("edits the search in the middle without the caret jumping", async () => {
+    mockApi()
+    renderPage(<ModelCatalogPage />, "/models?q=deepseek")
+    const user = userEvent.setup()
+    const search = await screen.findByRole("searchbox", {
+      name: "Search models",
+    })
+
+    await user.type(search, "XY", {
+      initialSelectionStart: 4,
+      initialSelectionEnd: 4,
+    })
+
+    expect(search).toHaveValue("deepXYseek")
+  })
+
+  it("keeps both of two changes made before the URL catches up", async () => {
+    const fetchMock = mockApi()
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+    await screen.findByRole("list", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: "Capabilities" }))
+
+    // Both presses land in one tick, before the router commits the first, so
+    // the second is handled with the list as it was before either.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Reasoning" }))
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Image" })[0])
+
+    await waitFor(() => {
+      const last = new URL(
+        String(fetchMock.mock.calls.at(-1)?.[0]),
+        "http://localhost",
+      ).searchParams
+      expect(last.getAll("capability")).toEqual(["reasoning"])
+      expect(last.getAll("input_modality")).toEqual(["image"])
+    })
+  })
+
+  it("keeps two quick selections on the same filter", async () => {
+    const fetchMock = mockApi()
+    renderPage(<ModelCatalogPage />)
+    await screen.findByRole("list", { name: "Models" })
+
+    // One tick, so the second press is handled with the list as it was before
+    // the first, and builds its set of input modalities from that.
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Text" })[0])
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Image" })[0])
+
+    await waitFor(() => {
+      const last = new URL(
+        String(fetchMock.mock.calls.at(-1)?.[0]),
+        "http://localhost",
+      ).searchParams
+      expect(last.getAll("input_modality")).toEqual(["image", "text"])
+    })
+  })
+
+  it("reads a hand-edited URL, falling back where the rail offers no such value", async () => {
+    const fetchMock = mockApi()
+    renderPage(
+      <ModelCatalogPage />,
+      "/models?sort=bogus&size=7&page=-2&capability=evil&pricing=free&vendor=-&output=image",
+    )
+
+    await screen.findByRole("list", { name: "Models" })
+    const request = new URL(
+      String(
+        fetchMock.mock.calls
+          .map(([input]) => String(input))
+          .find((url) => url.includes(`${API_ROOT}/catalog/models?`)),
+      ),
+      "http://localhost",
+    ).searchParams
+    expect(request.get("sort")).toBe("released")
+    expect(request.get("limit")).toBe("25")
+    expect(request.get("skip")).toBe("0")
+    expect(request.get("pricing")).toBe("all")
+    expect(request.getAll("capability")).toEqual([])
+    // `vendor=-` is the unknown vendor, whose facet value is blank.
+    expect(request.getAll("vendor")).toEqual([""])
+    expect(request.getAll("output_modality")).toEqual(["image"])
   })
 
   it("debounces search and sends the vendor term to the server", async () => {

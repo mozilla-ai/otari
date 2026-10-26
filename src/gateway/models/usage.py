@@ -74,7 +74,9 @@ class UsageLog(Base):
     # Provenance. "gateway" for requests Otari served itself; a source slug (e.g.
     # "claude_code") for usage imported through POST /v1/usage/external-events.
     # source_event_id is the upstream event id used for idempotent import (NULL for
-    # gateway rows); source_label carries optional session/project attribution.
+    # gateway rows); source_label carries optional session/project attribution:
+    # the imported label, or on a gateway row the trace id of the session the
+    # request named (see ``services/traces/_identity.py``).
     source: Mapped[str] = mapped_column(default=SERVED_HERE_SLUG, index=True)
     source_event_id: Mapped[str | None] = mapped_column()
     source_label: Mapped[str | None] = mapped_column()
@@ -82,6 +84,13 @@ class UsageLog(Base):
     # ...), bounded at intake; see ``api/routes/_request_tags.py``. Null when the
     # request sent none, and on every row written before the column existed.
     tags: Mapped[dict[str, str] | None] = mapped_column(JSON)
+    # The end-user identifier the request's provider calls carry (see
+    # ``services/inference/_upstream_user.py``), so an identifier a provider reports
+    # in an abuse case can be traced back to its workspace, user and key. Indexed
+    # for that lookup. Null where the request had none: imported usage, the
+    # pass-through endpoints, a request refused before its user was resolved, and
+    # every row written before the column existed.
+    safety_identifier: Mapped[str | None] = mapped_column(String(64), index=True)
     # Whether this row's cost participates in budget enforcement. True for normal
     # gateway rows; false for imported usage and for rows from keys flagged
     # exclude_from_budget. False rows are recorded (and appear in cost analytics)
@@ -211,10 +220,6 @@ class UsageLog(Base):
     # serving row's value also carries every earlier attempt's setup time.
     # Nothing in the column says so; a percentile keyed by the serving model
     # attributes failover time to the model that actually served.
-    #
-    # Hybrid (platform-fallback) streams never write this column at all: every
-    # settlement callback in build_streaming_response returns before reaching
-    # log_usage on that path, and run_streaming_with_fallback passes db=None.
     ttft_ms: Mapped[int | None] = mapped_column()
 
     api_key = relationship("APIKey", back_populates="usage_logs")

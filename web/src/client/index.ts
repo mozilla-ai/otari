@@ -24,11 +24,6 @@ type Schemas = components["schemas"]
  * is true of a response and false of a request body: the point of a default is
  * that a client may omit it. Applied only where the dashboard actually omits
  * one, so it stays a correction rather than a blanket loosening.
- *
- * Exported because the response side has the same problem from the other
- * direction: a gateway older than a field does not send it, whatever the
- * current schema says. `WireBootstrap` in `shared/helpers/bootstrap.ts` is that
- * case, and reuses this rather than restating it.
  */
 export type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 
@@ -39,23 +34,6 @@ export type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 // knows whether it can authenticate at all.
 // ---------------------------------------------------------------------------
 export type DeploymentBootstrap = Schemas["DeploymentBootstrap"]
-export type DeploymentType = DeploymentBootstrap["deployment_type"]
-export type SessionType = DeploymentBootstrap["session_type"]
-
-/**
- * `GET /health`, which the hybrid landing page reads for its two status rows.
- *
- * A flat string map rather than a named schema, because the route returns one:
- * `status` always, plus `mode` and `platform_reachable` ("yes" / "no") when the
- * gateway is attached to a control plane. Derived from the operation rather than
- * restated, but an index signature cannot police key names, so nothing here
- * would notice one being renamed: what pins the keys is
- * `test_hybrid_mode_health_reports_reachability`, which asserts the whole dict.
- * Giving the route a response model is what would move that guarantee into the
- * type.
- */
-export type GatewayHealth =
-  operations["health-health_check"]["responses"][200]["content"]["application/json"]
 
 // ---------------------------------------------------------------------------
 // Dashboard sign-in credentials
@@ -129,23 +107,14 @@ export type TraceSeries = Schemas["TraceSeriesPublic"]
 export type TraceDetail = Schemas["TraceDetailPublic"]
 export type TraceSpan = Schemas["SpanPublic"]
 export type TraceTurn = Schemas["TurnPublic"]
+export type TraceGateSummary = Schemas["GateSummaryPublic"]
+export type TraceToolCost = Schemas["ToolCostPublic"]
 export type UsageCount = Schemas["UsageCount"]
 export type UsageTotals = Schemas["UsageTotals"]
 export type UsageSummary = Schemas["UsageSummary"]
 export type UsageGroupRow = Schemas["UsageGroupRow"]
 export type UsageSeriesPoint = Schemas["UsageSeriesPoint"]
 export type UsageGroupedSeries = Schemas["UsageGroupedSeries"]
-export type UsageGroupedSeriesPoint = Schemas["UsageGroupedSeriesPoint"]
-export type UsageDeleteResult = Schemas["UsageDeleteResult"]
-export type UsageMutationSelection = Defaulted<
-  Schemas["UsageDeleteRequest"],
-  "by_filter"
->
-export type UsageSetPriceRequest = Defaulted<
-  Schemas["UsageSetPriceRequest"],
-  "by_filter"
->
-export type UsageSetPriceResult = Schemas["UsageSetPriceResult"]
 export type InFlightRequest = Schemas["InFlightEntry"]
 export type InFlightResponse = Schemas["InFlightResponse"]
 
@@ -153,14 +122,16 @@ export type InFlightResponse = Schemas["InFlightResponse"]
 // per-million or a per-call rate.
 export type TokenChargeLine = Schemas["TokenChargeLine"]
 export type UnitChargeLine = Schemas["UnitChargeLine"]
-/** One line of a row's `pricing_breakdown`, of whichever of the three shapes. */
+export type ToolChargeLine = Schemas["ToolChargeLine"]
+/** One line of a row's `pricing_breakdown`, of whichever of its shapes. */
 export type ChargeLine = NonNullable<UsageEntry["pricing_breakdown"]>[number]
 
-// Which rate a line carries is what says how to read it, and the third arm of
+// Which rate a line carries is what says how to read it, and the last arm of
 // the union is a line whose shape the gateway no longer writes (see the spec's
-// TokenChargeLine / UnitChargeLine). These guards live here rather than at the
-// one call site because the union is the generated client's, and a renderer that
-// assumed two arms would print an undefined rate for the third.
+// TokenChargeLine / UnitChargeLine / ToolChargeLine). These guards live here
+// rather than at the one call site because the union is the generated client's,
+// and a renderer that assumed only the named arms would print an undefined rate
+// for the last.
 //
 // They check the fields they promise rather than just the discriminator's
 // presence. The permissive arm is any object at all, so a legacy line carrying
@@ -184,14 +155,20 @@ export function isUnitChargeLine(line: ChargeLine): line is UnitChargeLine {
     typeof (line as Record<string, unknown>).unit_rate === "number"
   )
 }
+// A per-call line that also names what served the calls. A stored tool line
+// without a label reads as a plain per-call line.
+export function isToolChargeLine(line: ChargeLine): line is ToolChargeLine {
+  return (
+    isUnitChargeLine(line) &&
+    typeof (line as Record<string, unknown>).label === "string"
+  )
+}
 export function isTokenChargeLine(line: ChargeLine): line is TokenChargeLine {
   return (
     hasChargeFields(line) &&
     typeof (line as Record<string, unknown>).rate_per_million === "number"
   )
 }
-export type BillingMeters = Schemas["BillingMeters"]
-export type ToolMeter = Schemas["ToolMeter"]
 
 // Query-parameter enums. The spec carries these inline on the operation rather
 // than as named schemas, so they are pinned to the operation instead of being
@@ -205,6 +182,11 @@ type SeriesQuery = NonNullable<
   operations["usage-usage_series"]["parameters"]["query"]
 >
 export type UsageGroupBy = NonNullable<SeriesQuery["group_by"]>
+type TraceListQuery = NonNullable<
+  operations["traces-list_traces"]["parameters"]["query"]
+>
+export type TraceSortKey = NonNullable<TraceListQuery["sort"]>
+export type TraceSortOrder = NonNullable<TraceListQuery["order"]>
 
 // `UsageFilters` (`./local`) stays hand-written, because it is a filter set the
 // hooks assemble across five usage endpoints and several of its values go on the
@@ -235,6 +217,8 @@ export type UpdateKeyRequest = Schemas["UpdateKeyRequest"]
 // owner and the budget exemption, which that surface derives or refuses.
 export type CreateOwnKeyRequest = Schemas["CreateOwnKeyRequest"]
 export type UpdateOwnKeyRequest = Schemas["UpdateOwnKeyRequest"]
+export type FederationRule = Schemas["FederationRulePublic"]
+export type CreateFederationRuleRequest = Schemas["FederationRuleCreate"]
 export type Budget = Schemas["BudgetResponse"]
 export type CreateBudgetRequest = Schemas["CreateBudgetRequest"]
 export type UpdateBudgetRequest = Schemas["UpdateBudgetRequest"]
@@ -255,7 +239,6 @@ export type UpdateScopedBudgetRequest = Schemas["UpdateScopedBudgetRequest"]
 export type ModelObject = Schemas["ModelObject"]
 export type ModelListResponse = Schemas["ModelListResponse"]
 export type DiscoverableModel = Schemas["DiscoverableModel"]
-export type DiscoverableProvider = Schemas["DiscoverableProvider"]
 export type DiscoverableModelsResponse = Schemas["DiscoverableModelsResponse"]
 // The overview's strips, judged server-side: the page renders three integers
 // and one worst-case row, and used to download four collections to get them.
@@ -264,7 +247,6 @@ export type AllocationHealth = Schemas["AllocationHealthResponse"]
 export type WorstAllocation = Schemas["WorstAllocationResponse"]
 
 export type PricingResponse = Schemas["PricingResponse"]
-export type CurrentPricingPage = Schemas["CurrentPricingPage"]
 
 // The catalog folded by model (`/v1/catalog`): one summary per model in the
 // list, and one detail carrying every offering of it the caller may use.
@@ -278,7 +260,6 @@ export type CatalogModelSummary = Schemas["CatalogModelSummary"]
 export type CatalogModelDetail = Schemas["CatalogModelDetail"]
 export type CatalogOffering = Schemas["CatalogOffering"]
 export type CatalogCapabilities = Schemas["CatalogCapabilities"]
-export type CatalogElsewhere = Schemas["CatalogElsewhere"]
 // `unit` carries a schema default, so the generator emits it as required; the
 // callers that price a model omit it and the gateway reads tokens.
 export type SetPricingRequest = Defaulted<Schemas["SetPricingRequest"], "unit">
@@ -311,25 +292,24 @@ export type CreateOrganizationSpendCeiling =
   Schemas["OrganizationScopedBudgetCreate"]
 export type UpdateOrganizationSpendCeiling =
   Schemas["OrganizationScopedBudgetUpdate"]
-export type PricingDriftRow = Schemas["PricingDriftRow"]
 export type ProviderInfo = Schemas["ProviderInfoSchema"]
 export type ProvidersResponse = Schemas["ProvidersResponse"]
 export type ProviderHealth = Schemas["ProviderHealthSchema"]
 export type ProviderHealthResponse = Schemas["ProviderHealthResponse"]
-export type StoredProvider = Schemas["StoredProviderResponse"]
-export type CreateStoredProviderRequest = Schemas["CreateStoredProviderRequest"]
-export type UpdateStoredProviderRequest = Schemas["UpdateStoredProviderRequest"]
-export type TestProviderResult = Schemas["TestProviderResponse"]
-export type ReencryptProviderCredentialsResult =
-  Schemas["ReencryptProviderCredentialsResponse"]
+// The scheduled health checks: a completion sent to every offering, unlike
+// `ProviderHealth` above, which only asks a provider to list its models.
+export type HealthCheckStatus = Schemas["HealthCheckStatus"]
+export type HealthCheckSettings = Schemas["HealthCheckSettingsPublic"]
+export type UpdateHealthCheckSettings = Schemas["HealthCheckSettingsUpdate"]
+export type HealthCheckProvider = Schemas["ProviderHealthSummary"]
+export type HealthCheckResult = Schemas["HealthCheckResultPublic"]
+export type HealthCheckDisabled = Schemas["HealthCheckDisabled"]
 export type KnownProvider = Schemas["KnownProviderSchema"]
 export type KnownProviderSummary = Schemas["KnownProviderSummarySchema"]
 
-// The organization's own upstream credentials, which are a different table from
-// the four above: a `StoredProvider` is keyed on an instance name and belongs to
-// the process, an `OrgProviderKey` belongs to a tenant and every workspace in it
-// inherits it. Only a hosted deployment shows both concepts, and it shows only
-// this one (`organization_providers` in `GET /v1/bootstrap`'s surfaces).
+// The organization's own upstream credentials: an `OrgProviderKey` belongs to a
+// tenant and every workspace in it inherits it. The deployment's own keys are
+// `HostedProvider` below.
 export type OrgProviderKey = Schemas["OrgProviderKeyPublic"]
 // No alias for the list wrapper: this surface is read through `fetchAllPaged`,
 // which types the envelope itself, so a name for it would have no consumer.
@@ -360,6 +340,43 @@ export type CreateOrganizationDomainRequest =
 export type UpdateOrganizationDomainRequest =
   Schemas["OrganizationDomainUpdateRequest"]
 
+// The providers this deployment serves on its own keys, for a request that
+// brings no credential of its own. Deployment-wide and operator-only, and keyed
+// on the provider (one row each), so every path names the provider rather than
+// a row id. A stored key is known by its last four characters and nothing else.
+// `enabled` defaults to true on a create, so the dashboard may omit it.
+export type HostedProvider = Schemas["HostedProviderPublic"]
+export type HostedProviders = Schemas["HostedProvidersPublic"]
+export type CreateHostedProviderRequest = Defaulted<
+  Schemas["HostedProviderCreateRequest"],
+  "enabled"
+>
+export type UpdateHostedProviderRequest = Schemas["HostedProviderUpdateRequest"]
+export type HostedModel = Schemas["HostedModelPublic"]
+export type HostedModels = Schemas["HostedModelsPublic"]
+export type CreateHostedModelRequest = Schemas["HostedModelCreateRequest"]
+export type UpdateHostedModelRequest = Schemas["HostedModelUpdateRequest"]
+export type HostedModelsRefresh = Schemas["HostedModelsRefreshPublic"]
+export type HostedAvailableModels = Schemas["HostedAvailableModelsPublic"]
+export type HostedCatalogRefresh = Schemas["HostedCatalogRefreshPublic"]
+export type HostedCatalogProviderRefresh =
+  Schemas["HostedCatalogProviderRefreshPublic"]
+export type HostedCatalogPriceUpdate = Schemas["HostedCatalogPriceUpdatePublic"]
+export type HostedCatalogUpdatePreview =
+  Schemas["HostedCatalogUpdatePreviewPublic"]
+export type HostedCatalogUpdateResult = Schemas["HostedCatalogUpdatePublic"]
+export type HostedCatalogUpdateRequest = Schemas["HostedCatalogUpdateRequest"]
+export type TestHostedProviderRequest = Schemas["HostedProviderTestRequest"]
+export type HostedProviderTestResult = Schemas["HostedProviderTestPublic"]
+export type ReencryptHostedProvidersResult =
+  Schemas["HostedProvidersReencryptPublic"]
+export type DeploymentProviderMigration =
+  Schemas["DeploymentProviderMigrationPublic"]
+export type DeploymentProviderMigrationRow =
+  Schemas["DeploymentProviderMigrationRowPublic"]
+export type DeploymentProviderMigrationReviewedRow =
+  Schemas["DeploymentProviderMigrationReviewedRow"]
+
 // ---------------------------------------------------------------------------
 // Routing
 // ---------------------------------------------------------------------------
@@ -380,9 +397,6 @@ export type SetRoutingPolicyRequest = Omit<Schemas["PolicyRequest"], "spec"> & {
 export type AliasResponse = Schemas["AliasResponse"]
 export type CreateAliasRequest = Schemas["AliasRequest"]
 export type RouterStatus = Schemas["RouterStatus"]
-export type LearnedPolicy = Schemas["LearnedPolicy"]
-export type RecordedPool = Schemas["RecordedPool"]
-export type ScoredExample = Schemas["ScoredExample"]
 
 // ---------------------------------------------------------------------------
 // Settings, tools and guardrails
@@ -395,12 +409,12 @@ export type MailSettings = Schemas["MailSettings"]
 export type SendTestMailRequest = Schemas["SendTestMailRequest"]
 export type SendTestMailResponse = Schemas["SendTestMailResponse"]
 export type MaintenanceMode = Schemas["MaintenanceMode"]
-export type UpdateMaintenanceModeRequest =
-  Schemas["UpdateMaintenanceModeRequest"]
 export type ManagedTool = Schemas["ManagedTool"]
 export type ToolsResponse = Schemas["ToolsResponse"]
 export type ToolSettingField = Schemas["ToolSettingField"]
 export type ToolSettingsResponse = Schemas["ToolSettingsResponse"]
+export type SandboxCredentialPublic = Schemas["SandboxCredentialPublic"]
+export type SandboxCredentialRequest = Schemas["SandboxCredentialRequest"]
 export type UpdateToolSettingsRequest = Schemas["UpdateToolSettingsRequest"]
 export type TestServiceResponse = Schemas["TestServiceResponse"]
 
@@ -408,7 +422,6 @@ export type TestServiceResponse = Schemas["TestServiceResponse"]
 // guardrails service has built, and the `validate_kwargs` each one accepts. See
 // `src/gateway/services/guardrail_catalog.py`.
 export type GuardrailCatalog = Schemas["GuardrailCatalog"]
-export type GuardrailProfileSpec = Schemas["GuardrailProfileSpec"]
 export type GuardrailParameterSpec = Schemas["GuardrailParameterSpec"]
 
 // The guardrails this gateway can build itself, as the installed any-guardrail
@@ -416,8 +429,6 @@ export type GuardrailParameterSpec = Schemas["GuardrailParameterSpec"]
 // `build_builtin_guardrail_catalog` in the same module.
 export type BuiltInGuardrailCatalog = Schemas["BuiltInGuardrailCatalog"]
 export type BuiltInGuardrailSpec = Schemas["BuiltInGuardrailSpec"]
-export type GuardrailCategory = Schemas["GuardrailCategory"]
-export type RequirementGroup = Schemas["RequirementGroup"]
 
 // ---------------------------------------------------------------------------
 // Rate limit rules
@@ -441,7 +452,7 @@ export type UpdateSearchToolRequest = Schemas["UpdateSearchToolRequest"]
 // Tenancy: organizations, workspaces, and the memberships joining them
 //
 // Rehomed from the platform with their shapes intact, which is the point: the
-// pages built on them here are the ones otari.ai's control plane brings across
+// pages built on them here are the ones otari.ai brings across
 // at M5, so a renamed field would have to be reconciled twice.
 // ---------------------------------------------------------------------------
 // One organization is provisioned at first boot and that is what most
@@ -633,6 +644,10 @@ export type GuardrailTestResult =
 // bearer token is write-only, so the public shape reports only `has_token`.
 export type WorkspaceMcpServer = Schemas["WorkspaceMcpServerPublic"]
 export type WorkspaceMcpServers = Schemas["WorkspaceMcpServersPublic"]
+export type WorkspaceMcpServerHealth = Schemas["WorkspaceMcpServerHealth"]
+export type McpServerCheckFailure = Schemas["CheckFailure"]
+export type CheckWorkspaceMcpServerRequest =
+  Schemas["WorkspaceMcpServerCheckRequest"]
 export type CreateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCreate"]
 export type UpdateWorkspaceMcpServerRequest =
@@ -649,11 +664,10 @@ export type UpdateWorkspaceMcpServerRequest =
 export type PlaygroundConsent = Schemas["PlaygroundConsentPublic"]
 export type PlaygroundConsentUpdate = Schemas["PlaygroundConsentUpdate"]
 
-// Three states from two fields: a tool the deployment never configured, one a
-// workspace turned off (with the reason), and one that can be attached.
-export type PlaygroundToolStatus = Schemas["PlaygroundToolStatus"]
+// Each tool has three states from two fields: one the deployment never
+// configured, one a workspace turned off (with the reason), and one that can be
+// attached.
 export type PlaygroundTools = Schemas["PlaygroundToolsResponse"]
-export type PlaygroundMcpServer = Schemas["PlaygroundMcpServer"]
 
 // A saved transcript. The list carries a turn count and not the turns, so
 // loading one back into the page is a second request.
@@ -663,7 +677,6 @@ export type SavePlaygroundConversationRequest =
   Schemas["PlaygroundConversationCreate"]
 export type PlaygroundMessage = Schemas["PlaygroundMessagePublic"]
 export type PlaygroundMessages = Schemas["PlaygroundMessagesPublic"]
-export type PlaygroundAttachment = Schemas["PlaygroundAttachment"]
 
 // A file the caller uploaded, in OpenAI's file object shape, which is what the
 // Playground's own upload and listing answer in.
@@ -681,8 +694,6 @@ export type PlaygroundComparisonPreference =
   SavePlaygroundComparisonRequest["preference"]
 
 export type PlaygroundFavoriteModels = Schemas["PlaygroundFavoriteModelsPublic"]
-export type PlaygroundFavoriteModelsUpdate =
-  Schemas["PlaygroundFavoriteModelsUpdate"]
 
 // The OAuth sign-in pair; see `src/gateway/api/routes/auth_oauth.py`. Named
 // here rather than hand-written at the call site so the authorization response

@@ -11,9 +11,10 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { CONTROL_LANE, SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { AdvancedRows } from "@/features/tools/AdvancedRows"
+import { SandboxCredentialRow } from "@/features/tools/SandboxCredentialRow"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
 import type { FieldCopy } from "@/features/tools/ToolSettingRows"
-import { ToolPriceRow, ToolSettingRow } from "@/features/tools/ToolSettingRows"
+import { ToolSettingRow } from "@/features/tools/ToolSettingRows"
 import {
   ToolStatusGroup,
   ToolStatusRow,
@@ -22,14 +23,12 @@ import { WorkspaceCodeExecutionPolicyCard } from "@/features/tools/WorkspaceCode
 import { WorkspaceMcpServersCard } from "@/features/tools/WorkspaceMcpServersCard"
 import { WorkspaceWebSearchCard } from "@/features/tools/WorkspaceWebSearchCard"
 import { useDeploymentOperator } from "@/shared/api/organizations"
-import { usePricing, useSetPricing } from "@/shared/api/pricing"
 import {
   useToolSettings,
   useTools,
   useUpdateToolSettings,
 } from "@/shared/api/tools"
 import { docsSourceHref } from "@/shared/helpers/docs"
-import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
 
 // One settable field maps onto one key of the update request; cast at this one
 // boundary (the keys come from the backend's field list).
@@ -132,7 +131,6 @@ function copyFor(field: ToolSettingField): FieldCopy & {
 
 interface ManagedToolSpec {
   toolId: string
-  pricingKey: string
   /**
    * Whether the service's backend URL is what this tool waits on. A tool gated
    * on anything else must not be sent to that field, which would not turn it on.
@@ -154,8 +152,8 @@ interface GroupSpec {
   /** A heading in `docs/tools.md`. */
   docsAnchor: string
   keys: string[]
-  /** The group the tool's own per-call price belongs in. */
-  isPriced?: boolean
+  /** Where the service's per-call prices are set, linked from this group. */
+  pricingPage?: "/admin/web-search" | "/admin/code-execution"
   /** Where a key the backend added but this page has not been told about goes. */
   catchAll?: boolean
   /** Keys collapsed under an Advanced row at the end of the group. */
@@ -174,11 +172,6 @@ interface ServiceSpec {
   groups: GroupSpec[]
   /** Keys the backend reports that this page deliberately leaves to the API. */
   omit?: string[]
-  /**
-   * Run by the data plane, so a hosted control plane's own settings for it run
-   * nothing: the platform's do.
-   */
-  isDataPlane?: boolean
 }
 
 const SERVICES: ServiceSpec[] = [
@@ -190,13 +183,11 @@ const SERVICES: ServiceSpec[] = [
     managedTools: [
       {
         toolId: "otari_web_search",
-        pricingKey: "otari:web_search",
         urlBacked: true,
         help: "Lets the model search the web for current information.",
       },
       {
         toolId: "otari_web_fetch",
-        pricingKey: "otari:web_fetch",
         // Fetch has no backend of its own, so the default "no backend" reason
         // would send an operator to a URL field that cannot turn it on. It is
         // off unless the deployment says otherwise, and the switch is
@@ -221,13 +212,12 @@ const SERVICES: ServiceSpec[] = [
           "web_search_extract",
           "web_search_intercept",
         ],
-        isPriced: true,
+        pricingPage: "/admin/web-search",
         catchAll: true,
         isOperatorOnly: true,
       },
     ],
     omit: ["web_search_purpose_hint"],
-    isDataPlane: true,
   },
   {
     key: "sandbox",
@@ -238,7 +228,6 @@ const SERVICES: ServiceSpec[] = [
     managedTools: [
       {
         toolId: "otari_code_execution",
-        pricingKey: "otari:code_execution",
         urlBacked: true,
         unavailableSummary: "Unavailable · no sandbox",
         unavailableHelp:
@@ -253,13 +242,12 @@ const SERVICES: ServiceSpec[] = [
         docsAnchor: "code-execution",
         keys: ["sandbox_url"],
         advanced: ["sandbox_session_image", "code_execution_executor"],
-        isPriced: true,
+        pricingPage: "/admin/code-execution",
         catchAll: true,
         isOperatorOnly: true,
       },
     ],
     omit: ["sandbox_purpose_hint"],
-    isDataPlane: true,
   },
   {
     key: "guardrails",
@@ -290,13 +278,34 @@ function SandboxProviderRow({ provider }: { provider: "protocol" | "e2b" }) {
       configKey="sandbox_provider"
       help={
         provider === "e2b"
-          ? "E2B runs the code. Set with sandbox_provider and E2B_API_KEY at startup."
-          : "A sandbox you run. To use E2B instead, set sandbox_provider: e2b and E2B_API_KEY, then restart."
+          ? "E2B runs the code. Set with sandbox_provider at startup."
+          : "A sandbox you run. To use E2B instead, set sandbox_provider: e2b and restart."
       }
       control={
         <span className="text-caption text-foreground">
           {provider === "e2b" ? "E2B" : "Self-hosted"}
         </span>
+      }
+    />
+  )
+}
+
+/** Where the service's tools are priced: the deployment's page, not this one. */
+function PricingLinkRow({
+  to,
+}: {
+  to: "/admin/web-search" | "/admin/code-execution"
+}) {
+  return (
+    <SettingRow
+      label="Price per call"
+      help="Set for the whole deployment, beside its other tool rates."
+      control={
+        <Link to={to} className="font-medium text-link hover:text-link-hover">
+          {to === "/admin/web-search"
+            ? "Web search pricing"
+            : "Code execution pricing"}
+        </Link>
       }
     />
   )
@@ -344,27 +353,13 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   // below. Of the deployment-wide reads above them, the tool settings answer a
   // tenant without the service endpoints in them (otari-ai#1969), and the tool
   // list is a catalog read any session may make, so both are asked
-  // unconditionally. The pricing rows
-  // and the /api/v1/search tools stay operator-only on the server, so they are
-  // still gated on the same answer the sidebar uses rather than fired into a 403.
+  // unconditionally. The /api/v1/search tools stay operator-only on the
+  // server, so they are still gated on the same answer the sidebar uses rather
+  // than fired into a 403.
   const { isOperator } = useDeploymentOperator()
   const query = useToolSettings()
   const tools = useTools()
-  const pricing = usePricing(isOperator)
-  const setPricing = useSetPricing()
   const update = useUpdateToolSettings()
-  const serves = useSurfaces()
-  const isHosted = useDeployment().deployment_type === "hosted"
-
-  // Latest rate per key. /api/v1/pricing is history-shaped (one row per
-  // effective_at), and the newest row is the one in force.
-  const currentRates = (pricing.data ?? []).reduce(
-    (rates, row) =>
-      rates.has(row.model_key)
-        ? rates
-        : rates.set(row.model_key, row.input_price_per_million),
-    new Map<string, number>(),
-  )
 
   const data = query.data
   const disabled = !data
@@ -465,9 +460,6 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
             <Status
               key={tool.id}
               tool={tool}
-              // A hosted control plane never runs a tool itself, so its own
-              // config says nothing about whether the data plane can.
-              showsAvailability={!isHosted}
               docsHref={toolsDocs(spec.docsAnchor ?? service.docsAnchor)}
               help={spec.help}
               urlFieldKey={
@@ -495,16 +487,12 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
             {/* The tools and the switch most readers came for, as one card
                 above the one-time setup. */}
             {service.key === "sandbox" ? (
-              <WorkspaceCodeExecutionPolicyCard
-                isHosted={isHosted}
-                leading={leading}
-              />
+              <WorkspaceCodeExecutionPolicyCard leading={leading} />
             ) : service.key === "web_search" ? (
               <WorkspaceWebSearchCard
                 // Unknown until the tool list answers, and a failed read must
                 // not lock the switch over tools that may well run.
                 isAvailable={
-                  isHosted ||
                   managed.length === 0 ||
                   managed.some(({ tool }) => tool.available)
                 }
@@ -516,28 +504,31 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
 
             {service.groups.map((group) => {
               if (group.isOperatorOnly && !isOperator) return null
-              // A hosted control plane serves no inference, so its own tool
-              // settings run nothing: the platform's do.
-              if (service.isDataPlane && isHosted) return null
               const fields = [
                 ...fieldsFor(group.keys),
                 ...(group.catchAll ? unlisted : []),
               ]
               const advanced = fieldsFor(group.advanced ?? [])
-              // Operator-only inside a group a member also sees: the rate
-              // comes from /api/v1/pricing, whose read is still operator-gated, so
-              // a member would get an editable "unpriced" row that can only
-              // fail on save.
-              const pricedTools =
-                group.isPriced && isOperator ? (service.managedTools ?? []) : []
+              // Operator-only inside a group a member also sees: the page it
+              // links to is the deployment's, which refuses anyone else.
+              const pricingRow =
+                group.pricingPage && isOperator ? (
+                  <PricingLinkRow to={group.pricingPage} />
+                ) : null
+              const sandboxCredential = data?.sandbox_credential
               const providerRow =
                 service.key === "sandbox" && sandboxProvider ? (
-                  <SandboxProviderRow provider={sandboxProvider} />
+                  <>
+                    <SandboxProviderRow provider={sandboxProvider} />
+                    {sandboxCredential ? (
+                      <SandboxCredentialRow credential={sandboxCredential} />
+                    ) : null}
+                  </>
                 ) : null
               if (
                 fields.length === 0 &&
                 advanced.length === 0 &&
-                pricedTools.length === 0 &&
+                !pricingRow &&
                 !providerRow
               )
                 return null
@@ -556,32 +547,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                 >
                   {providerRow}
                   {fields.map(renderField)}
-                  {pricedTools.map(({ pricingKey }) => (
-                    <ToolPriceRow
-                      key={pricingKey}
-                      pricingKey={pricingKey}
-                      configured={currentRates.get(pricingKey) ?? null}
-                      commit={(perMillion) =>
-                        setPricing.mutateAsync({
-                          model_key: pricingKey,
-                          input_price_per_million: perMillion,
-                          // A tool call is one unit; there is no output side
-                          // of it to price.
-                          output_price_per_million: 0,
-                          unit: "requests",
-                        })
-                      }
-                      // Also disabled when the load failed: an errored query
-                      // leaves the rate unknown, and a blur would overwrite a
-                      // price nobody can see.
-                      disabled={pricing.isLoading || Boolean(pricing.error)}
-                      loadError={
-                        pricing.error
-                          ? "Could not read the current price. Reload before editing."
-                          : undefined
-                      }
-                    />
-                  ))}
+                  {pricingRow}
                   {advanced.length > 0 ? (
                     <AdvancedRows>{advanced.map(renderField)}</AdvancedRows>
                   ) : null}
@@ -592,13 +558,11 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
             {/* Last, because it configures the direct search API rather than
                 the model's tools. Below the backend, because a searxng search
                 tool with no URL of its own inherits the one set there.
-                Operator-only: its rows are the deployment's own credentials.
-                A hosted control plane serves no /api/v1/search at all. */}
-            {service.key === "web_search" && isOperator && !isHosted ? (
+                Operator-only: its rows are the deployment's own credentials. */}
+            {service.key === "web_search" && isOperator ? (
               <SearchToolsCard docsHref={toolsDocs("direct-search")} />
             ) : null}
-            {service.key === "guardrails" &&
-            serves("organization_guardrails") ? (
+            {service.key === "guardrails" ? (
               // The organization's own guardrails moved to a page of their own;
               // this rail keeps the deployment's service and says where they went.
               <p className="text-sm text-muted">

@@ -11,7 +11,7 @@ from gateway.auth.models import API_KEY_PREFIX, MIN_API_KEY_LENGTH
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.metrics import REGISTRY
 
-from .conftest import build_test_client
+from .conftest import build_test_client, declared_test_providers
 
 
 def _sample(name: str, labels: dict[str, str] | None = None) -> float:
@@ -26,6 +26,7 @@ def _make_metrics_client(
     rate_limit_rpm: int | None = None,
 ) -> Generator[TestClient]:
     config = GatewayConfig(
+        providers=declared_test_providers(),
         database_url=postgres_url,
         master_key="test-master-key",
         host="127.0.0.1",

@@ -65,7 +65,6 @@ from gateway.services.tenancy.org_provider_key_service import (
     reset_org_provider_cache,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 pytestmark = pytest.mark.asyncio
 
@@ -115,7 +114,7 @@ def _service(db: AsyncSession, *, require_pricing: bool = True) -> OrgProviderMo
     return OrgProviderModelService(
         uow,
         config=config,
-        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+        organizations=OrganizationService(db, membership_listener=None),
         provider_keys=OrgProviderKeyService(db),
         org_pricing=OrganizationPricingService(db, config, model_provider=None),
         models=OrgProviderKeyModelRepository(uow),
@@ -142,7 +141,9 @@ def _discovery(monkeypatch: pytest.MonkeyPatch, *models: str, error: str | None 
 def _defaults(monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]]) -> None:
     """Make the community dataset price exactly ``rates``, and nothing else."""
 
-    def _stub(provider: str | None, model: str, as_of: object) -> ModelPricing | None:
+    def _stub(
+        provider: str | None, model: str, as_of: object, *, implementation: str | None = None
+    ) -> ModelPricing | None:
         if model not in rates:
             return None
         input_rate, output_rate = rates[model]

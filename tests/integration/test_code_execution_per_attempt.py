@@ -37,6 +37,8 @@ from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 
+from .conftest import declared_test_providers
+
 _SANDBOX_URL = "http://127.0.0.1:9999/sandbox"
 _DATED = {"type": "code_execution_20250825", "name": "code_execution"}
 _INTERPRETER = {"type": "code_interpreter", "container": {"type": "auto"}}
@@ -47,6 +49,7 @@ _CLAUDE = "claude-haiku-4-5"
 @pytest.fixture(scope="module")
 def test_config(postgres_url: str) -> GatewayConfig:
     return GatewayConfig(
+        providers=declared_test_providers(),
         database_url=postgres_url,
         master_key="test-master-key",
         host="127.0.0.1",
@@ -340,7 +343,7 @@ def test_a_request_none_of_whose_candidates_can_run_the_code_is_refused(
     response, seen = _post_messages(client, {**api_key_header, _HEADER: "otari"}, _messages_body("claude-then-vertex"))
 
     assert response.status_code == 403, response.text
-    assert "not enabled" in response.json()["detail"]["error"]["message"]
+    assert "not enabled" in response.json()["error"]["message"]
     assert seen.provider_calls == []
     assert seen.loop_calls == []
 

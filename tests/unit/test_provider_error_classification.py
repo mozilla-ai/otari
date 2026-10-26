@@ -34,6 +34,8 @@ from cohere.errors import BadRequestError as CohereBadRequestError
 from fastapi import HTTPException
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
+from gateway.api.routes._attempts import get_shared_rejection, provider_failure_http_exc
+from gateway.api.routes._helpers import SHOULD_RETRY_HEADER, with_retry_hint
 from gateway.api.routes._pipeline import (
     _FORWARDED_PARAMS,
     PROVIDER_ACCOUNT_QUOTA_DETAIL,
@@ -52,19 +54,15 @@ from gateway.api.routes._pipeline import (
     refusal_code,
     stream_error_code,
     stream_error_message,
-)
-from gateway.api.routes._platform import (
-    SHOULD_RETRY_HEADER,
-    _provider_failure_http_exc,
-    get_shared_rejection,
-    is_provider_credential_rejection,
-    with_retry_hint,
+    with_provider_failure,
 )
 from gateway.core.error_codes import PROVIDER_CREDENTIAL_REJECTED, PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.inference import (
+    is_provider_credential_rejection,
     is_retry_futile,
     is_upstream_request_fault,
+    provider_failure,
     upstream_retry_after,
 )
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
@@ -361,8 +359,8 @@ def test_retry_after_read_through_the_exception_chain() -> None:
     assert upstream_retry_after(_WrappedError(429, _rate_limited_with("7"))) == "7"
 
 
-def test_platform_terminal_exc_forwards_retry_after() -> None:
-    exc = _provider_failure_http_exc(_rate_limited_with("34"), fallback_detail="LLM provider error")
+def test_terminal_exc_forwards_retry_after() -> None:
+    exc = provider_failure_http_exc(_rate_limited_with("34"), fallback_detail="LLM provider error")
     assert exc.status_code == 429
     assert exc.headers == {"Otari-Error-Code": "upstream_rate_limited", "Retry-After": "34"}
 
@@ -382,15 +380,14 @@ def test_gateway_fault_details_never_echo_the_raw_message() -> None:
         assert "abc123" not in mapping.detail
 
 
-def test_platform_terminal_exc_uses_classified_status() -> None:
-    """Platform-mode terminal failures get the same classified status as the
-    standalone adapters, so the production path is not stuck on a generic 502."""
-    exc = _provider_failure_http_exc(_StatusError(404), fallback_detail="LLM provider error")
+def test_terminal_exc_uses_classified_status() -> None:
+    """A terminal failure gets its classified status, not a generic 502."""
+    exc = provider_failure_http_exc(_StatusError(404), fallback_detail="LLM provider error")
     assert exc.status_code == 404
 
 
-def test_platform_terminal_exc_falls_back_to_generic() -> None:
-    exc = _provider_failure_http_exc(Exception(_RAW), fallback_detail="LLM provider error")
+def test_terminal_exc_falls_back_to_generic() -> None:
+    exc = provider_failure_http_exc(Exception(_RAW), fallback_detail="LLM provider error")
     assert exc.status_code == 502
     assert exc.detail == "LLM provider error"
     assert "SECRET" not in str(exc.detail)
@@ -401,15 +398,14 @@ def test_platform_terminal_exc_falls_back_to_generic() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_missing_credential_maps_to_424_naming_the_provider_and_its_variable() -> None:
+def test_missing_credential_maps_to_424_naming_the_provider() -> None:
     """Nothing went upstream, so the answer is the deployment's to fix: a client
-    error that names the provider and the variable, in the gateway's own words."""
+    error that names the provider, in the gateway's own words."""
     mapping = classify_provider_error(MissingApiKeyError("anthropic", "ANTHROPIC_API_KEY"))
     assert mapping is not None
     assert mapping.status_code == 424
     assert mapping.detail == MissingCredential("anthropic", "ANTHROPIC_API_KEY").detail
     assert "'anthropic'" in mapping.detail
-    assert "ANTHROPIC_API_KEY" in mapping.detail
     assert "Please provide it in the config" not in mapping.detail
 
 
@@ -472,14 +468,19 @@ def test_missing_credential_error_code_is_not_sent_for_an_upstream_424() -> None
     assert provider_error_headers(_StatusError(424), 424) is None
 
 
-def test_platform_terminal_exc_for_a_missing_credential_is_a_424() -> None:
-    exc = _provider_failure_http_exc(MissingApiKeyError("anthropic", "ANTHROPIC_API_KEY"), fallback_detail="x")
+def test_terminal_exc_for_a_missing_credential_is_a_424() -> None:
+    exc = provider_failure_http_exc(MissingApiKeyError("anthropic", "ANTHROPIC_API_KEY"), fallback_detail="x")
     assert exc.status_code == 424
     assert (exc.headers or {}).get("Otari-Error-Code") == PROVIDER_NOT_CONFIGURED
 
 
-def test_missing_credential_detail_without_a_variable() -> None:
-    assert MissingCredential("vertexai", None).detail.endswith("through the dashboard.")
+@pytest.mark.parametrize("alias", [None, "fast"])
+def test_missing_credential_detail_names_only_what_a_caller_can_configure(alias: str | None) -> None:
+    detail = MissingCredential("vertexai", "VERTEXAI_API_KEY", alias=alias).detail
+    assert "hosted provider" in detail
+    assert "its own provider key" in detail
+    assert "config.yml" not in detail
+    assert "VERTEXAI_API_KEY" not in detail
 
 
 # ---------------------------------------------------------------------------
@@ -1299,15 +1300,15 @@ def test_no_retry_is_not_sent_below_500() -> None:
     assert with_retry_hint(rejected, mapping.status_code, None) is None
 
 
-def test_platform_terminal_exc_tells_a_client_not_to_retry_a_local_fault() -> None:
-    exc = _provider_failure_http_exc(KeyError("content"), fallback_detail="LLM provider error")
+def test_terminal_exc_tells_a_client_not_to_retry_a_local_fault() -> None:
+    exc = provider_failure_http_exc(KeyError("content"), fallback_detail="LLM provider error")
     assert exc.status_code == 502
     assert exc.detail == "LLM provider error"
     assert exc.headers == _NO_RETRY
 
 
-def test_platform_terminal_exc_keeps_retries_for_an_upstream_outage() -> None:
-    exc = _provider_failure_http_exc(_StatusError(503), fallback_detail="LLM provider error")
+def test_terminal_exc_keeps_retries_for_an_upstream_outage() -> None:
+    exc = provider_failure_http_exc(_StatusError(503), fallback_detail="LLM provider error")
     assert exc.status_code == 502
     assert exc.headers is None
 
@@ -1577,7 +1578,7 @@ def test_a_failure_inside_the_gateway_keeps_the_fixed_detail() -> None:
 
 def test_the_502_keeps_its_retry_behavior() -> None:
     """Only the detail changed: a provider 5xx still carries no x-should-retry, so a client retries it."""
-    answer = _provider_failure_http_exc(_StatusError(500), fallback_detail="LLM provider error")
+    answer = provider_failure_http_exc(_StatusError(500), fallback_detail="LLM provider error")
     assert answer.status_code == 502
     assert answer.detail == "The provider failed the request with HTTP 500"
     assert SHOULD_RETRY_HEADER not in (answer.headers or {})
@@ -1658,3 +1659,103 @@ def test_an_image_refusal_beside_another_rejection_shares_the_generic_400() -> N
 
     assert rejection is not None
     assert rejection.headers == {"Otari-Error-Code": "all_candidates_rejected"}
+
+
+class _BodiedStatusError(_StatusError):
+    """An upstream error with the parsed body an SDK attaches, like Exa's tagged errors."""
+
+    def __init__(self, status_code: int, body: dict[str, Any]) -> None:
+        super().__init__(status_code)
+        self.body = body
+
+
+_EXA_OVERLOADED = {"requestId": "r1", "error": "Service overloaded", "tag": "SERVICE_OVERLOADED"}
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (
+            _BodiedStatusError(503, _EXA_OVERLOADED),
+            {
+                "Otari-Error-Provider": "exa",
+                "Otari-Error-Status": "503",
+                "Otari-Error-Tag": "SERVICE_OVERLOADED",
+                "Otari-Error-Retryable": "true",
+            },
+        ),
+        (
+            _StatusError(500),
+            {
+                "Otari-Error-Provider": "exa",
+                "Otari-Error-Status": "500",
+                "Otari-Error-Tag": "http_error",
+                "Otari-Error-Retryable": "true",
+            },
+        ),
+        (
+            OpenAIAPITimeoutError(request=httpx.Request("POST", "https://api.example/v1")),
+            {"Otari-Error-Provider": "exa", "Otari-Error-Tag": "timeout", "Otari-Error-Retryable": "true"},
+        ),
+        (
+            _openai_connection_error(httpx.ConnectError("refused")),
+            {"Otari-Error-Provider": "exa", "Otari-Error-Tag": "network", "Otari-Error-Retryable": "true"},
+        ),
+    ],
+    ids=["tagged-5xx", "untagged-5xx", "timeout", "network"],
+)
+def test_a_provider_side_failure_names_the_provider_status_and_tag(exc: Exception, expected: dict[str, str]) -> None:
+    error = with_provider_failure(HTTPException(status_code=502, detail="x"), exc, "exa")
+
+    assert error.headers == expected
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        _StatusError(402),
+        _rate_limited_with("3"),
+        _BodiedStatusError(400, {"error": {"message": "credit balance is too low", "code": "billing"}}),
+    ],
+    ids=["billing", "rate-limited", "bad-request"],
+)
+def test_a_4xx_shows_nothing_of_the_gateways_account(exc: Exception) -> None:
+    assert provider_failure(exc, "openai") is None
+
+
+def test_a_provider_code_that_is_not_an_identifier_is_not_repeated() -> None:
+    exc = _BodiedStatusError(503, {"error": {"code": "see https://status.example/ for details"}})
+
+    failure = provider_failure(exc, "openai")
+
+    assert failure is not None
+    assert failure.tag == "http_error"
+
+
+def test_no_provider_no_fields() -> None:
+    assert provider_failure(_StatusError(503), None) is None
+
+
+def test_a_gateway_4xx_is_left_alone() -> None:
+    error = with_provider_failure(HTTPException(status_code=429, detail="x"), _StatusError(503), "exa")
+
+    assert error.headers is None
+
+
+def test_a_stream_error_event_carries_the_providers_failure() -> None:
+    exc = _BodiedStatusError(503, _EXA_OVERLOADED)
+    failure = provider_failure(exc, "exa")
+    assert failure is not None
+
+    event = openai_error_event(
+        OPENAI_STREAM_FORMAT, stream_error_code(exc), stream_error_message(exc), failure.as_dict()
+    )
+
+    payload = json.loads(event.removeprefix("data: "))
+    assert payload["error"]["code"] == "provider_error"
+    assert payload["error"]["provider_failure"] == {
+        "provider": "exa",
+        "status": 503,
+        "tag": "SERVICE_OVERLOADED",
+        "retryable": True,
+    }

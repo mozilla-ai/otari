@@ -15,19 +15,23 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import event
+from sqlalchemy import event, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import dispose_db, init_db
 from gateway.core.unit_of_work import create_unit_of_work
 from gateway.exceptions.traces_exceptions import TraceAmbiguousError
+from gateway.models.traces import TraceSpan
 from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
 from gateway.repositories.traces import TracesRepositories
+from gateway.services.secret_box import generate_secret_key
 from gateway.services.traces import TraceService
 from gateway.services.traces import _service as trace_service_module
+from gateway.services.traces._collector import call_id_digest
 from gateway.types.traces import SpanRecord, TraceFilter, TraceScope, TraceWrite
 
 pytestmark = pytest.mark.asyncio
@@ -74,7 +78,13 @@ def _span(span_id: str, *, kind: str = "step", minutes: int = 0, **fields: Any) 
 
 
 def _write(
-    workspace_id: uuid.UUID, trace_id: str, *spans: SpanRecord, user_id: str = "alice", session_source: str = "harness"
+    workspace_id: uuid.UUID,
+    trace_id: str,
+    *spans: SpanRecord,
+    user_id: str = "alice",
+    session_source: str = "harness",
+    name: str | None = None,
+    harness: str = "claude-code",
 ) -> TraceWrite:
     return TraceWrite(
         workspace_id=workspace_id,
@@ -82,7 +92,8 @@ def _write(
         user_id=user_id,
         api_key_id=None,
         session_source=session_source,
-        harness="claude-code",
+        harness=harness,
+        name=name,
         spans=spans,
     )
 
@@ -103,6 +114,9 @@ async def test_a_write_creates_the_trace_and_totals_its_spans(
                     parent_span_id="req-1",
                     input_tokens=100,
                     output_tokens=20,
+                    cache_read_tokens=60,
+                    cache_write_tokens=30,
+                    reasoning_tokens=5,
                     cost_snapshot=Decimal("0.0049"),
                 ),
                 _span("tool-1", kind="tool", minutes=1, tool_name="Bash", outcome="error"),
@@ -120,6 +134,8 @@ async def test_a_write_creates_the_trace_and_totals_its_spans(
     assert summary.started_at == _T0
     assert summary.last_activity_at == _T0 + timedelta(minutes=1, seconds=2)
     assert [span.span_id for span in detail.spans] == ["llm-1", "req-1", "tool-1"]
+    llm = detail.spans[0]
+    assert (llm.cache_read_tokens, llm.cache_write_tokens, llm.reasoning_tokens) == (60, 30, 5)
     assert detail.truncated is False
 
 
@@ -136,6 +152,51 @@ async def test_a_replayed_write_is_counted_as_duplicate_and_adds_nothing(
     detail = await store.get(TraceScope.deployment(), "session-1", span_limit=10)
     assert detail is not None
     assert (detail.summary.span_count, detail.summary.input_tokens) == (2, 10)
+
+
+async def test_a_requests_cost_counts_once_on_its_session_and_is_not_a_span(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    priced = _write(
+        workspace,
+        "session-1",
+        _span("usage-1", kind="llm", operation="usage", request_id="req_1", cost_snapshot=Decimal("0.25")),
+        session_source="otlp",
+    )
+    await store.write((_write(workspace, "session-1", _span("llm-1", kind="llm", request_id="req_1")),))
+    await store.write((priced,))
+
+    replay = await store.write((priced,))
+
+    assert replay.duplicate == 1
+    detail = await store.get(TraceScope.deployment(), "session-1", span_limit=10)
+    assert detail is not None
+    assert (detail.summary.span_count, detail.summary.cost_snapshot) == (1, Decimal("0.25"))
+
+
+async def test_a_logs_only_export_creates_no_session_until_its_spans_arrive(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    priced = _write(
+        workspace,
+        "session-1",
+        _span("usage-1", kind="llm", operation="usage", request_id="req_1", cost_snapshot=Decimal("0.25")),
+        session_source="otlp",
+    )
+
+    await store.write((priced,))
+
+    scope = TraceScope.deployment()
+    assert await store.count(scope, TraceFilter()) == 0
+    assert (await store.search(scope, TraceFilter(), limit=10, offset=0)).items == ()
+    assert await store.series(scope, TraceFilter(), bucket="hour") == ()
+
+    await store.write((_write(workspace, "session-1", _span("llm-1", kind="llm", request_id="req_1")),))
+
+    [summary] = (await store.search(scope, TraceFilter(), limit=10, offset=0)).items
+    assert (summary.span_count, summary.cost_snapshot) == (1, Decimal("0.25"))
 
 
 async def test_a_span_repeated_inside_one_write_is_stored_once(
@@ -229,7 +290,7 @@ async def test_search_pages_newest_activity_first_and_filters(
     first_page = await store.search(scope, TraceFilter(), limit=2, offset=0)
     second_page = await store.search(scope, TraceFilter(), limit=2, offset=2)
     failing = await store.search(scope, TraceFilter(has_error=True), limit=10, offset=0)
-    by_prefix = await store.search(scope, TraceFilter(trace_id_prefix="session-2"), limit=10, offset=0)
+    by_search = await store.search(scope, TraceFilter(search="session-2"), limit=10, offset=0)
     windowed = await store.count(scope, TraceFilter(start=_T0 + timedelta(minutes=1)))
 
     assert [item.trace_id for item in first_page.items] == ["session-2", "session-1"]
@@ -237,18 +298,85 @@ async def test_search_pages_newest_activity_first_and_filters(
     assert [item.trace_id for item in second_page.items] == ["session-0"]
     assert second_page.has_more is False
     assert [item.trace_id for item in failing.items] == ["session-1"]
-    assert [item.trace_id for item in by_prefix.items] == ["session-2"]
+    assert [item.trace_id for item in by_search.items] == ["session-2"]
     assert windowed == 2
 
 
-async def test_a_prefix_search_treats_wildcards_literally(
+async def test_a_window_lists_the_sessions_active_in_it_as_the_series_counts_them(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    """A session still running past the window's end is listed, as the chart counts it."""
+    workspace, _ = tenants
+    await store.write(
+        (
+            _write(workspace, "spanning", _span("start", minutes=0), _span("later", minutes=30)),
+            _write(workspace, "before", _span("only", minutes=5)),
+            _write(workspace, "after", _span("only", minutes=20)),
+        )
+    )
+    window = TraceFilter(start=_T0 + timedelta(minutes=10), end=_T0 + timedelta(minutes=20))
+
+    page = await store.search(TraceScope.deployment(), window, limit=10, offset=0)
+
+    assert [item.trace_id for item in page.items] == ["spanning"]
+    assert await store.count(TraceScope.deployment(), window) == 1
+
+
+async def test_a_search_finds_any_part_of_the_id_harness_or_user_in_any_case(
     store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
 ) -> None:
     workspace, _ = tenants
+    await store.write(
+        (
+            _write(workspace, "s-1a2b3c", _span("req-1"), user_id="alice", harness="claude-code"),
+            _write(workspace, "s-4d5e6f", _span("req-2"), user_id="bob", harness="codex"),
+        )
+    )
+    scope = TraceScope.workspaces(frozenset({workspace}))
+
+    async def found(text: str) -> list[str]:
+        return sorted(
+            item.trace_id for item in (await store.search(scope, TraceFilter(search=text), limit=10, offset=0)).items
+        )
+
+    assert await found("1A2B") == ["s-1a2b3c"]
+    assert await found("CODEX") == ["s-4d5e6f"]
+    assert await found("lic") == ["s-1a2b3c"]
+    assert await found("s-") == ["s-1a2b3c", "s-4d5e6f"]
+    assert await found("gemini") == []
+
+
+async def test_a_search_treats_wildcards_literally(store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]) -> None:
+    workspace, _ = tenants
     await store.write((_write(workspace, "session-1", _span("req-1")),))
 
-    assert await store.count(TraceScope.deployment(), TraceFilter(trace_id_prefix="%")) == 0
-    assert await store.count(TraceScope.deployment(), TraceFilter(trace_id_prefix="session_")) == 0
+    assert await store.count(TraceScope.deployment(), TraceFilter(search="%")) == 0
+    assert await store.count(TraceScope.deployment(), TraceFilter(search="session_")) == 0
+
+
+async def test_a_search_finds_a_session_by_any_part_of_its_name_in_any_case_inside_the_scope_only(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, other = tenants
+    await store.write(
+        (
+            _write(workspace, "s-aaa", _span("req-1"), session_source="client", name="hackbot-1234"),
+            _write(workspace, "s-bbb", _span("req-2"), session_source="client", name="hackbot-1299"),
+            _write(other, "s-ccc", _span("req-3"), session_source="client", name="hackbot-1234"),
+        )
+    )
+    scope = TraceScope.workspaces(frozenset({workspace}))
+
+    exact = await store.search(scope, TraceFilter(search="hackbot-1234"), limit=10, offset=0)
+    prefix = await store.search(scope, TraceFilter(search="hackbot-12"), limit=10, offset=0)
+    middle = await store.search(scope, TraceFilter(search="BOT-12"), limit=10, offset=0)
+
+    assert [(item.trace_id, item.name) for item in exact.items] == [("s-aaa", "hackbot-1234")]
+    assert sorted(item.trace_id for item in prefix.items) == ["s-aaa", "s-bbb"]
+    assert sorted(item.trace_id for item in middle.items) == ["s-aaa", "s-bbb"]
+    assert await store.count(scope, TraceFilter(search="hackbot_")) == 0
+    assert await store.count(scope, TraceFilter(search="HACKBOT-1234")) == 1
+    assert await store.count(scope, TraceFilter(search="S-AAA")) == 1
 
 
 async def test_a_trace_with_more_spans_than_asked_for_says_it_was_cut(
@@ -403,4 +531,101 @@ async def test_a_series_never_reads_traces_older_than_its_buckets_can_reach(
 
     assert [point.bucket for point in series] == ["2026-10-07T14:00:00Z", "2026-10-07T15:00:00Z"]
     [grouped] = statements
-    assert "started_at >=" in grouped
+    assert "last_activity_at >=" in grouped
+
+
+async def test_a_session_counts_in_every_bucket_it_was_active_in(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    await store.write(
+        (
+            _write(workspace, "long", _span("start", minutes=0), _span("later", minutes=35)),
+            _write(workspace, "short", _span("only", minutes=50, outcome="error")),
+        )
+    )
+
+    series = await store.series(TraceScope.deployment(), TraceFilter(), bucket="30m")
+
+    assert [(point.bucket, point.succeeded, point.failed) for point in series] == [
+        ("2026-10-07T12:00:00Z", 1, 0),
+        ("2026-10-07T12:30:00Z", 1, 1),
+    ]
+
+
+async def test_a_minute_series_is_aligned_to_the_minute(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    await store.write((_write(workspace, "s", _span("a", minutes=3), _span("b", minutes=5)),))
+
+    series = await store.series(TraceScope.deployment(), TraceFilter(), bucket="1m")
+
+    assert [point.bucket for point in series] == [f"2026-10-07T12:0{minute}:00Z" for minute in (3, 4, 5)]
+
+
+async def test_a_series_fails_a_session_for_its_own_errors_and_not_its_tools(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    await store.write(
+        (
+            _write(workspace, "recovered", _span("req-1"), _span("tool-1", kind="tool", outcome="error")),
+            _write(workspace, "failed", _span("req-1", outcome="error"), _span("tool-1", kind="tool", outcome="error")),
+        )
+    )
+
+    series = await store.series(TraceScope.deployment(), TraceFilter(), bucket="hour")
+
+    assert [(point.succeeded, point.failed) for point in series] == [(1, 1)]
+    page = await store.search(TraceScope.deployment(), TraceFilter(has_error=True), limit=10, offset=0)
+    assert sorted((item.trace_id, item.error_count) for item in page.items) == [("failed", 2), ("recovered", 1)]
+
+
+@pytest.mark.parametrize("legacy", ["call/" + "x" * 80, "toolu_01AbCdEf"])
+async def test_a_tool_call_id_an_older_version_stored_as_sent_reads_back_as_its_digest(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, legacy: str
+) -> None:
+    workspace, _ = tenants
+    await store.write((_write(workspace, "session-1", _span("tool-1", kind="tool", tool_name="Bash")),))
+    await async_db.execute(update(TraceSpan).where(col(TraceSpan.span_id) == "tool-1").values(tool_call_id=legacy))
+    await async_db.commit()
+
+    detail = await store.get(TraceScope.deployment(), "session-1", span_limit=10)
+
+    assert detail is not None
+    assert detail.spans[0].tool_call_id == call_id_digest(workspace, legacy)
+
+
+async def test_what_a_span_was_about_is_stored_encrypted_and_reads_back(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    command = "cat ~/.aws/credentials"
+    await store.write(
+        (_write(workspace, "session-1", _span("tool-1", kind="tool", tool_name="Bash", content={"command": command})),)
+    )
+
+    sealed = (
+        await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.span_id) == "tool-1"))
+    ).scalar_one()
+    assert sealed is not None and "credentials" not in sealed
+    detail = await store.get(TraceScope.deployment(), "session-1", span_limit=10)
+    assert detail is not None
+    assert dict(detail.spans[0].content) == {"command": command}
+
+
+async def test_without_a_key_what_a_span_was_about_is_not_stored(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+    workspace, _ = tenants
+    await store.write(
+        (_write(workspace, "session-1", _span("tool-1", kind="tool", content={"command": "cat ~/.aws/credentials"})),)
+    )
+
+    sealed = (
+        await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.span_id) == "tool-1"))
+    ).scalar_one()
+    assert sealed is None

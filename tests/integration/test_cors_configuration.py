@@ -152,3 +152,50 @@ def test_cors_wildcard_disables_credentials(postgres_url: str, test_db: Session)
             assert response.headers.get("access-control-allow-credentials") != "true"
     finally:
         dispose_override()
+
+
+def test_cors_preflight_allows_sdk_headers(postgres_url: str, test_db: Session) -> None:
+    """The OpenAI and Anthropic JS SDK headers pass the preflight; trace-context headers still do not."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        cors_allow_origins=["https://trusted.com"],
+    )
+
+    app = create_app(config)
+    override_get_db, dispose_override = build_async_session_override(postgres_url)
+    app.dependency_overrides[get_db] = override_get_db
+
+    # What the OpenAI JS SDK sent from Thunderbolt, plus the Anthropic SDK's own.
+    sdk_headers = (
+        "authorization,content-type,accept,x-stainless-os,x-stainless-runtime-version,"
+        "x-stainless-package-version,x-stainless-runtime,x-stainless-arch,x-stainless-retry-count,"
+        "x-stainless-lang,x-stainless-timeout,anthropic-version,anthropic-beta,"
+        "anthropic-dangerous-direct-browser-access"
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.options(
+                f"{API_ROOT}/chat/completions",
+                headers={
+                    "Origin": "https://trusted.com",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": sdk_headers,
+                },
+            )
+            assert response.status_code == 200
+            assert response.headers.get("access-control-allow-origin") == "https://trusted.com"
+
+            response = client.options(
+                f"{API_ROOT}/chat/completions",
+                headers={
+                    "Origin": "https://trusted.com",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": f"{sdk_headers},traceparent",
+                },
+            )
+            assert response.status_code == 400
+    finally:
+        dispose_override()

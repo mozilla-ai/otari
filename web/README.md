@@ -1,8 +1,7 @@
 # Otari admin dashboard
 
 A React + [HeroUI v3](https://www.heroui.com) single-page app for Otari. It
-renders the standalone or hosted management dashboard and the hybrid gateway
-landing page from the deployment contract returned by `/api/v1/bootstrap`.
+renders the management dashboard from the deployment contract returned by `/api/v1/bootstrap`.
 
 Local sign-in exchanges the deployment's current credential for an HttpOnly
 session cookie. The credential is not written to browser storage, and page
@@ -30,7 +29,7 @@ scripts cannot read the cookie.
 
 `client/` is generated from the OpenAPI spec, `main.tsx` is the entry, and
 `styles/globals.css` is the one stylesheet. This is `otari-ai/frontend/src`'s
-layout, because that control-plane UI moves into this repo at M5.
+layout, because otari.ai's own pages move into this repo at M5.
 
 `pnpm run lint` fails a PR that has a feature importing `app/`, or `shared/`
 importing either of the layers above it. No layer may import an overlay's tree,
@@ -95,8 +94,5 @@ builds on every change under `web/`.
 The gateway serves `index.html` at `/` and the hashed assets under `/assets`
 (see `src/gateway/main.py` and `src/gateway/dashboard.py`). The app routes on
 hash history (`/#/models`, `/#/usage`), so no server-side catch-all route is
-needed. All three modes serve the same bundle: the page asks `GET /api/v1/bootstrap`
-which deployment it reached, and a hybrid gateway, having no local management
-API, boots into the data-plane landing page instead of the management shell.
-Without a built bundle the root falls back to the get-started tutorial in
-all three modes.
+needed. Without a built bundle the root falls back to the
+get-started tutorial.

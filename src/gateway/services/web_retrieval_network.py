@@ -16,8 +16,9 @@ import zlib
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from http.cookiejar import Cookie, CookieJar
 from time import monotonic
-from typing import ClassVar, Protocol, TypeAlias, TypeVar
+from typing import Any, ClassVar, Protocol, TypeAlias, TypeVar
 from urllib.request import getproxies_environment
 
 import httpx
@@ -134,7 +135,8 @@ class ValidatedTarget:
         return self.canonical_url.display_url
 
 
-def _blocked_address_reason(address: IPAddress) -> str | None:
+def blocked_address_reason(address: IPAddress) -> str | None:
+    """Why the retrieval clients may not reach ``address``, or ``None`` for a public one."""
     if address.is_unspecified:
         return "unspecified"
     if address.is_loopback:
@@ -218,7 +220,7 @@ async def validate_retrieval_target(
     seen: set[IPAddress] = set()
     for address in resolved:
         canonical_address = ipaddress.ip_address(str(address))
-        reason = _blocked_address_reason(canonical_address)
+        reason = blocked_address_reason(canonical_address)
         if reason is not None and not allow_private:
             raise RetrievalAddressError(f"destination resolves to a disallowed {reason} address")
         if canonical_address not in seen:
@@ -267,6 +269,16 @@ class RedirectTracker:
         self._visited.add(next_url.redirect_loop_key)
         self._current = next_url
         return next_url
+
+
+class NoCookieJar(CookieJar):
+    """A jar that keeps no cookie, for a client that serves every tenant: one's cookie never rides on another's call."""
+
+    def set_cookie(self, cookie: Cookie) -> None:
+        return None
+
+    def extract_cookies(self, response: Any, request: Any) -> None:
+        return None
 
 
 def is_redirect_status(status_code: int) -> bool:

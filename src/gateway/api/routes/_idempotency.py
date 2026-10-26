@@ -4,10 +4,9 @@ A non-streaming completion that carries the header claims it before the budget
 is reserved. A retry with the same key and body is answered with the stored
 response (and its original request ID and cost) without calling the provider or
 billing again, or is answered 409 while the request holding the key still runs.
-Streaming requests and hybrid mode ignore the header: a stream the client
-dropped left no complete response to replay (it is billed only for the tokens
-the provider reported), and a hybrid gateway has no database to hold the key
-in. So does a deployment without ``OTARI_SECRET_KEY``, since the stored
+Streaming requests ignore the header: a stream the client dropped left no
+complete response to replay (it is billed only for the tokens the provider
+reported). So does a deployment without ``OTARI_SECRET_KEY``, since the stored
 response is encrypted with it.
 """
 
@@ -21,7 +20,7 @@ from typing import Annotated, Any
 from fastapi import Depends, Header, Request, Response
 from fastapi.encoders import jsonable_encoder
 
-from gateway.api.deps import build_inference_service, get_config, get_unit_of_work_if_needed
+from gateway.api.deps import build_inference_service, get_config, get_unit_of_work
 from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
 from gateway.core.config import (
     ATTEMPT_COUNT_HEADER,
@@ -33,6 +32,7 @@ from gateway.core.config import (
     REQUEST_ID_HEADER,
     ROUTER_HEADER,
     ROUTER_TASK_HEADER,
+    TAGS_HEADER,
     GatewayConfig,
 )
 from gateway.core.unit_of_work import UnitOfWork
@@ -75,6 +75,10 @@ _REQUEST_SHAPING_HEADERS = (
     CONVERSATION_HEADER,
     END_USER_BUDGET_HEADER,
 )
+# Shaping headers added after keys were first stored. Each counts only when
+# sent, so a retry without it still matches a claim fingerprinted before it
+# existed; it is named in its option so two of them cannot collide.
+_LATER_SHAPING_HEADERS = (TAGS_HEADER,)
 
 INVALID_IDEMPOTENCY_KEY_DETAIL = (
     f"{IDEMPOTENCY_KEY_HEADER} must be 1 to {IdempotentRequest.MAX_KEY_LENGTH} printable ASCII characters."
@@ -114,6 +118,15 @@ def _header_values(raw_request: Request, name: str) -> str | None:
     return ",".join(values) if values else None
 
 
+def _shaping_options(raw_request: Request) -> list[str | None]:
+    options = [_header_values(raw_request, name) for name in _REQUEST_SHAPING_HEADERS]
+    for name in _LATER_SHAPING_HEADERS:
+        value = _header_values(raw_request, name)
+        if value is not None:
+            options.append(f"{name}: {value}")
+    return options
+
+
 class IdempotencyGuard:
     """One request's hold on its ``Idempotency-Key``, released unless the request completes.
 
@@ -147,7 +160,7 @@ class IdempotencyGuard:
             self._key,
             endpoint=endpoint,
             body=await self._raw_request.body(),
-            options=[_header_values(self._raw_request, name) for name in _REQUEST_SHAPING_HEADERS],
+            options=_shaping_options(self._raw_request),
             user_id=user_id,
             api_key_id=api_key_id,
         )
@@ -210,7 +223,7 @@ class IdempotencyGuard:
 async def get_idempotency_guard(
     raw_request: Request,
     config: Annotated[GatewayConfig, Depends(get_config)],
-    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     idempotency_key: Annotated[
         str | None,
         Header(
@@ -220,7 +233,7 @@ async def get_idempotency_guard(
                 "A retry with the same key and body returns the original response, request ID and "
                 "cost without calling the provider or billing again. A retry while the original is still "
                 "running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. "
-                "Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, "
+                "Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, "
                 "which encrypts the stored response."
             ),
         ),
@@ -228,7 +241,7 @@ async def get_idempotency_guard(
 ) -> AsyncIterator[IdempotencyGuard]:
     """Yield the request's guard, and release its claim if the request did not complete."""
     service = None
-    if uow is not None and idempotency_key is not None and InferenceService.is_enabled(config):
+    if idempotency_key is not None and InferenceService.is_enabled(config):
         service = build_inference_service(uow, config)
 
     async def keep_alive(request: IdempotentRequest, claimed: Claimed) -> None:

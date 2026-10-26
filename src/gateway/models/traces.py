@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, ForeignKey, ForeignKeyConstraint, Index, String, Uuid, false, func
+from sqlalchemy import JSON, BigInteger, ForeignKey, ForeignKeyConstraint, Index, String, Text, Uuid, false, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
@@ -38,6 +38,16 @@ class Trace(Base):
         Index("ix_traces_last_activity", "last_activity_at"),
         # Retention's age bound.
         Index("ix_traces_started_at", "started_at"),
+        # Search matches a prefix of the trace id or of the name. A pattern-ops index
+        # serves a prefix ``LIKE`` whatever the database's collation, and indexing both
+        # columns lets PostgreSQL answer the search's ``OR`` from the two together.
+        Index(
+            "ix_traces_workspace_trace_id_pattern",
+            "workspace_id",
+            "trace_id",
+            postgresql_ops={"trace_id": "text_pattern_ops"},
+        ),
+        Index("ix_traces_workspace_name", "workspace_id", "name", postgresql_ops={"name": "text_pattern_ops"}),
     )
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
@@ -57,6 +67,8 @@ class Trace(Base):
     span_count: Mapped[int] = mapped_column(default=0, server_default="0")
     # Spans that ended in an error a fallback did not recover.
     error_count: Mapped[int] = mapped_column(default=0, server_default="0")
+    # The ones among them that fail the session, as the trace service decides.
+    failing_error_count: Mapped[int] = mapped_column(default=0, server_default="0")
     # A long session's sum outgrows int32; one span's count does not.
     input_tokens: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     output_tokens: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
@@ -109,6 +121,9 @@ class TraceSpan(Base):
     provider: Mapped[str | None] = mapped_column(String)
     input_tokens: Mapped[int | None] = mapped_column()
     output_tokens: Mapped[int | None] = mapped_column()
+    cache_read_tokens: Mapped[int | None] = mapped_column()
+    cache_write_tokens: Mapped[int | None] = mapped_column()
+    reasoning_tokens: Mapped[int | None] = mapped_column()
     cost_snapshot: Mapped[Decimal | None] = mapped_column(UsdCost())
     tool_name: Mapped[str | None] = mapped_column(String)
     tool_type: Mapped[str | None] = mapped_column(String)
@@ -119,6 +134,29 @@ class TraceSpan(Base):
     otel_span_id: Mapped[str | None] = mapped_column(String(TRACE_ID_MAX_LENGTH))
     # Allowlisted, typed attributes only (``types.traces.SPAN_ATTRIBUTES``).
     attributes: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    # What the span was about, sealed with OTARI_SECRET_KEY by ``services.traces._content``;
+    # kept only where the deployment keeps content (``trace_content_enabled``).
+    content_sealed: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+
+
+class TraceGuardrailDefinition(Base):
+    """One version of an agent guardrail a coding agent's hook checked: its gates, and what each says.
+
+    A gate span names the version it was checked against by its fingerprint, so a
+    read can say what a gate is for without each check carrying it. The fingerprint
+    is recomputed from the gates when one is stored, and a stored one never changes.
+    """
+
+    __tablename__ = "trace_guardrail_definitions"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    gates: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
     )

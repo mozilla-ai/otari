@@ -11,10 +11,9 @@ from collections.abc import AsyncIterator, Callable, Generator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 import anyio
-import httpx
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,17 +27,6 @@ if TYPE_CHECKING:
     from gateway.services.pricing import ModelsDevPriceIndex
 
 MODELS_DEV_MINI = ROOT / "tests" / "fixtures" / "models_dev_mini.json"
-
-
-class ControlPlaneHandler(Protocol):
-    """One call to a control plane, as a test answers it."""
-
-    async def __call__(
-        self, *, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
-    ) -> httpx.Response: ...
-
-
-InstallControlPlane = Callable[[ControlPlaneHandler], None]
 
 
 @dataclass(frozen=True)
@@ -117,6 +105,7 @@ def _no_background_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("gateway.main.run_discovery_refresher", _noop)
     monkeypatch.setattr("gateway.main.run_catalog_refresher", _noop)
+    monkeypatch.setattr("gateway.api.routes.health_checks.run_health_check_worker", _noop)
 
 
 @pytest.fixture(autouse=True)
@@ -202,6 +191,20 @@ def install_models_dev() -> Callable[[dict[str, Any] | None], "ModelsDevPriceInd
     return install
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _builtin_fetcher_registered() -> None:
+    """Register otari's fetcher as any-fetch's ``builtin`` provider, once per worker.
+
+    ``create_app`` registers it at startup. A test that runs ``builtin`` without an
+    app, such as one that constructs the old web backend with its fetch half on,
+    must not depend on an earlier test having built one, which a sharded or
+    parallel run does not guarantee.
+    """
+    from gateway.services.tools import register_builtin_fetcher
+
+    register_builtin_fetcher()
+
+
 @pytest.fixture(scope="session")
 def _migrated_sqlite_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A SQLite database migrated to head once per worker, for new databases to start from."""
@@ -245,28 +248,10 @@ def isolated_home(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.Temp
 
 @pytest.fixture
 def no_otari_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Unset every ``OTARI_*`` variable, so the developer's shell cannot switch a mode or put a key in test output."""
-    for name in [name for name in os.environ if name.startswith("OTARI_")]:
+    """Unset every ``OTARI_*`` and ``OTEL_*`` variable, so the developer's shell cannot switch a mode, put a key in
+    test output, or have `otari hook` report a test's gates to a real server."""
+    for name in [name for name in os.environ if name.startswith(("OTARI_", "OTEL_"))]:
         monkeypatch.delenv(name)
-
-
-@pytest.fixture
-def control_plane_transport(monkeypatch: pytest.MonkeyPatch) -> InstallControlPlane:
-    """Answer a hybrid gateway's control plane calls with ``handler``.
-
-    ``handler`` receives the request the gateway would have sent and returns the
-    response it should read back, so a test states the answers it wants rather
-    than where the call is made.
-
-    NOTE: this is the only place the suite names the transport. A test that
-    reaches for it directly pins the call to wherever it lives today, and a
-    later move leaves that test passing while intercepting nothing.
-    """
-
-    def install(handler: ControlPlaneHandler) -> None:
-        monkeypatch.setattr("gateway.services.control_plane.transport.post", handler)
-
-    return install
 
 
 class TaskGroupMcpTransport:

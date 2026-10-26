@@ -19,13 +19,14 @@ from fastapi.testclient import TestClient
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig, RateLimitRule
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 
-from .conftest import build_test_client
+from .conftest import build_test_client, declared_test_providers
 
 _MASTER = {API_KEY_HEADER: "Bearer test-master-key"}
 
 
 def _client(postgres_url: str, rules: list[dict[str, Any]]) -> Generator[TestClient]:
     config = GatewayConfig(
+        providers=declared_test_providers(),
         database_url=postgres_url,
         master_key="test-master-key",
         host="127.0.0.1",

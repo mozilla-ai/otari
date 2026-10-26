@@ -10,7 +10,6 @@ import {
 } from "react-icons/fi"
 
 import type {
-  Budget,
   BulkInviteOrganizationMembersResult,
   InviteOrganizationMemberRequest,
   InviteOrganizationMemberResult,
@@ -41,17 +40,19 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { Disclosure } from "@/design-system/navigation/Disclosure"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
-import { budgetLabeler } from "@/features/budgets/budgetLabel"
+import {
+  budgetLabeler,
+  type LabelableBudget,
+} from "@/features/budgets/budgetLabel"
 import {
   accessLabel,
   ModelScopeControl,
 } from "@/features/models/ModelScopeControl"
+import { ToolScopeControl } from "@/features/tools/ToolScopeControl"
 import {
   useBudgets,
-  useCreateScopedBudget,
-  useDeleteScopedBudget,
-  useScopedBudgets,
-  useUpdateScopedBudget,
+  useMemberCeilingWriter,
+  useOrganizationBudgets,
 } from "@/shared/api/budgets"
 import {
   useBulkInviteOrganizationMembers,
@@ -72,6 +73,7 @@ import {
   useUpdateWorkspaceMemberRole,
   useWorkspaces,
 } from "@/shared/api/workspaces"
+import { parseAddresses } from "@/shared/helpers/addresses"
 import { absoluteDashboardLink } from "@/shared/helpers/dashboardLink"
 import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
@@ -179,18 +181,6 @@ function invitationExpired(member: OrganizationMember): boolean {
     Boolean(member.invitation_expires_at) &&
     new Date(member.invitation_expires_at ?? "").getTime() <= Date.now()
   )
-}
-
-// Addresses pasted as a list, separated by commas, semicolons or whitespace,
-// deduplicated without regard to case.
-export function parseAddresses(text: string): string[] {
-  const seen = new Set<string>()
-  return text.split(/[\s,;]+/).filter((address) => {
-    const key = address.toLowerCase()
-    if (address === "" || seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
 }
 
 // After an invite or a reissue: whether it was emailed, and the link to share
@@ -501,10 +491,14 @@ function InviteMemberForm({
  * The three live in different tables, so a save is several writes rather than
  * one. They are ordered: memberships first, then ceilings, because a ceiling is
  * keyed on the *membership* and a workspace someone has just been added to has
- * no membership id until the server answers. The scoped budgets are refetched
+ * no membership id until the server answers. The ceilings are refetched
  * between the two passes for the same reason, since joining a workspace with a
  * default budget materializes a ceiling server-side that this form then has to
  * edit rather than duplicate.
+ *
+ * Ceilings go through the deployment's surface for an operator and the
+ * organization's for anyone else who may edit, so an organization's owners and
+ * admins cap their members here with the organization's own budgets.
  */
 function MemberEditor({
   member,
@@ -519,18 +513,18 @@ function MemberEditor({
   member: OrganizationMember
   spendRow: MemberAttribution | undefined
   workspaces: Workspace[]
-  budgets: Budget[]
+  // The deployment's budgets for an operator, the organization's otherwise.
+  budgets: LabelableBudget[]
   // What each workspace hands a new member, used both to say what someone would
   // get and to give a ceiling created here the same cadence.
   defaultByWorkspace: ReadonlyMap<string, WorkspaceBudgetDefault>
   placements: WorkspacePlacement[]
   /**
-   * Whether this caller operates the deployment, which two halves of this form
-   * need and the rest does not. Model access writes the gateway's own `users`
-   * row and a workspace ceiling is a `scoped_budgets` row; both are
-   * deployment-wide since #821, while placing somebody in a workspace is the
-   * organization's own. Passed in rather than resolved here so the page asks the
-   * question once and the form cannot come to a different answer.
+   * Whether this caller operates the deployment. Model access writes the
+   * gateway's own `users` row, deployment-wide since #821, so it is theirs
+   * alone; it also picks which surface the ceilings are written on. Passed in
+   * rather than resolved here so the page asks the question once and the form
+   * cannot come to a different answer.
    */
   isOperator: boolean
   onClose: () => void
@@ -539,10 +533,9 @@ function MemberEditor({
   const addMember = useAddWorkspaceMember()
   const removeMember = useRemoveWorkspaceMember()
   const updateRole = useUpdateWorkspaceMemberRole()
-  const scopedBudgets = useScopedBudgets(isOperator)
-  const createCeiling = useCreateScopedBudget()
-  const updateCeiling = useUpdateScopedBudget()
-  const deleteCeiling = useDeleteScopedBudget()
+  const ceilingWriter = useMemberCeilingWriter(
+    isOperator ? "deployment" : "organization",
+  )
 
   const initial = useMemo(() => {
     const byWorkspace = new Map(
@@ -570,16 +563,31 @@ function MemberEditor({
   const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
     spendRow?.allowed_models ?? undefined,
   )
+  const [allowedTools, setAllowedTools] = useState<string[] | undefined>(
+    spendRow?.allowed_tools ?? undefined,
+  )
   const [scopeValid, setScopeValid] = useState(true)
+  const [toolScopeValid, setToolScopeValid] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<unknown>(undefined)
 
   // "No ceiling" first, then every budget. A workspace's own default is labelled
-  // so an operator can tell the inherited one from the rest without leaving the
+  // so an admin can tell the inherited one from the rest without leaving the
   // form to look it up.
   const nameBudget = budgetLabeler(budgets)
-  const budgetOptions = (fallback: WorkspaceBudgetDefault | undefined) => [
+  const budgetOptions = (
+    fallback: WorkspaceBudgetDefault | undefined,
+    current: string,
+  ) => [
     { value: "", label: "No ceiling" },
+    // A ceiling on a budget this list does not hold (one set at the deployment
+    // level, seen from the organization's surface) is kept as an option, so the
+    // picker shows it rather than a blank, and picking another budget moves it.
+    ...(!isOperator &&
+    current !== "" &&
+    !budgets.some((budget) => budget.budget_id === current)
+      ? [{ value: current, label: "Set by the deployment" }]
+      : []),
     ...budgets.map((budget) => {
       const label = nameBudget(budget)
       return {
@@ -603,14 +611,16 @@ function MemberEditor({
       return next
     })
 
-  const canSave = !saving && scopeValid
+  const canSave = !saving && scopeValid && toolScopeValid
   // The workspace rows are a Map, which `JSON.stringify` flattens to `{}`, so
   // the guard is handed their entries. Both halves seed on mount and neither
   // changes on its own, so nothing here arms without a keystroke.
   const { isDirty } = useDirtySnapshot({
     rows: [...rows],
     allowedModels,
+    allowedTools,
     scopeValid,
+    toolScopeValid,
   })
 
   const save = async () => {
@@ -622,7 +632,10 @@ function MemberEditor({
         await updateUser.mutateAsync({
           id: member.attribution_user_id,
           // `null` is how the wire spells "not restricted".
-          body: { allowed_models: allowedModels ?? null },
+          body: {
+            allowed_models: allowedModels ?? null,
+            allowed_tools: allowedTools ?? null,
+          },
         })
       }
 
@@ -669,43 +682,31 @@ function MemberEditor({
 
       // Pass two: ceilings, against a roster that now includes the joins above
       // and the ceilings their workspaces' defaults just materialized.
-      //
-      // Skipped whole for a caller who does not operate the deployment, and the
-      // gate has to be here rather than only on the query: `refetch()` runs the
-      // query function even when `enabled` is false, which is what makes it the
-      // way to drive a disabled query on purpose. So without this, a tenant
-      // saving nothing but a workspace placement would still ask
-      // `/scoped-budgets`, be refused, and land back on the very banner
-      // otari#838 exists to remove. There is nothing to write here either: the
-      // Budget column is not rendered for them, so every `row.budgetId` is the
-      // empty string it was seeded with.
-      if (isOperator) {
-        const fresh = await scopedBudgets.refetch()
-        const ceilings = new Map(
-          (fresh.data ?? [])
-            .filter((budget) => budget.scope_type === "workspace_member")
-            .map((budget) => [budget.scope_id, budget]),
-        )
-        for (const [workspaceId, row] of rows) {
-          if (!row.member) continue
-          const membershipId = membershipIds.get(workspaceId)
-          if (!membershipId) continue
-          const existing = ceilings.get(membershipId)
-          const wanted = row.budgetId === "" ? null : row.budgetId
-          if (existing && wanted === null) {
-            await deleteCeiling.mutateAsync(existing.id)
-          } else if (existing && existing.budget_id !== wanted) {
-            await updateCeiling.mutateAsync({
-              id: existing.id,
-              body: { budget_id: wanted },
-            })
-          } else if (!existing && wanted !== null) {
-            await createCeiling.mutateAsync({
-              scope_type: "workspace_member",
-              scope_id: membershipId,
-              budget_id: wanted,
-            })
-          }
+      const ceilings = new Map(
+        (await ceilingWriter.fetchAll()).map((ceiling) => [
+          ceiling.scope_id,
+          ceiling,
+        ]),
+      )
+      for (const [workspaceId, row] of rows) {
+        if (!row.member) continue
+        const membershipId = membershipIds.get(workspaceId)
+        if (!membershipId) continue
+        const existing = ceilings.get(membershipId)
+        const wanted = row.budgetId === "" ? null : row.budgetId
+        if (existing && wanted === null) {
+          await ceilingWriter.remove(existing.id)
+        } else if (
+          existing &&
+          wanted !== null &&
+          existing.budget_id !== wanted
+        ) {
+          await ceilingWriter.update({ id: existing.id, budgetId: wanted })
+        } else if (!existing && wanted !== null) {
+          await ceilingWriter.create({
+            scopeId: membershipId,
+            budgetId: wanted,
+          })
         }
       }
       onClose()
@@ -729,7 +730,7 @@ function MemberEditor({
       submitLabel="Save"
       onSubmit={() => void save()}
       isPending={saving}
-      isSubmitDisabled={!scopeValid}
+      isSubmitDisabled={!scopeValid || !toolScopeValid}
       isDirty={isDirty}
       error={error}
     >
@@ -740,15 +741,27 @@ function MemberEditor({
           member cell is gated to avoid: a withheld read must not read as an
           absent gateway identity. */}
       {!isOperator ? null : spendRow ? (
-        <ModelScopeControl
-          title="Model access (default for this member's keys)"
-          description="The models this member's keys may list and call by default. A key can narrow this, but never exceed it."
-          initial={spendRow.allowed_models ?? undefined}
-          onChange={(value, isValid) => {
-            setAllowedModels(value)
-            setScopeValid(isValid)
-          }}
-        />
+        <>
+          <ModelScopeControl
+            title="Model access (default for this member's keys)"
+            description="The models this member's keys may list and call by default. A key can narrow this, but never exceed it."
+            initial={spendRow.allowed_models ?? undefined}
+            onChange={(value, isValid) => {
+              setAllowedModels(value)
+              setScopeValid(isValid)
+            }}
+          />
+          <ToolScopeControl
+            title="Search tool access (default for this member's keys)"
+            description="The search tools this member's keys may run on /v1/search by default. Left on its default, a key follows its own model access, or the member's when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). A key can narrow this, but never exceed it."
+            inheritLabel="Default"
+            initial={spendRow.allowed_tools ?? undefined}
+            onChange={(value, isValid) => {
+              setAllowedTools(value)
+              setToolScopeValid(isValid)
+            }}
+          />
+        </>
       ) : (
         <span className="text-xs text-muted">
           No spend row yet, so there is no model access to set. One is minted
@@ -768,15 +781,9 @@ function MemberEditor({
                 <th scope="col" className="py-1 font-medium">
                   Role
                 </th>
-                {/* Withheld from a caller who does not operate the deployment,
-                    as the roster's own Spend column is. Their `row.budgetId` is
-                    then the empty string it was seeded with, which is what lets
-                    the save skip the scoped-budget writes entirely. */}
-                {isOperator ? (
-                  <th scope="col" className="py-1 font-medium">
-                    Budget
-                  </th>
-                ) : null}
+                <th scope="col" className="py-1 font-medium">
+                  Budget
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -806,39 +813,33 @@ function MemberEditor({
                         disabled={!row.member}
                       />
                     </td>
-                    {isOperator ? (
-                      <td className="py-1.5">
-                        <FilterSelect
-                          ariaLabel={`Budget in ${workspace.name}`}
-                          value={row.budgetId}
-                          onChange={(next) =>
-                            setRow(workspace.id, { budgetId: next })
-                          }
-                          options={budgetOptions(
-                            defaultByWorkspace.get(workspace.id),
-                          )}
-                          disabled={!row.member}
-                        />
-                      </td>
-                    ) : null}
+                    <td className="py-1.5">
+                      <FilterSelect
+                        ariaLabel={`Budget in ${workspace.name}`}
+                        value={row.budgetId}
+                        onChange={(next) =>
+                          setRow(workspace.id, { budgetId: next })
+                        }
+                        options={budgetOptions(
+                          defaultByWorkspace.get(workspace.id),
+                          row.budgetId,
+                        )}
+                        disabled={!row.member}
+                      />
+                    </td>
                   </tr>
                 )
               })}
             </tbody>
           </table>
         </div>
-        {/* Gated with the Budget column it explains: "pick a different budget
-            here" names a control this caller is not offered. */}
-        {isOperator ? (
-          <span className="text-xs text-muted">
-            Each workspace holds its own allowance, so someone in two workspaces
-            has two. The amount and the reset period belong to the budget, so
-            editing one moves everyone held to it; pick a different budget here
-            to change only this person. Adding them to a workspace that has a
-            default member budget gives them that budget unless another is
-            chosen.
-          </span>
-        ) : null}
+        <span className="text-xs text-muted">
+          Each workspace holds its own allowance, so someone in two workspaces
+          has two. The amount and the reset period belong to the budget, so
+          editing one moves everyone held to it; pick a different budget here to
+          change only this person. Adding them to a workspace that has a default
+          member budget gives them that budget unless another is chosen.
+        </span>
       </div>
     </FormDialog>
   )
@@ -887,7 +888,9 @@ export function OrganizationMembersPage() {
     [workspaces.data],
   )
   const workspaceDefaults = useAllWorkspaceBudgetDefaults(workspaceIds)
-  const budgets = useBudgets(isOperator && isEditing)
+  const deploymentBudgets = useBudgets(isOperator && isEditing)
+  const organizationBudgets = useOrganizationBudgets(!isOperator && isEditing)
+  const budgets = isOperator ? deploymentBudgets : organizationBudgets
 
   const rows = useMemo(() => members.data?.data ?? [], [members.data])
 

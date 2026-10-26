@@ -4,18 +4,9 @@ Otari serves its dashboard at the gateway root. The dashboard uses the same
 management API available to scripts, so access and behavior are determined by the
 server rather than duplicated in the frontend.
 
-## Deployment modes
-
-- **Standalone** shows the local management UI and serves inference from the same
-  process.
-- **Hosted** shows the multi-tenant control plane. Inference snippets point to
-  `data_plane_url`; the hosted process does not serve inference.
-- **Hybrid** shows gateway health and a link to the otari.ai control plane. It has
-  no local management UI.
-
 The dashboard reads `GET /api/v1/bootstrap` before rendering. That response controls
-the available sign-in methods and navigation surfaces, so a page that is not
-available in the current mode is not offered.
+the available sign-in methods and navigation surfaces, so a page the deployment
+does not serve is not offered.
 
 ## Sign-in and secrets
 
@@ -26,7 +17,7 @@ The master key and `OTARI_SECRET_KEY` are different credentials:
 | Master key | Authorizes deployment management and signs in the first operator |
 | `OTARI_SECRET_KEY` | Encrypts provider and search-tool credentials stored in the database |
 
-If `OTARI_MASTER_KEY` is unset on a new standalone database, Otari generates a
+If `OTARI_MASTER_KEY` is unset on a new database, Otari generates a
 master key and prints it once. The dashboard exchanges it for an HttpOnly session
 cookie; it does not store the master key in browser storage.
 
@@ -63,7 +54,7 @@ organization, so the account menu names you even before you join one.
 
 ## First-run walkthrough
 
-1. Start Otari in standalone mode.
+1. Start Otari.
 2. Open the gateway root, usually `http://localhost:8000/`.
 3. Sign in with the configured or generated master key.
 4. Add a provider. If storing its credential in the dashboard, configure
@@ -90,17 +81,17 @@ created. Set `activation_guide: false` to disable the flow for the deployment.
 The workspace view contains day-to-day gateway operations:
 
 - Overview, Activity, and Usage
-- Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers. Routing lists each policy with its main model, its backups in order, and who it applies to. On a standalone gateway, Automatic fallback lists the models your organization used in the last 30 days with the providers their catalog ID tries in order, how many requests a backup served, and which ones have no backup. The Models guide explains the order. Create policy first asks what the policy is for (a fallback, a traffic split, a smart router, spill-over at rate limits, or a budget tier-down) and then shows only that kind's fields; the empty list offers a fallback directly. Models are chosen by model and then by provider. Each policy has its own page, opened from Edit in the list, where its main selection, fallback chain, budget tier-down and guardrails are combined, each section with its own Save. Policies from `config.yml` open there read-only. A hybrid or hosted deployment says that its policies are not where a request's attempt plan comes from.
+- Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers. Routing lists each policy with its main model, its backups in order, and who it applies to. Automatic fallback lists the models your organization used in the last 30 days with the providers their catalog ID tries in order, how many requests a backup served, and which ones have no backup, including those most requests pin to one provider. The Models guide explains the order. Create policy first asks what the policy is for (a fallback, a traffic split, a smart router, spill-over at rate limits, or a budget tier-down) and then shows only that kind's fields; the empty list offers a fallback directly. Models are chosen by model and then by provider. Each policy has its own page, opened from Edit in the list, where its main selection, fallback chain, budget tier-down and guardrails are combined, each section with its own Save. Policies from `config.yml` open there read-only.
 - Tools
 - API keys and workspace members
 
 The organization view contains tenant-wide administration:
 
-- Organization-wide usage, in hosted mode
+- Organization-wide usage
 - Workspaces and organization members
 - Email domains, for joining colleagues automatically
 - Spend and budgets
-- General: Providers, followed by Deployment providers and Org settings.
+- General: Providers, followed by Guardrails and Org settings.
   Providers is the organization's own upstream credentials, the models each one
   reaches, and what this organization pays for them: adding a key offers every
   model the provider lists on it, each carrying a switch that decides whether
@@ -109,9 +100,74 @@ The organization view contains tenant-wide administration:
   deployment price list, then the community defaults. A model nothing prices is
   offered and left unserved. Each key's row counts how many of its offered
   models are serving, and a key serving none of them is marked, because every
-  request through it is refused until a switch is on. Deployment providers is
-  the process-wide credential list, which a deployment operator manages and
-  which is served to every organization; it appears in standalone mode only.
+  request through it is refused until a switch is on. The star on a key makes
+  it the organization's default for its provider, and clicking a filled star
+  removes that. For a provider the deployment has no credential of its own
+  for, a workspace uses the key it set to "Always use this key", otherwise the
+  organization's default, otherwise the oldest key; a key it set to "Never use
+  this key" is passed over at every step. The deployment's own provider
+  credentials, served to every organization, are managed on Hosted providers
+  in the deployment view, or in `config.yml`.
+
+The deployment view, opened from the account menu, holds what belongs to the
+gateway process rather than to any organization on it:
+
+- Settings, the running configuration.
+- Accounts, every account on the deployment.
+- Hosted providers, the keys the deployment serves inference on for a request
+  that brings no credential of its own. A request is served on one only after
+  the organization's own keys and the configured providers have not answered.
+  Adding a provider offers every model it lists on the key; each model carries a
+  serving switch and a price, set per million tokens or per 1,000 requests or
+  images, and a model nothing prices arrives switched off. Refresh models asks
+  one provider again. Update catalog fetches the latest models.dev prices and
+  then asks every provider what it lists, showing the price changes and each
+  provider's new models before applying them; its optional cleanup also removes
+  priced models nothing on the deployment serves, along with the model lists of
+  providers nothing configures any more, listing them before anything is
+  removed. A provider kept to one organization shows which; that restriction
+  is set through `/api/v1/hosted-providers`. A provider defined in the
+  `hosted_providers:` block of `config.yml` carries a `config.yml` badge and
+  cannot be edited, switched or removed here, while its models can; adding a
+  provider of the same name overrides it, which the form warns about.
+  A provider takes an optional name, which defaults to its implementation; a
+  name of its own (`openai-eu`) serves a second endpoint of one implementation,
+  reached as `openai-eu:<model>`. The key is optional for a provider that needs
+  none and for one pointed at an endpoint of its own. Test connection, in the
+  add and edit dialogs, asks the provider what it lists on the dialog's values
+  without saving them, the stored key standing in for a blank key box; Test on
+  a provider's row asks the same of what it stores. Serve models not on its
+  list, in both dialogs, makes a provider serve any model a request names, as
+  a `config.yml` provider does, priced or not, while a model switched off on
+  its list is still refused. It is off by default; a provider moved from the
+  retired Deployment providers page starts with it off and every model it lists
+  switched on, priced or not.
+  A provider's name opens Models filtered to it, and above the table a summary
+  counts the providers reachable, with Re-check all to ask them again. With no
+  provider yet, the page walks through adding the first one, and offers to
+  enable default pricing when pricing is required and nothing sets it. Adding
+  a provider is disabled, with a banner saying why, while the server has no
+  `OTARI_SECRET_KEY` to encrypt its key with. The
+  table also lists the `providers:` instances of `config.yml`, marked
+  config.yml and read-only, with their reachability. Providers stored on the
+  retired Deployment providers page are moved here under the same names
+  automatically at startup. Any that could not be moved are listed in a banner
+  with the reason: once the cause is fixed, move it from there, or Discard it,
+  since a row left behind serves nothing.
+- Web search pricing and Code execution pricing, what the deployment charges
+  per successful call of a tool it runs itself. Web search pricing lists the
+  `otari:web_search` and `otari:web_fetch` rates and each search and fetch
+  instance's own rate, saying which rate an instance with none of its own falls
+  back to. Code execution pricing lists `otari:code_execution`. Edit sets a
+  rate in dollars per call, in force from the moment it is saved, and 0 prices a
+  tool as free. An instance whose rate comes from `price_per_call` in
+  `config.yml` is marked and changed there. With `require_pricing` on, the page
+  warns while a tool it lists has no rate, because a request that would run it
+  is refused. See [Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool).
+
+Accounts and Hosted providers are listed only for a deployment operator, and
+answer anyone else that they are not available to them. The two pricing pages
+are listed for one too, and say the same to anyone else who opens them.
 
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the
@@ -134,9 +190,15 @@ each model is billed at. An organization may set its own rate for a model it
 supplies the provider key for. A model reached through one of the deployment's
 own provider instances is not one of those: the deployment holds that credential
 and settles its upstream bill, so its rate is the deployment price list's, which
-is `/api/v1/pricing` and has no page of its own. The models.dev defaults are
-likewise kept current through `/api/v1/pricing/refresh` rather than from the
-dashboard.
+is `/api/v1/pricing` and has no page of its own. The same holds for a model the
+deployment serves on one of its hosted providers: a request served there is
+priced only from a rate the deployment operator set, either the price list or a
+rate the operator set for this organization, never from one the organization
+wrote itself, even one written while its own key still covered the model. A rate
+the operator set for an organization is listed beside the organization's own,
+and only the operator may change or remove it. The models.dev defaults are
+kept current by Update catalog on the Hosted providers page, or on a schedule
+under `pricing_refresh`.
 
 A rate is per million tokens, per request, or per image, and the rate form asks
 which. A request or image rate is entered per 1,000, the way providers publish
@@ -151,7 +213,7 @@ a rate bills. A token rate on an audio or moderation request is still read per
 request for now and logs a warning; a later release reads it strictly, as
 tokens, which those requests do not report, so price them per request.
 
-Exact page names and availability can change with deployment mode and installed
+Exact page names and availability can change with configuration and installed
 extensions. The running dashboard is the source of truth.
 
 What a page shows can also depend on who is signed in. On API keys, an operator
@@ -185,16 +247,14 @@ given their extracted text. When comparing, both models get the same files. A
 saved conversation remembers which files each question carried. Removing a
 chip takes the file off that question and keeps the upload: the Files dialog
 lists everything you uploaded in the workspace, to attach again or to delete.
-These controls appear only where the deployment stores files: not when file
-uploads are off, and not on a hosted control plane.
+These controls do not appear when file uploads are off.
 
 The Tools menu attaches web search, code execution and any number of MCP
 servers to the next message, in any mix: the model is offered all of them in one
 tool loop. A tool the gateway runs shows in the transcript above the reply as a
 collapsed row with its status, opening to the arguments the model sent and what
 the tool returned (a long result is shortened for display). This activity is
-shown in the Playground only (not on a hosted control plane, whose requests run
-on the data plane) and is not saved with a conversation; a request
+shown in the Playground only and is not saved with a conversation; a request
 made through the API still returns just the final message, as
 [What clients receive](tools.md#what-clients-receive) describes.
 
@@ -213,19 +273,25 @@ comparison prompts once for content retention, and the flags are per person and
 revocable; withdrawing one blocks new saves and deletes nothing. Saved
 transcripts, recorded comparisons and pinned models are visible only to the
 person who created them, even to colleagues in the same workspace, and each can
-be deleted from the page. Hosted control planes serve no inference, so they do
-not offer the page at all.
+be deleted from the page.
 
 ## Observability
 
 Activity is the per-request log. Sessions lists [agent sessions](traces.md)
-where the deployment records traces (`trace_capture_enabled`, on by default; a
-hybrid gateway records none), and has no entry where it does not. A session
+where the deployment records traces (`trace_capture_enabled`, on by default), and has no entry where it does not. Its chart
+counts sessions per hour or day as succeeded or failed, and its Levels column
+counts each session's errors, tools' errors included; a tool's error alone does
+not fail a session (see [Sessions and failures](traces.md#sessions-and-failures)). The
+Last activity, Levels, Latency, Tokens and Total cost headers sort the list
+across every page: a header's first press puts the largest first and a second
+press flips it, and the order is kept in the URL with the filters. A session
 opens in a side panel as a tree of its turns, LLM calls and tool calls, a
-timeline of the same spans, or a flat log; before a span is picked, the panel
+timeline of the same spans, or a flat log. The token count in its header breaks
+down into input, the share of it the prompt cache served, and output, for the
+session or the span picked. Before a span is picked, the panel
 shows what the session cost against its key's own spend ceiling and where the
 gateway stepped in. A request in Activity whose session was recorded links to it:
-**View trace** in the request's detail opens the session on that LLM call. Usage provides aggregates and time series. Routed requests share a request-group ID, so the
+**View trace** in the request's detail opens the session on that LLM call. Usage provides aggregates and time series; its spend by session groups requests by the same sessions, keyed by trace id. Routed requests share a request-group ID, so the
 request log can show the attempted models and the model that served the
 response. Imported usage is labeled by
 source and does not consume a budget.
@@ -290,11 +356,10 @@ daily invitation mail limit), you get the accept link to share,
 and an invitee new to the deployment chooses a password on the page it opens,
 so a deployment without SMTP can still bring people in. See [Configuration](configuration.md#mail).
 
-## Bundled guide and custom documentation
+## Custom documentation
 
-This guide is bundled into the dashboard at `/#/docs`. Set `docs_url` to make
-the dashboard's Documentation link open a different site. The bundled route
-remains available.
+The dashboard's Documentation link opens [docs.otari.ai](https://docs.otari.ai/).
+Set `docs_url` to make it open a different site.
 
 ## Legal pages
 

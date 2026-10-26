@@ -11,10 +11,8 @@ on:
       - 'any-fetch/**'
       - 'alembic/**'
       # The image builds the dashboard bundle in its web stage rather than
-      # shipping a committed one, so these are image inputs too. docs/dashboard.md
-      # is bundled into the app (web/src/features/docs/DocsPage.tsx).
+      # shipping a committed one, so these are image inputs too.
       - 'web/**'
-      - 'docs/dashboard.md'
       - 'Dockerfile'
       - '.dockerignore'
       - 'docker-compose*.yml'
@@ -22,6 +20,7 @@ on:
       - 'pyproject.toml'
       - 'uv.lock'
       - 'scripts/docker_liveness_check.sh'
+      - 'scripts/readme_quickstart_check.py'
       - '.github/workflows/otari-docker.yml'
   release:
     types: [published]
@@ -34,10 +33,15 @@ env:
 jobs:
   build-and-push-image:
     runs-on: ubuntu-latest
+    # Docker Hub trusts this repository's docker-hub environment through an
+    # OIDC connection, so no Docker credential is stored, and only the refs the
+    # environment allows (main, v* tags) can log in. See RELEASE.md.
+    environment: docker-hub
     permissions:
       contents: read
-    outputs:
-      image: ${{ steps.image-output.outputs.image }}
+      id-token: write
+      # The signed provenance attestation.
+      attestations: write
 
     steps:
       - name: Checkout repository
@@ -54,10 +58,14 @@ jobs:
 
       - name: Log in to the Container registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        env:
+          DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_OIDC_CONNECTIONID }}
+          # The default lifetime is 300 seconds, and login to the end of the
+          # multi-arch push takes 6 to 9 minutes. 3600 is this version's maximum.
+          DOCKERHUB_OIDC_EXPIREIN: "3600"
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: mzdotai
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
@@ -84,7 +92,13 @@ jobs:
       - name: Run container liveness check
         run: ./scripts/docker_liveness_check.sh otari-test:${{ github.sha }}
 
+      # Before the push, so an image whose README quickstart cannot start never
+      # becomes `latest`. The PR build skips src/gateway/**, where that breaks.
+      - name: Run the README quickstart
+        run: python3 scripts/readme_quickstart_check.py --image otari-test:${{ github.sha }}
+
       - name: Build and push Docker image
+        id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -101,50 +115,15 @@ jobs:
           provenance: mode=max
           sbom: true
 
-      - name: Set image output
-        id: image-output
-        run: echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}" >> $GITHUB_OUTPUT
-
-  update-dockerhub-description:
-    runs-on: ubuntu-latest
-    needs: build-and-push-image
-    if: github.ref == 'refs/heads/main'
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Update Docker Hub description
-        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+      # Signed with this workflow's identity through Sigstore, unlike the
+      # BuildKit provenance above, so `gh attestation verify` can tie an image
+      # to this repository and workflow. Stored next to the image on Docker Hub.
+      - name: Attest the image's build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: mzdotai/otari
-          readme-filepath: ./README.md
-
-  notify-platform:
-    runs-on: ubuntu-latest
-    needs: build-and-push-image
-    if: github.ref == 'refs/heads/main'
-    # The dispatch authenticates with its own App token, not GITHUB_TOKEN.
-    permissions: {}
-    steps:
-      - name: Generate App token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ secrets.PLATFORM_DISPATCH_APP_ID }}
-          private-key: ${{ secrets.PLATFORM_DISPATCH_APP_PRIVATE_KEY }}
-          owner: mozilla-ai
-          repositories: otari-ai
-
-      - name: Dispatch deploy event to otari-ai
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          IMAGE_REF: ${{ needs.build-and-push-image.outputs.image }}
-        run: |
-          IMAGE_TAG="${IMAGE_REF##*:}"
-          jq -nc --arg tag "$IMAGE_TAG" \
-            '{event_type:"otari-image-published",client_payload:{image_tag:$tag}}' \
-            | gh api -X POST /repos/mozilla-ai/otari-ai/dispatches --input -
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          # A storage record needs the artifact-metadata permission and adds no
+          # verification, so this job does without it.
+          create-storage-record: false

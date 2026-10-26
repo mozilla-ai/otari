@@ -2,6 +2,7 @@
 
 import pytest
 
+from gateway.api.routes._attempt_metrics import record_attempt
 from gateway.api.routes._pipeline import record_cost, record_inline_cost_settlement, record_tokens
 from gateway.metrics import REGISTRY
 
@@ -53,3 +54,49 @@ def test_record_inline_cost_settlement_increments_counter(outcome: str) -> None:
     record_inline_cost_settlement(outcome)
 
     assert _sample("gateway_inline_cost_settlements_total", labels) - before == 1.0
+
+
+def test_record_attempt_counts_a_success_and_its_timings() -> None:
+    labels = {"provider": "att-prov", "model": "att-model", "outcome": "success", "status_code": "200"}
+    before = _sample("gateway_upstream_attempts_total", {**labels, "fallback": "false"})
+    ttft_before = _sample("gateway_time_to_first_token_seconds_count", {"provider": "att-prov", "model": "att-model"})
+
+    record_attempt(
+        "att-prov", "att-model", failed=False, status_code=None, fallback=False, latency_ms=1500, ttft_ms=300
+    )
+
+    assert _sample("gateway_upstream_attempts_total", {**labels, "fallback": "false"}) - before == 1.0
+    assert (
+        _sample("gateway_time_to_first_token_seconds_count", {"provider": "att-prov", "model": "att-model"})
+        - ttft_before
+        == 1.0
+    )
+    duration = {"provider": "att-prov", "model": "att-model", "outcome": "success"}
+    assert _sample("gateway_attempt_duration_seconds_sum", duration) >= 1.5
+
+
+@pytest.mark.parametrize(("status_code", "label"), [(503, "503"), (None, "none")])
+def test_record_attempt_counts_a_failure_by_status(status_code: int | None, label: str) -> None:
+    labels = {
+        "provider": "fail-prov",
+        "model": "fail-model",
+        "outcome": "error",
+        "status_code": label,
+        "fallback": "true",
+    }
+    before = _sample("gateway_upstream_attempts_total", labels)
+
+    record_attempt(
+        "fail-prov", "fail-model", failed=True, status_code=status_code, fallback=True, latency_ms=None, ttft_ms=None
+    )
+
+    assert _sample("gateway_upstream_attempts_total", labels) - before == 1.0
+
+
+def test_record_attempt_skips_timings_for_a_fallback() -> None:
+    duration = {"provider": "fb-prov", "model": "fb-model", "outcome": "success"}
+    before = _sample("gateway_attempt_duration_seconds_count", duration)
+
+    record_attempt("fb-prov", "fb-model", failed=False, status_code=None, fallback=True, latency_ms=900, ttft_ms=200)
+
+    assert _sample("gateway_attempt_duration_seconds_count", duration) - before == 0.0

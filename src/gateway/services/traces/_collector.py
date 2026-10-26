@@ -10,6 +10,7 @@ because its trace could not be recorded.
 
 import functools
 import hashlib
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -19,7 +20,7 @@ from decimal import Decimal
 from gateway.log_config import logger
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._turns import TurnFacts
-from gateway.types.traces import SpanRecord, TraceWrite, is_identifier
+from gateway.types.traces import SpanRecord, TraceWrite, is_endpoint, is_identifier
 
 # The settled status of an attempt a later candidate made up for, and of one that served.
 _ABSORBED = "absorbed"
@@ -43,6 +44,9 @@ class LlmCall:
     input_tokens: int | None
     output_tokens: int | None
     cost: Decimal | None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    reasoning_tokens: int | None = None
     policy_name: str | None = None
     selection_reason: str | None = None
     attempt_position: int | None = None
@@ -53,10 +57,28 @@ def identifier_or_none(value: object) -> str | None:
     return value if isinstance(value, str) and is_identifier(value) else None
 
 
+# Longer than any call id a provider issues; past it the value is not one.
+_MAX_CALL_ID_LENGTH = 512
+CALL_ID_DIGEST = re.compile(r"tc-[0-9a-f]{32}")
+
+
+def call_id_digest(workspace_id: uuid.UUID, value: object) -> str | None:
+    """A tool call's id as it is stored: a digest of what the client sent, never the id itself.
+
+    A call id is whatever the client chose, so it may be anything, a credential
+    included. Every span that names one call (the tool, and each gate a hook checked
+    it with) carries the same digest, so they still match; with the workspace in it,
+    two tenants' ids never do.
+    """
+    if not isinstance(value, str) or not value or len(value) > _MAX_CALL_ID_LENGTH:
+        return None
+    return "tc-" + hashlib.sha256(f"{workspace_id}\x00{value}".encode()).hexdigest()[:32]
+
+
 def client_tool_span_id(call_id: str, position: int) -> str:
     """The span id of a tool the client ran: derived from its call id, never the call id itself.
 
-    A call id is whatever the client sent, so it is hashed rather than stored.
+    A call id is whatever the client sent, so it is hashed into the span id.
     The result's position in the input goes in too: the same call answered
     again (a retried request) still lands on one span, while a later call that
     reuses the id gets its own.
@@ -95,7 +117,8 @@ class RequestTrace:
     The step's id is the request's ``Otari-Request-ID``, so it is unique per
     request: two retries with the same history are two steps, each with its cost.
     A request that names its session joins that session's trace; one that names
-    none is a trace of its own.
+    none is a trace of its own. A subagent's step opens no turn, since the
+    subagent works inside its parent's.
     """
 
     request_id: str
@@ -108,6 +131,7 @@ class RequestTrace:
     session: SessionRef | None = None
     harness: str | None = None
     turn: TurnFacts | None = None
+    subagent: bool = False
     spans: list[SpanRecord] = field(default_factory=list)
     dropped: int = 0
 
@@ -127,6 +151,11 @@ class RequestTrace:
         """
         ended = call.ended
         started = ended - timedelta(milliseconds=call.latency_ms) if call.latency_ms is not None else None
+        if started is not None:
+            # Latency is rounded to the millisecond, so a call that began with its
+            # step can read as starting a fraction of one before it. The start never
+            # moves past the call's own end, whatever the wall clock did meanwhile.
+            started = max(started, min(self.started_at, ended))
         attributes: dict[str, str | int | float | bool] = {}
         if (policy := identifier_or_none(call.policy_name)) is not None:
             attributes["otari.routing.policy"] = policy
@@ -154,6 +183,9 @@ class RequestTrace:
                 provider=identifier_or_none(call.provider),
                 input_tokens=call.input_tokens,
                 output_tokens=call.output_tokens,
+                cache_read_tokens=call.cache_read_tokens,
+                cache_write_tokens=call.cache_write_tokens,
+                reasoning_tokens=call.reasoning_tokens,
                 cost_snapshot=call.cost,
                 request_id=self.request_id,
                 attributes=attributes,
@@ -264,8 +296,8 @@ class RequestTrace:
             span_id=self.request_id,
             kind="step",
             origin="gateway",
-            name=identifier_or_none(self.endpoint) or "request",
-            opens_turn=self.turn.opens_turn if self.turn is not None else False,
+            name=self.endpoint if is_endpoint(self.endpoint) else "request",
+            opens_turn=self.turn is not None and self.turn.opens_turn and not self.subagent,
             outcome="ok" if ok else "error",
             error_class=error_class,
             start_time=self.started_at,
@@ -283,6 +315,7 @@ class RequestTrace:
             api_key_id=self.api_key_id,
             session_source=self.session.source if self.session else "none",
             harness=self.harness,
+            name=self.session.name if self.session else None,
             spans=(step, *self._client_tool_spans(), *self.spans),
         )
 
@@ -309,12 +342,13 @@ class RequestTrace:
                     origin="gateway",
                     name=f"execute_tool:{name}" if name and is_identifier(f"execute_tool:{name}") else "execute_tool",
                     operation="execute_tool",
-                    outcome="error" if call.is_error else "ok",
-                    error_class="tool_error" if call.is_error else None,
+                    # The agent reads an error result like any other, so it is no session error.
+                    outcome="ok",
+                    attributes={"otari.tool.succeeded": False} if call.is_error else {},
                     end_time=self.started_at,
                     tool_name=name,
                     tool_type="client",
-                    tool_call_id=identifier_or_none(call.call_id),
+                    tool_call_id=call_id_digest(self.workspace_id, call.call_id),
                     request_id=self.request_id,
                 )
             )

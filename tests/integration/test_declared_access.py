@@ -123,22 +123,55 @@ def test_a_restart_applies_the_same_config_without_a_second_row(test_config: Gat
     with _boot(config) as client:
         (first,) = _declared_keys(client)
         (first_ceiling,) = _key_ceilings(client, first["id"])
-        # An edit made through the API, which config.yml overrides at the next start.
-        assert (
-            client.patch(f"{API_ROOT}/budgets/mlpa-global", json={"max_budget": 5}, headers=MASTER).status_code == 200
-        )
-        assert (
-            client.patch(f"{API_ROOT}/keys/{first['id']}", json={"is_service_key": False}, headers=MASTER).status_code
-            == 200
-        )
 
     with _boot(config) as client:
         (second,) = _declared_keys(client)
         assert second["id"] == first["id"]
-        assert second["is_service_key"] is True
         (second_ceiling,) = _key_ceilings(client, second["id"])
         assert second_ceiling["id"] == first_ceiling["id"]
-        assert client.get(f"{API_ROOT}/budgets/mlpa-global", headers=MASTER).json()["max_budget"] == 100
+        assert _authenticates(client, SECRET)
+
+
+def test_a_change_made_through_the_api_survives_a_restart(test_config: GatewayConfig) -> None:
+    """An emergency shut-off made through the API is not undone by a restart or a new replica."""
+    config = _config(test_config, mlpa=_key())
+    with _boot(config) as client:
+        (key,) = _declared_keys(client)
+        assert (
+            client.patch(f"{API_ROOT}/budgets/mlpa-global", json={"max_budget": 0}, headers=MASTER).status_code == 200
+        )
+        assert (
+            client.patch(f"{API_ROOT}/keys/{key['id']}", json={"is_active": False}, headers=MASTER).status_code == 200
+        )
+
+    with _boot(config) as client:
+        assert client.get(f"{API_ROOT}/budgets/mlpa-global", headers=MASTER).json()["max_budget"] == 0
+        assert client.get(f"{API_ROOT}/keys/{key['id']}", headers=MASTER).json()["is_active"] is False
+        assert not _authenticates(client, SECRET)
+
+
+def test_changing_an_entry_in_config_writes_it_back_over_the_api_change(test_config: GatewayConfig) -> None:
+    with _boot(_config(test_config, mlpa=_key())) as client:
+        (key,) = _declared_keys(client)
+        client.patch(f"{API_ROOT}/budgets/mlpa-global", json={"max_budget": 0}, headers=MASTER)
+        client.patch(f"{API_ROOT}/keys/{key['id']}", json={"is_active": False}, headers=MASTER)
+
+    budgets = {**BUDGETS, "mlpa-global": BudgetConfig(max_budget=50, reset_alignment="calendar_day")}
+    with _boot(_config(test_config, budgets=budgets, mlpa=_key(key_name="mlpa-service"))) as client:
+        assert client.get(f"{API_ROOT}/budgets/mlpa-global", headers=MASTER).json()["max_budget"] == 50
+        assert client.get(f"{API_ROOT}/keys/{key['id']}", headers=MASTER).json()["is_active"] is True
+        assert _authenticates(client, SECRET)
+
+
+def test_a_declared_key_deleted_through_the_api_is_created_again(test_config: GatewayConfig) -> None:
+    config = _config(test_config, mlpa=_key())
+    with _boot(config) as client:
+        (key,) = _declared_keys(client)
+        assert client.delete(f"{API_ROOT}/keys/{key['id']}", headers=MASTER).status_code in (200, 204)
+
+    with _boot(config) as client:
+        (again,) = _declared_keys(client)
+        assert again["id"] != key["id"]
         assert _authenticates(client, SECRET)
 
 
@@ -166,6 +199,16 @@ def test_changing_the_end_user_budgets_in_config_is_applied_at_the_next_start(te
         (key,) = _declared_keys(client)
         assert key["end_user_budget_ids"] == ["end-user-budget-ai", "end-user-budget-memories"]
         assert key["end_user_budget_id"] == "end-user-budget-memories"
+
+
+def test_a_declared_cap_on_end_users_is_applied_and_changed_at_the_next_start(test_config: GatewayConfig) -> None:
+    with _boot(_config(test_config, mlpa=_key(max_end_users=2))) as client:
+        (key,) = _declared_keys(client)
+        assert key["max_end_users"] == 2
+
+    with _boot(_config(test_config, mlpa=_key(max_end_users=None))) as client:
+        (key,) = _declared_keys(client)
+        assert key["max_end_users"] is None
 
 
 def test_changing_the_ceiling_in_config_moves_the_one_ceiling(test_config: GatewayConfig) -> None:
@@ -210,6 +253,23 @@ def test_a_declaration_removed_from_config_is_kept_and_no_longer_marked(test_con
         assert kept["is_service_key"] is True
         budget = client.get(f"{API_ROOT}/budgets/mlpa-global", headers=MASTER).json()
         assert budget["origin"] is None
+        assert _authenticates(client, SECRET)
+
+
+def test_a_declaration_restored_to_config_is_written_back_over_the_api_change(test_config: GatewayConfig) -> None:
+    config = _config(test_config, mlpa=_key())
+    with _boot(config) as client:
+        (key,) = _declared_keys(client)
+
+    with _boot(test_config) as client:
+        client.patch(f"{API_ROOT}/budgets/mlpa-global", json={"max_budget": 0}, headers=MASTER)
+        client.patch(f"{API_ROOT}/keys/{key['id']}", json={"is_active": False}, headers=MASTER)
+
+    with _boot(config) as client:
+        budget = client.get(f"{API_ROOT}/budgets/mlpa-global", headers=MASTER).json()
+        assert budget["max_budget"] == 100
+        assert budget["origin"] == "config"
+        assert client.get(f"{API_ROOT}/keys/{key['id']}", headers=MASTER).json()["is_active"] is True
         assert _authenticates(client, SECRET)
 
 

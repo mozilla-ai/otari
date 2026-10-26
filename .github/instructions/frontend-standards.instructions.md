@@ -201,16 +201,17 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
 
 8. **Navigation is data, and its three gates stay three.** A *rail* destination is declared in
    `web/src/app/nav/registry.ts` and nowhere else; flag a sidebar link hand-written into a
-   component. `/playground`, `/docs`, and `/account` are chrome destinations, so they
+   component. `/playground` and `/account` are chrome destinations, so they
    use hand-written `Link`s outside the sidebar sections. Playground and Documentation
-   appear in the top bar and in the account menu below `md`; Account settings is that
+   appear in the top bar and in the account menu below `md`, Documentation as an external
+   link to `docs_url` or `https://docs.otari.ai/` rather than a route; Account settings is that
    menu's first row. Playground remains in route lookup to preserve its surface gate.
    An entry gates on `surface` (the deployment axis, from `GET /v1/bootstrap`
    via `useDeployment`), `capability` (the entitlement axis, via `useEntitlements`), and
    `operatorOnly` (the caller axis, via `useDeploymentAdminAccess`), composed as AND by
    `useNavVisibility`. Do not fold one into another, and do not reach past them: a page
-   component that reads the gateway's mode itself, or infers it from an endpoint's 404, is
-   the scattered mode check this replaced. A new base capability belongs in
+   component that decides for itself what the deployment serves, or infers it from an
+   endpoint's 404, is the scattered check this replaced. A new base capability belongs in
    `BASE_CAPABILITIES`; an overlay's belongs in neither. Hiding a surface client-side is a
    convenience, never an authorization; the server still has to enforce it.
    - The caller axis is the odd one and stays narrow. It is about *who is signed in* where
@@ -281,10 +282,11 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
     the height of what it replaces, or everything below it jumps on swap. Global chrome
     (sidebar, header, breadcrumbs) belongs to `AppShell` and not to a route component, which
     remounts it on every navigation. `window.location.reload()` is not a refresh button:
-    invalidate the affected keys instead, and the root error boundary is its one legitimate
-    caller. A pre-paint decision, the theme above all, is resolved in `index.html`'s inline
-    script as well as in `useTheme`, so a change to the storage key, the three-state
-    resolution or the attributes that carry it has to reach both. See
+    invalidate the affected keys instead. Its callers are the root error boundary and
+    `AutoUpdate`, which loads a new build on the next page change. A pre-paint decision,
+    the theme above all, is resolved in `index.html`'s inline script as well as in
+    `useTheme`, so a change to the storage key, the three-state resolution or the
+    attributes that carry it has to reach both. See
     [layout-stability.md](../skills/frontend-standards/layout-stability.md).
 
 12. **Numbers, money and dates go through `web/src/shared/helpers/format.ts`.** `Intl` does the

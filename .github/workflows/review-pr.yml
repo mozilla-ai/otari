@@ -98,6 +98,11 @@ jobs:
       # The PR head as git objects only: readable with `git show` and
       # `git diff`, never written to disk. The repo is public, so this needs
       # no credentials.
+      #
+      # NOTE: CodeQL flags this fetch whichever ref form it names. A pinned SHA
+      # matches actions/untrusted-checkout and a mutable ref matches its TOCTOU
+      # variant, so swapping the ref form only trades one alert for the other.
+      # The write-access gate in `authorize` is what makes the risk acceptable.
       - name: Fetch PR head
         env:
           HEAD_SHA: ${{ needs.authorize.outputs.head_sha }}
@@ -120,7 +125,7 @@ jobs:
 
       - name: Run review
         id: claude
-        uses: anthropics/claude-code-action@6c690188da61cf16ee7debb28383ba67f02abb4c # v1.0.242
+        uses: anthropics/claude-code-action@e4a6faad497d33dbc7144135c75e41f82f0bf6c0 # v1.0.255
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # The action writes this token into the git remote config and the
@@ -185,7 +190,7 @@ jobs:
       # needs write access, and keep it for a day.
       - name: Upload logs
         if: always() && runner.debug == '1' && steps.claude.outputs.execution_file != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: claude-logs
           path: ${{ steps.claude.outputs.execution_file }}

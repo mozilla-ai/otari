@@ -1,3 +1,4 @@
+import json
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
@@ -8,8 +9,8 @@ from any_llm.types.completion import (
     CompletionParams,
     CompletionUsage,
 )
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
-from pydantic import Field, field_validator
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -21,39 +22,33 @@ from gateway.api.deps import (
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
-    get_db_if_needed,
+    get_db,
     get_log_writer,
-    get_unit_of_work_if_needed,
+    get_unit_of_work,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
+from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
-    NO_RESOLVABLE_PROVIDER_DETAIL,
     DeclaredTools,
     ErrorKind,
     ToolBackends,
     ToolContext,
     classify_provider_error,
-    default_attempt_kwargs,
     log_usage,
     prepare_gateway_tools,
     provider_error_headers,
     provider_failure_detail,
-    raise_all_streaming_attempts_failed,
     rate_limit_headers,
     resolve_dispatch_provider,
     resolve_request_context,
-    run_platform_non_stream,
+    run_non_stream,
     run_single_attempt_stream,
-    run_standalone_non_stream,
-    run_streaming_with_fallback,
     scope_prompt_cache_key,
     stream_error_code,
     stream_error_message,
 )
-from gateway.api.routes._platform import ResolvedAttempt, SettledCost, with_retry_hint
-from gateway.api.routes._request_tags import RequestMetadata, request_tags
+from gateway.api.routes._request_tags import RequestMetadata, RequestTagsHeader, resolved_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
@@ -66,11 +61,13 @@ from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.provider_fields import surface_provider_fields
+from gateway.schemas.inference import SettledCost
 from gateway.services.files import FileService, StagedFile
 from gateway.services.inference import (
     bind_upstream_user,
     chat_user_fields,
     is_chat_stream_cost_carrier,
+    provider_failure,
     require_choices,
     with_upstream_user,
 )
@@ -83,7 +80,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
     reports_tool_activity,
 )
-from gateway.services.provider_kwargs import apply_endpoint_defaults
+from gateway.services.provider_kwargs import apply_endpoint_defaults, with_request_fields
 from gateway.services.providers import acompletion
 from gateway.services.tools import (
     CODE_EXECUTION_HEADER,
@@ -91,6 +88,8 @@ from gateway.services.tools import (
     WEB_SEARCH_HEADER,
     Dialect,
     ToolUseBudget,
+    provider_attempt_kwargs,
+    with_typed_code_execution_tool,
     without_otari_tool_calls,
 )
 from gateway.services.traces import read_turn
@@ -129,6 +128,12 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     unchanged to document it (``max_completion_tokens``), which is only worth
     doing where the wire contract is not guessable from the field itself.
     """
+
+    # A field beyond the ones below is set aside here rather than kept on the
+    # model, so ``model_dump`` still never carries one (a caller's ``api_key``
+    # would otherwise override the gateway's). It reaches the provider only when
+    # its instance lists it in ``request_fields``; see ``with_request_fields``.
+    _extra_fields: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     messages: list[dict[str, Any]] = Field(min_length=1)
     # any-llm types this as ``dict | type | None``; the wire body only ever
@@ -189,9 +194,32 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     )
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
+    # OpenAI's chat field, absent from ``CompletionParams``. The provider gets a
+    # digest of it instead (see ``bind_upstream_user``), never the caller's value.
+    safety_identifier: str | None = Field(
+        default=None,
+        description=(
+            "A stable identifier for the end user behind the request, used as the tag the provider's "
+            "end-user identifier is derived from. Wins over `user` for that, and is never sent upstream. "
+            "The dashboard's Playground ignores it."
+        ),
+    )
     # OpenAI's chat field, absent from ``CompletionParams``: read for request tags
     # and never forwarded, since a provider other than OpenAI would reject it.
     metadata: RequestMetadata = None
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _set_extra_fields_aside(cls, data: Any, handler: Any) -> "ChatCompletionRequest":
+        request: ChatCompletionRequest = handler(data)
+        if isinstance(data, dict):
+            request._extra_fields = {name: value for name, value in data.items() if name not in cls.model_fields}
+        return request
+
+    @property
+    def extra_fields(self) -> dict[str, Any]:
+        """The fields the request carried beyond its schema's."""
+        return dict(self._extra_fields)
 
 
 def _every_choice_finishes() -> Callable[[ChatCompletionChunk], bool]:
@@ -213,6 +241,23 @@ def _every_choice_finishes() -> Callable[[ChatCompletionChunk], bool]:
         return bool(finished) and seen <= finished
 
     return completes
+
+
+def _without_nulls(obj: ChatCompletion | ChatCompletionChunk) -> dict[str, Any]:
+    """Serialize a completion or chunk without its null fields, which strict clients reject.
+
+    The nulls the OpenAI spec requires as keys stay: ``finish_reason`` on every
+    choice, and ``logprobs``, ``message.content`` and ``message.refusal`` on a
+    completion's choices (``content`` is null on a tool-call-only answer).
+    """
+    body = surface_provider_fields(obj).model_dump(mode="json", exclude_none=True)
+    for choice in body["choices"]:
+        choice.setdefault("finish_reason", None)
+        if (message := choice.get("message")) is not None:
+            choice.setdefault("logprobs", None)
+            message.setdefault("content", None)
+            message.setdefault("refusal", None)
+    return body
 
 
 class _ChatAdapter:
@@ -259,11 +304,17 @@ class _ChatAdapter:
     def stream_completion(self) -> Callable[[Any], bool] | None:
         return _every_choice_finishes()
 
-    def stream_error_payload(self, exc: BaseException) -> str:
-        return openai_error_event(self.stream_format, stream_error_code(exc), stream_error_message(exc))
+    def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
+        failure = provider_failure(exc, provider)
+        return openai_error_event(
+            self.stream_format,
+            stream_error_code(exc),
+            stream_error_message(exc),
+            failure.as_dict() if failure is not None else None,
+        )
 
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
-        return f"data: {surface_provider_fields(chunk).model_dump_json()}\n\n"
+        return f"data: {json.dumps(_without_nulls(chunk), separators=(',', ':'))}\n\n"
 
     def extract_stream_usage(self, chunk: ChatCompletionChunk) -> CompletionUsage | None:
         if not chunk.usage:
@@ -278,6 +329,7 @@ class _ChatAdapter:
             total_tokens=chunk.usage.total_tokens or 0,
             prompt_tokens_details=details,
             cache_read_tokens=(details.cached_tokens or 0) if details is not None else 0,
+            cache_write_tokens=(details.cache_write_tokens or 0) if details is not None else 0,
             reasoning_tokens=reasoning_tokens_of(chunk.usage),
         )
         return GatewayUsage(**fields)
@@ -312,17 +364,9 @@ class _ChatAdapter:
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ChatCompletionChunk]:
         return await acompletion(**_with_upstream_user(kwargs))  # type: ignore[return-value]
 
-    def prepare_stream_kwargs(
-        self,
-        kwargs: dict[str, Any],
-        *,
-        require_usage: bool = False,
-    ) -> dict[str, Any]:
-        options = kwargs.get("stream_options")
-        if options is None:
+    def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if kwargs.get("stream_options") is None:
             kwargs["stream_options"] = {"include_usage": True}
-        elif require_usage:
-            kwargs["stream_options"] = {**options, "include_usage": True}
         return kwargs
 
     async def run_tool_loop(
@@ -337,8 +381,7 @@ class _ChatAdapter:
     ) -> ChatCompletion:
         # ``native_tools`` names the web tools whose calls the answer reports in
         # ``otari_tool_calls``; ``use_budget`` caps what the caller is billed for.
-        # Standalone dispatch has no lock-in callback; each kwarg is passed only when
-        # set, so test fakes can mirror each call shape.
+        # Each kwarg is passed only when set, so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
@@ -388,22 +431,12 @@ class _ChatAdapter:
             "messages": inject_purpose_hints(kwargs["messages"], hints, header=header),
         }
 
-    def attempt_kwargs(
-        self,
-        attempt: ResolvedAttempt,
-        base_request_fields: dict[str, Any],
-    ) -> dict[str, Any]:
-        return default_attempt_kwargs(attempt, base_request_fields)
-
     def local_attempt_kwargs(
         self,
         attempt: Attempt,
         base_request_fields: dict[str, Any],
     ) -> dict[str, Any]:
-        return attempt.call_kwargs(base_request_fields)
-
-    def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        return kwargs
+        return provider_attempt_kwargs(attempt.call_kwargs(base_request_fields))
 
 
 def _user_fields(kwargs: dict[str, Any], identifier: str) -> dict[str, Any]:
@@ -459,10 +492,9 @@ _USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
 async def chat_completions(
     raw_request: Request,
     response: Response,
-    background_tasks: BackgroundTasks,
     request: ChatCompletionRequest,
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
-    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     files: OptionalFileServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
@@ -470,7 +502,8 @@ async def chat_completions(
     billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
-) -> ChatCompletion | Response:
+    tags_header: RequestTagsHeader,
+) -> dict[str, Any] | Response:
     """OpenAI-compatible chat completions endpoint.
 
     Supports both streaming and non-streaming responses.
@@ -484,7 +517,6 @@ async def chat_completions(
     return await run_chat_completion(
         raw_request=raw_request,
         response=response,
-        background_tasks=background_tasks,
         request=request,
         db=db,
         uow=uow,
@@ -495,6 +527,7 @@ async def chat_completions(
         billing=billing,
         tool_ports=tool_ports,
         idempotency=idempotency,
+        tags_header=tags_header,
     )
 
 
@@ -502,10 +535,9 @@ async def run_chat_completion(
     *,
     raw_request: Request,
     response: Response,
-    background_tasks: BackgroundTasks,
     request: ChatCompletionRequest,
-    db: AsyncSession | None,
-    uow: UnitOfWork | None,
+    db: AsyncSession,
+    uow: UnitOfWork,
     files: FileService | None,
     config: GatewayConfig,
     log_writer: LogWriter,
@@ -514,7 +546,8 @@ async def run_chat_completion(
     tool_ports: ToolPorts,
     session_principal: SessionPrincipal | None = None,
     idempotency: IdempotencyGuard | None = None,
-) -> ChatCompletion | Response:
+    tags_header: str | None = None,
+) -> dict[str, Any] | Response:
     """Serve one chat completion, from the resolved preamble to the response.
 
     The body of :func:`chat_completions`, as a plain function so a second route
@@ -525,7 +558,7 @@ async def run_chat_completion(
     ``session_principal``. Everything from the budget gate onward is shared, so
     the two paths cannot drift on routing, tools, pricing or settlement.
 
-    ``session_principal`` is standalone-only and left ``None`` by the public
+    ``session_principal`` is left ``None`` by the public
     endpoint, which keeps its API-key-or-master-key rule exactly as it was; see
     :class:`SessionPrincipal` for what a caller owes before building one. It is
     also what picks the usage row's endpoint label, so a Playground request is
@@ -542,6 +575,8 @@ async def run_chat_completion(
     # message it sends back. A provider rejects the field, so it goes before
     # admission sizes the prompt.
     request.messages = without_otari_tool_calls(request.messages)
+    if (typed_tools := with_typed_code_execution_tool(request.tools)) is not request.tools:
+        request.tools = typed_tools
 
     # Uploads the normalizer found for the code-execution sandbox, handed to the
     # sandbox session once the billed user and workspace are resolved.
@@ -550,8 +585,8 @@ async def run_chat_completion(
     async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the wire payload (extract to
         # text for text-only models, inline for natively-capable ones) before
-        # the cost estimate. Standalone only; no-op when the files feature is
-        # off or the request has no attachments.
+        # the cost estimate. A no-op when the files feature is off or the
+        # request has no attachments.
         request.messages, stats = await normalize_request_messages(
             request.messages,
             fmt="openai",
@@ -562,6 +597,10 @@ async def run_chat_completion(
             user_id=target.user_id,
             instance=target.instance,
             workspace_id=target.file_workspace_id,
+            candidates=target.candidate_providers,
+            credential_workspace_id=target.credential_workspace_id,
+            hosted_credential=target.hosted_credential,
+            upstream_user=target.upstream_user,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
@@ -587,6 +626,7 @@ async def run_chat_completion(
             log_writer=log_writer,
             model=request.model,
             user_id_from_request=request.user,
+            safety_identifier=request.safety_identifier,
             estimate_prompt_chars=len(str(request.messages)),
             estimate_max_output_tokens=output_cap,
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
@@ -600,12 +640,13 @@ async def run_chat_completion(
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
-            tags=request_tags(request.metadata),
+            tags=resolved_tags(tags_header, request.metadata),
             turn=read_turn("chat", request.messages),
             session_label=request.session_label,
         )
     except IdempotentReplay as replay:
         return replay.response()
+    ctx.request_extras = request.extra_fields
 
     tool_ctx = await prepare_gateway_tools(
         adapter=adapter,
@@ -627,7 +668,7 @@ async def run_chat_completion(
             ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
                 config=config,
-                uow=ctx.uow,
+                uow=uow,
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 port=tool_ports.code_execution,
@@ -635,11 +676,12 @@ async def run_chat_completion(
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,
                 config=config,
-                uow=ctx.uow,
+                uow=uow,
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 inputs=sandbox_inputs,
             ),
+            billing=billing,
         ),
     )
 
@@ -665,51 +707,24 @@ async def run_chat_completion(
     request_fields = tool_ctx.build_request_fields(_request_fields)
 
     # ------------------------------------------------------------------
-    # Streaming path: in hybrid mode, iterate `route.attempts` before any
-    # bytes are flushed, then commit to the first attempt that yields a chunk
-    # (tool modes included, so they get per-attempt fallback up to the
-    # lock-in point). Mid-stream failover (after first chunk) is out of
+    # Streaming path. Mid-stream failover (after first chunk) is out of
     # scope: errors after first chunk propagate to the client.
     # ------------------------------------------------------------------
     if request.stream:
-        if ctx.hybrid_mode:
-            route = ctx.route
-            if route is None or not route.attempts:
-                if route is not None:
-                    logger.error(
-                        "Platform returned empty attempts list request_id=%s",
-                        route.request_id,
-                    )
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=NO_RESOLVABLE_PROVIDER_DETAIL,
-                )
-            try:
-                return await run_streaming_with_fallback(
-                    adapter=adapter,
-                    route=route,
-                    base_request_fields=request_fields,
-                    config=config,
-                    background_tasks=background_tasks,
-                    rate_limit_info=ctx.rate_limit_info,
-                    tool_ctx=tool_ctx,
-                    session_label=request.session_label,
-                    started_at=ctx.started_at,
-                )
-            except HTTPException:
-                raise
-            except Exception as exc:
-                # Every attempt failed before any bytes were flushed.
-                raise_all_streaming_attempts_failed(adapter, exc, route)
-
-        # Standalone path: single attempt, no fallback (no `route.attempts`).
         # Resolve the instance to its implementation; dispatch any-llm against
         # ``implementation:model`` while billing/logging key on the instance.
         resolved = await resolve_dispatch_provider(
             ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
         )
-        call_kwargs = apply_endpoint_defaults(
-            {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+        call_kwargs = provider_attempt_kwargs(
+            apply_endpoint_defaults(
+                {
+                    **resolved.kwargs,
+                    **with_request_fields(config, resolved.instance, request_fields, ctx.request_extras),
+                    "model": resolved.dispatch_model,
+                },
+                resolved,
+            )
         )
         return await run_single_attempt_stream(
             adapter=adapter,
@@ -722,39 +737,20 @@ async def run_chat_completion(
             base_request_fields=request_fields,
         )
 
-    # ------------------------------------------------------------------
-    # Non-streaming path. Hybrid mode iterates `route.attempts` with
-    # pre-lock-in fallback semantics: once an attempt's tool loop has
-    # received its first assistant message, subsequent failures terminate
-    # the request; we never swap providers between tool-use rounds.
-    # ------------------------------------------------------------------
-    if ctx.hybrid_mode:
-        route = ctx.route
-        if route is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Internal error: missing route context",
-            )
-        platform_result = await run_platform_non_stream(
-            adapter=adapter,
-            route=route,
-            base_request_fields=request_fields,
-            tool_ctx=tool_ctx,
-            response=response,
-            background_tasks=background_tasks,
-            config=config,
-            rate_limit_info=ctx.rate_limit_info,
-            session_label=request.session_label,
-        )
-        return surface_provider_fields(platform_result)
-
     resolved = await resolve_dispatch_provider(
         ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
     )
-    call_kwargs = apply_endpoint_defaults(
-        {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+    call_kwargs = provider_attempt_kwargs(
+        apply_endpoint_defaults(
+            {
+                **resolved.kwargs,
+                **with_request_fields(config, resolved.instance, request_fields, ctx.request_extras),
+                "model": resolved.dispatch_model,
+            },
+            resolved,
+        )
     )
-    result = await run_standalone_non_stream(
+    result = await run_non_stream(
         adapter=adapter,
         ctx=ctx,
         tool_ctx=tool_ctx,
@@ -765,7 +761,7 @@ async def run_chat_completion(
         display_model=resolved.alias,
         base_request_fields=request_fields,
     )
-    surface_provider_fields(result)
+    body = _without_nulls(result)
     if idempotency is not None:
-        await idempotency.complete(result, response)
-    return result
+        await idempotency.complete(body, response)
+    return body

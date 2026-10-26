@@ -25,13 +25,13 @@ offering the deployment serves (`openai/gpt-4o` while an `openai` instance
 serves `gpt-4o`); read as a catalog id otherwise. Where it is also the catalog
 id of a model the catalog also offers elsewhere (an OpenAI model served by
 Azure OpenAI too, say), the named offering serves first and the others are
-its fallback (see [Catalog spellings](#catalog-spellings)). Prefer the colon form in standalone
+its fallback (see [Catalog spellings](#catalog-spellings)). Prefer the colon form in
 configuration, pricing, aliases, and routing policies.
 
 ## Configuring a provider
 
 Declare a provider under `providers` in `config.yml`, or add it on the
-standalone Providers page. Either way it serves requests and its models are
+Hosted providers page. Either way it serves requests and its models are
 discovered. Supply the key from the environment with a `${VAR}` reference:
 
 ```yaml
@@ -40,10 +40,32 @@ providers:
     api_key: ${OPENAI_API_KEY}
 ```
 
-A provider that is not declared is still called when its native variable (such
-as `OPENAI_API_KEY`) is set, but its models are not listed. That fallback is
-deprecated: the gateway logs a warning naming the provider, and a future
-release will refuse the request.
+A key reaches a provider only from where a declaration names it: an entry's own
+`api_key` (a `${VAR}` reference included), a hosted provider's key, or
+an organization's own provider key, which declares the provider for that
+organization's requests. A provider's native variable (such as `OPENAI_API_KEY`)
+is never read for it otherwise, so an entry with no `api_key`, or one carrying
+only `client_args`, has no credential. A request it cannot serve is refused with
+a `424` and the `provider_not_configured` code. Otherwise a variable present on
+the server would serve every caller that has no credential of its own.
+
+Keyless local backends (`ollama`, `llamacpp`, `llamafile`, `lmstudio`, `vllm`)
+and providers authenticating from ambient cloud credentials (`bedrock`,
+`sagemaker`, `vertexai`) need a declaration too, but no key: a bare entry
+declares one. Undeclared, they are refused like any other provider, because the
+local server and the cloud role belong to the deployment.
+
+```yaml
+providers:
+  ollama:
+  bedrock:
+```
+
+The one exception is a build whose extension serves the request on a credential
+the deployment owns (`ModelProviderPort`, asked only after every other source
+missed); a plain deployment has none. The gateway logs a warning at startup
+naming each `<PROVIDER>_API_KEY` variable that is set and that no entry's
+`api_key` reads, and ignores an entry for a keyed provider that names no key.
 
 Provider support is endpoint-specific. A provider that supports chat may not
 support Responses, images, audio, rerank, or batches. Unsupported combinations
@@ -70,9 +92,6 @@ aliases for the OpenAI implementation.
 
 The optional `models` list supplies discovery for a backend that has no
 model-listing endpoint. It does not restrict direct dispatch.
-
-Named instances are local configuration and do not apply in hybrid mode, where
-the control plane resolves each attempt.
 
 A workspace or a single user can also bring its own server, reached the same
 way (`my-vllm:qwen3`) but visible only to its owner. See
@@ -102,6 +121,17 @@ does, is read to the last page.
 Discovery is cached and bounded; an unreachable provider does not block the
 catalog indefinitely.
 
+A [hosted provider](hosted-providers.md#hosted-providers-and-byo-credentials) lists its
+roster, the models switched on under it, rather than everything its upstream
+lists. The operator's `GET /api/v1/models/discoverable` and provider health
+dial it on its stored key beside the configured instances. A hosted provider
+serves only its roster unless it serves models not on its roster
+(`serves_unlisted_models`, off by default): it then also serves any model a
+request names, the way a `providers:` instance does, switches on every model
+it offers whether or not something prices it, and still refuses a model its
+roster switches off. A provider moved from the retired Deployment providers page
+starts with it off and every model it lists switched on.
+
 Each listed model carries the rate a request from the caller would be billed at,
 and `pricing_source` says which price list it came from: `organization` for the
 caller's organization's own override, `configured` for the deployment's stored
@@ -120,13 +150,20 @@ instance declared `openai-compatible` is looked up under OpenAI, so a model it
 serves under another name usually has no models.dev entry. With
 `models_dev_metadata: false`, the context window comes from the pricing snapshot alone.
 
+Each model also says what it accepts, in the fields OpenRouter's model listing
+uses, so a client built for that shape reads them unchanged. `name` is models.dev's
+display name. `supported_parameters` lists `tools` and `tool_choice` for a model
+that calls tools, `response_format` for one with structured output, and
+`reasoning` for a reasoning model; it names only the parameters models.dev records
+a flag for, not every parameter the model takes. `architecture` carries
+`input_modalities` and `output_modalities`, such as `["text", "image"]`. All three
+are `null` for a model models.dev does not describe, which means unknown rather
+than unsupported. An alias reports its target's capabilities but no `name`,
+because the target's name would say what the alias points at.
+
 Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's
 `models` list.
-
-Hosted mode keeps `GET /api/v1/models` for control-plane discovery. Hybrid mode
-does not serve the local catalog: it relays the control plane's list, limits
-included (see [Model listing](hybrid-mode-protocol.md#model-listing)).
 
 ### Who is shown which models
 
@@ -189,6 +226,23 @@ model_capabilities:
 File handling uses these values to decide whether to pass an attachment through
 or normalize it for a text-only model. See [Files](files.md).
 
+## Prompt caching
+
+Mark the prompt prefix to cache the way Anthropic does, with `cache_control`
+(`{"type": "ephemeral"}`, optionally `"ttl": "1h"`): on a system block or content
+block on `/api/v1/messages`, or on a message or content part on
+`/api/v1/chat/completions`. Anthropic models read it natively. For Gemini, any-llm
+turns the last breakpoint into a Gemini context cache holding everything up to
+it, reuses that cache while it lives (5 minutes, or 1 hour with `"ttl": "1h"`),
+and falls back to an uncached request when Gemini refuses a prefix below its
+minimum size. Gemini 2.5 and later models also cache repeated prefixes on their
+own, with nothing marked.
+
+Either way, the usage reports the tokens written to and read from the cache, and
+Otari bills them at the model's `cache_write_price_per_million` and
+`cache_read_price_per_million` when the pricing sets them, and at the input price
+otherwise. The time a Gemini cache is stored is not billed separately.
+
 ## Model aliases
 
 An alias gives callers a stable name for one real selector:
@@ -200,7 +254,7 @@ aliases:
 ```
 
 Callers send the alias in `model`. Completion responses keep the alias while
-pricing, budgets, and usage use the resolved target, which a standalone gateway
+pricing, budgets, and usage use the resolved target, which the gateway
 names in the `Otari-Provider` and `Otari-Model` response headers. Configure the
 target's price, not a price under the alias.
 
@@ -218,7 +272,7 @@ point to another alias.
 
 ### Runtime aliases
 
-Standalone operators can manage aliases from Routing or `/api/v1/aliases` without
+Operators can manage aliases from Routing or `/api/v1/aliases` without
 restarting. A stored alias belongs to a workspace and can optionally be narrowed
 to one user. Resolution prefers the most specific applicable alias.
 
@@ -323,7 +377,7 @@ another tenant's selector lands, and a model nobody offers to the caller
 resolves as the deployment's view says. A model's `selector` in the catalog is
 null where the caller has no such spelling for it.
 
-In standalone mode, a request that names a catalog id with more than one offering falls back across them. When the first offering fails before it sends a response, the next one in the same order serves the request, as a routing policy's `on_failure` list does. A catalog id spelled like the legacy `provider/model` of one of its own offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that offering first and the others after it in the usual order. The colon spelling of an offering (`openai:gpt-4o`) never falls back, so it is the way to pin one provider. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it. In hybrid mode, the control plane decides which offerings a request may try.
+A request that names a catalog id with more than one offering falls back across them. When the first offering fails before it sends a response, the next one in the same order serves the request, as a routing policy's `on_failure` list does. A catalog id spelled like the legacy `provider/model` of one of its own offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that offering first and the others after it in the usual order. The colon spelling of an offering (`openai:gpt-4o`) never falls back, so it is the way to pin one provider. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it.
 
 The Routing page's "Automatic fallback" section, read from
 `GET /api/v1/organizations/me/automatic-fallbacks`, lists every model your
@@ -331,9 +385,13 @@ organization sent requests to in the last 30 days, most requested first, with
 its offerings in the order a request sent by catalog id tries them for your
 organization. Beside each it counts the requests (an absorbed attempt is not one), the
 successful ones a later offering served, and the ones that named one offering
-or a policy rather than the catalog id and so had no automatic fallback. Under
-each offering it says who runs the built-in tools: the provider's own where it
-runs them itself, Otari's where it does not. That assumes a caller who declares
+or a policy rather than the catalog id and so had no automatic fallback. A model
+most of whose requests named one provider shows that provider alone, marked "No
+backup · pinned", because those requests get no fallback until they send the
+catalog id. Under each provider it says who runs the built-in tools: "Own
+tools" where the provider runs at least one itself, "Otari's tools" where Otari
+runs them all; the response's `own_tools` and `otari_tools` name which tool is
+whose. That assumes a caller who declares
 the tools in the provider's own words and sends no `Otari-*` executor header,
 so the deployment's code execution executor and web search interception decide;
 a workspace's code execution pin is not reflected. The order is the catalog's,
@@ -353,8 +411,8 @@ list price is marked with the list price.
 
 With `public_catalog: true` (see [Configuration](configuration.md)), the same
 two routes and the same page are served to a visitor with no session, at the
-deployment's rates and for the models the deployment itself serves: the
-configured providers, and on a managed platform its hosted models. A visitor's
+deployment's rates and for the models the deployment itself serves, its
+hosted providers included. A visitor's
 "Use this model" opens account creation instead of the drawer (sign-in where
 signup is closed), and the dashboard reopens that model on their first sign-in.
 
@@ -364,6 +422,15 @@ signup is closed), and the dashboard reopens that model on their first sign-in.
 curl http://localhost:8000/api/v1/models \
   -H "Authorization: Bearer $OTARI_API_KEY"
 ```
+
+On a deployment that hosts at least one provider, an organization API key is
+shown a priced model only where something would
+serve it from the key's workspace: a configured instance, the organization's own
+provider key, a hosted provider the deployment serves the organization, or the
+provider's own environment variable. A hosted provider the operator switched
+off or deleted leaves its rates on the price list, and its models leave this
+listing. The master key and an operator session still list the whole price
+list.
 
 ## HuggingFace provider routing
 

@@ -1,8 +1,7 @@
 import hashlib
 
-# Prefix stamped on every key the open-source build mints. ``gw_`` is the other
-# credential, the gateway's own token to the platform, so a user key must not
-# share it. The format itself lives behind ``ApiKeyFormatPort``; this constant
+# Prefix stamped on every key the open-source build mints. The format itself
+# lives behind ``ApiKeyFormatPort``; this constant
 # is the default adapter's, kept here so tests and the dashboard can name it.
 API_KEY_PREFIX = "tk-"
 

@@ -70,7 +70,11 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         return result.scalar_one()
 
     async def minute_limits_for_user(self, user_id: str) -> tuple[str, int | None, int | None] | None:
-        """``(budget_id, rpm_limit, tpm_limit)`` of the user's own budget, or None when it limits neither."""
+        """``(budget_id, rpm_limit, tpm_limit)`` of the user's own budget, or None when the user is on none.
+
+        A budget that sets neither limit is still returned: a ``per: budget`` rate
+        limit counts its users by it.
+        """
         row = (
             await self.db.execute(
                 select(Budget.budget_id, Budget.rpm_limit, Budget.tpm_limit)
@@ -78,7 +82,7 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
                 .where(User.user_id == user_id, User.deleted_at.is_(None))
             )
         ).first()
-        if row is None or (row.rpm_limit is None and row.tpm_limit is None):
+        if row is None:
             return None
         return row.budget_id, row.rpm_limit, row.tpm_limit
 
@@ -145,8 +149,20 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         except IntegrityError:
             raise BudgetStillReferencedError(budget_id) from None
 
+    async def set_declared_digest(self, budget_id: str, digest: str) -> None:
+        """Record the digest of the config.yml entry just written over this budget."""
+        await self.db.execute(
+            update(Budget)
+            .where(Budget.budget_id == budget_id)
+            .values(declared_digest=digest)
+            .execution_options(synchronize_session=False)
+        )
+
     async def mark_declared(self, budget_ids: Collection[str]) -> None:
         """Mark these budgets as declared in config.yml, and clear the mark from every other budget.
+
+        A budget losing the mark loses its digest too, so declaring it again writes
+        the entry back over whatever the API did to it meanwhile.
 
         Only rows whose mark changes are written, so a restart with nothing changed locks none.
         """
@@ -164,6 +180,6 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         await self.db.execute(
             update(Budget)
             .where(Budget.origin == BUDGET_ORIGIN_CONFIG, Budget.budget_id.not_in(declared))
-            .values(origin=None)
+            .values(origin=None, declared_digest=None)
             .execution_options(synchronize_session=False)
         )

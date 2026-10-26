@@ -1,8 +1,9 @@
 import json
 import math
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from functools import partial
+from http import HTTPStatus
 from typing import Annotated, Any, Literal
 
 from any_llm import AnyLLM
@@ -14,9 +15,12 @@ from any_llm.types.messages import (
     MessageStartEvent,
     MessageStreamEvent,
 )
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from gateway.api.deps import (
     BillingPortDep,
@@ -25,14 +29,14 @@ from gateway.api.deps import (
     ToolPortsDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
-    extract_credential_token,
     get_config,
-    get_db_if_needed,
+    get_db,
     get_log_writer,
-    get_unit_of_work_if_needed,
+    get_unit_of_work,
     verify_api_key_or_master_key,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
+from gateway.api.error_body import BodyHTTPException
+from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import (
     container_copies_step,
@@ -41,58 +45,54 @@ from gateway.api.routes._normalize import (
     sandbox_requested,
 )
 from gateway.api.routes._pipeline import (
-    DB_UNAVAILABLE_DETAIL,
-    NO_RESOLVABLE_PROVIDER_DETAIL,
     DeclaredTools,
     ErrorKind,
     ToolBackends,
     ToolContext,
     classify_provider_error,
-    default_attempt_kwargs,
     domain_error,
     error_kind_for_status,
     prepare_gateway_tools,
     provider_error_headers,
     provider_failure_detail,
-    raise_all_streaming_attempts_failed,
     release_reservation,
     resolve_dispatch_provider,
     resolve_request_context,
-    run_platform_non_stream,
+    run_non_stream,
     run_single_attempt_stream,
-    run_standalone_non_stream,
-    run_streaming_with_fallback,
     scope_prompt_cache_key,
-)
-from gateway.api.routes._platform import (
-    ResolvedAttempt,
-    SettledCost,
-    _resolve_platform_credentials,
-    with_retry_hint,
 )
 from gateway.api.routes._request_tags import (
     ANTHROPIC_USER_KEY,
     AnthropicRequestMetadata,
-    request_tags,
+    RequestTagsHeader,
+    resolved_tags,
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import INVALID_REQUEST, error_headers
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
+from gateway.exceptions import TenancyError
 from gateway.exceptions.files_exceptions import ProviderUploadFailedError
-from gateway.exceptions.tools_exceptions import ContainerOnManagedCredentialError
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.services.code_execution import ContainerLease, check_container_on_credential, gateway_container_value
+from gateway.schemas.inference import AnthropicErrorResponse, SettledCost
+from gateway.services.code_execution import ContainerLease, gateway_container_value
 from gateway.services.content_normalizer import stage_container_blocks
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
+    CONVERSATION_CACHE_KEY_FIELD,
     bind_upstream_user,
+    call_messages,
+    conversation_cache_key,
     messages_user_fields,
     upstream_exception_chain,
     upstream_exception_shape,
+    usage_unreported,
+    with_responses_instance,
     with_upstream_user,
 )
 from gateway.services.log_writer import LogWriter
@@ -115,13 +115,52 @@ from gateway.services.tools import (
     WEB_SEARCH_HEADER,
     Dialect,
     ToolUseBudget,
+    provider_attempt_kwargs,
+    with_typed_code_execution_tool,
 )
 from gateway.services.traces import read_turn
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, IncompleteStreamError, StreamFormat
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 
-router = APIRouter(tags=["messages"])
+
+class _AnthropicErrorRoute(APIRoute):
+    """A route whose every error, a request that fails validation included, is answered in Anthropic's envelope.
+
+    Anthropic's SDKs, and the clients built on them, read no other error body.
+    """
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handle = super().get_route_handler()
+
+        async def handle_in_anthropic_envelope(request: Request) -> Response:
+            try:
+                return await handle(request)
+            except RequestValidationError as exc:
+                raise _anthropic_error(
+                    _ERR_INVALID_REQUEST,
+                    _validation_message(exc),
+                    status.HTTP_400_BAD_REQUEST,
+                    error_headers(INVALID_REQUEST),
+                ) from exc
+            except StarletteHTTPException as exc:
+                enveloped = _ensure_anthropic_error(exc)
+                if enveloped is exc:
+                    raise
+                raise enveloped from exc
+            except TenancyError as exc:
+                raise domain_error(_ADAPTER, exc) from exc
+            except Exception as exc:
+                # Not ``BaseException``: a cancelled request is a disconnected client, not a failure.
+                logger.exception("Messages request failed: %s", type(exc).__name__)
+                raise _anthropic_error(
+                    _ERR_API, "Internal server error", status.HTTP_500_INTERNAL_SERVER_ERROR
+                ) from exc
+
+        return handle_in_anthropic_envelope
+
+
+router = APIRouter(tags=["messages"], route_class=_AnthropicErrorRoute)
 
 # See chat.USAGE_ENDPOINT.
 USAGE_ENDPOINT = "/v1/messages"
@@ -175,25 +214,36 @@ def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
 
 
 def _split_client_betas(kwargs: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-    """Take out the betas no provider should see, and say whether MCP's was among them.
+    """Take out the betas (and ``context_management``) no provider should see, and say whether MCP's was among them.
 
     Two never travel. The MCP client capability is the gateway's own, consumed
     here. And every beta is dropped for a model served with no Messages API of
     its own, where any-llm refuses the request outright: a beta names an Anthropic
     feature that model was never going to serve, so forwarding it would make
     a request stop working purely because its model changed, which is the swap
-    `auto` exists to keep invisible.
+    `auto` exists to keep invisible. ``context_management`` goes with them, for
+    the same reason: it configures Anthropic's server-side context editing, and
+    Claude Code sends it on every request.
     """
+    native = None
+    provider_kwargs = kwargs
+    if kwargs.get("context_management") is not None:
+        native = _dispatched_natively(kwargs)
+        if not native:
+            provider_kwargs = {key: value for key, value in kwargs.items() if key != "context_management"}
+
     betas = kwargs.get("betas")
     if not isinstance(betas, list) or not betas:
-        return kwargs, False
+        return provider_kwargs, False
 
+    if native is None:
+        native = _dispatched_natively(kwargs)
     saw_mcp_beta = MCP_CLIENT_BETA in betas
-    provider_betas = [beta for beta in betas if beta != MCP_CLIENT_BETA] if _dispatched_natively(kwargs) else []
+    provider_betas = [beta for beta in betas if beta != MCP_CLIENT_BETA] if native else []
     if provider_betas == betas:
-        return kwargs, False
+        return provider_kwargs, False
 
-    provider_kwargs = {**kwargs}
+    provider_kwargs = {**provider_kwargs}
     if provider_betas:
         provider_kwargs["betas"] = provider_betas
     else:
@@ -229,6 +279,35 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
     metadata: AnthropicRequestMetadata = None
+    # Declared so the published contract carries Anthropic's wire name; the
+    # validator below moves it into ``output_format``, so it is never set or forwarded.
+    output_config: dict[str, Any] | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            "Anthropic's output configuration (`effort`, `format`). Forwarded to the provider as "
+            "`output_config`. An alternative to `output_format`; send one or the other."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_output_config(cls, data: Any) -> Any:
+        """Read Anthropic's ``output_config`` as the ``output_format`` any-llm forwards.
+
+        ``output_config`` (``effort``, ``format``) is the Messages API's wire name, and
+        what Claude Code and the Anthropic SDK send; any-llm takes the same object as
+        ``output_format`` and sends it on as ``output_config``.
+        """
+        if not isinstance(data, dict) or "output_config" not in data:
+            return data
+        if data.get("output_format") is not None:
+            raise ValueError("Send output_config or output_format, not both.")
+        data = dict(data)
+        output_config = data.pop("output_config")
+        if output_config is not None:
+            data["output_format"] = output_config
+        return data
 
 
 class CountTokensRequest(BaseModel):
@@ -258,6 +337,12 @@ class CountTokensResponse(BaseModel):
     """Anthropic ``/v1/messages/count_tokens`` response."""
 
     input_tokens: int
+
+
+_ANTHROPIC_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    "4XX": {"model": AnthropicErrorResponse, "description": "The request was refused."},
+    "5XX": {"model": AnthropicErrorResponse, "description": "The request failed."},
+}
 
 
 def _is_gateway_minted_result(block: Any) -> bool:
@@ -433,14 +518,24 @@ def _anthropic_error(
     error_type: str,
     message: str,
     status_code: int,
-    headers: dict[str, str] | None = None,
-) -> HTTPException:
-    """Create an HTTPException with Anthropic-style error body."""
-    return HTTPException(
-        status_code=status_code,
-        detail={"type": "error", "error": {"type": error_type, "message": message}},
-        headers=headers,
-    )
+    headers: Mapping[str, str] | None = None,
+    *,
+    details: Mapping[str, Any] | None = None,
+) -> BodyHTTPException:
+    """An error answered in Anthropic's envelope, with any ``details`` beside its ``type`` and ``message``."""
+    error = {**(details or {}), "type": error_type, "message": message}
+    return BodyHTTPException(status_code, {"type": "error", "error": error}, headers)
+
+
+def _validation_message(exc: RequestValidationError) -> str:
+    """Each failure as ``field: reason``, never echoing the rejected value."""
+    failures = []
+    for error in exc.errors():
+        # A JSON decode error's location is a character offset, not a field.
+        loc = () if error.get("type") == "json_invalid" else error.get("loc", ())[1:]
+        field = ".".join(str(part) for part in loc)
+        failures.append(f"{field}: {error.get('msg', '')}" if field else error.get("msg", ""))
+    return "; ".join(failures)
 
 
 _ERR_INVALID_REQUEST = "invalid_request_error"
@@ -462,24 +557,21 @@ _ERROR_KIND_TO_ANTHROPIC_TYPE = {
 }
 
 
-def _ensure_anthropic_error(exc: HTTPException) -> HTTPException:
-    """Re-wrap a plain-string ``HTTPException`` in the Anthropic error envelope,
-    preserving the status code and headers (e.g. a 429's ``Retry-After``).
+def _ensure_anthropic_error(exc: StarletteHTTPException) -> BodyHTTPException:
+    """``exc`` in the Anthropic error envelope, keeping its status code and headers (a 429's ``Retry-After``).
 
-    HTTPExceptions already carrying the Anthropic ``detail`` dict (raised via
-    ``_anthropic_error``) pass through unchanged, so this is safe to apply to any
-    HTTPException on the ``/api/v1/messages`` path, including format-agnostic ones
-    raised by the hybrid preamble (platform resolve/auth) and the shared
-    execution runners.
+    One already in the envelope is returned as it is. A string detail becomes the
+    message; a dict detail gives its ``message``, and its other fields ride beside it.
     """
-    if not isinstance(exc.detail, str):
+    if isinstance(exc, BodyHTTPException):
         return exc
     error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[error_kind_for_status(exc.status_code)]
-    return HTTPException(
-        status_code=exc.status_code,
-        detail={"type": "error", "error": {"type": error_type, "message": exc.detail}},
-        headers=exc.headers,
-    )
+    detail = exc.detail
+    if isinstance(detail, dict):
+        details = {key: value for key, value in detail.items() if key != "message"}
+        message = str(detail.get("message", HTTPStatus(exc.status_code).phrase))
+        return _anthropic_error(error_type, message, exc.status_code, exc.headers, details=details)
+    return _anthropic_error(error_type, str(detail), exc.status_code, exc.headers)
 
 
 _ERR_OVERLOADED = "overloaded_error"
@@ -558,12 +650,13 @@ def _billable_messages_usage(usage: Any) -> GatewayUsage:
         cache_write_1h_tokens=sum(_cache_write_1h_tokens(part) for part in billable_parts),
         cache_tokens_in_prompt=False,
         reasoning_tokens=getattr(getattr(usage, "output_tokens_details", None), "thinking_tokens", None) or 0,
+        provider_web_searches=getattr(getattr(usage, "server_tool_use", None), "web_search_requests", None) or 0,
     )
 
 
 def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
     if isinstance(event, MessageDeltaEvent):
-        return _billable_messages_usage(event.usage)
+        return None if usage_unreported(event.usage) else _billable_messages_usage(event.usage)
     if isinstance(event, MessageStartEvent):
         usage = event.message.usage
         input_tokens = usage.input_tokens or 0
@@ -630,6 +723,14 @@ class _MessagesAdapter:
     # behavior this endpoint has always had.
     log_success_without_usage = False
 
+    def __init__(self, responses_instances: frozenset[str] = frozenset()) -> None:
+        # The provider instances whose Messages traffic goes through their Responses API.
+        self._responses_instances = responses_instances
+
+    def for_instance(self, kwargs: dict[str, Any], instance: str) -> dict[str, Any]:
+        """``kwargs`` for a call to ``instance``, marked for its Responses API when it opted in."""
+        return with_responses_instance(kwargs, instance if instance in self._responses_instances else None)
+
     def error(
         self,
         status_code: int,
@@ -663,7 +764,7 @@ class _MessagesAdapter:
         # same way after ``message_start`` went out.
         return _reached_message_stop()
 
-    def stream_error_payload(self, exc: BaseException) -> str:
+    def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
         if isinstance(exc, IncompleteStreamError):
             error_type, message = _ERR_API, _INCOMPLETE_STREAM_MESSAGE
         else:
@@ -681,7 +782,7 @@ class _MessagesAdapter:
         return _messages_stream_usage(chunk)
 
     def extract_usage(self, result: MessageResponse) -> CompletionUsage | None:
-        if not result.usage:
+        if not result.usage or usage_unreported(result.usage):
             return None
         return _billable_messages_usage(result.usage)
 
@@ -713,19 +814,13 @@ class _MessagesAdapter:
 
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
         provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
-        return await amessages(**provider_kwargs)  # type: ignore[return-value]
+        return await call_messages(amessages, provider_kwargs)  # type: ignore[no-any-return]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
         provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
-        return await amessages(**provider_kwargs)  # type: ignore[return-value]
+        return await call_messages(amessages, provider_kwargs)  # type: ignore[no-any-return]
 
-    def prepare_stream_kwargs(
-        self,
-        kwargs: dict[str, Any],
-        *,
-        require_usage: bool = False,
-    ) -> dict[str, Any]:
-        del require_usage
+    def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         kwargs["stream"] = True
         return kwargs
 
@@ -740,8 +835,7 @@ class _MessagesAdapter:
         use_budget: ToolUseBudget | None = None,
         container: ContainerLease | None = None,
     ) -> MessageResponse:
-        # Standalone dispatch has no lock-in callback; only pass the kwarg on
-        # the platform-attempt path so test fakes can mirror each call shape.
+        # Only pass the lock-in callback when given, so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
@@ -795,35 +889,34 @@ class _MessagesAdapter:
     ) -> dict[str, Any]:
         return inject_purpose_hints_anthropic({**kwargs}, hints, header=header)
 
-    def attempt_kwargs(
-        self,
-        attempt: ResolvedAttempt,
-        base_request_fields: dict[str, Any],
-    ) -> dict[str, Any]:
-        return default_attempt_kwargs(attempt, base_request_fields)
-
     def local_attempt_kwargs(
         self,
         attempt: Attempt,
         base_request_fields: dict[str, Any],
     ) -> dict[str, Any]:
-        return attempt.call_kwargs(base_request_fields)
-
-    def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        return kwargs
+        return self.for_instance(provider_attempt_kwargs(attempt.call_kwargs(base_request_fields)), attempt.instance)
 
 
 _ADAPTER = _MessagesAdapter()
 
 
-@router.post("/messages", response_model=None)
+def _adapter_for(config: GatewayConfig) -> _MessagesAdapter:
+    """The adapter for a request under ``config``: the shared one unless an instance set ``messages_api``."""
+    instances = frozenset(
+        name
+        for name, entry in config.providers.items()
+        if isinstance(entry, dict) and entry.get("messages_api") == "responses"
+    )
+    return _MessagesAdapter(instances) if instances else _ADAPTER
+
+
+@router.post("/messages", response_model=None, responses=_ANTHROPIC_ERROR_RESPONSES)
 async def create_message(
     raw_request: Request,
     response: Response,
-    background_tasks: BackgroundTasks,
     request: MessagesRequest,
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
-    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     files: OptionalFileServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
@@ -831,15 +924,14 @@ async def create_message(
     billing: BillingPortDep,
     tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
+    tags_header: RequestTagsHeader,
 ) -> dict[str, Any] | Response:
     """Anthropic Messages API-compatible endpoint.
 
     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
-    web_search in both standalone mode and hybrid mode. Hybrid-mode requests
-    resolve credentials via the platform service and get multi-attempt
-    fallback across the resolved route, tool-loop requests included (fallback
-    applies up to the pre-lock-in point, same as chat).
+    web_search.
     """
+    adapter = _adapter_for(config)
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
     merged_betas = _merge_anthropic_betas(request.betas, raw_request)
     if merged_betas is not None:
@@ -851,6 +943,8 @@ async def create_message(
     # overcharge the request. Provenance comes from each block, so this is
     # independent of whether the current request enables the same tool again.
     request.messages = _strip_gateway_minted_blocks(request.messages)
+    if (typed_tools := with_typed_code_execution_tool(request.tools)) is not request.tools:
+        request.tools = typed_tools
 
     # Uploads the normalizer found for the code-execution sandbox, handed to the
     # sandbox session once the billed user and workspace are resolved.
@@ -861,8 +955,8 @@ async def create_message(
 
     async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Anthropic wire payload
-        # before the cost estimate. Standalone only; no-op when the files
-        # feature is off or the request has no attachments.
+        # before the cost estimate. A no-op when the files feature is off or the
+        # request has no attachments.
         code_execution_header = raw_request.headers.get(CODE_EXECUTION_HEADER)
         request.messages, stats = await normalize_request_messages(
             request.messages,
@@ -874,11 +968,15 @@ async def create_message(
             user_id=target.user_id,
             instance=target.instance,
             workspace_id=target.file_workspace_id,
+            candidates=target.candidate_providers,
+            credential_workspace_id=target.credential_workspace_id,
+            hosted_credential=target.hosted_credential,
+            upstream_user=target.upstream_user,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
                 providers=target.candidate_providers,
-                dialect=_ADAPTER.name,
+                dialect=adapter.name,
                 code_execution_header=code_execution_header,
                 workspace_executor=target.workspace_executor,
             ),
@@ -886,7 +984,7 @@ async def create_message(
                 request.tools,
                 config=config,
                 providers=target.candidate_providers,
-                dialect=_ADAPTER.name,
+                dialect=adapter.name,
                 code_execution_header=code_execution_header,
                 workspace_executor=target.workspace_executor,
             ),
@@ -897,7 +995,7 @@ async def create_message(
 
     try:
         ctx = await resolve_request_context(
-            adapter=_ADAPTER,
+            adapter=adapter,
             raw_request=raw_request,
             response=response,
             db=db,
@@ -924,35 +1022,15 @@ async def create_message(
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
-            tags=request_tags(request.metadata, ignore=frozenset({ANTHROPIC_USER_KEY})),
+            tags=resolved_tags(tags_header, request.metadata, ignore=frozenset({ANTHROPIC_USER_KEY})),
             turn=read_turn("messages", request.messages),
             session_label=request.session_label,
         )
     except IdempotentReplay as replay:
         return replay.response()
-    except HTTPException as exc:
-        # The hybrid preamble (platform resolve / auth) raises format-agnostic
-        # plain-string HTTPExceptions (some with a Retry-After header); re-wrap
-        # them in the Anthropic envelope so /api/v1/messages errors stay structured.
-        raise _ensure_anthropic_error(exc) from exc
-
-    # Standalone credentials are the operator's own, so only hybrid can route to a managed one.
-    # Any managed attempt counts, not only the first: fallback decides which serves, past this point.
-    if request.container is not None and ctx.hybrid_mode:
-        route = ctx.route
-        try:
-            check_container_on_credential(
-                request.container,
-                managed_credential=route is not None and any(attempt.managed for attempt in route.attempts),
-            )
-        except ContainerOnManagedCredentialError as exc:
-            # A no-op in hybrid, which reserves nothing locally. Kept so this exit already settles
-            # if the gate ever covers a mode that does pre-debit the estimate.
-            await release_reservation(ctx)
-            raise domain_error(_ADAPTER, exc) from exc
 
     tool_ctx = await prepare_gateway_tools(
-        adapter=_ADAPTER,
+        adapter=adapter,
         ctx=ctx,
         response=response,
         declared=DeclaredTools(
@@ -975,7 +1053,7 @@ async def create_message(
             ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
                 config=config,
-                uow=ctx.uow,
+                uow=uow,
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 port=tool_ports.code_execution,
@@ -983,11 +1061,12 @@ async def create_message(
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,
                 config=config,
-                uow=ctx.uow,
+                uow=uow,
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 inputs=sandbox_inputs,
             ),
+            billing=billing,
         ),
     )
 
@@ -1002,7 +1081,9 @@ async def create_message(
         )
         # Only ``user_id`` means anything to a provider here, and the identifier replaces it.
         fields.pop("metadata", None)
+        fields.update(conversation_cache_key(raw_request.headers, session_label=request.session_label))
         scope_prompt_cache_key(fields, ctx)
+        scope_prompt_cache_key(fields, ctx, field=CONVERSATION_CACHE_KEY_FIELD)
         bind_upstream_user(fields, ctx.upstream_user)
         if fields.get("tools"):
             fields["tools"] = openai_to_anthropic_tools(fields["tools"])
@@ -1028,69 +1109,39 @@ async def create_message(
     prepare_kwargs = None
     if container_inputs:
         pepper = config.provider_account_pepper
-        if files is None or ctx.workspace_id is None or pepper is None:
+        if files is None or pepper is None:
             # The blocks still name Otari's files, which no provider account holds.
             await release_reservation(ctx)
-            raise domain_error(_ADAPTER, ProviderUploadFailedError())
+            raise domain_error(adapter, ProviderUploadFailedError())
         prepare_kwargs = container_copies_step(
             files=files,
             inputs=container_inputs,
             accounts=ProviderAccounts(pepper=pepper, workspace_id=ctx.workspace_id),
-            render=partial(domain_error, _ADAPTER),
+            render=partial(domain_error, adapter),
         )
 
     # ------------------------------------------------------------------
     # Streaming path
     # ------------------------------------------------------------------
     if request.stream:
-        if ctx.hybrid_mode:
-            route = ctx.route
-            assert route is not None  # guaranteed by the hybrid-mode preamble
-            if not route.attempts:
-                logger.error("Platform returned empty attempts list request_id=%s", route.request_id)
-                raise _anthropic_error(
-                    _ERR_API,
-                    NO_RESOLVABLE_PROVIDER_DETAIL,
-                    status.HTTP_502_BAD_GATEWAY,
-                )
-            try:
-                return await run_streaming_with_fallback(
-                    adapter=_ADAPTER,
-                    route=route,
-                    base_request_fields=request_fields,
-                    config=config,
-                    background_tasks=background_tasks,
-                    rate_limit_info=ctx.rate_limit_info,
-                    tool_ctx=tool_ctx,
-                    session_label=request.session_label,
-                    started_at=ctx.started_at,
-                )
-            except HTTPException as exc:
-                # Hybrid terminal failures arrive as format-agnostic plain-string
-                # HTTPExceptions; ensure the Anthropic envelope (dict details pass
-                # through unchanged).
-                converted = _ensure_anthropic_error(exc)
-                if converted is exc:
-                    raise
-                raise converted from exc
-            except Exception as exc:
-                raise_all_streaming_attempts_failed(_ADAPTER, exc, route)
-
-        # Standalone: single attempt streaming.
         resolved = await resolve_dispatch_provider(
-            ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
+            ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
         )
-        call_kwargs = apply_endpoint_defaults(
-            {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+        call_kwargs = adapter.for_instance(
+            provider_attempt_kwargs(
+                apply_endpoint_defaults(
+                    {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+                )
+            ),
+            resolved.instance,
         )
         return await run_single_attempt_stream(
-            adapter=_ADAPTER,
+            adapter=adapter,
             ctx=ctx,
             tool_ctx=tool_ctx,
             call_kwargs=call_kwargs,
             provider=resolved.instance,
             model=resolved.model,
-            session_label=request.session_label,
             display_model=resolved.alias,
             base_request_fields=request_fields,
             prepare_kwargs=prepare_kwargs,
@@ -1099,41 +1150,17 @@ async def create_message(
     # ------------------------------------------------------------------
     # Non-streaming path
     # ------------------------------------------------------------------
-    if ctx.hybrid_mode:
-        route = ctx.route
-        assert route is not None  # guaranteed by the hybrid-mode preamble
-        try:
-            result = await run_platform_non_stream(
-                adapter=_ADAPTER,
-                route=route,
-                base_request_fields=request_fields,
-                tool_ctx=tool_ctx,
-                response=response,
-                background_tasks=background_tasks,
-                config=config,
-                rate_limit_info=ctx.rate_limit_info,
-                session_label=request.session_label,
-            )
-        except HTTPException as exc:
-            # Hybrid terminal failures arrive as format-agnostic plain-string
-            # HTTPExceptions; ensure the Anthropic envelope (dict details pass
-            # through unchanged, including the sandbox / web_search 502s that
-            # run_platform_non_stream raises via the adapter).
-            converted = _ensure_anthropic_error(exc)
-            if converted is exc:
-                raise
-            raise converted from exc
-        return result.model_dump(exclude_none=True)
-
-    # Standalone non-stream path
     resolved = await resolve_dispatch_provider(
-        ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider, billing=billing
+        ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
     )
-    call_kwargs = apply_endpoint_defaults(
-        {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+    call_kwargs = adapter.for_instance(
+        provider_attempt_kwargs(
+            apply_endpoint_defaults({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved)
+        ),
+        resolved.instance,
     )
-    result = await run_standalone_non_stream(
-        adapter=_ADAPTER,
+    result = await run_non_stream(
+        adapter=adapter,
         ctx=ctx,
         tool_ctx=tool_ctx,
         call_kwargs=call_kwargs,
@@ -1165,41 +1192,23 @@ def _estimate_input_tokens(request: CountTokensRequest) -> int:
     return max(1, math.ceil(chars / _CHARS_PER_TOKEN))
 
 
-@router.post("/messages/count_tokens")
+@router.post("/messages/count_tokens", responses=_ANTHROPIC_ERROR_RESPONSES)
 async def count_message_tokens(
     raw_request: Request,
     request: CountTokensRequest,
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> CountTokensResponse:
     """Anthropic ``/v1/messages/count_tokens``-compatible endpoint.
 
     Returns ``{"input_tokens": N}`` without contacting an upstream provider:
     counting is local, so there is no budget reservation, pricing, or usage
-    logging. Authentication mirrors :func:`create_message` — hybrid mode
-    resolves the caller's token against the platform, standalone mode validates
-    the API key — so the endpoint is not an open token-counting oracle.
+    logging. Authentication mirrors :func:`create_message`, validating the API
+    key, so the endpoint is not an open token-counting oracle.
     """
-    try:
-        if config.is_hybrid_mode:
-            # Resolve against the platform purely to authenticate the caller (same
-            # as create_message); the routing plan is discarded since counting is
-            # local. Without this, any non-empty bearer string would be accepted.
-            user_token = extract_credential_token(raw_request)
-            await _resolve_platform_credentials(
-                config=config,
-                user_token=user_token,
-                model_selector=request.model,
-            )
-        else:
-            if db is None:
-                raise _anthropic_error(_ERR_API, DB_UNAVAILABLE_DETAIL, status.HTTP_500_INTERNAL_SERVER_ERROR)
-            # No session cookie here either, for the reason the completions path
-            # gives (`_pipeline.resolve_request_context`): this counts tokens for
-            # the plane a cookie may not reach, so it must not report on one.
-            await verify_api_key_or_master_key(raw_request, db, config)
-    except HTTPException as exc:
-        # Keep count_tokens auth errors in the Anthropic envelope too.
-        raise _ensure_anthropic_error(exc) from exc
+    # No session cookie here either, for the reason the completions path
+    # gives (`_pipeline.resolve_request_context`): this counts tokens for
+    # the plane a cookie may not reach, so it must not report on one.
+    await verify_api_key_or_master_key(raw_request, db, config)
 
     return CountTokensResponse(input_tokens=_estimate_input_tokens(request))

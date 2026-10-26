@@ -40,6 +40,7 @@ import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import cast
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -50,10 +51,20 @@ from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.pricing_exceptions import (
     OrganizationPricingManagedModelError,
     OrganizationPricingNotFoundError,
+    OrganizationPricingOperatorRateError,
     OrganizationPricingOverlapError,
+    OrganizationPricingToolRateError,
 )
 from gateway.models.money import to_usd, to_usd_or_none
-from gateway.models.pricing import API_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
+from gateway.models.pricing import (
+    API_ORIGIN,
+    MODEL_KIND,
+    OPERATOR_ORIGIN,
+    ModelPricing,
+    OrganizationModelPricing,
+    PriceSource,
+    PricingKind,
+)
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.repositories.pricing import OrganizationModelPricingRepository
@@ -66,7 +77,6 @@ from gateway.services.provider_kwargs import is_deployment_instance_key, split_s
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 
 @dataclass(frozen=True)
@@ -144,9 +154,7 @@ class OrganizationPricingService:
         """
         self.db = db
         self.config = config
-        self.organizations = OrganizationService(
-            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-        )
+        self.organizations = OrganizationService(db, membership_listener=None)
         self.provider_keys = OrgProviderKeyService(db)
         self.model_provider = model_provider
         self.rows = OrganizationModelPricingRepository(db)
@@ -236,27 +244,48 @@ class OrganizationPricingService:
         user: TenancyUser,
         model_key: str,
         organization_id: uuid.UUID,
+        *,
+        kind: PricingKind = MODEL_KIND,
     ) -> None:
         """Refuse a rate for a model this deployment, not this organization, pays for.
+
+        A search or fetch instance always runs on the deployment's own key, so
+        its rate is the operator's to set.
 
         Public for the reason :meth:`raise_if_overlapping` is: it is one of the
         rules this surface exists to enforce, and asserting it through a create
         would prove it through the role gate and the identity resolver instead.
 
         The deployment operator is exempt because they are the party the rule
-        protects. On a standalone deployment that identity is also the single
-        organization's administrator, so nothing there changes; on a control plane
+        protects. On a single-tenant deployment that identity is also the single
+        organization's administrator, so nothing there changes; on a deployment
         serving tenants who did not pay for the upstream capacity, an override on a
         deployment-supplied instance would let a tenant name its own cost basis,
         and a zero would make the model free and spend no budget.
 
-        Gotcha: this runs at write time only.
-        A stored override still applies if the organization later loses BYO coverage.
+        This runs at write time only, so it cannot stop an override written while
+        BYO covered the model from outliving that key. Settlement closes that:
+        a request the deployment paid for is priced only from an override the
+        operator wrote (``pricing_service.resolve_model_pricing``).
         """
-        if await DeploymentUserService(self.db).has_administration_access(user):
+        if await self._operates_deployment(user):
             return
+        if kind != MODEL_KIND:
+            raise OrganizationPricingToolRateError(kind, model_key)
         if model_key in await self.deployment_supplied_keys(organization_id, [model_key]):
             raise OrganizationPricingManagedModelError(model_key)
+
+    async def _operates_deployment(self, user: TenancyUser) -> bool:
+        return await DeploymentUserService(self.db).has_administration_access(user)
+
+    async def _origin_for(self, user: TenancyUser) -> str:
+        """The origin a rate ``user`` writes is stored under, which settlement reads back."""
+        return OPERATOR_ORIGIN if await self._operates_deployment(user) else API_ORIGIN
+
+    async def _raise_if_operator_rate(self, user: TenancyUser, row: OrganizationModelPricing) -> None:
+        """Refuse an organization manager's edit or delete of a rate the operator set."""
+        if row.origin == OPERATOR_ORIGIN and not await self._operates_deployment(user):
+            raise OrganizationPricingOperatorRateError(row.model_key)
 
     async def deployment_supplied_keys(self, organization_id: uuid.UUID, model_keys: Collection[str]) -> set[str]:
         """Which of ``model_keys`` the deployment pays the upstream bill for.
@@ -268,9 +297,10 @@ class OrganizationPricingService:
 
         Asked in a batch because the organization's BYO providers have to be
         resolved before the port can be asked at all, and that is one query for
-        an answer that does not change between models. The port call stays per
-        model: whether a hosted credential serves one is a question about that
-        model.
+        an answer that does not change between models. The port is asked once
+        per provider first: ``model`` can only make it refuse, so a provider it
+        serves no credential for serves none of its models, and only a provider
+        it does serve is asked again per model.
 
         Two callers want different things from the same answer.
         :meth:`raise_if_deployment_supplied` refuses an override for such a
@@ -280,9 +310,31 @@ class OrganizationPricingService:
         if not model_keys:
             return set()
         byo = await self.provider_keys.get_byo_providers(organization_id=organization_id)
-        return {
-            model_key for model_key in model_keys if await self._is_deployment_supplied(organization_id, model_key, byo)
-        }
+        provider_served: dict[str, bool] = {}
+        supplied: set[str] = set()
+        for model_key in model_keys:
+            split = split_selector(model_key)
+            if split is not None and split[0] not in byo and not is_deployment_instance_key(self.config, model_key):
+                provider = split[0]
+                if provider not in provider_served:
+                    provider_served[provider] = await self._hosted_serves_provider(organization_id, provider)
+                if not provider_served[provider]:
+                    continue
+            if await self._is_deployment_supplied(organization_id, model_key, byo):
+                supplied.add(model_key)
+        return supplied
+
+    async def _hosted_serves_provider(self, organization_id: uuid.UUID, provider: str) -> bool:
+        """Whether the port serves ``provider`` at all, before any model is named."""
+        if self.model_provider is None:
+            return False
+        try:
+            credential = await self.model_provider.resolve_hosted_credential(
+                organization_id=organization_id, workspace_id=None, provider=provider, model=None
+            )
+        except HostedAccessDeniedError:
+            return True
+        return credential is not None
 
     async def _is_deployment_supplied(
         self, organization_id: uuid.UUID, model_key: str, byo_providers: Collection[str]
@@ -318,8 +370,9 @@ class OrganizationPricingService:
         effective_from: datetime,
         effective_to: datetime | None,
         exclude_id: uuid.UUID | None = None,
+        kind: PricingKind = MODEL_KIND,
     ) -> None:
-        """Refuse a period that covers an instant this key is already priced for.
+        """Refuse a period that covers an instant this key, of this kind, is already priced for.
 
         Public because it is the rule this surface exists to enforce, and it is
         asserted directly over every arrangement of two periods in
@@ -334,6 +387,7 @@ class OrganizationPricingService:
         """
         stmt = select(OrganizationModelPricing).where(
             OrganizationModelPricing.organization_id == organization_id,
+            OrganizationModelPricing.kind == kind,
             OrganizationModelPricing.model_key == model_key,
             # The existing row ends after the candidate starts. NULL is open
             # ended, which always satisfies this.
@@ -363,6 +417,7 @@ class OrganizationPricingService:
         user: TenancyUser,
         *,
         model_key: str | None = None,
+        kind: PricingKind | None = None,
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[list[OrganizationModelPricing], int]:
@@ -383,13 +438,17 @@ class OrganizationPricingService:
         that is what tells a client whether to ask for another one.
         """
         organization_id = await self._readable_organization_id(user)
-        return await self.rows.page_for_organization(organization_id, model_key=model_key, skip=skip, limit=limit)
+        return await self.rows.page_for_organization(
+            organization_id, model_key=model_key, kind=kind, skip=skip, limit=limit
+        )
 
     async def create_for_caller(
         self,
         user: TenancyUser,
         model_key: str,
         override: PricingOverrideInput,
+        *,
+        kind: PricingKind = MODEL_KIND,
     ) -> OrganizationModelPricing:
         """Store a new override.
 
@@ -397,21 +456,24 @@ class OrganizationPricingService:
         period that overlaps one already stored for this key.
         """
         organization_id = await self._writable_organization_id(user)
-        await self.raise_if_deployment_supplied(user, model_key, organization_id)
+        await self.raise_if_deployment_supplied(user, model_key, organization_id, kind=kind)
         effective_from = normalize_effective_at(override.effective_from)
         effective_to = None if override.effective_to is None else normalize_effective_at(override.effective_to)
         validate_period(effective_from, effective_to)
         validate_rates(override)
+        validate_unit(kind, override.unit)
 
         await self.raise_if_overlapping(
             organization_id=organization_id,
             model_key=model_key,
             effective_from=effective_from,
             effective_to=effective_to,
+            kind=kind,
         )
 
         row = OrganizationModelPricing(
             organization_id=organization_id,
+            kind=kind,
             model_key=model_key,
             input_price_per_million=to_usd(override.input_price_per_million),
             output_price_per_million=to_usd(override.output_price_per_million),
@@ -421,10 +483,10 @@ class OrganizationPricingService:
             effective_from=effective_from,
             effective_to=effective_to,
             unit=override.unit,
-            origin=API_ORIGIN,
+            origin=await self._origin_for(user),
         )
         self.db.add(row)
-        await self._flush_or_conflict(organization_id, model_key, effective_from)
+        await self._flush_or_conflict(organization_id, model_key, effective_from, kind=kind)
         return row
 
     async def _flush_or_conflict(
@@ -434,12 +496,13 @@ class OrganizationPricingService:
         effective_from: datetime,
         *,
         exclude_id: uuid.UUID | None = None,
+        kind: PricingKind = MODEL_KIND,
     ) -> None:
         """Flush, mapping the unique-index race onto the overlap conflict.
 
         The overlap check above is what refuses an overlapping period, and it is
         enough single-threaded. Two writers racing on the same period both pass it,
-        and the unique index on ``(organization_id, model_key, effective_from)``
+        and the unique index on ``(organization_id, kind, model_key, effective_from)``
         refuses the second. That refusal arrives here, at ``flush``, not at the
         route's ``commit``, so without this it escapes as a 500 and the caller is
         told to retry something that was really a conflict.
@@ -470,6 +533,7 @@ class OrganizationPricingService:
             await self.db.rollback()
             occupant = select(OrganizationModelPricing).where(
                 OrganizationModelPricing.organization_id == organization_id,
+                OrganizationModelPricing.kind == kind,
                 OrganizationModelPricing.model_key == model_key,
                 OrganizationModelPricing.effective_from == effective_from,
             )
@@ -517,12 +581,15 @@ class OrganizationPricingService:
         """
         organization_id = await self._writable_organization_id(user)
         row = await self._owned_row(organization_id, pricing_id)
-        await self.raise_if_deployment_supplied(user, row.model_key, organization_id)
+        await self._raise_if_operator_rate(user, row)
+        kind = cast(PricingKind, row.kind)
+        await self.raise_if_deployment_supplied(user, row.model_key, organization_id, kind=kind)
 
         effective_from = normalize_effective_at(override.effective_from)
         effective_to = None if override.effective_to is None else normalize_effective_at(override.effective_to)
         validate_period(effective_from, effective_to)
         validate_rates(override)
+        validate_unit(kind, override.unit)
 
         await self.raise_if_overlapping(
             organization_id=organization_id,
@@ -530,6 +597,7 @@ class OrganizationPricingService:
             effective_from=effective_from,
             effective_to=effective_to,
             exclude_id=row.id,
+            kind=kind,
         )
 
         row.input_price_per_million = to_usd(override.input_price_per_million)
@@ -544,8 +612,8 @@ class OrganizationPricingService:
         # offered-models surface seeded carries ``seed`` and its refresh moves it
         # to each day's community default; leaving that marking on a rate an
         # admin has just set would have the next refresh overwrite it.
-        row.origin = API_ORIGIN
-        await self._flush_or_conflict(organization_id, row.model_key, effective_from, exclude_id=row.id)
+        row.origin = await self._origin_for(user)
+        await self._flush_or_conflict(organization_id, row.model_key, effective_from, exclude_id=row.id, kind=kind)
         return row
 
     async def delete_for_caller(self, user: TenancyUser, pricing_id: uuid.UUID) -> None:
@@ -557,6 +625,7 @@ class OrganizationPricingService:
         """
         organization_id = await self._writable_organization_id(user)
         row = await self._owned_row(organization_id, pricing_id)
+        await self._raise_if_operator_rate(user, row)
         await self.db.delete(row)
         await self.db.flush()
 
@@ -583,6 +652,12 @@ def validate_rates(override: PricingOverrideInput) -> None:
             raise TenancyValidationError(f"{field} must be non-negative; got {value}")
 
 
+def validate_unit(kind: PricingKind, unit: str) -> None:
+    """Refuse a search or fetch rate in any unit but ``requests``, since it is charged per call."""
+    if kind != MODEL_KIND and unit != "requests":
+        raise TenancyValidationError(f"a {kind} rate is per call, so its unit is 'requests'")
+
+
 def validate_period(effective_from: datetime, effective_to: datetime | None) -> None:
     """Refuse a period that could never apply to any instant.
 
@@ -601,4 +676,5 @@ __all__ = [
     "PricingOverrideInput",
     "validate_period",
     "validate_rates",
+    "validate_unit",
 ]

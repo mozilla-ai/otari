@@ -57,3 +57,22 @@ def test_override_beats_hosted_metadata() -> None:
     assert caps.source == "config"
     assert caps.image is False
     assert caps.pdf is False
+
+
+def test_deepseek_flash_takes_images_from_provider_metadata() -> None:
+    caps = resolve_capabilities(GatewayConfig(), LLMProvider.DEEPSEEK, "deepseek-flash")
+    assert (caps.image, caps.pdf, caps.source) == (True, False, "provider_metadata")
+
+
+def test_deepseek_v4_pro_is_a_known_exception_to_its_providers_images() -> None:
+    """It accepts an image and answers without it, so the image is described for it instead."""
+    caps = resolve_capabilities(GatewayConfig(), LLMProvider.DEEPSEEK, "deepseek-v4-pro")
+    assert (caps.image, caps.pdf, caps.source) == (False, False, "model_exception")
+
+
+def test_config_override_beats_a_known_model_exception() -> None:
+    config = GatewayConfig(
+        model_capabilities={"deepseek:deepseek-v4-pro": ModelCapabilityConfig(supports_image=True, supports_pdf=False)}
+    )
+    caps = resolve_capabilities(config, LLMProvider.DEEPSEEK, "deepseek-v4-pro")
+    assert (caps.image, caps.source) == (True, "config")

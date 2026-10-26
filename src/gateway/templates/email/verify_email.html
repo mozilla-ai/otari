@@ -1,14 +1,24 @@
-                <h1 style="margin:0 0 16px 0; font-size:20px; color:#0f172a;">Verify your email</h1>
-                <p style="margin:0 0 16px 0; font-size:15px; line-height:1.5; color:#334155;">
-                  Confirm this address to finish signing in to Otari. This link expires in {{VALID_PERIOD}}.
-                </p>
-                <p style="margin:0 0 24px 0; text-align:center;">
-                  <a href="{{VERIFY_LINK}}" style="display:inline-block; background-color:#0f766e; color:#ffffff; text-decoration:none; padding:12px 24px; border-radius:8px; font-size:15px; font-weight:600;">Verify email</a>
-                </p>
-                <p style="margin:0; font-size:13px; line-height:1.5; color:#64748b;">
-                  If the button doesn't work, copy and paste this link into your browser:<br />
-                  <a href="{{VERIFY_LINK}}" style="color:#0f766e; word-break:break-all;">{{VERIFY_LINK}}</a>
-                </p>
-                <p style="margin:24px 0 0 0; font-size:13px; line-height:1.5; color:#94a3b8;">
-                  If you weren't expecting this, you can ignore this email.
-                </p>
+                  <tr>
+                    <td class="o-band" style="padding:28px 32px 28px 32px;">
+                      <div style="font-family:'Mozilla Headline','Mozilla Text',Arial,Helvetica,sans-serif; font-size:28px; line-height:34px; font-weight:600; letter-spacing:-0.01em; color:#08090a;">Verify your email</div>
+                      <div style="font-family:'Mozilla Text',Arial,Helvetica,sans-serif; font-size:14px; line-height:20px; color:#2c2e33; padding-top:6px;">Confirm this address to finish signing in to Otari. This link expires in {{VALID_PERIOD}}.</div>
+                      <div style="padding-top:20px;">
+                        <table class="o-buttons" role="presentation" cellpadding="0" cellspacing="0" border="0">
+                          <tr>
+                            <td class="o-button" style="background-color:#00808a;"><a href="{{VERIFY_LINK}}" style="display:inline-block; padding:12px 20px; font-family:'Mozilla Text',Arial,Helvetica,sans-serif; font-size:14px; line-height:20px; font-weight:600; color:#ffffff; text-decoration:none;">Verify email</a></td>
+                          </tr>
+                        </table>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="o-band" style="padding:20px 32px 22px 32px; border-top:1px solid #f0f1f1;">
+                      <div style="font-family:'Mozilla Text',Arial,Helvetica,sans-serif; font-size:12px; line-height:18px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#5a5f6b;">Button not working? Paste this link</div>
+                      <div style="font-family:'Fira Code',Menlo,Consolas,'Courier New',monospace; font-size:13px; line-height:19px; padding-top:4px; word-break:break-all;"><a href="{{VERIFY_LINK}}" style="color:#00747e; text-decoration:underline;">{{VERIFY_LINK}}</a></div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="o-band" style="padding:16px 32px 20px 32px; border-top:1px solid #f0f1f1;">
+                      <div style="font-family:'Mozilla Text',Arial,Helvetica,sans-serif; font-size:13px; line-height:19px; color:#5a5f6b;">If you weren't expecting this, you can ignore this email.</div>
+                    </td>
+                  </tr>

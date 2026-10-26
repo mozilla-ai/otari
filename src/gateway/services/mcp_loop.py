@@ -143,6 +143,24 @@ def _accumulate_tool_call_deltas(slots: dict[int, dict[str, Any]], deltas: list[
                 slot["function"]["name"] += fn.name
             if getattr(fn, "arguments", None):
                 slot["function"]["arguments"] += fn.arguments
+        if extra_content := getattr(delta, "extra_content", None):
+            slot["extra_content"] = extra_content
+
+
+def _tool_call_dict(tc: Any) -> dict[str, Any]:
+    """Transcript form of a completed SDK tool call.
+
+    ``extra_content`` carries provider state the next request must echo back, such as
+    Gemini's ``thought_signature``; without it any-llm substitutes a validator bypass.
+    """
+    out: dict[str, Any] = {
+        "id": tc.id,
+        "type": "function",
+        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+    }
+    if extra_content := getattr(tc, "extra_content", None):
+        out["extra_content"] = extra_content
+    return out
 
 
 def _with_tool_calls(event: ChatCompletionChunk, tool_calls: list[Any] | None) -> ChatCompletionChunk | None:
@@ -241,9 +259,9 @@ async def _run_owned_calls(
         try:
             text = await owner.call_tool(name, args)
         except MaxToolIterationsExceeded:
-            # The request's shared search and fetch limit refused the call inside the
+            # The old backend's shared search and fetch limit refused the call inside the
             # backend, after its started entry went out, so the entry ends before the
-            # request fails.
+            # request fails. On the libraries, a call past the limit returns a tool error.
             if rendering is not None:
                 yield True, rendering.refused(call)
             raise
@@ -483,15 +501,7 @@ class _ChatToolLoopStrategy:
         # function tool-call. We avoid `isinstance` here because `acompletion`'s
         # return type uses the OpenAI SDK's class, while any_llm exposes a
         # same-named but distinct class alias.
-        tool_calls = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-            }
-            for tc in sdk_calls
-            if hasattr(tc, "function")
-        ]
+        tool_calls = [_tool_call_dict(tc) for tc in sdk_calls if hasattr(tc, "function")]
         return _execute_split(tool_calls, pool)
 
     def exit_after_split(self, result: ChatCompletion) -> bool:
@@ -814,8 +824,7 @@ async def mcp_tool_loop(
     ``native_tools``, across every round.
 
     ``on_first_response`` follows the provider lock-in contract documented on
-    :func:`gateway.services._tool_loop.run_tool_loop`; the hybrid-mode attempt
-    loop in :mod:`gateway.api.routes.chat` is the consumer.
+    :func:`gateway.services._tool_loop.run_tool_loop`.
 
     A first response with no choices is a provider failure, as on a call without
     tools. A later one is returned as the answer, so the rounds before it are billed.

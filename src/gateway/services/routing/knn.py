@@ -27,8 +27,7 @@ spaces.
 Known v1 limits (tracked on #187): capability gating is minimal (a request
 carrying tools keeps the default target; vision and context-window gating need a
 capability registry), learning happens only through the preference API rather
-than from live traffic, cost is list price rather than cache-aware, and the
-router is standalone-only because hybrid mode resolves models upstream.
+than from live traffic, and cost is list price rather than cache-aware.
 """
 
 from __future__ import annotations
@@ -49,7 +48,7 @@ from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.models.routing import RoutingMemory
 from gateway.services.pricing_service import find_model_pricing
-from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.services.provider_kwargs import require_declared_credential, resolve_provider_selector
 from gateway.services.routing.backends import RoutingContext, RoutingDecision
 
 if TYPE_CHECKING:
@@ -522,6 +521,7 @@ class KnnRoutingMemory:
         others fixes.
         """
         resolved = resolve_provider_selector(self.config, self.embedding_model)
+        require_declared_credential(self.config, resolved.instance, resolved.provider, resolved.kwargs)
         result = await aembedding(model=resolved.model, inputs=text, provider=resolved.provider, **resolved.kwargs)
         vector = list(result.data[0].embedding)
         return _unit([float(x) for x in vector])

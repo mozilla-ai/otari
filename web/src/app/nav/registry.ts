@@ -4,6 +4,7 @@ import {
   FiBarChart2,
   FiBox,
   FiCode,
+  FiCpu,
   FiDollarSign,
   FiGitBranch,
   FiGlobe,
@@ -226,35 +227,21 @@ const BASE_NAV_SECTIONS = [
  *
  * Reached from the sidebar footer and left by the "Back to" link at its top,
  * so the two contexts never render together. Gated on the caller managing the
- * organization, which in a standalone deployment is always true: there is one
- * session, the local operator, and it owns the organization the gateway
- * provisioned for itself. The gate is written anyway because it is the thing
- * that becomes load-bearing the moment per-user sign-in lands (otari-ai#1716).
+ * organization, which today is always true: there is one session, the local
+ * operator, and it owns the organization the gateway provisioned for itself.
+ * The gate is written anyway because it is the thing that becomes load-bearing the moment per-user sign-in lands (otari-ai#1716).
  *
- * One of the design's rows is **declared and gated on a surface the standalone
- * bootstrap does not report** (`STANDALONE_SURFACES` in
- * `src/gateway/api/routes/bootstrap.py` is that list), so it is absent here and
- * present on a deployment that serves it, and a group whose every row is gated
- * drops entirely, heading included. Usage is that row; its own comment says why.
+ * Every row is gated on a surface the bootstrap publishes (`SURFACES` in
+ * `src/gateway/api/routes/bootstrap.py`), and a group whose every row a
+ * deployment gates off drops entirely, heading included.
  *
- * The organization's guardrails are not such a row: `organization_guardrails`
- * is published by both topologies, because its rows are keyed on the
- * organization. It is in General, under Deployment providers. Gateway holds
- * nothing in this build and drops; it stays declared for an overlay's Gateways.
+ * The organization's guardrails are in General, under Providers.
  *
- * The organization's own provider credentials are not such a row either:
- * `organization_providers` is published by both topologies, because the page
- * behind it is where an organization's models are offered, priced and switched.
- * It sits under General beside the process-global `providers` row, under a
- * different label; see that pair for why.
- *
- * The design draws two more, Billing and Gateways, and neither is declared here
- * at all, because neither is this build's to declare: Billing is
- * ARCHITECTURE.md's canonical overlay-only capability, and the attached-gateway
- * surface behind Gateways is hosted depth (otari-ai#1779), so an overlay owns
- * both rows together with the pages under them and contributes them through
- * `overlayNavItems.ts`. Declaring either here would be worse than redundant: a
- * base route file at a path the overlay also serves is not shadowed by the
+ * The design draws one more, Billing, and it is not declared here at all,
+ * because it is not this build's to declare: Billing is ARCHITECTURE.md's
+ * canonical overlay-only capability, so an overlay owns the row together with
+ * the page under it and contributes it through `overlayNavItems.ts`. Declaring
+ * it here would be worse than redundant: a base route file at a path the overlay also serves is not shadowed by the
  * overlay's, it collides with it. The generator refuses the pair ("Conflicting
  * configuration paths were found") instead of choosing between them, so the
  * composed tree is never written: the Vite plugin logs that error and keeps
@@ -279,12 +266,11 @@ const ORGANIZATION_NAV_SECTIONS = [
       // The organization as a whole, which the workspace rail's Usage page
       // cannot ask for: its scope is the sidebar's selected workspace, and the
       // switcher offers only the caller's own memberships (otari-ai#1963).
-      // Gated on a surface only the hosted bootstrap reports, because on a
-      // standalone deployment the organization is the deployment and `/usage`
-      // already answers it whole. No `operatorOnly` and no role gate here: the
-      // organization rail already opens only to a caller who manages the
-      // organization, and the server scopes a member who lands here by URL to
-      // their own workspaces, the same rows `/usage` shows them.
+      // It sits beside that page. No `operatorOnly`
+      // and no role gate here: the organization rail already opens only to a
+      // caller who manages the organization, and the server scopes a member
+      // who lands here by URL to their own workspaces, the same rows `/usage`
+      // shows them.
       {
         to: "/organization/usage",
         label: "Usage",
@@ -343,49 +329,16 @@ const ORGANIZATION_NAV_SECTIONS = [
     ],
   },
   {
-    id: "org-gateway",
-    label: "Gateway",
-    // Empty in this build, so the rail drops it, heading included. Declared
-    // anyway because it is an overlay seam: an overlay contributes Gateways into
-    // this section by its id (`overlayNavItems.ts`), and a section that is not
-    // declared has nothing for that row to join.
-    items: [],
-  },
-  {
     id: "org-general",
     label: "General",
     items: [
-      // Two rows, and on a standalone deployment both render, which is why they
-      // cannot share a label. The organization row is where an organization's
-      // models are offered, priced and switched, a tenant's question on either
-      // topology, so both surfaces are published there; hosted reports only the
-      // organization one.
-      //
-      // The organization's own row keeps the bare noun, because this rail is
-      // already scoped to the organization and the row whose scope is *not* the
-      // rail's is the one that needs qualifying. "Deployment providers" is also
-      // what its `operatorOnly` already says in the gating: those credentials
-      // are keyed on an instance name and belong to the process, so every
-      // organization on the deployment is served them.
+      // Where an organization's models are offered, priced and switched. The
+      // deployment's own keys are Hosted providers, on the deployment rail.
       {
         to: "/organization/provider-keys",
         label: "Providers",
         surface: "organization_providers",
         icon: FiBox,
-      },
-      // `operatorOnly` here rather than on the organization rail's own entry
-      // point is the one exception to the deployment-rail placement the other
-      // two `operatorOnly` rows follow: a deployment operator who is not an
-      // organization owner or admin has no rail path to this row at all. Silent
-      // today, because standalone's one operator always owns the organization
-      // its own gateway provisioned; it stops holding once the rail's own gate
-      // (docblock above) becomes load-bearing at otari-ai#1716.
-      {
-        to: "/providers",
-        label: "Deployment providers",
-        surface: "providers",
-        icon: FiBox,
-        operatorOnly: "refused",
       },
       // The organization's own guardrails and where each one runs. Not the
       // workspace rail's `/tools/guardrails`, which sets the deployment's own
@@ -421,7 +374,7 @@ const ORGANIZATION_NAV_SECTIONS = [
  * separate it from, and a heading inside a context already named Deployment
  * would read as "Deployment, Deployment, Settings".
  *
- * Both rows keep the refusal they declare, which is the axis the server
+ * Every row keeps the refusal it declares, which is the axis the server
  * enforces and not a property of which rail draws them.
  */
 const DEPLOYMENT_SECTIONS = [
@@ -441,6 +394,40 @@ const DEPLOYMENT_SECTIONS = [
         surface: "admin",
         operatorOnly: "unlisted",
         icon: FiUserCheck,
+      },
+      // The keys the deployment serves inference on for a request that brings
+      // none of its own. Unlisted like Accounts, because its API refuses a
+      // non-operator with the same 404.
+      {
+        to: "/admin/hosted-providers",
+        label: "Hosted providers",
+        surface: "hosted_providers",
+        operatorOnly: "unlisted",
+        icon: FiCpu,
+      },
+      // What the deployment charges per call of the tools it runs itself, as
+      // Hosted providers is for its models. Refused rather than unlisted:
+      // `/pricing` answers a non-operator 403.
+      {
+        to: "/admin/web-search",
+        label: "Web search pricing",
+        surface: "pricing",
+        operatorOnly: "refused",
+        icon: FiGlobe,
+      },
+      {
+        to: "/admin/code-execution",
+        label: "Code execution pricing",
+        surface: "pricing",
+        operatorOnly: "refused",
+        icon: FiCode,
+      },
+      {
+        to: "/health-checks",
+        label: "Health",
+        surface: "health_checks",
+        icon: FiActivity,
+        operatorOnly: "refused",
       },
     ],
   },
@@ -564,9 +551,9 @@ export const NAV_SECTIONS: readonly NavSection[] = composeNavSections(
  * and it belongs on this rail, so an overlay that could only contribute to the
  * workspace one would have to edit this file to register it, which is what
  * cardinal rule 6 rules out. Both rails need the row seam as well as the section
- * one, and this rail is why: Billing lands inside "Cost & billing" and Gateways
- * inside "Gateway", among rows the base declares, so appending a section could
- * only put a second heading of the same name below the first. This build appends
+ * one, and this rail is why: Billing lands inside "Cost & billing", among rows
+ * the base declares, so appending a section could only put a second heading of
+ * the same name below the first. This build appends
  * nothing.
  *
  * Label overrides and row contributions come from the same lists the workspace
@@ -589,7 +576,7 @@ export const ORG_NAV_SECTIONS: readonly NavSection[] = composeNavSections(
  * The composed deployment sidebar.
  *
  * Composed through the same three seams as the other two rails, because the
- * distinction this rail draws is one an overlay can land on: a hosted edition
+ * distinction this rail draws is one an overlay can land on: otari.ai
  * administers the process every tenant is served by, and those destinations
  * belong here rather than beside a tenant's own settings. Reached through the
  * row seam, since the rail declares one headingless section and a contributed
@@ -680,7 +667,6 @@ export function navLabelForPath(pathname: string): string | undefined {
 
 /** Names for the chrome destinations, which no registry entry declares. */
 const CHROME_PAGE_LABELS: Readonly<Record<string, string | undefined>> = {
-  "/docs": "Documentation",
   "/account": "Account",
   "/invitations": "Invitations",
 }

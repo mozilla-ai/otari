@@ -83,6 +83,48 @@ def test_prose_in_a_trace_id_is_refused() -> None:
         )
 
 
+def test_a_gateway_step_is_named_for_its_endpoint() -> None:
+    assert _span(name="/v1/chat/completions").name == "/v1/chat/completions"
+
+
+@pytest.mark.parametrize(
+    ("kind", "origin", "name"),
+    [
+        ("llm", "otlp", "/v1/chat/completions"),
+        ("step", "otlp", "/v1/chat/completions"),
+        ("tool", "gateway", "/v1/chat/completions"),
+        ("step", "gateway", "/etc/passwd"),
+        ("step", "gateway", "/v1/notes.txt"),
+    ],
+)
+def test_a_path_is_a_name_only_for_a_gateway_step_and_only_when_it_is_an_endpoint(
+    kind: str, origin: str, name: str
+) -> None:
+    """The endpoint shape is the gateway's own; a span an exporter named still meets the identifier rule."""
+    with pytest.raises(InvalidSpanError, match="name"):
+        _span(kind=kind, origin=origin, name=name)
+
+
+def test_finish_reasons_are_kept_as_identifiers_joined_by_a_comma() -> None:
+    span = _span(kind="llm", origin="otlp", attributes={"gen_ai.response.finish_reasons": "stop,length"})
+
+    assert span.attributes == {"gen_ai.response.finish_reasons": "stop,length"}
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("gen_ai.response.finish_reasons", "stop,the model gave up"),
+        ("gen_ai.response.finish_reasons", "stop,"),
+        ("gen_ai.response.finish_reasons", "x" * 100 + "," + "y" * 100),
+        ("error.type", "timeout,retry"),
+    ],
+)
+def test_a_list_is_kept_only_in_a_list_attribute_and_only_of_identifiers(key: str, value: str) -> None:
+    with pytest.raises(InvalidSpanError, match="identifier-shaped"):
+        _span(kind="llm", origin="otlp", attributes={key: value})
+
+
 def test_prose_in_an_attribute_string_is_refused() -> None:
     with pytest.raises(InvalidSpanError, match="identifier-shaped"):
         _span(attributes={"error.type": "connection reset by peer"})
@@ -132,7 +174,24 @@ def test_a_span_keeps_the_attributes_it_was_checked_with() -> None:
 
 @pytest.mark.parametrize(
     "value",
-    ["alice@example.com", "/Users/alice/notes.txt", "src/secret/notes.txt", "~/x", "sk-ant-api03-abc", "ghp_abc123"],
+    [
+        "alice@example.com",
+        "/Users/alice/notes.txt",
+        "src/secret/notes.txt",
+        "~/x",
+        "sk-ant-api03-abc",
+        "ghp_abc123",
+        "api-key-123456",
+        "api_key_123456",
+        "apikey-123456",
+        "API_KEY_0123456789abcdef",
+        "SK-abc123",
+        "alice@example.com:42",
+        "src/secret/notes.txt:42",
+        "src/app.py#L10",
+        "AKIAIOSFODNN7EXAMPLE",
+        "ASIAIOSFODNN7EXAMPLE",
+    ],
 )
 def test_a_name_shaped_like_personal_data_or_a_credential_is_refused(value: str) -> None:
     with pytest.raises(InvalidSpanError, match="tool_name"):
@@ -149,3 +208,11 @@ def test_a_real_model_or_tool_name_is_kept(value: str) -> None:
 def test_an_id_takes_no_slash_or_at_sign() -> None:
     with pytest.raises(InvalidSpanError, match="span_id"):
         _span(span_id="a/b@c")
+
+
+def test_a_span_holds_only_known_content() -> None:
+    with pytest.raises(InvalidSpanError):
+        SpanRecord(span_id="s", kind="tool", origin="otlp", name="x", outcome="ok", content={"output": "secret"})
+
+    span = SpanRecord(span_id="s", kind="tool", origin="otlp", name="x", outcome="ok", content={"command": "ls -la"})
+    assert span.content == {"command": "ls -la"}

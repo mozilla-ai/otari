@@ -161,18 +161,6 @@ export function formatDateTimeMinutes(iso: string | null | undefined): string {
   })
 }
 
-// The time of day alone, for rows that already sit under their date.
-export function formatTime(iso: string | null | undefined): string {
-  if (!iso) {
-    return "—"
-  }
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) {
-    return iso
-  }
-  return date.toLocaleTimeString()
-}
-
 // The heading a dated row sits under in a history list: "Today", "Yesterday",
 // or the date, with the year only when it is not the current one.
 //
@@ -216,6 +204,13 @@ export function formatUsd(value: number): string {
   return usdCompact.format(value)
 }
 
+// A session's spend and its parts, read at a glance: cents, as a tile shows them,
+// unless the amount is under a cent, where it keeps `formatCost`'s four places
+// rather than rounding a real cost down to "$0.00".
+export function formatSpend(value: number): string {
+  return Math.abs(value) >= 0.01 ? formatUsd(value) : formatCost(value)
+}
+
 const usdWhole = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -238,6 +233,29 @@ export function formatTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
   return String(value)
+}
+
+const tokensCompact = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumSignificantDigits: 3,
+})
+
+// Three significant figures for a count shortened to fit a narrow lane:
+// 1234567890 -> "1.23B", 98765432 -> "98.8M".
+export function formatTokensCompact(value: number): string {
+  return tokensCompact.format(value)
+}
+
+const usdCompactNotation = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  notation: "compact",
+  maximumSignificantDigits: 3,
+})
+
+// Money shortened the same way: 12345678.9 -> "$12.3M", 100000 -> "$100K".
+export function formatUsdCompact(value: number): string {
+  return usdCompactNotation.format(value)
 }
 
 const scoreFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 })

@@ -1,4 +1,6 @@
-import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { useState } from "react"
+
+import { EMPTY_CATALOG_LIST } from "@/features/models/catalog"
 import { ModelCatalogView } from "@/features/models/ModelCatalogPage"
 import { ModelDetailView } from "@/features/models/ModelDetailPage"
 import { PublicCatalogBar } from "@/features/models/PublicCatalogBar"
@@ -14,18 +16,17 @@ import { publicCatalogHref } from "@/features/models/publicCatalog"
 // a form, and these pages are as wide as the dashboard's. It carries the site's
 // own navbar destinations; see `PublicCatalogBar`.
 export function PublicCatalogPage({ modelId }: { modelId?: string }) {
+  const [list, setList] = useState(EMPTY_CATALOG_LIST)
   return (
     <div className="flex min-h-full flex-col">
       <PublicCatalogBar onList={!modelId} />
       <main className="mx-auto flex w-full max-w-[112.5rem] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
-        <InfoBanner>
-          This is the deployment's public catalog. Sign in to see the rates your
-          organization is charged and to set prices.
-        </InfoBanner>
         {modelId ? (
           <ModelDetailView modelId={modelId} publicView />
         ) : (
           <ModelCatalogView
+            list={list}
+            onListChange={setList}
             publicView
             onOpen={(id) => {
               window.location.hash = publicCatalogHref(id)

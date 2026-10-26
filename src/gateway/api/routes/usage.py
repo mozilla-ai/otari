@@ -24,7 +24,6 @@ from gateway.api.deps import (
     require_deployment_operator,
     verify_api_key_or_master_key,
 )
-from gateway.api.routes._billing_schemas import ChargeLine, MeterMap
 from gateway.api.routes._helpers import retryable_on_database_outage
 from gateway.api.routes._request_tags import MAX_TAG_KEY_LENGTH
 from gateway.core.config import GatewayConfig
@@ -44,6 +43,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
 from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User
+from gateway.schemas.usage_and_telemetry import ChargeLine, MeterMap
 from gateway.services.external_usage_service import (
     ExternalEventsRequest,
     ExternalIngestResult,
@@ -61,9 +61,9 @@ from gateway.services.usage_admin_service import (
     set_usage_price,
 )
 
-# Two routers under one prefix, because the two planes that meet here
-# authenticate differently. Reading or amending usage rows across an
-# organization is an operator's job, so that gate is declared on the router and a route added later
+# Two routers under one prefix, because their callers authenticate
+# differently. Reading or amending usage rows across an organization is an
+# operator's job, so that gate is declared on the router and a route added later
 # inherits it; ``POST /external-events`` files rows on behalf of the API key that
 # holds them, and ``GET /requests/{request_id}`` reads a key's own request back,
 # so both sit on a router of their own rather than a route-level override, and
@@ -208,7 +208,7 @@ class UsageEntry(BaseModel):
     cache_write_1h_tokens: int | None
     # A subset of completion_tokens; null on rows written before it was recorded.
     reasoning_tokens: int | None = None
-    # Precise shapes with a permissive fallback arm; see _billing_schemas for why
+    # Precise shapes with a permissive fallback arm; see schemas/usage_and_telemetry.py for why
     # the fallback is what keeps a row written by an older gateway renderable.
     billing_meters: MeterMap | None
     pricing_breakdown: Sequence[ChargeLine] | None
@@ -333,7 +333,10 @@ _STATUS_CODE_DESC = (
 _ENDPOINT_DESC = "Filter to a single endpoint (e.g. '/v1/chat/completions')"
 _PROVIDER_DESC = "Filter to a single provider (e.g. 'openai')"
 _SOURCE_DESC = "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')"
-_SOURCE_LABEL_DESC = "Filter to a single session/project label (the source_label carried by imported usage)"
+_SOURCE_LABEL_DESC = (
+    "Filter to a single session (source_label): the session's trace id on a gateway request that named one, "
+    "or the session/project label imported usage carried"
+)
 _TAG_DESC = (
     "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: "
     "values for the same key match any of them, and different keys must all match. "
@@ -605,7 +608,7 @@ async def ingest_external_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ExternalIngestResult:
-    """Ingest a batch of externally-observed usage events (standalone).
+    """Ingest a batch of externally-observed usage events.
 
     Authenticated with either an API key or the master key. Usage binds to the
     authenticated principal: an API key attributes to its own user (and stamps its
@@ -653,7 +656,7 @@ async def get_request_settlement(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> RequestSettlement:
-    """Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).
+    """Look up a request's settled cost by the ``Otari-Request-ID`` it was sent.
 
     This is how a caller recovers the cost of a request whose response never
     carried one: a stream that failed or was disconnected mid-response, or a
@@ -815,7 +818,7 @@ async def delete_usage_rows(
     db: Annotated[AsyncSession, Depends(get_db)],
     workspace_ids: CallerWorkspaceQuery,
 ) -> UsageDeleteResult:
-    """Delete imported usage rows by explicit ids or by filter (standalone).
+    """Delete imported usage rows by explicit ids or by filter.
 
     Target either the current selection (``ids``) or everything matching a filter
     (``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /
@@ -833,7 +836,7 @@ async def set_usage_price_rows(
     db: Annotated[AsyncSession, Depends(get_db)],
     workspace_ids: CallerWorkspaceQuery,
 ) -> UsageSetPriceResult:
-    """Set the cost of imported usage rows from manual per-1M rates (standalone).
+    """Set the cost of imported usage rows from manual per-1M rates.
 
     Target either the current selection (``ids``) or everything matching a filter
     (``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed

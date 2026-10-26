@@ -167,6 +167,7 @@ def _bridge(
     **config: Any,
 ) -> SandboxFileBridge:
     uow = uow if uow is not None else _CommittingUnitOfWork(_FakeDb())
+    config.setdefault("providers", {"anthropic-eu": {"provider_type": "anthropic", "api_key": "sk-ant-test"}})
     settings = GatewayConfig(**config)
     backends = FileBackends(storage=store, provider_files=cast(ProviderFilePort, _PROVIDER_FILES))
     return SandboxFileBridge(
@@ -316,7 +317,6 @@ def _stub_provider(
     delay: float = 0.0,
 ) -> _StubProviderClient:
     client = _StubProviderClient(files, delay)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     monkeypatch.setattr(_PROVIDER_FILES, "client", client)
     return client
 
@@ -521,11 +521,21 @@ async def test_a_copy_whose_stamp_is_uncertain_keeps_its_blob(monkeypatch: pytes
 @pytest.mark.asyncio
 async def test_no_credential_copies_nothing_and_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_provider(monkeypatch, {"file_01a": b"a"})
-    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
-        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-from-the-environment")
     store = _MemoryStore()
 
-    await _copy(_bridge(store), "file_01a")
+    await _copy(_bridge(store, providers={"anthropic-eu": {"provider_type": "anthropic"}}), "file_01a")
+
+    assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_an_undeclared_instance_never_copies_on_the_providers_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_provider(monkeypatch, {"file_01a": b"a"})
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-from-the-environment")
+    store = _MemoryStore()
+
+    await _copy(_bridge(store, providers={}), "file_01a")
 
     assert store.blobs == {}
 
@@ -618,3 +628,35 @@ async def test_an_output_cancelled_inside_its_reservation_writes_no_bytes() -> N
         await bridge.store_output("chart.png", _chunks(b"\x89PNG"))
 
     assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_a_provider_output_sent_inline_is_stored_as_a_new_file() -> None:
+    store = _MemoryStore()
+    db = _FakeDb()
+
+    file_id = await _bridge(store, _CommittingUnitOfWork(db)).store_provider_output(b"\x89PNG", "image/png")
+
+    (record,) = db.added
+    assert file_id == record.id
+    assert store.blobs == {record.storage_ref: b"\x89PNG"}
+    assert record.filename.endswith(".png")
+    assert record.purpose == CODE_EXECUTION_OUTPUT_PURPOSE
+
+
+@pytest.mark.asyncio
+async def test_inline_provider_outputs_draw_on_the_same_caps_as_copies() -> None:
+    db = _FakeDb()
+    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(db), files_output_max_files=2, files_output_max_bytes=5)
+
+    assert await bridge.store_provider_output(b"123456", "text/plain") is None
+    assert await bridge.store_provider_output(b"1234", "text/plain") is not None
+    assert await bridge.store_provider_output(b"12", "text/plain") is None
+    assert len(db.added) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_inline_provider_output_that_cannot_be_stored_never_raises() -> None:
+    bridge = _bridge(_MemoryStore(), record_error=TimeoutError())
+
+    assert await bridge.store_provider_output(b"data", "text/plain") is None

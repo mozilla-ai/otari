@@ -22,7 +22,6 @@ import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import {
   bootstrap,
   callerOrganizationMembership,
-  HOSTED_SURFACES,
   organizationContext,
   pendingOrganizationInvitation,
 } from "@/tests/fixtures"
@@ -168,7 +167,6 @@ function renderShell(
     // The harness already mounts the component under test at `url`, so a probe
     // for that same path would be a duplicate route.
     routes: [
-      { path: "/providers", element: <div>PROVIDERS PAGE</div> },
       { path: "/invitations", element: <div>INVITATIONS PAGE</div> },
       {
         path: "/organization/provider-keys",
@@ -179,7 +177,6 @@ function renderShell(
 }
 
 const SETTINGS_WITH_PRICING: GatewaySettings = {
-  mode: "standalone",
   version: "1.0.0",
   model_discovery: true,
   default_pricing: true,
@@ -255,12 +252,12 @@ describe("AppShell responsive layout", () => {
     await renderShell(bootstrap(), { url: "/organization" })
 
     await user.click(screen.getByRole("button", { name: "Open navigation" }))
-    await user.click(
-      await screen.findByRole("link", { name: "Deployment providers" }),
-    )
+    await user.click(await screen.findByRole("link", { name: "Providers" }))
 
-    expect(await screen.findByText("PROVIDERS PAGE")).toBeInTheDocument()
-    expect(document.title).toBe("Deployment providers · Otari")
+    expect(
+      await screen.findByText("ORG PROVIDER KEYS PAGE"),
+    ).toBeInTheDocument()
+    expect(document.title).toBe("Providers · Otari")
     // Navigating closes the drawer so the page it landed on is not hidden behind it.
     expect(
       screen.getByRole("button", { name: "Open navigation" }),
@@ -286,17 +283,18 @@ describe("AppShell responsive layout", () => {
     )
 
     await user.click(await screen.findByRole("link", { name: "Organization" }))
-    const providers = await screen.findByRole("link", {
-      name: "Deployment providers",
-    })
+    const providers = await screen.findByRole("link", { name: "Providers" })
     expect(providers).not.toHaveAttribute("aria-current")
 
     await user.click(providers)
 
-    expect(await screen.findByText("PROVIDERS PAGE")).toBeInTheDocument()
     expect(
-      screen.getByRole("link", { name: "Deployment providers" }),
-    ).toHaveAttribute("aria-current", "page")
+      await screen.findByText("ORG PROVIDER KEYS PAGE"),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Providers" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    )
     expect(
       screen.getByRole("link", { name: "Org settings" }),
     ).not.toHaveAttribute("aria-current")
@@ -406,6 +404,20 @@ describe("AppShell responsive layout", () => {
     expect(container.querySelector(".fixed.inset-0")).toBeNull()
   })
 
+  it("ends the page with room for a control fixed to the corner", async () => {
+    const { container } = await renderShell()
+
+    // A superset sets `--shell-corner-clearance` while it pins something to the
+    // bottom-right corner, so the end of a page can scroll out from under it.
+    const content = container.querySelector("#main-content > div")!
+    expect(content.className).toContain(
+      "pb-[calc(1.25rem+var(--shell-corner-clearance))]",
+    )
+    expect(content.className).toContain(
+      "md:pb-[calc(1.5rem+var(--shell-corner-clearance))]",
+    )
+  })
+
   it("marks the drawer inert while closed so its links leave the tab order", async () => {
     mockMatchMedia(true)
     const { container } = await renderShell()
@@ -487,14 +499,14 @@ describe("AppShell responsive layout", () => {
     })
   })
 
-  it("links to the bundled user guide from the top bar", async () => {
+  it("links to the documentation site from the top bar", async () => {
     mockMatchMedia(false)
     await renderShell()
 
     // In the top bar, where the design puts it, rather than inside the account
-    // menu: the guide is read alongside a page rather than instead of one.
+    // menu: the docs are read alongside a page rather than instead of one.
     const guideLink = await screen.findByRole("link", { name: "Documentation" })
-    expect(guideLink).toHaveAttribute("href", "/docs")
+    expect(guideLink).toHaveAttribute("href", "https://docs.otari.ai/")
   })
 
   it("subscribes via the legacy matchMedia API when addEventListener is absent", async () => {
@@ -658,9 +670,7 @@ describe("AppShell surface gating", () => {
     // Same reasoning as above, for the other context: the organization rail is
     // its own registry, and nothing else compares it against a full list.
     await renderShell(bootstrap(), { url: "/organization/members" })
-    // Awaited on Providers rather than on any other row: it declares
-    // `operatorOnly`, so it is the last to settle once the membership context
-    // arrives. Waiting on another row would leave the snapshot below a race.
+    // Awaited so the rail has settled before the snapshot below.
     await within(
       screen.getByRole("navigation", { name: "Sidebar" }),
     ).findByRole("link", { name: "Providers" })
@@ -670,12 +680,12 @@ describe("AppShell surface gating", () => {
         .getAllByRole("link")
         .map((link) => link.textContent),
     ).toEqual([
+      "Usage",
       "Workspaces",
       "Members & roles",
       "Email domains",
       "Spend & budgets",
       "Providers",
-      "Deployment providers",
       "Guardrails",
       "Org settings",
     ])
@@ -687,31 +697,20 @@ describe("AppShell surface gating", () => {
       ),
     ).toBeNull()
     expect(screen.getByText("General")).toBeInTheDocument()
-    // Guardrails sits in General, so the Gateway group holds nothing in this
-    // build and is not drawn. It stays declared for an overlay's Gateways, a
-    // row this registry does not declare at all (otari#737).
-    expect(screen.queryByText("Gateway")).toBeNull()
   })
 
-  it("puts the hosted deployment's own Providers row in that same place", async () => {
+  it("sends the organization's own Providers row to its provider keys", async () => {
     mockMatchMedia(false)
-    // The other half of the either/or the two rows encode. A hosted deployment
-    // drops `providers` and reports `organization_providers` in its place, so
-    // the row under General is a different destination with the same label, and
-    // nothing above this asserts that: the registry test reads the declaration,
-    // and the page's own tests render it without a rail.
-    await renderShell(
-      bootstrap({ deployment_type: "hosted", surfaces: HOSTED_SURFACES }),
-      { url: "/organization/members" },
-    )
+    // The registry test reads the declaration and the page's own tests render
+    // it without a rail, so nothing else asserts the rail draws it.
+    await renderShell(bootstrap(), { url: "/organization/members" })
     const sidebar = screen.getByRole("navigation", { name: "Sidebar" })
     const providers = await within(sidebar).findByRole("link", {
       name: "Providers",
     })
     expect(providers).toHaveAttribute("href", "/organization/provider-keys")
-    // Where the deployment's own row stands on standalone, with Guardrails then
-    // Org settings after it, read off the rendered order rather than off the
-    // registry.
+    // Guardrails then Org settings after it, read off the rendered order rather
+    // than off the registry.
     expect(
       within(sidebar)
         .getAllByRole("link")
@@ -731,9 +730,7 @@ describe("AppShell surface gating", () => {
     mockMatchMedia(false)
     // A surface the bootstrap omits takes its link with it. Both observability
     // pages read /v1/usage, so both go.
-    await renderShell(
-      bootstrap({ surfaces: ["models", "providers", "settings"] }),
-    )
+    await renderShell(bootstrap({ surfaces: ["models", "settings"] }))
 
     expect(screen.queryByRole("link", { name: "Activity" })).toBeNull()
     expect(screen.queryByRole("link", { name: "Usage" })).toBeNull()
@@ -797,11 +794,11 @@ describe("AppShell entitlement gating", () => {
     // useNavVisibility.test.tsx covers the other two on synthetic entries,
     // which is where they have users today.
     await renderShell(bootstrap({ surfaces: ["models"] }), {
-      url: "/providers",
+      url: "/keys",
     })
 
     expect(
-      await screen.findByText("Deployment providers is not available here"),
+      await screen.findByText("API keys is not available here"),
     ).toBeInTheDocument()
     expect(screen.queryByText("PAGE CONTENT")).toBeNull()
     // The sidebar is behind a menu on a phone, so the panel carries its own way
@@ -836,9 +833,7 @@ describe("AppShell entitlement gating", () => {
     // The other half of that split, and the reason the page may call
     // `useDeploymentAdminAccess()` with no surface gate of its own: the route
     // declares `surface: "admin"`, so a deployment that does not host it never
-    // reaches the page at all, and the caller axis is never asked. A hybrid
-    // gateway does not even get this far, since `App` hands it `HybridLanding`
-    // rather than the router.
+    // reaches the page at all, and the caller axis is never asked.
     await renderShell(bootstrap({ surfaces: ["models"] }), {
       url: "/admin/accounts",
       operator: true,
@@ -862,13 +857,15 @@ describe("AppShell entitlement gating", () => {
     // The case rides on one row, so it is only as good as that row's gate, and
     // a row losing its gate is a registry edit that says nothing about this
     // file. So the premise is asserted rather than assumed.
-    expect(navItemForPath("/providers")?.operatorOnly).toBeDefined()
-    await renderShell(bootstrap(), { operator: true, url: "/organization" })
+    expect(
+      navItemForPath("/admin/hosted-providers")?.operatorOnly,
+    ).toBeDefined()
+    await renderShell(bootstrap(), { operator: true, url: "/settings" })
 
     expect(
       await within(
         screen.getByRole("navigation", { name: "Sidebar" }),
-      ).findByRole("link", { name: "Providers" }),
+      ).findByRole("link", { name: "Hosted providers" }),
     ).toBeInTheDocument()
   })
 
@@ -912,18 +909,18 @@ describe("AppShell entitlement gating", () => {
 
   it("still renders a destination that passes every axis", async () => {
     mockMatchMedia(false)
-    await renderShell(bootstrap(), { url: "/providers" })
+    await renderShell(bootstrap(), { url: "/settings" })
 
     expect(await screen.findByText("PAGE CONTENT")).toBeInTheDocument()
   })
 
   it("leaves a path the registry does not declare alone", async () => {
     mockMatchMedia(false)
-    // The bundled guide is not a registered destination, so the registry has no
+    // The account page is not a registered destination, so the registry has no
     // opinion on it and must not gate it away with the rest.
     await renderShell(bootstrap({ surfaces: [] }), {
       entitlements: { capabilities: [] },
-      url: "/docs",
+      url: "/account",
     })
 
     expect(await screen.findByText("PAGE CONTENT")).toBeInTheDocument()
@@ -1242,18 +1239,18 @@ describe("AppShell entitlement gating", () => {
     ).toBeInTheDocument()
   })
 
-  it("keeps the bundled guide reachable from the account menu, for the phone", async () => {
+  it("keeps the documentation reachable from the account menu, for the phone", async () => {
     mockMatchMedia(false)
     const user = userEvent.setup()
     await renderShell()
 
     // The top bar's cluster is `hidden md:flex`, and this menu is what the
-    // mobile drawer contains, so without this row the guide has no control
+    // mobile drawer contains, so without this row the docs have no control
     // pointing at it below the breakpoint. The row carries `md:hidden` for the
     // mirror-image reason: above it, the top bar already answers.
     await user.click(screen.getByRole("button", { name: /^Account:/ }))
     const guideRow = await screen.findByRole("link", { name: "Documentation" })
-    expect(guideRow).toHaveAttribute("href", "/docs")
+    expect(guideRow).toHaveAttribute("href", "https://docs.otari.ai/")
     expect(guideRow).toHaveClass("md:hidden")
   })
 
@@ -1261,7 +1258,7 @@ describe("AppShell entitlement gating", () => {
     mockMatchMedia(false)
     await renderShell()
 
-    // Standalone provisions one organization and most deployments keep exactly
+    // First boot provisions one organization and most deployments keep exactly
     // that, so naming it on every page is a segment that never disambiguates
     // anything; the scope switcher names the active one where it matters.
     const crumb = await screen.findByLabelText("Breadcrumb")
@@ -1392,21 +1389,6 @@ describe("AppShell entitlement gating", () => {
     )
   })
 
-  it("leads the trail with the organization when a deployment can hold several", async () => {
-    mockMatchMedia(false)
-    // A standalone deployment leaves the organization out of the trail whether
-    // or not the caller belongs to a second, so `hosted` is what exercises this:
-    // `OTARI_MODE=hosted` is the mode a multi-tenant deployment runs in, and
-    // bootstrap.py reports `deployment_type: "hosted"` for it.
-    await renderShell(bootstrap({ deployment_type: "hosted" }))
-
-    const crumb = await screen.findByLabelText("Breadcrumb")
-    // The organization's name comes from the membership context, so the trail
-    // renders before it can lead with one.
-    await within(crumb).findByText("Default Organization")
-    expect(crumb).toHaveTextContent("Overview")
-  })
-
   it("drops a nested destination whose own surface the deployment lacks", async () => {
     mockMatchMedia(false)
     // Guardrails is grouped under Routing but served by the tools surface. The
@@ -1532,12 +1514,10 @@ describe("the telemetry the sidebar records", () => {
     const user = userEvent.setup()
     await renderShell(bootstrap(), { url: "/organization" })
 
-    await user.click(
-      await screen.findByRole("link", { name: "Deployment providers" }),
-    )
+    await user.click(await screen.findByRole("link", { name: "Guardrails" }))
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
-      tab_name: "providers",
+      tab_name: "guardrails",
       context: "organization_settings",
     })
   })
@@ -1562,11 +1542,9 @@ describe("the telemetry the sidebar records", () => {
     // Counting those would inflate whichever page people sit on longest.
     mockMatchMedia(false)
     const user = userEvent.setup()
-    await renderShell(bootstrap(), { url: "/providers" })
+    await renderShell(bootstrap(), { url: "/organization/guardrails" })
 
-    await user.click(
-      await screen.findByRole("link", { name: "Deployment providers" }),
-    )
+    await user.click(await screen.findByRole("link", { name: "Guardrails" }))
 
     expect(recordEvent).not.toHaveBeenCalled()
   })

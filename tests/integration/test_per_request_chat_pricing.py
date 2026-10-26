@@ -301,3 +301,46 @@ def test_a_model_priced_per_token_is_unchanged(
     user = _user(client, master_key_header)
     assert user["spend"] == pytest.approx(0.06)
     assert user["reserved"] == pytest.approx(0.0)
+
+
+def test_price_per_request_sets_and_reports_the_same_flat_price(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """``price_per_request`` is the readable form of ``unit: requests``: stored, billed and read back alike."""
+    priced = client.post(
+        f"{API_ROOT}/pricing", json={"model_key": MODEL_NAME, "price_per_request": 0.005}, headers=master_key_header
+    )
+    assert priced.status_code == 200, priced.text
+    assert priced.json()["unit"] == "requests"
+    assert priced.json()["input_price_per_million"] == PER_REQUEST_RATE
+    assert priced.json()["price_per_request"] == pytest.approx(0.005)
+    headers = _user_key(client, master_key_header)
+
+    response, reserved = _chat(client, headers, stream=False)
+
+    assert response.status_code == 200, response.text
+    assert reserved == [FLAT_COST]
+    assert _row(db_session_factory).cost == FLAT_COST
+
+
+def test_price_per_request_with_a_token_price_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
+    refused = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": MODEL_NAME, "price_per_request": 0.005, "output_price_per_million": 2.0},
+        headers=master_key_header,
+    )
+
+    assert refused.status_code == 422
+    assert "output_price_per_million" in refused.text
+
+
+def test_a_price_per_request_that_is_not_a_number_is_refused(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    refused = client.post(
+        f"{API_ROOT}/pricing", json={"model_key": MODEL_NAME, "price_per_request": "abc"}, headers=master_key_header
+    )
+
+    assert refused.status_code == 422

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Resp
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verify_api_key_or_master_key_if_needed
+from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
@@ -60,8 +60,8 @@ def _named_audio(data: bytes, upload: UploadFile) -> io.BytesIO:
 async def create_transcription(
     raw_request: Request,
     response: Response,
-    auth_result: Annotated[tuple[APIKey | None, bool] | None, Depends(verify_api_key_or_master_key_if_needed)],
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     file: UploadFile = File(...),
@@ -81,7 +81,6 @@ async def create_transcription(
     """
 
     async def call_provider(resolved: ResolvedProvider) -> Transcription:
-        # A hybrid gateway calls this once per attempt it falls back through.
         await file.seek(0)
         file_bytes = await file.read()
         if len(file_bytes) > _MAX_AUDIO_UPLOAD_BYTES:
@@ -181,8 +180,8 @@ async def create_speech(
     raw_request: Request,
     response: Response,
     request: AudioSpeechRequest,
-    auth_result: Annotated[tuple[APIKey | None, bool] | None, Depends(verify_api_key_or_master_key_if_needed)],
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
 ) -> StreamingResponse:

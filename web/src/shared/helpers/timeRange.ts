@@ -22,7 +22,30 @@ export const DAY_S = 86_400
 // headroom and never trips the clamp, so the preset spans what it claims to.
 export const YEAR_SPAN_S = 365 * DAY_S
 
-export interface RangePreset {
+// The bucket sizes a timeline can draw: the usage API's two, and the finer ones
+// the sessions series takes, so a short window gets bars a session can fill.
+export type ChartBucket = UsageBucket | "1m" | "5m" | "30m" | "6h"
+
+const BUCKET_S: Record<ChartBucket, number> = {
+  "1m": 60,
+  "5m": 5 * 60,
+  "30m": 30 * 60,
+  hour: HOUR_S,
+  "6h": 6 * HOUR_S,
+  day: DAY_S,
+}
+
+// How a bucket reads after "per": "Sessions / 30 min".
+export const BUCKET_LABEL: Record<ChartBucket, string> = {
+  "1m": "minute",
+  "5m": "5 min",
+  "30m": "30 min",
+  hour: "hour",
+  "6h": "6 hours",
+  day: "day",
+}
+
+export interface RangePreset<B extends ChartBucket = UsageBucket> {
   key: string
   label: string
   // A rolling lookback of this many seconds ("now minus N"). `null` is an
@@ -31,7 +54,7 @@ export interface RangePreset {
   // reads an omitted start as a 30-day *default*, so its preset list carries no
   // null: an unbounded Usage window is neither representable nor meaningful.
   seconds: number | null
-  bucket: UsageBucket
+  bucket: B
 }
 
 // Sub-day windows bucket hourly; longer ranges bucket daily. Usage adds bounded
@@ -62,14 +85,25 @@ export const ACTIVITY_PRESETS: RangePreset[] = [
 
 export const ACTIVITY_DEFAULT_KEY = "24h"
 
+// A session lasts minutes to hours, so each window gets enough buckets for a
+// session to fill several (60 in an hour, 48 in a day, 28 in a week), not the
+// two hourly bars an hour would get.
+export const SESSION_PRESETS: RangePreset<ChartBucket>[] = [
+  { key: "1h", label: "1h", seconds: HOUR_S, bucket: "1m" },
+  { key: "24h", label: "24h", seconds: DAY_S, bucket: "30m" },
+  { key: "7d", label: "7d", seconds: 7 * DAY_S, bucket: "6h" },
+  { key: "30d", label: "30d", seconds: 30 * DAY_S, bucket: "day" },
+  { key: "all", label: "All", seconds: null, bucket: "day" },
+]
+
 // The sentinel key the preset row highlights while an explicit range is active
 // (drag-selected or zoomed). Not a preset itself, so it never appears in a list.
 export const CUSTOM_KEY = "custom"
 
-export function findPreset(
-  presets: RangePreset[],
+export function findPreset<B extends ChartBucket>(
+  presets: RangePreset<B>[],
   key: string,
-): RangePreset | undefined {
+): RangePreset<B> | undefined {
   return presets.find((preset) => preset.key === key)
 }
 
@@ -77,8 +111,8 @@ export function isoAgo(seconds: number, now: number = Date.now()): string {
   return new Date(now - seconds * 1000).toISOString()
 }
 
-export function bucketDurationMs(bucket: UsageBucket): number {
-  return (bucket === "hour" ? HOUR_S : DAY_S) * 1000
+export function bucketDurationMs(bucket: ChartBucket): number {
+  return BUCKET_S[bucket] * 1000
 }
 
 // Bucket granularity for a window, chosen from its length rather than from
@@ -103,7 +137,7 @@ export function rangeFromBuckets(
   starts: string[],
   i: number,
   j: number,
-  bucket: UsageBucket,
+  bucket: ChartBucket,
 ): { startIso: string; endIso: string } | null {
   if (starts.length === 0) return null
   const lo = Math.max(0, Math.min(i, j))

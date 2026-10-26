@@ -2,6 +2,7 @@ import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 
 import App from "@/app/App"
+import { reloadOnStaleChunk } from "@/app/AutoUpdate"
 import { loadDeployment } from "@/app/boot"
 import { Provider } from "@/app/provider"
 import { apiFetch } from "@/shared/api/client"
@@ -9,16 +10,18 @@ import { prepareRequests } from "@/shared/api/overlayRequestPolicy"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import "@/styles/globals.css"
 
+reloadOnStaleChunk()
+
 const container = document.getElementById("root")
 if (!container) {
   throw new Error("Root element #root not found")
 }
 
 // Read before the first render rather than during it. The answer decides
-// whether this URL is a management dashboard, a sign-in screen, or a data-plane
-// gateway's landing page, and painting one of those only to swap it for another
-// is worse than waiting one same-origin round trip. A failure hands App null,
-// which says the gateway is unreachable instead of guessing a deployment.
+// whether this URL is a management dashboard or a sign-in screen, and painting
+// one only to swap it for the other is worse than waiting one same-origin round
+// trip. A failure hands App null, which says the gateway is unreachable instead
+// of guessing a deployment.
 // Shorter than apiFetch's 30s default, because nothing at all is on screen until
 // this settles: a stalled gateway or proxy would otherwise hold a blank page for
 // half a minute before the error state appears. A refused connection fails fast

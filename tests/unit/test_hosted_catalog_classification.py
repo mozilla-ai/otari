@@ -1,0 +1,149 @@
+"""The rule a hosted-provider catalog sweep applies to the deployment price list.
+
+Pure: no database, no provider. What is pinned is which priced keys the surface
+keeps, which it removes, and why it keeps the ones it does not offer.
+"""
+
+from gateway.services.providers._hosted_catalog import (
+    KEEP_DEPLOYMENT_INSTANCE,
+    KEEP_FETCH_TOOL,
+    KEEP_GATEWAY_TOOL,
+    KEEP_OWNED_ENDPOINT,
+    KEEP_SEARCH_TOOL,
+    KEEP_UNATTRIBUTABLE,
+    KEEP_UNLISTED,
+    classify_priced_keys,
+)
+
+
+def _verdicts(
+    *,
+    priced: list[tuple[str, int]],
+    offered: set[str] = set(),  # noqa: B006
+    deployment_instances: set[str] = set(),  # noqa: B006
+    legacy_search_tool_keys: set[str] = set(),  # noqa: B006
+    legacy_fetch_tool_keys: set[str] = set(),  # noqa: B006
+    owned_endpoints: set[str] = set(),  # noqa: B006
+    unlisted_providers: set[str] = set(),  # noqa: B006
+) -> dict[str, tuple[str, str | None]]:
+    """Each priced key's verdict and reason, for the deployment the arguments describe."""
+    results = classify_priced_keys(
+        priced,
+        offered=frozenset(offered),
+        deployment_instances=frozenset(deployment_instances),
+        legacy_search_tool_keys=frozenset(legacy_search_tool_keys),
+        legacy_fetch_tool_keys=frozenset(legacy_fetch_tool_keys),
+        owned_endpoints=frozenset(owned_endpoints),
+        unlisted_providers=frozenset(unlisted_providers),
+    )
+    return {verdict.model_key: (verdict.verdict, verdict.reason) for verdict in results}
+
+
+def test_an_offered_model_is_the_catalog_working() -> None:
+    verdicts = _verdicts(priced=[("openai:gpt-4o", 2)], offered={"openai:gpt-4o"})
+
+    assert verdicts == {"openai:gpt-4o": ("offered", None)}
+
+
+def test_a_model_nothing_offers_is_removed() -> None:
+    verdicts = _verdicts(priced=[("nebius:llama", 1)], offered={"openai:gpt-4o"})
+
+    assert verdicts == {"nebius:llama": ("removed", None)}
+
+
+def test_a_model_an_owned_endpoint_serves_is_kept() -> None:
+    verdicts = _verdicts(priced=[("my-vllm:llama", 1)], owned_endpoints={"my-vllm"})
+
+    assert verdicts == {"my-vllm:llama": ("kept", KEEP_OWNED_ENDPOINT)}
+
+
+def test_a_model_off_the_roster_of_a_provider_serving_unlisted_models_is_kept() -> None:
+    verdicts = _verdicts(priced=[("my-vllm:llama", 1)], offered={"openai:gpt-4o"}, unlisted_providers={"my-vllm"})
+
+    assert verdicts == {"my-vllm:llama": ("kept", KEEP_UNLISTED)}
+
+
+def test_the_legacy_slash_spelling_is_folded_onto_the_roster() -> None:
+    """``openai/gpt-4o`` names the same model as the roster's ``openai:gpt-4o``."""
+    results = classify_priced_keys(
+        [("openai/gpt-4o", 1)], offered=frozenset({"openai:gpt-4o"}), deployment_instances=frozenset()
+    )
+
+    [verdict] = results
+    assert verdict.verdict == "offered"
+    assert verdict.canonical_key == "openai:gpt-4o"
+
+
+def test_a_gateway_tool_rate_is_kept_and_says_why() -> None:
+    verdicts = _verdicts(priced=[("otari:web_search", 1)], offered={"openai:gpt-4o"})
+
+    assert verdicts == {"otari:web_search": ("kept", KEEP_GATEWAY_TOOL)}
+
+
+def test_a_search_tool_rate_under_its_old_key_is_kept() -> None:
+    verdicts = _verdicts(
+        priced=[("tavily:search", 1)], offered={"openai:gpt-4o"}, legacy_search_tool_keys={"tavily:search"}
+    )
+
+    assert verdicts == {"tavily:search": ("kept", KEEP_SEARCH_TOOL)}
+
+
+def test_a_fetch_tool_rate_under_its_old_key_is_kept() -> None:
+    """A fetch instance's rate and the built-in fetcher's are tool prices, not models nothing offers."""
+    verdicts = _verdicts(
+        priced=[("tabstack:tabstack", 1), ("builtin:builtin_fetch", 1)],
+        offered={"openai:gpt-4o"},
+        legacy_fetch_tool_keys={"tabstack:tabstack", "builtin:builtin_fetch"},
+    )
+
+    assert verdicts == {
+        "tabstack:tabstack": ("kept", KEEP_FETCH_TOOL),
+        "builtin:builtin_fetch": ("kept", KEEP_FETCH_TOOL),
+    }
+
+
+def test_a_model_under_a_search_tools_provider_is_not_kept_as_a_tool_rate() -> None:
+    """DeepSeek searches and serves models under one name; only the tool's exact old key is a tool rate.
+
+    Kept by prefix, the unoffered model would stay on the price list, and a
+    deployment rate is what serves a model hosted.
+    """
+    verdicts = _verdicts(
+        priced=[("deepseek:deepseek", 1), ("deepseek:deepseek-chat", 1)],
+        offered={"openai:gpt-4o"},
+        legacy_search_tool_keys={"deepseek:deepseek"},
+    )
+
+    assert verdicts == {
+        "deepseek:deepseek": ("kept", KEEP_SEARCH_TOOL),
+        "deepseek:deepseek-chat": ("removed", None),
+    }
+
+
+def test_a_model_served_by_a_configured_instance_is_kept() -> None:
+    verdicts = _verdicts(priced=[("my-vllm:llama", 1)], offered={"openai:gpt-4o"}, deployment_instances={"my-vllm"})
+
+    assert verdicts == {"my-vllm:llama": ("kept", KEEP_DEPLOYMENT_INSTANCE)}
+
+
+def test_a_key_with_no_prefix_is_kept_rather_than_guessed_at() -> None:
+    verdicts = _verdicts(priced=[("gpt-4o", 1)], offered={"openai:gpt-4o"})
+
+    assert verdicts == {"gpt-4o": ("kept", KEEP_UNATTRIBUTABLE)}
+
+
+def test_offered_outranks_every_keep_reason() -> None:
+    """A key the surface offers is kept as offered, whatever else also serves it."""
+    verdicts = _verdicts(
+        priced=[("my-vllm:llama", 1)],
+        offered={"my-vllm:llama"},
+        deployment_instances={"my-vllm"},
+    )
+
+    assert verdicts == {"my-vllm:llama": ("offered", None)}
+
+
+def test_version_counts_travel_with_the_verdict() -> None:
+    [verdict] = classify_priced_keys([("nebius:llama", 7)], offered=frozenset(), deployment_instances=frozenset())
+
+    assert verdict.versions == 7

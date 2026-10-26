@@ -54,7 +54,9 @@ fails the call rather than degrading it. A missing key raises `MissingCredential
 `AnyFetchError`, and none carries a response body, a URL or a key.
 
 `ProviderMetadata` says what a host needs before calling: where the key comes from, the provider's
-`tier` (`production` or `test`), `max_urls_per_call`, whether it `renders_javascript`, the
+`tier` (`production` or `test`), `max_urls_per_call`, whether it `renders_javascript`, whether it
+`reports_final_url` (when false, `final_url` is the URL as asked, because the provider follows
+redirects without saying where they led, so a caller cannot check a redirect it followed), the
 `formats` it returns text in, and its native options as `OptionSpec`s (`name`, `type`, `enum`,
 `default`, `description` and `operator_only`, for an option only a deployment's operator should
 set; the library accepts it from anyone, and enforcing that is the host's job).
@@ -107,6 +109,28 @@ provider's metadata and each native option with its type, allowed values, defaul
 description, then exits without fetching. `builtin` needs a host, so it fails from the command
 line, though `--describe builtin` works.
 
+## DeepSeek
+
+`deepseek` calls DeepSeek's [Fetch API](https://api-docs.deepseek.com/api/fetch),
+`POST /v1/tools/fetch`, with the key in a bearer header, read from `DEEPSEEK_API_KEY` when not
+passed. It fetches one page per call and returns its title and its text as markdown. It takes the
+URL and nothing else, so there are no native options. DeepSeek has no length cap, so `max_chars`
+cuts the text it returns and sets `text_truncated`, and without `max_chars` the whole page comes
+back. `final_url` is the URL asked for, since DeepSeek follows a redirect without saying where it
+ended, so `reports_final_url` is false: a caller cannot check where a redirect DeepSeek followed
+led. `content_type` is empty. DeepSeek reports no cost and no date.
+
+A failed call raises `ProviderError` with DeepSeek's HTTP status, tagged with the `error.type` of
+its OpenAI-shaped body, or its `error.code` when there is no type; the message is never read. A
+page DeepSeek cannot turn into markdown fails the call with a 404 tagged `not_found_error`, and the
+answer does not say why. That was seen for a page that does not exist, a site's 500, a private
+address, a PDF, a zero-byte file and HTML with an empty body, so DeepSeek never returns an empty
+page, and a missing page never comes back as the site's own error page.
+
+Every field read from a successful answer is checked: a `title` or a `content` that is missing or
+not a string raises `ProviderError` with the tag `unexpected_response`. DeepSeek documents both as
+always present. Fields the adapter does not read are ignored.
+
 ## Exa
 
 `exa` calls Exa's [`POST /contents`](https://exa.ai/docs/reference/get-contents) for the URL,
@@ -119,8 +143,9 @@ Python SDK asks for, when `max_chars` is not passed. A longer page is cut there 
 only, so `text.maxCharacters` is refused. The other native options are `highlights`, `summary` and `extras`, whose answers stay in
 `raw`, and `maxAgeHours`, `livecrawlTimeout` and `snapshotAsOf`.
 
-`final_url` is the URL Exa answered for, `published` its `publishedDate`, and the cost
-`costDollars.total`. `content_type` is empty: Exa does not say what the page was served as.
+`final_url` is the URL Exa answered for, which is the URL as asked even after a redirect, so
+`reports_final_url` is false: a caller cannot check where a redirect Exa followed led.
+`published` is its `publishedDate`, and the cost `costDollars.total`. `content_type` is empty: Exa does not say what the page was served as.
 
 A page Exa could not fetch comes back as `FetchedPage.error`, with Exa's tag, such as
 `CRAWL_NOT_FOUND`, and the page's HTTP status. A page with no text, which Exa reports as
@@ -154,7 +179,9 @@ back. The native options are `content` (`main`, the default, or `full`), `effort
 documents up to 15 seconds for a fetch at `standard` effort, the default `timeout`, and 15 to 60
 at `max`, which renders the page in a browser, so pass a `timeout` to match.
 
-`final_url` is the `url` Tabstack answered for, which is the URL as asked even after a redirect.
+`final_url` is the `url` Tabstack answered for, which is the URL as asked even after a redirect, so
+`reports_final_url` is false: a caller cannot check where a redirect Tabstack followed led, for
+example against its own allow or deny lists.
 `content_type` is empty and `published` is `None`: Tabstack does not say what the page was
 served as, and its `created_at` is not a date to rely on, since for a PDF it carries the PDF's
 own date format rather than the ISO 8601 it documents. The metadata stays in `raw`. Tabstack

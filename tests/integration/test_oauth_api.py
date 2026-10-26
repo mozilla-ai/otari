@@ -11,10 +11,12 @@ the request shape apron-auth actually sends is one Google and GitHub accept, and
 nothing here can stand in for it.
 """
 
+import json
 import logging
 import re
 import uuid
 from base64 import urlsafe_b64encode
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from http.cookies import SimpleCookie
@@ -30,15 +32,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from sqlmodel import col, delete
+from sqlmodel import col, delete, update
 
 from gateway.api.routes import auth_oauth
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.exceptions.identity_exceptions import OAuthIdentityLinkConflictError, OAuthProviderUnavailableError
 from gateway.log_config import logger as gateway_logger
 from gateway.models.identity import EmailAssertion, OAuthIdentityLink, ProviderIdentity
-from gateway.models.tenancy import Organization, User, WebAuthnCredential
-from gateway.models.tools import WorkspaceCodeExecutionPolicy
+from gateway.models.tenancy import OAuthPendingState, Organization, User, WebAuthnCredential
 from gateway.repositories.identity import DashboardSessionRepository
 from gateway.repositories.tenancy import UserRepository
 from gateway.services import oauth_service
@@ -490,29 +491,6 @@ def test_the_registered_identity_lands_the_tenancy_the_signup_form_lands(
     workspaces = client.get(f"{API_ROOT}/workspaces")
     assert workspaces.status_code == 200, workspaces.text
     assert workspaces.json()["data"], "the registered tenant has no workspace"
-
-
-def test_a_hosted_open_signup_starts_its_workspace_with_code_execution_on(
-    client: TestClient,
-    oauth_configured: None,
-    signup_open: None,
-    test_config: GatewayConfig,
-    monkeypatch: pytest.MonkeyPatch,
-    db_session: Session,
-) -> None:
-    """A hosted control plane reads no policy as off, so the tenant this founds starts with one turned on."""
-    monkeypatch.setattr(test_config, "mode", "hosted")
-    stub_exchange(monkeypatch, email="stranger@example.com")
-
-    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
-    assert response.status_code == 200, response.text
-
-    workspaces = {uuid.UUID(row["id"]) for row in client.get(f"{API_ROOT}/workspaces").json()["data"]}
-    policies = {
-        row.workspace_id: row.enabled for row in db_session.execute(select(WorkspaceCodeExecutionPolicy)).scalars()
-    }
-    assert workspaces
-    assert all(policies.get(workspace) is True for workspace in workspaces)
 
 
 def test_a_registered_identity_holds_the_provider_and_a_verified_address_and_no_password(
@@ -1757,8 +1735,17 @@ def test_without_published_terms_a_provider_sign_up_records_no_acceptance(
 # ---------- the state check, with nothing stubbed but the token endpoint ----------
 
 
-def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
-    """Replace the outbound HTTP only, and return the form each exchange posted.
+@dataclass
+class _TokenEndpoint:
+    """What a stubbed token endpoint saw: each form posted, each nonce claimed, each token revoked."""
+
+    posted: list[dict[str, str]] = field(default_factory=list)
+    claimed_nonces: list[str | None] = field(default_factory=list)
+    revoked: list[str] = field(default_factory=list)
+
+
+def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch, *, id_token_nonce: str | None = None) -> _TokenEndpoint:
+    """Replace the outbound HTTP only, and return what each exchange sent and claimed.
 
     Patched at ``_token_request`` rather than at ``exchange_code``, which is the
     point of these tests: consuming the pending state happens *inside*
@@ -1766,21 +1753,48 @@ def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]
     asserted on. ``stub_exchange`` above patches even higher, at the route's own
     reference, so nothing using it can say anything about state at all.
 
-    The returned list holds the form fields sent to the token endpoint, which is
-    where ``code_verifier`` shows up.
+    ``posted`` holds the form fields sent to the token endpoint, which is where
+    ``code_verifier`` shows up. The ID token answers with the nonce of the state
+    the exchange claimed, so apron-auth's own nonce check runs against what the
+    store gave back, unless ``id_token_nonce`` names another.
     """
-    posted: list[dict[str, str]] = []
+    endpoint = _TokenEndpoint()
+    consume = oauth_service._DatabaseStateStore.consume
+
+    async def _consume(self: Any, state_key: str) -> Any:
+        pending = await consume(self, state_key)
+        endpoint.claimed_nonces.append(pending.nonce if pending is not None else None)
+        return pending
 
     async def _token_request(self: Any, data: dict[str, str]) -> dict[str, Any]:
-        posted.append(data)
-        return {"access_token": "an-access-token", "token_type": "Bearer"}
+        endpoint.posted.append(data)
+        response: dict[str, Any] = {"access_token": "an-access-token", "token_type": "Bearer"}
+        nonce = id_token_nonce or endpoint.claimed_nonces[-1]
+        if nonce is not None:
+            response["id_token"] = _unsigned_id_token(nonce=nonce)
+        return response
 
     async def _fetch_identity(self: Any, _tokens: Any) -> Any:
         return SimpleNamespace(subject="ada-subject", email="ada@example.com", name="Ada Lovelace", email_verified=True)
 
+    async def _revoke_token(self: Any, token: str) -> bool:
+        endpoint.revoked.append(token)
+        return True
+
+    monkeypatch.setattr(oauth_service._DatabaseStateStore, "consume", _consume)
     monkeypatch.setattr(OAuthClient, "_token_request", _token_request)
     monkeypatch.setattr(OAuthClient, "fetch_identity", _fetch_identity)
-    return posted
+    monkeypatch.setattr(OAuthClient, "revoke_token", _revoke_token)
+    return endpoint
+
+
+def _unsigned_id_token(**claims: Any) -> str:
+    """An ID token for the nonce check, which reads claims only; ``fetch_identity`` is stubbed above."""
+
+    def segment(value: dict[str, Any]) -> str:
+        return urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
+
+    return f"{segment({'alg': 'RS256'})}.{segment({'sub': 'ada-subject', **claims})}.signature"
 
 
 def test_a_code_with_no_authorize_behind_it_is_refused(
@@ -1797,7 +1811,7 @@ def test_a_code_with_no_authorize_behind_it_is_refused(
     unless the deployment kept a record of the flow it started.
     """
     add_member(client, master_key_header, email="ada@example.com")
-    posted = stub_token_endpoint(monkeypatch)
+    posted = stub_token_endpoint(monkeypatch).posted
 
     response = client.post(
         f"{API_ROOT}/auth/oauth/google/callback",
@@ -1856,7 +1870,7 @@ def test_the_exchange_sends_the_verifier_the_authorize_call_minted(
 ) -> None:
     """PKCE end to end: the challenge on the consent URL answers to the verifier sent here."""
     add_member(client, master_key_header, email="ada@example.com")
-    posted = stub_token_endpoint(monkeypatch)
+    posted = stub_token_endpoint(monkeypatch).posted
     started = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()
     query = parse_qs(urlsplit(started["authorization_url"]).query)
 
@@ -1871,6 +1885,71 @@ def test_the_exchange_sends_the_verifier_the_authorize_call_minted(
     expected = urlsafe_b64encode(sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     assert query["code_challenge"] == [expected]
     assert query["code_challenge_method"] == ["S256"]
+
+
+def test_the_exchange_checks_the_nonce_the_authorize_call_sent(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The nonce on the consent URL survives the round trip through the pending-state row."""
+    add_member(client, master_key_header, email="ada@example.com")
+    endpoint = stub_token_endpoint(monkeypatch)
+    started = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()
+    (nonce,) = parse_qs(urlsplit(started["authorization_url"]).query)["nonce"]
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": started["state"]})
+
+    assert response.status_code == 200, response.text
+    assert endpoint.claimed_nonces == [nonce]
+
+
+def test_an_id_token_carrying_another_nonce_is_a_refused_sign_in(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A token response that does not answer this request is the caller's failure, not the provider's.
+
+    That is what an injected code looks like, so it is counted with the other
+    refused sign-ins rather than rendered as an outage, and the tokens it
+    carried are revoked.
+    """
+    add_member(client, master_key_header, email="ada@example.com")
+    endpoint = stub_token_endpoint(monkeypatch, id_token_nonce="a-nonce-this-deployment-never-sent")
+    failures: list[str] = []
+    monkeypatch.setattr("gateway.api.routes.auth_oauth.record_auth_failure", failures.append)
+    state = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": state})
+
+    assert response.status_code == 400, response.text
+    assert SESSION_COOKIE_NAME not in response.cookies
+    assert failures == ["invalid_oauth"]
+    assert endpoint.revoked == ["an-access-token"]
+
+
+def test_a_google_state_minted_without_a_nonce_asks_for_a_fresh_sign_in(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    """A sign-in in flight across the upgrade is refused as a stale state, before the code is spent."""
+    add_member(client, master_key_header, email="ada@example.com")
+    endpoint = stub_token_endpoint(monkeypatch)
+    state = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
+    db_session.execute(update(OAuthPendingState).values(nonce=None))
+    db_session.commit()
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": state})
+
+    assert response.status_code == 400, response.text
+    assert SESSION_COOKIE_NAME not in response.cookies
+    assert endpoint.posted == []
 
 
 def test_a_refused_exchange_leaves_the_state_spendable_for_the_retry(
@@ -1931,7 +2010,7 @@ def test_a_callback_from_a_browser_that_did_not_start_the_flow_is_refused(
     refused too.
     """
     add_member(client, master_key_header, email="ada@example.com")
-    posted = stub_token_endpoint(monkeypatch)
+    posted = stub_token_endpoint(monkeypatch).posted
     state = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
     victims_cookie = client.cookies[FLOW_COOKIE_NAME]
 

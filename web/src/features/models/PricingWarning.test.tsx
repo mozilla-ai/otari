@@ -10,7 +10,6 @@ import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
 const BASE: GatewaySettings = {
-  mode: "standalone",
   version: "1.0.0",
   model_discovery: true,
   default_pricing: false,

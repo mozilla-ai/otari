@@ -7,7 +7,7 @@ import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -28,9 +28,9 @@ from gateway.models.tools import (
 from gateway.services.pricing_service import gateway_tool_pricing_key
 from gateway.services.tools import ResolvedFetch, ResolvedSearch, resolve_fetch, resolve_search
 from gateway.services.tools._web_search import _resolve
+from gateway.types.tool_charges import ORGANIZATION_KEY_LABEL_PREFIX, InstanceRateKey
 
 _ORG = WebToolCredentialSource.ORG
-_HYBRID = WebToolCredentialSource.HYBRID
 _EXA = {"provider": "exa", "api_key": "exa-instance-key"}
 _FAKE = {"provider": "fake"}
 _SEARXNG = {"provider": "searxng", "api_base": "http://searxng:8080"}
@@ -99,7 +99,7 @@ _SEARCH_CASES = [
             "api_key": "exa-instance-key",
             "api_base": "https://api.exa.ai",
             "label": "exa:exa",
-            "rate_keys": ("exa:exa", "otari:web_search"),
+            "rate_keys": (InstanceRateKey("search", "exa", "exa:exa"), "otari:web_search"),
             "timeout": 15.0,
         },
     ),
@@ -168,12 +168,6 @@ _SEARCH_CASES = [
         policy=_policy(credential=WebSearchCredential(provider="exa", source=_ORG, api_key="exa-org-key")),
     ),
     _SearchCase(
-        "the control plane's credential, which settles nothing here",
-        {},
-        {"provider": "exa", "api_key": "exa-peer-key", "label": None, "rate_keys": ()},
-        policy=_policy(credential=WebSearchCredential(provider="exa", source=_HYBRID, api_key="exa-peer-key")),
-    ),
-    _SearchCase(
         "a credential's own endpoint",
         {},
         {"api_base": "https://exa.example"},
@@ -222,7 +216,7 @@ _SEARCH_CASES = [
             "provider": "exa",
             "api_key": "exa-instance-key",
             "label": "exa:exa",
-            "rate_keys": ("exa:exa",),
+            "rate_keys": (InstanceRateKey("search", "exa", "exa:exa"),),
             "timeout": 30.0,
         },
         policy=_policy(credential=WebSearchCredential(provider="fake", source=_ORG)),
@@ -317,6 +311,16 @@ def test_the_search_order(case: _SearchCase) -> None:
     assert {key: getattr(resolved, key) for key in case.expected} == case.expected
     if case.options is not None:
         assert dict(resolved.options) == case.options
+
+
+def test_an_organization_keys_label_carries_the_prefix_pricing_reads() -> None:
+    """Pricing keeps the organization's own overrides for an ``org:<provider>`` call, so the label must say so."""
+    policy = _policy(credential=WebSearchCredential(provider="exa", source=_ORG, api_key="exa-org-key"))
+    resolved = resolve_search(GatewayConfig(search_tools={"test": _FAKE}), policy, requested=None, request_options=None)
+
+    assert resolved is not None
+    assert resolved.label is not None
+    assert resolved.label.startswith(ORGANIZATION_KEY_LABEL_PREFIX)
 
 
 def test_the_fallback_rate_keys_are_the_pricing_services_keys_for_the_tools() -> None:
@@ -438,9 +442,23 @@ def test_a_result_says_whether_a_credential_or_an_instance_serves_it() -> None:
     assert not on_instance.on_credential
 
 
+@pytest.mark.parametrize(("api_base", "tenant_endpoint"), [(None, False), ("  ", False), ("https://1.1.1.1/v1", True)])
+def test_a_result_says_whether_a_credential_names_its_own_endpoint(api_base: str | None, tenant_endpoint: bool) -> None:
+    config = GatewayConfig(search_tools={"exa": {"api_key": "k", "api_base": "https://1.1.1.1/exa"}})
+    search = WebSearchCredential(provider="exa", source=_ORG, api_key="org-key", api_base=api_base)
+    fetch = WebFetchCredential(provider="tabstack", source=_ORG, api_key="org-key", api_base=api_base)
+
+    on_search = resolve_search(config, None, requested="exa", request_options=None, direct_credential=search)
+    on_fetch = _resolve._fetch_on_credential(fetch)
+
+    assert on_search is not None and on_search.on_credential and on_search.tenant_endpoint is tenant_endpoint
+    assert on_fetch is not None and on_fetch.tenant_endpoint is tenant_endpoint
+    assert not _named(config, "exa").tenant_endpoint
+
+
 def test_a_credential_for_a_provider_this_gateway_cannot_call_is_ignored(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.WARNING, logger="gateway")
-    credential = WebSearchCredential(provider="unheard-of", source=_HYBRID, api_key="key-of-the-peer")
+    credential = WebSearchCredential(provider="unheard-of", source=_ORG, api_key="key-of-the-org")
 
     resolved = resolve_search(
         GatewayConfig(search_tools={"test": _FAKE}),
@@ -452,18 +470,18 @@ def test_a_credential_for_a_provider_this_gateway_cannot_call_is_ignored(caplog:
     assert resolved is not None
     assert resolved.name == "test"
     assert "unheard-of" in _warnings(caplog)
-    assert "key-of-the-peer" not in _warnings(caplog)
+    assert "key-of-the-org" not in _warnings(caplog)
 
 
 @pytest.mark.parametrize(
     "credential",
     [
         WebSearchCredential(provider="exa", source=_ORG),
-        WebSearchCredential(provider="exa", source=_HYBRID, api_key=""),
+        WebSearchCredential(provider="exa", source=_ORG, api_key=""),
         WebSearchCredential(provider="tavily", source=_ORG),
-        WebSearchCredential(provider="searxng", source=_HYBRID),
-        WebSearchCredential(provider="searxng", source=_HYBRID, api_base=" / "),
-        WebSearchCredential(provider="tavily", source=_HYBRID, api_key="k", api_base="https://tavily-proxy.example"),
+        WebSearchCredential(provider="searxng", source=_ORG),
+        WebSearchCredential(provider="searxng", source=_ORG, api_base=" / "),
+        WebSearchCredential(provider="tavily", source=_ORG, api_key="k", api_base="https://tavily-proxy.example"),
     ],
     ids=[
         "exa-without-key",
@@ -486,16 +504,6 @@ def test_a_credential_its_provider_cannot_be_called_with_is_refused(
     with pytest.raises(WebSearchCredentialRefusedError):
         resolve_search(config, None, requested="exa", request_options=None, direct_credential=credential)
     assert credential.provider in refused.value.message
-
-
-def test_a_credentials_source_counts_by_value() -> None:
-    """One built from data, its source a plain string, is still the control plane's."""
-    credential = WebSearchCredential(provider="exa", source=cast(WebToolCredentialSource, "hybrid"), api_key="k")
-
-    resolved = resolve_search(GatewayConfig(), _policy(credential=credential), requested=None, request_options=None)
-
-    assert resolved is not None
-    assert (resolved.label, resolved.rate_keys) == (None, ())
 
 
 def test_a_resolved_search_never_prints_its_key_endpoint_or_options() -> None:
@@ -661,7 +669,7 @@ def test_a_credentials_options_the_provider_refuses_are_dropped_and_its_operator
     caplog.set_level(logging.WARNING, logger="gateway")
     credential = WebSearchCredential(
         provider="fake",
-        source=_HYBRID,
+        source=_ORG,
         options={"nope": "secret-value", "max_results": 0, "account": "the-orgs-account"},
     )
 
@@ -670,7 +678,7 @@ def test_a_credentials_options_the_provider_refuses_are_dropped_and_its_operator
     assert dict(resolved.options) == {"account": "the-orgs-account"}
     assert "'nope'" in _warnings(caplog)
     assert "'max_results'" in _warnings(caplog)
-    assert "control plane" in _warnings(caplog)
+    assert "organization's key" in _warnings(caplog)
     assert "secret-value" not in _warnings(caplog)
 
 
@@ -746,7 +754,7 @@ _FETCH_CASES = [
             "api_key": "",
             "api_base": "",
             "label": "builtin:builtin_fetch",
-            "rate_keys": ("builtin:builtin_fetch", "otari:web_fetch"),
+            "rate_keys": (InstanceRateKey("fetch", "builtin_fetch", "builtin:builtin_fetch"), "otari:web_fetch"),
             # The built-in fetcher's own deadline.
             "timeout": 5.0,
         },
@@ -760,7 +768,7 @@ _FETCH_CASES = [
             "api_key": "exa-fetch-key",
             "api_base": "https://api.exa.ai",
             "label": "exa:exa-fetch",
-            "rate_keys": ("exa:exa-fetch", "otari:web_fetch"),
+            "rate_keys": (InstanceRateKey("fetch", "exa-fetch", "exa:exa-fetch"), "otari:web_fetch"),
             "timeout": 15.0,
         },
     ),
@@ -774,12 +782,6 @@ _FETCH_CASES = [
         {"fetch_tools": {"exa-fetch": _EXA_FETCH}, "web_fetch_default_tool": "exa-fetch"},
         {"name": None, "provider": "fake", "label": "org:fake", "rate_keys": ("otari:web_fetch",), "timeout": 15.0},
         policy=_policy(fetch_credential=_ORG_FETCH),
-    ),
-    _FetchCase(
-        "the control plane's fetch key",
-        {},
-        {"provider": "exa", "api_key": "exa-peer", "api_base": "https://api.exa.ai", "label": None, "rate_keys": ()},
-        policy=_policy(fetch_credential=WebFetchCredential(provider="exa", source=_HYBRID, api_key="exa-peer")),
     ),
     _FetchCase(
         "a search instance's fetch_tool over the fetch key, for enrichment",
@@ -811,7 +813,7 @@ _FETCH_CASES = [
         "a fetch key on builtin is ignored",
         {},
         {"name": "builtin_fetch"},
-        policy=_policy(fetch_credential=WebFetchCredential(provider="builtin", source=_HYBRID)),
+        policy=_policy(fetch_credential=WebFetchCredential(provider="builtin", source=_ORG)),
     ),
 ]
 

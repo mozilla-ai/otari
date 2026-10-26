@@ -1,4 +1,4 @@
-"""Dashboard sign-in sessions (standalone mode only).
+"""Dashboard sign-in sessions.
 
 ``POST /api/v1/auth/session`` exchanges a credential for a server-issued session
 held in an HttpOnly cookie, so the dashboard never persists that credential in
@@ -8,7 +8,7 @@ sign-out. The cookie is honored by the master-key auth dependencies in
 the identity it was minted for, so those dependencies resolve a caller from it.
 
 **Two credentials, one at a time, and which one depends on the deployment.**
-mozilla-ai/otari-ai#1716 settled that the master key bootstraps a standalone
+mozilla-ai/otari-ai#1716 settled that the master key bootstraps a
 deployment and then retires as its dashboard login, staying the deployment-wide
 API credential. So:
 
@@ -52,7 +52,6 @@ from gateway.api.deps import (
     IdentityServiceDep,
     MembershipListenerDep,
     UnitOfWorkDep,
-    WorkspaceListenerDep,
     get_config,
     get_db,
     is_valid_master_key,
@@ -79,7 +78,6 @@ from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import authenticate, operator_has_password
-from gateway.services.tenancy.workspace_listener import WorkspaceListener
 
 router = APIRouter(prefix="/auth/session", tags=["auth"])
 
@@ -221,7 +219,6 @@ async def _sign_in_with_master_key(
     *,
     uow: UnitOfWork,
     membership_listener: MembershipListener,
-    workspace_listener: WorkspaceListener,
 ) -> TenancyUser:
     """Bootstrap sign-in: verify the master key and resolve the operator identity.
 
@@ -251,7 +248,6 @@ async def _sign_in_with_master_key(
         db,
         uow=uow,
         membership_listener=membership_listener,
-        workspace_listener=workspace_listener,
     )
 
 
@@ -289,7 +285,6 @@ async def create_session(
     config: Annotated[GatewayConfig, Depends(get_config)],
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
-    workspace_listener: WorkspaceListenerDep,
     identities: IdentityServiceDep,
 ) -> SessionResponse:
     """Verify a sign-in credential and set the HttpOnly session cookie.
@@ -340,7 +335,6 @@ async def create_session(
             config,
             uow=uow,
             membership_listener=membership_listener,
-            workspace_listener=workspace_listener,
         )
     else:
         assert body.email is not None and body.password is not None  # guaranteed by the model validator

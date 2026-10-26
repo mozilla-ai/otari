@@ -1,9 +1,9 @@
 """Unit tests for the OSS-edition smoke gate (scripts/oss_edition_smoke.py).
 
 The gate's own end-to-end proof is the CI job that runs it. What is worth pinning
-here is the part that decides *which edition* gets booted, plus the mock provider
-the run depends on: a scrub that stopped dropping the platform token would leave
-the job green while checking the hybrid build, which is the one failure this gate
+here is the part that decides *which build* gets booted, plus the mock provider
+the run depends on: a scrub that stopped dropping ``OTARI_BOOTSTRAP`` would leave
+the job green while checking an overlay build, which is the one failure this gate
 cannot detect by running.
 """
 
@@ -68,10 +68,7 @@ def test_the_gate_walks_the_root_the_app_actually_serves() -> None:
 @pytest.mark.parametrize(
     "name",
     [
-        "OTARI_MODE",  # selects hybrid mode outright
-        "OTARI_AI_TOKEN",  # a platform token selects hybrid mode when mode is unset
         "OTARI_BOOTSTRAP",  # the overlay selector, which would boot a build nobody chose
-        "OTARI_PLATFORM_BASE_URL",  # the platform block, which only hybrid reads
         "OTARI_DATABASE_URL",  # would smoke a database nobody chose
         # A name the scrub has never heard of, so a regression from the prefix
         # sweep to a fixed allowlist of the names above fails here.
@@ -100,7 +97,7 @@ def test_the_provider_account_pepper_is_set_for_provider_copies() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_config_selects_no_other_edition() -> None:
+def test_config_declares_only_the_failing_instance() -> None:
     names = smoke.Names.for_run("abcd1234")
     config = smoke.oss_edition_config(
         database_url="sqlite:///smoke.db",
@@ -108,8 +105,6 @@ def test_config_selects_no_other_edition() -> None:
         mock_base_url="http://127.0.0.1:9000",
         names=names,
     )
-    assert "mode" not in config
-    assert "platform" not in config
     assert list(config["providers"]) == [names.failing_instance]
 
 
@@ -189,3 +184,48 @@ def test_unknown_route_is_not_mistaken_for_a_completion(provider: Any) -> None:
     assert status == 404
     assert provider.working_calls == 0
     assert provider.failing_calls == 0
+
+
+# --------------------------------------------------------------------------- #
+# The container mode
+# --------------------------------------------------------------------------- #
+
+
+def test_image_is_off_by_default_and_taken_as_given() -> None:
+    assert smoke.parse_args([]).image is None
+    assert smoke.parse_args(["--image", "otari:pr-sha"]).image == "otari:pr-sha"
+
+
+def test_container_config_leaves_the_listen_address_to_the_image() -> None:
+    """The image pins OTARI_HOST/OTARI_PORT, and env beats a config file."""
+    names = smoke.Names.for_run("abcd1234")
+    config = smoke.oss_edition_config(
+        database_url=smoke.CONTAINER_DATABASE_URL,
+        port=None,
+        mock_base_url="http://host.docker.internal:9000",
+        names=names,
+    )
+    assert "host" not in config
+    assert "port" not in config
+    source = smoke.oss_edition_config(
+        database_url="sqlite:///smoke.db", port=8123, mock_base_url="http://127.0.0.1:9000", names=names
+    )
+    assert (source["host"], source["port"]) == (smoke.LOOPBACK, 8123)
+
+
+def test_container_database_is_an_absolute_sqlite_path() -> None:
+    """Four slashes: a relative path would land wherever the image's workdir is."""
+    assert smoke.CONTAINER_DATABASE_URL.startswith("sqlite:////")
+
+
+def test_mock_binds_loopback_by_default_and_is_dialed_there() -> None:
+    with smoke.mock_provider("key") as server:
+        assert server.server_address[0] == smoke.LOOPBACK
+        assert smoke.peer_base_url(server, smoke.LOOPBACK) == f"http://{smoke.LOOPBACK}:{server.server_address[1]}"
+
+
+def test_mock_is_dialed_through_the_host_alias_when_bound_for_a_container() -> None:
+    """A container has its own loopback, so the mock must be reachable by name."""
+    with smoke.mock_provider("key", smoke.ALL_INTERFACES) as server:
+        url = smoke.peer_base_url(server, smoke.ALL_INTERFACES)
+        assert url == f"http://{smoke.CONTAINER_HOST_ALIAS}:{server.server_address[1]}"

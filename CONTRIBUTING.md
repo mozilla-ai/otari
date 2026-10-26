@@ -25,11 +25,15 @@ behavior, it belongs upstream.
 import asyncio
 from any_llm import acompletion
 
-print(asyncio.run(acompletion(
-    model="openai:gpt-4o-mini",   # your provider:model
-    messages=[{"role": "user", "content": "hi"}],
-    # plus the param or option you think Otari is mishandling
-)))
+print(
+    asyncio.run(
+        acompletion(
+            model="openai:gpt-4o-mini",  # your provider:model
+            messages=[{"role": "user", "content": "hi"}],
+            # plus the param or option you think Otari is mishandling
+        )
+    )
+)
 ```
 
 **File it in [any-llm](https://github.com/mozilla-ai/any-llm/issues) if:**
@@ -46,7 +50,7 @@ print(asyncio.run(acompletion(
 - route schemas, the OpenAPI spec, or the Anthropic and Responses envelopes
 - routing, fallback across attempts, or routing memory
 - `config.yml` layering, the `providers:` block, or provider instances and aliases
-- the dashboard, built-in tools, the MCP loop, guardrails, or hybrid mode
+- the dashboard, built-in tools, the MCP loop, or guardrails
 
 Two things that look upstream but are ours: the per-provider setup guides in
 `docs/providers/`, and how a provider error becomes a status code and a
@@ -160,12 +164,10 @@ keep it current, and they cover different things:
   on every PR that changes the dashboard's dependencies and weekly, failing on a
   high or critical advisory, and keeps a tracking issue open while one remains.
   Run it locally with `pnpm --dir web audit`.
-- **`.github/workflows/otari-lock-refresh.yml`** re-resolves `uv.lock` weekly against
-  the newest versions the existing constraints already allow, which is the case
-  Dependabot does not open PRs for. A floored dependency can otherwise stay at
-  whatever version was current the day it was first locked.
 
-To do either by hand:
+Dependabot moves a direct dependency by raising its floor, and an indirect one only
+when an advisory names it. An indirect dependency with no advisory stays at the
+version it was first locked at until the lock is refreshed by hand:
 
 ```bash
 uv lock --upgrade --dry-run                    # what would move, and to where

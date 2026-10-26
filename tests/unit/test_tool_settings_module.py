@@ -24,14 +24,12 @@ from gateway.core.settings.tools import (
     effective_fetch_instances,
     effective_search_instances,
     effective_web_search_max_calls,
-    enrichment_fetch_instance,
-    fetch_default,
-    in_loop_default,
     synthesized_search_instance,
     validate_default_tool,
-    warn_about_tool_instances,
 )
 from gateway.services.tool_settings_service import apply_override
+from gateway.services.tools import resolve_fetch, resolve_search, warn_about_tool_instances, web_search_configured
+from gateway.services.tools._web_search import in_loop_default
 
 _EXA = {"provider": "exa", "api_key": "exa-secret-key"}
 _SEARXNG = {"provider": "searxng", "api_base": "http://searxng:8080"}
@@ -139,6 +137,30 @@ def test_a_dangling_default_falls_through_to_the_single_instance() -> None:
     default = in_loop_default(config)
     assert isinstance(default, ToolInstance)
     assert default.name == "exa"
+
+
+@pytest.mark.parametrize(
+    ("settings", "configured"),
+    [
+        pytest.param({"search_tools": {"exa": _EXA}}, True, id="one-served-instance"),
+        pytest.param({"search_tools": {"exa": _EXA, "other": _EXA}}, False, id="two-and-no-default"),
+        pytest.param(
+            {"search_tools": {"exa": _EXA, "other": _EXA}, "web_search_default_tool": "other"}, True, id="named"
+        ),
+        pytest.param({"search_tools": {"local": _SEARXNG}}, False, id="one-instance-without-an-adapter"),
+        pytest.param({"web_search_url": "http://searxng:8080"}, True, id="legacy-url"),
+        pytest.param({"web_search_provider": "tavily", "web_search_provider_api_key": "tvly-k"}, True, id="pair"),
+        pytest.param({"web_search_url": "http://searxng:8080", "web_search_default_tool": "none"}, False, id="none"),
+        pytest.param({}, False, id="nothing"),
+    ],
+)
+def test_search_is_configured_when_the_in_loop_default_yields_one(settings: dict[str, Any], configured: bool) -> None:
+    assert web_search_configured(GatewayConfig(**settings)) is configured
+
+
+def test_a_legacy_url_in_the_environment_alone_configures_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
+    assert web_search_configured(GatewayConfig()) is True
 
 
 def test_a_stored_instance_counts_like_a_configured_one() -> None:
@@ -290,6 +312,14 @@ def test_validate_refuses_a_credentialed_searxng_tool_inheriting_http() -> None:
         config.validate_search_tools()
 
 
+@pytest.mark.parametrize("price", [-0.01, float("nan"), float("inf"), "0.005", True])
+def test_validate_refuses_a_price_per_call_that_is_not_a_finite_amount(price: object) -> None:
+    """NaN would bill nothing and add a version on every restart; infinity would stop startup at the write."""
+    config = GatewayConfig(search_tools={"exa": {**_EXA, "price_per_call": price}})
+    with pytest.raises(ValueError, match="price_per_call must be a finite, non-negative number of USD"):
+        config.validate_search_tools()
+
+
 def test_a_searxng_tool_with_no_backend_url_anywhere_is_reported() -> None:
     """Startup warns instead of failing: a dashboard-stored URL lands after load."""
     config = GatewayConfig(search_tools={"local": {"provider": "searxng"}, "exa": {"api_key": "k"}})
@@ -316,6 +346,7 @@ def test_a_searxng_tool_with_its_own_api_base_is_not_reported() -> None:
         ({BUILTIN_FETCH: {"provider": "fake"}}, "its name is reserved"),
         ({"none": {"provider": "fake"}}, "its name is reserved"),
         ({"Builtin_Fetch": {"provider": "fake"}}, "its name is reserved"),
+        ({"*": {"provider": "fake"}}, "its name is reserved"),
         ({"a/b": {"provider": "fake"}}, "must not contain '/'"),
     ],
 )
@@ -371,6 +402,17 @@ def test_a_fetch_entry_named_like_a_stored_search_tool_is_left_out(caplog: pytes
     )
 
 
+def test_the_legacy_tool_keys_name_each_instance_under_its_provider() -> None:
+    """The keys tool prices and allow-list entries were written under before tools had a namespace."""
+    assert GatewayConfig().legacy_fetch_tool_keys() == {"builtin:builtin_fetch"}
+    config = GatewayConfig(
+        fetch_tools={"tabstack": {"provider": "tabstack", "api_key": "k"}, "exa-fetch": {"provider": "exa"}},
+        search_tools={"exa": _EXA, "exa-search": _EXA},
+    )
+    assert config.legacy_search_tool_keys() == {"exa:exa", "exa:exa-search"}
+    assert config.legacy_fetch_tool_keys() == {"builtin:builtin_fetch", "tabstack:tabstack", "exa:exa-fetch"}
+
+
 def test_a_search_entry_named_builtin_fetch_loads_beside_the_implicit_instance(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -379,6 +421,12 @@ def test_a_search_entry_named_builtin_fetch_loads_beside_the_implicit_instance(
     assert BUILTIN_FETCH in effective_search_instances(config)
     assert effective_fetch_instances(config)[BUILTIN_FETCH].provider == "builtin"
     assert f"search_tools.{BUILTIN_FETCH} breaks the instance rules" in _warnings(caplog, config)
+
+
+def test_a_search_entry_named_like_the_every_tool_entry_breaks_the_rules(caplog: pytest.LogCaptureFixture) -> None:
+    """``*`` in ``allowed_tools`` grants every search tool, so no instance may take that name."""
+    config = GatewayConfig(search_tools={"*": _EXA})
+    assert "search_tools.* breaks the instance rules" in _warnings(caplog, config)
 
 
 # --------------------------------------------------------------------------- #
@@ -524,14 +572,19 @@ def test_the_lenient_load_warns_with_names_and_never_values(caplog: pytest.LogCa
 # --------------------------------------------------------------------------- #
 
 
+def _enriched_by(config: GatewayConfig, search: str) -> str | None:
+    """The fetch instance that enriches the search instance ``search``'s hits."""
+    resolved = resolve_search(config, None, requested=search, request_options=None)
+    return resolve_fetch(config, None, requested=None, for_search=resolved).name
+
+
 def test_a_search_instance_is_enriched_by_its_own_fetch_tool() -> None:
     config = GatewayConfig(
         search_tools={"exa": {**_EXA, "fetch_tool": "exa-fetch"}, "other": {"provider": "fake"}},
         fetch_tools={"exa-fetch": {"provider": "exa", "api_key": "k"}},
     )
-    search = effective_search_instances(config)
-    assert enrichment_fetch_instance(config, search["exa"]).name == "exa-fetch"
-    assert enrichment_fetch_instance(config, search["other"]).name == BUILTIN_FETCH
+    assert _enriched_by(config, "exa") == "exa-fetch"
+    assert _enriched_by(config, "other") == BUILTIN_FETCH
 
 
 def test_without_a_fetch_tool_the_fetch_default_enriches() -> None:
@@ -540,19 +593,19 @@ def test_without_a_fetch_tool_the_fetch_default_enriches() -> None:
         fetch_tools={"exa-fetch": {"provider": "exa", "api_key": "k"}},
         web_fetch_default_tool="exa-fetch",
     )
-    assert enrichment_fetch_instance(config, effective_search_instances(config)["exa"]).name == "exa-fetch"
+    assert _enriched_by(config, "exa") == "exa-fetch"
 
 
 def test_a_dangling_fetch_tool_falls_back_to_the_fetch_default(caplog: pytest.LogCaptureFixture) -> None:
     config = GatewayConfig(search_tools={"exa": {**_EXA, "fetch_tool": "gone"}})
     config.validate_search_tools()
-    assert enrichment_fetch_instance(config, effective_search_instances(config)["exa"]).name == BUILTIN_FETCH
+    assert _enriched_by(config, "exa") == BUILTIN_FETCH
     assert "search_tools.exa.fetch_tool names no fetch instance" in _warnings(caplog, config)
 
 
 def test_a_dangling_fetch_default_falls_back_to_builtin_fetch(caplog: pytest.LogCaptureFixture) -> None:
     config = GatewayConfig(web_fetch_default_tool="gone")
-    assert fetch_default(config).name == BUILTIN_FETCH
+    assert _fetch_default_name(config) == BUILTIN_FETCH
     assert "web_fetch_default_tool names no fetch instance (gone)" in _warnings(caplog, config)
 
 
@@ -682,7 +735,9 @@ def _in_loop_default_name(config: GatewayConfig) -> str | None:
 
 
 def _fetch_default_name(config: GatewayConfig) -> str:
-    return fetch_default(config).name
+    name = resolve_fetch(config, None, requested=None, for_search=None).name
+    assert name is not None
+    return name
 
 
 @pytest.mark.parametrize(

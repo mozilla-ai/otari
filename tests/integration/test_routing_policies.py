@@ -45,9 +45,17 @@ from gateway.core.config import (
     MODEL_HEADER,
     PROVIDER_HEADER,
     RESPONSE_DURATION_HEADER,
+    SERVER_TIMING_HEADER,
     GatewayConfig,
 )
-from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_ERROR
+from gateway.core.error_codes import (
+    ERROR_CODE_HEADER,
+    ERROR_PROVIDER_HEADER,
+    ERROR_RETRYABLE_HEADER,
+    ERROR_STATUS_HEADER,
+    ERROR_TAG_HEADER,
+    PROVIDER_ERROR,
+)
 from gateway.models.routing import RoutingConfig
 from gateway.services import catalog as selectors
 
@@ -260,6 +268,21 @@ def test_a_plain_model_names_the_instance_and_model_that_served_it(
     # A name a header cannot carry is left out rather than failing a response the provider gave.
     assert _served_by(resp) == ("openai", header, "1", "false")
     assert int(resp.headers[RESPONSE_DURATION_HEADER]) >= 0
+    timing = _server_timing(resp)
+    assert list(timing) == ["otari", "upstream", "total"]
+    assert all(duration >= 0 for duration in timing.values())
+    # The gateway's share and the provider's add up to the whole, to the rounding of each.
+    assert abs(timing["otari"] + timing["upstream"] - timing["total"]) <= 0.2
+    assert abs(timing["total"] - int(resp.headers[RESPONSE_DURATION_HEADER])) <= 0.5
+
+
+def _server_timing(resp: Any) -> dict[str, float]:
+    """Each ``Server-Timing`` metric's name and duration in milliseconds, in order."""
+    metrics: dict[str, float] = {}
+    for entry in resp.headers[SERVER_TIMING_HEADER].split(","):
+        name, *params = (part.strip() for part in entry.split(";"))
+        metrics[name] = next(float(param.removeprefix("dur=")) for param in params if param.startswith("dur="))
+    return metrics
 
 
 def test_a_failed_request_names_no_serving_instance(client: TestClient) -> None:
@@ -270,6 +293,7 @@ def test_a_failed_request_names_no_serving_instance(client: TestClient) -> None:
     assert resp.status_code == 502
     assert _served_by(resp) == (None, None, None, None)
     assert RESPONSE_DURATION_HEADER not in resp.headers
+    assert SERVER_TIMING_HEADER not in resp.headers
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +308,7 @@ def test_failover_serves_the_next_candidate_and_bills_it_once(client: TestClient
     async def flaky(**kwargs: Any) -> ChatCompletion:
         calls.append(kwargs["model"])
         if kwargs["model"] == "openai:gpt-5-mini":
+            await asyncio.sleep(0.05)
             raise _http_error(503)
         return _completion("claude-haiku-4-5")
 
@@ -292,6 +317,8 @@ def test_failover_serves_the_next_candidate_and_bills_it_once(client: TestClient
 
     assert resp.status_code == 200, resp.text
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+    # The candidate that failed spent provider time, not Otari's.
+    assert _server_timing(resp)["upstream"] >= 50
     # Relabeled to the policy, so a fallover is invisible to the caller's code.
     assert resp.json()["model"] == "fast"
     # ...but not to a caller reading the headers, which name what served it.
@@ -394,15 +421,20 @@ def test_an_empty_completion_fails_over_to_the_next_candidate(client: TestClient
     assert [r["model"] for r in rows if r["status"] == "success"] == ["claude-haiku-4-5"]
 
 
-def test_all_candidates_failing_is_a_generic_502(client: TestClient) -> None:
+@pytest.mark.parametrize("stream", [False, True], ids=["unstreamed", "streamed"])
+def test_all_candidates_failing_is_a_generic_502(client: TestClient, stream: bool) -> None:
     """A multi-candidate fallthrough must not attribute one provider's status to
-    the whole plan.
+    the whole plan, though its headers name the last candidate's own failure.
     """
     _create_user(client)
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=_http_error(503))):
-        resp = _chat(client, "fast")
+        resp = _chat(client, "fast", stream=stream)
 
     assert resp.status_code == 502
+    assert resp.headers[ERROR_PROVIDER_HEADER] == "anthropic"
+    assert resp.headers[ERROR_STATUS_HEADER] == "503"
+    assert resp.headers[ERROR_TAG_HEADER] == "http_error"
+    assert resp.headers[ERROR_RETRYABLE_HEADER] == "true"
 
 
 def test_a_provider_400_burns_the_chain(client: TestClient) -> None:
@@ -422,6 +454,8 @@ def test_a_provider_400_burns_the_chain(client: TestClient) -> None:
 
     assert resp.status_code == 400
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+    # A provider's 4xx keeps its fixed answer.
+    assert ERROR_PROVIDER_HEADER not in resp.headers
 
 
 def test_an_auth_failure_burns_the_chain(client: TestClient) -> None:
@@ -1857,7 +1891,7 @@ def test_tools_run_by_the_candidate_that_serves_are_billed_once_on_its_row(
     with (
         patch("gateway.services.mcp_loop.acompletion", new=scripted_provider),
         patch(
-            "gateway.services.web_search_backend.WebSearchBackend._search_tool",
+            "gateway.services.web_retrieval_backend.WebSearchBackend._search_tool",
             new=AsyncMock(return_value="results"),
         ),
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
@@ -1928,7 +1962,7 @@ def test_a_locked_in_tool_loop_cannot_fail_over_and_still_owes_for_its_searches(
     with (
         patch("gateway.services.mcp_loop.acompletion", new=scripted_provider),
         patch(
-            "gateway.services.web_search_backend.WebSearchBackend._search_tool",
+            "gateway.services.web_retrieval_backend.WebSearchBackend._search_tool",
             new=AsyncMock(return_value="results"),
         ),
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),

@@ -2,20 +2,32 @@
 
 from __future__ import annotations
 
+import dataclasses
+import math
 import uuid
 from collections import defaultdict
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions.traces_exceptions import RequestTraceNotFoundError, TraceAmbiguousError, TraceNotFoundError
-from gateway.models.traces import Trace, TraceSpan
+from gateway.exceptions.traces_exceptions import (
+    GuardrailDigestMismatchError,
+    RequestTraceNotFoundError,
+    TraceAmbiguousError,
+    TraceNotFoundError,
+)
+from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
+from gateway.services.traces._collector import CALL_ID_DIGEST, call_id_digest
+from gateway.services.traces._content import open_content, seal_content
 from gateway.services.traces._reading import MAX_SPANS_PER_READ, trace_view
 from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
+    TRACE_BUCKET_DURATION,
+    USAGE_OPERATION,
+    GuardrailDefinition,
     SpanRecord,
     TraceBucket,
     TraceBucketGrain,
@@ -23,13 +35,17 @@ from gateway.types.traces import (
     TraceFilter,
     TracePage,
     TraceScope,
+    TraceSort,
     TraceSummary,
     TraceWrite,
     WriteResult,
 )
+from otari_agent.domain.definitions import GateDefinition, definition_digest, gates_from_body
 
-# The most buckets one series read returns: 90 days by the hour.
-MAX_SERIES_BUCKETS = 90 * 24
+# The most buckets one series read returns, each joined against every session it
+# overlaps. A dashboard preset asks for at most 60; its "All", by the day, keeps
+# the newest two years.
+MAX_SERIES_BUCKETS = 720
 
 
 class TraceService:
@@ -45,6 +61,7 @@ class TraceService:
         self._uow = uow
         self._traces = repositories.traces
         self._spans = repositories.spans
+        self._definitions = repositories.definitions
 
     async def write(self, traces: Sequence[TraceWrite]) -> WriteResult:
         """Store these traces' spans, creating each trace on its first span.
@@ -93,10 +110,12 @@ class TraceService:
             await self._traces.add_totals([_growth(key, spans, written_at) for key, spans in grown.items()])
         return WriteResult(accepted=accepted, duplicate=duplicate, rejected=rejected)
 
-    async def search(self, scope: TraceScope, filters: TraceFilter, *, limit: int, offset: int) -> TracePage:
-        """Return one page of the scope's traces, newest activity first."""
+    async def search(
+        self, scope: TraceScope, filters: TraceFilter, *, limit: int, offset: int, sort: TraceSort = TraceSort()
+    ) -> TracePage:
+        """Return one page of the scope's traces in ``sort`` order, newest activity first by default."""
         async with self._uow:
-            rows = await self._traces.page(_workspace_ids(scope), filters, limit=limit + 1, offset=offset)
+            rows = await self._traces.page(_workspace_ids(scope), filters, limit=limit + 1, offset=offset, sort=sort)
             return TracePage(items=tuple(_summary(row) for row in rows[:limit]), has_more=len(rows) > limit)
 
     async def count(self, scope: TraceScope, filters: TraceFilter) -> int:
@@ -123,25 +142,55 @@ class TraceService:
                 raise TraceAmbiguousError(trace_id)
             row = rows[0]
             spans = await self._spans.for_trace(row.workspace_id, row.trace_id, limit=span_limit + 1)
+            with_content = scope.reads_content_of(row.user_id)
+            records = tuple(_span_record(span, with_content=with_content) for span in spans[:span_limit])
+            digests = {
+                digest for span in records if isinstance(digest := span.attributes.get("otari.policy.digest"), str)
+            }
+            definitions = await self._definitions.for_digests(row.workspace_id, digests)
             return TraceDetail(
                 summary=_summary(row),
-                spans=tuple(_span_record(span) for span in spans[:span_limit]),
+                spans=records,
                 truncated=len(spans) > span_limit,
+                definitions=tuple(_definition(definition) for definition in definitions),
             )
+
+    async def record_definition(self, workspace_id: uuid.UUID, gates: Sequence[GateDefinition], digest: str) -> str:
+        """Store this version of a workspace's agent guardrail, once, and return its fingerprint.
+
+        The fingerprint is recomputed from the gates and must match the one sent,
+        so a version is never stored under another's name. Raises
+        ``GuardrailDigestMismatchError`` when it does not.
+        """
+        if definition_digest(gates) != digest:
+            raise GuardrailDigestMismatchError()
+        async with self._uow:
+            await self._definitions.insert_absent(workspace_id, digest, [dataclasses.asdict(gate) for gate in gates])
+        return digest
 
     async def series(
         self, scope: TraceScope, filters: TraceFilter, *, bucket: TraceBucketGrain
     ) -> tuple[TraceBucket, ...]:
-        """Count the scope's matching traces per bucket of their start, oldest first, populated buckets only.
+        """Count the scope's matching sessions active in each bucket, oldest first, populated buckets only.
 
-        At most :data:`MAX_SERIES_BUCKETS`, reaching back from the newest trace, whatever window the filters
-        leave open.
+        A session is active from its start to its last activity, so it counts in
+        every bucket it overlaps. The window is the filters' (or the sessions'
+        own, from the first start to the last activity), cut into buckets aligned
+        to their size in UTC, the newest :data:`MAX_SERIES_BUCKETS` of them.
         """
+        grain = TRACE_BUCKET_DURATION[bucket]
         async with self._uow:
-            rows = await self._traces.bucket_counts(
-                _workspace_ids(scope), filters, bucket=bucket, limit=MAX_SERIES_BUCKETS
+            oldest, newest = await self._traces.activity_bounds(_workspace_ids(scope), filters)
+            if oldest is None or newest is None:
+                return ()
+            lower = filters.start or oldest
+            upper = filters.end or newest + timedelta(microseconds=1)
+            starts = _bucket_starts(lower, upper, grain, MAX_SERIES_BUCKETS)
+            rows = await self._traces.count_active(_workspace_ids(scope), filters, starts=starts, grain=grain)
+            return tuple(
+                TraceBucket(bucket=start.strftime("%Y-%m-%dT%H:%M:%SZ"), succeeded=ok, failed=bad)
+                for start, ok, bad in rows
             )
-            return tuple(TraceBucket(bucket=key, succeeded=ok, failed=bad) for key, ok, bad in rows)
 
     async def detail(self, scope: TraceScope, trace_id: str, *, workspace_id: uuid.UUID | None = None) -> TraceView:
         """One session with its turns.
@@ -185,6 +234,21 @@ class TraceService:
             return await self._traces.delete_expired(idle_before=idle_before, started_before=started_before)
 
 
+def _bucket_starts(lower: datetime, upper: datetime, grain: timedelta, limit: int) -> list[datetime]:
+    """The starts of the buckets covering ``[lower, upper)``, aligned to ``grain`` in UTC, the newest ``limit``."""
+    lower, upper = _utc(lower), _utc(upper)
+    if lower >= upper:
+        return []
+    step = grain.total_seconds()
+    first = datetime.fromtimestamp((lower.timestamp() // step) * step, tz=UTC)
+    total = math.ceil((upper - first) / grain)
+    return [first + grain * index for index in range(max(0, total - limit), total)]
+
+
+def _utc(moment: datetime) -> datetime:
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+
 def _workspace_ids(scope: TraceScope) -> frozenset[uuid.UUID] | None:
     return None if scope.deployment_wide else scope.workspace_ids
 
@@ -225,12 +289,17 @@ def _key(trace: TraceWrite) -> TraceKey:
 def _growth(key: TraceKey, spans: list[SpanRecord], written_at: datetime) -> TraceGrowth:
     moments = [_span_moment(span, written_at) for span in spans]
     llm = [span for span in spans if span.kind == "llm"]
+    errors = [span for span in spans if span.outcome == "error" and not span.recovered]
     return TraceGrowth(
         workspace_id=key[0],
         trace_id=key[1],
         steps=sum(1 for span in spans if span.kind == "step"),
-        spans=len(spans),
-        errors=sum(1 for span in spans if span.outcome == "error" and not span.recovered),
+        # A span that only carries a request's cost is not one a person reads.
+        spans=sum(1 for span in spans if span.operation != USAGE_OPERATION),
+        errors=len(errors),
+        # A tool's error goes back to the model, which usually carries on, so it does not fail the session.
+        # An MCP tool's too, a transport failure included; a failed MCP connection is not a tool's and does.
+        failing_errors=sum(1 for span in errors if span.kind != "tool"),
         input_tokens=sum(span.input_tokens or 0 for span in llm),
         output_tokens=sum(span.output_tokens or 0 for span in llm),
         cost=sum((span.cost_snapshot or Decimal(0) for span in llm), Decimal(0)),
@@ -260,6 +329,9 @@ def _span_values(trace: TraceWrite, span: SpanRecord) -> dict[str, Any]:
         "provider": span.provider,
         "input_tokens": span.input_tokens,
         "output_tokens": span.output_tokens,
+        "cache_read_tokens": span.cache_read_tokens,
+        "cache_write_tokens": span.cache_write_tokens,
+        "reasoning_tokens": span.reasoning_tokens,
         "cost_snapshot": span.cost_snapshot,
         "tool_name": span.tool_name,
         "tool_type": span.tool_type,
@@ -268,10 +340,18 @@ def _span_values(trace: TraceWrite, span: SpanRecord) -> dict[str, Any]:
         "otel_trace_id": span.otel_trace_id,
         "otel_span_id": span.otel_span_id,
         "attributes": dict(span.attributes) or None,
+        "content_sealed": seal_content(span.content, workspace_id=trace.workspace_id, span_id=span.span_id),
     }
 
 
-def _span_record(row: TraceSpan) -> SpanRecord:
+def _stored_call_id(row: TraceSpan) -> str | None:
+    """A row's tool call id, digested on read where an older version stored the id as the client sent it."""
+    if row.tool_call_id is None or CALL_ID_DIGEST.fullmatch(row.tool_call_id):
+        return row.tool_call_id
+    return call_id_digest(row.workspace_id, row.tool_call_id)
+
+
+def _span_record(row: TraceSpan, *, with_content: bool) -> SpanRecord:
     return SpanRecord(
         span_id=row.span_id,
         kind=row.kind,
@@ -290,15 +370,25 @@ def _span_record(row: TraceSpan) -> SpanRecord:
         provider=row.provider,
         input_tokens=row.input_tokens,
         output_tokens=row.output_tokens,
+        cache_read_tokens=row.cache_read_tokens,
+        cache_write_tokens=row.cache_write_tokens,
+        reasoning_tokens=row.reasoning_tokens,
         cost_snapshot=row.cost_snapshot,
         tool_name=row.tool_name,
         tool_type=row.tool_type,
-        tool_call_id=row.tool_call_id,
+        tool_call_id=_stored_call_id(row),
         request_id=row.request_id,
         otel_trace_id=row.otel_trace_id,
         otel_span_id=row.otel_span_id,
         attributes=row.attributes or {},
+        content=open_content(row.content_sealed, workspace_id=row.workspace_id, span_id=row.span_id)
+        if with_content
+        else {},
     )
+
+
+def _definition(row: TraceGuardrailDefinition) -> GuardrailDefinition:
+    return GuardrailDefinition(digest=row.digest, gates=gates_from_body(row.gates))
 
 
 def _summary(row: Trace) -> TraceSummary:

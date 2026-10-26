@@ -31,10 +31,8 @@ if "gateway" in sys.modules:
     del sys.modules["gateway"]
 
 from gateway.api.deps import (
+    build_hosted_provider_service,
     get_membership_listener,
-    get_workspace_code_execution_policies,
-    get_workspace_listener,
-    get_workspace_search_keys,
     set_config,
 )
 from gateway.container import build_container
@@ -282,6 +280,15 @@ def db_session_factory(test_config: GatewayConfig) -> Generator[Callable[[], Ses
 @pytest.fixture(scope="session")
 def test_config(postgres_url: str) -> GatewayConfig:
     """Create a test configuration."""
+    return shared_test_config(postgres_url, declared_test_providers())
+
+
+def shared_test_config(postgres_url: str, providers: dict[str, dict[str, Any]]) -> GatewayConfig:
+    """The shared configuration, declaring ``providers``.
+
+    A module about organization-scoped keys overrides ``test_config`` with this and
+    no providers, because a declared instance would shadow the organization's key.
+    """
     return GatewayConfig(
         database_url=postgres_url,
         master_key="test-master-key",
@@ -293,7 +300,35 @@ def test_config(postgres_url: str) -> GatewayConfig:
         # fail-closed require_pricing=True behavior is covered by dedicated tests
         # that build their own config (see test_require_pricing.py).
         require_pricing=False,
+        providers=providers,
+        # The suite exercises providers: entries as config.yml serves them;
+        # test_configured_provider_import.py turns the copy on.
+        import_configured_providers=False,
     )
+
+
+def declared_test_providers() -> dict[str, dict[str, Any]]:
+    """The providers the shared config declares, so a request naming one reaches the mocked provider call.
+
+    A provider nothing declares is refused before dispatch, whatever its SDK
+    variable holds, keyless and ambient-credential providers included, which are
+    declared here with no key. The keys are placeholders, except gemini's, which
+    takes a real one from the environment where CI supplies it for the live
+    completion tests.
+    A test about an undeclared provider, or about an organization's own key (which
+    a declared instance would shadow), builds a config without these.
+    """
+    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "test-gemini-key"
+    providers: dict[str, dict[str, Any]] = {name: {"api_key": f"test-{name}-key"} for name in _DECLARED_TEST_PROVIDERS}
+    providers["gemini"] = {"api_key": gemini_key}
+    providers.update({name: {} for name in _DECLARED_KEYLESS_TEST_PROVIDERS})
+    # A project is configuration Vertex AI's client needs, not a credential.
+    providers["vertexai"] = {"project": "test-project"}
+    return providers
+
+
+_DECLARED_TEST_PROVIDERS = ("openai", "anthropic", "cohere", "mistral", "together", "groq", "voyage")
+_DECLARED_KEYLESS_TEST_PROVIDERS = ("ollama", "vllm", "bedrock", "sagemaker")
 
 
 _APPS: list[tuple[GatewayConfig, FastAPI]] = []
@@ -363,13 +398,13 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         else None
     )
     app.state.feedback_rate_limiter = new_feedback_rate_limiter() if config.feedback_enabled else None
+    # Built on first use and caching each issuer's signing keys, so a test's stub must not serve the next test.
+    app.state.federated_token_verifier = None
     app.state.container = build_container(
         config.bootstrap,
         config=config,
         membership_listener=get_membership_listener,
-        workspace_listener=functools.partial(get_workspace_listener, config=config),
-        search_keys=get_workspace_search_keys,
-        code_execution_policies=get_workspace_code_execution_policies,
+        hosted_provider_service=functools.partial(build_hosted_provider_service, config=config),
     )
     install_rate_limits(app, config)
 
