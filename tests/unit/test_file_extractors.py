@@ -191,6 +191,15 @@ def test_xlsx_rows_count_their_memory_against_the_text_ceiling(monkeypatch: pyte
     assert len(file_extractors._sheet_rows(archive, "xl/worksheets/sheet1.xml", book)) <= 10
 
 
+def test_xlsx_does_not_keep_the_row_that_passes_the_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(file_extractors, "_MAX_TEXT_BYTES", 1000)
+    sheet = '<row><c r="A1"><v>1</v></c></row><row><c r="A2" t="inlineStr"><is><t>' + "x" * 5000 + "</t></is></c></row>"
+    archive = file_extractors._Archive(_xlsx(sheet))
+    book = file_extractors._Workbook(shared=[], date_styles=frozenset(), date1904=False)
+
+    assert file_extractors._sheet_rows(archive, "xl/worksheets/sheet1.xml", book) == [["1"]]
+
+
 def test_the_shared_string_table_stops_at_the_text_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(file_extractors, "_MAX_TEXT_BYTES", 3 * (file_extractors._HELD_OBJECT_BYTES + 1))
     data = _zip({"sst.xml": f"<sst {_S}>" + "<si><t>a</t></si>" * 100 + "</sst>"})

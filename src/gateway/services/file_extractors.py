@@ -439,10 +439,10 @@ def _sheet_rows(archive: _Archive, member: str, book: _Workbook) -> list[list[st
         # size check below never sees.
         if not cells:
             continue
-        rows.append(cells)
         size += _HELD_OBJECT_BYTES + sum(len(cell) + 3 for cell in cells)
         if size > _MAX_TEXT_BYTES:
             break
+        rows.append(cells)
     return rows
 
 
