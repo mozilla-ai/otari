@@ -185,7 +185,7 @@ class TraceContentShare(Base):
 
     Without one, a session's content opens only for its owner. The audience is a
     role, never a person: the organization's owners and admins, or the deployment's
-    operator. Deleted with the session.
+    operator. Deleted with the session; the record of each read through it stays.
     """
 
     __tablename__ = "trace_content_shares"
@@ -217,18 +217,31 @@ class TraceContentShare(Base):
 
 
 class TraceContentRead(Base):
-    """One read of a session's content through a share, which the session's owner can see."""
+    """One read of a session's content through a share, which the session's owner can see.
+
+    Names the session itself, with no foreign key to it, so the record outlives the
+    session and its share: an access record lasts longer than what it describes. It
+    goes once it is older than ``trace_access_record_retention_days``, and an erasure
+    clears whose session it was.
+    """
 
     __tablename__ = "trace_content_reads"
     __table_args__ = (
         # The newest reads of a share, and whether a reader has one this hour.
         Index("ix_trace_content_reads_share_read_at", "share_id", "read_at"),
+        Index("ix_trace_content_reads_read_at", "read_at"),
+        Index("ix_trace_content_reads_session_user_id", "session_user_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    share_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("trace_content_shares.id", ondelete="CASCADE"), index=True
+    # Cleared when the share goes with its session; the columns below still say what was read.
+    share_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("trace_content_shares.id", ondelete="SET NULL"), index=True
     )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    trace_id: Mapped[str] = mapped_column(String(TRACE_ID_MAX_LENGTH))
+    session_user_id: Mapped[str | None] = mapped_column(String)
+    audience: Mapped[str] = mapped_column(String(32))
     reader_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("user.id", ondelete="SET NULL"), index=True
     )
@@ -277,7 +290,7 @@ class TraceBreakGlassRead(Base):
     whose session it was. Kept apart from the session and the organization, with no
     foreign key to either, so the record outlives both: an organization cannot
     delete the record of the deployment's access to it. It goes once it is older
-    than ``trace_break_glass_retention_days``.
+    than ``trace_access_record_retention_days``.
     """
 
     __tablename__ = "trace_break_glass_reads"

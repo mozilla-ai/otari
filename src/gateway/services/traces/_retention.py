@@ -15,12 +15,13 @@ async def run_trace_retention(
     *,
     retention_days: int,
     max_age_days: int,
-    break_glass_retention_days: int,
+    access_record_retention_days: int,
     interval: float,
 ) -> None:
     """Expire traces idle longer than ``retention_days`` or older than ``max_age_days``, once per ``interval``.
 
-    The records of break-glass openings go too, ``break_glass_retention_days`` after each,
+    The records of reads through a share and of break-glass openings go too,
+    ``access_record_retention_days`` after each,
     and the ids of erased users once they can no longer be needed. Each step runs on its
     own, so one that keeps failing never holds back the others.
     """
@@ -31,15 +32,17 @@ async def run_trace_retention(
             idle_before=now - timedelta(days=retention_days), started_before=now - timedelta(days=max_age_days)
         )
 
-    async def break_glass(service: TraceService) -> int:
-        return await service.expire_break_glass(before=datetime.now(UTC) - timedelta(days=break_glass_retention_days))
+    async def access_records(service: TraceService) -> int:
+        return await service.expire_access_records(
+            before=datetime.now(UTC) - timedelta(days=access_record_retention_days)
+        )
 
     async def erasures(service: TraceService) -> int:
         return await service.expire_erasures(now=datetime.now(UTC))
 
     steps: tuple[tuple[str, Callable[[TraceService], Awaitable[int]]], ...] = (
         ("traces", traces),
-        ("break-glass records", break_glass),
+        ("access records", access_records),
         ("user ids", erasures),
     )
     while True:

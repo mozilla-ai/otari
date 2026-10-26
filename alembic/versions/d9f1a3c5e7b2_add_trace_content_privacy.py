@@ -66,17 +66,23 @@ def upgrade() -> None:
     op.create_table(
         "trace_content_reads",
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("share_id", sa.Uuid(), nullable=False),
+        sa.Column("share_id", sa.Uuid(), nullable=True),
+        sa.Column("workspace_id", sa.Uuid(), nullable=False),
+        sa.Column("trace_id", sa.String(length=64), nullable=False),
+        sa.Column("session_user_id", sa.String(), nullable=True),
+        sa.Column("audience", sa.String(length=32), nullable=False),
         sa.Column("reader_user_id", sa.Uuid(), nullable=True),
         sa.Column("reader_email", sa.String(length=320), nullable=False),
         sa.Column("read_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.ForeignKeyConstraint(["share_id"], ["trace_content_shares.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["share_id"], ["trace_content_shares.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["reader_user_id"], ["user.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_trace_content_reads_share_id", "trace_content_reads", ["share_id"])
     op.create_index("ix_trace_content_reads_reader_user_id", "trace_content_reads", ["reader_user_id"])
     op.create_index("ix_trace_content_reads_share_read_at", "trace_content_reads", ["share_id", "read_at"])
+    op.create_index("ix_trace_content_reads_read_at", "trace_content_reads", ["read_at"])
+    op.create_index("ix_trace_content_reads_session_user_id", "trace_content_reads", ["session_user_id"])
 
     op.create_table(
         "trace_content_barriers",
@@ -128,6 +134,8 @@ def downgrade() -> None:
     op.drop_table("trace_break_glass_reads")
     op.drop_table("trace_user_barriers")
     op.drop_table("trace_content_barriers")
+    op.drop_index("ix_trace_content_reads_session_user_id", table_name="trace_content_reads")
+    op.drop_index("ix_trace_content_reads_read_at", table_name="trace_content_reads")
     op.drop_index("ix_trace_content_reads_share_read_at", table_name="trace_content_reads")
     op.drop_index("ix_trace_content_reads_reader_user_id", table_name="trace_content_reads")
     op.drop_index("ix_trace_content_reads_share_id", table_name="trace_content_reads")

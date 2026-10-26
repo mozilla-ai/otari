@@ -19,8 +19,8 @@ class _Service:
         self._ran.append("traces")
         raise RuntimeError("trace expiry keeps failing")
 
-    async def expire_break_glass(self, **kwargs: Any) -> int:
-        self._ran.append("break-glass")
+    async def expire_access_records(self, **kwargs: Any) -> int:
+        self._ran.append("access records")
         return 1
 
     async def expire_erasures(self, **kwargs: Any) -> int:
@@ -42,7 +42,7 @@ async def test_a_step_that_keeps_failing_does_not_hold_back_the_others(monkeypat
             lambda uow: cast(TraceService, _Service(ran)),
             retention_days=30,
             max_age_days=90,
-            break_glass_retention_days=365,
+            access_record_retention_days=365,
             interval=0,
         )
     )
@@ -55,4 +55,4 @@ async def test_a_step_that_keeps_failing_does_not_hold_back_the_others(monkeypat
         with contextlib.suppress(asyncio.CancelledError):
             await worker
 
-    assert ran[:6] == ["traces", "break-glass", "erasures"] * 2
+    assert ran[:6] == ["traces", "access records", "erasures"] * 2

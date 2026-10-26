@@ -47,10 +47,13 @@ class TraceSettings(BaseModel):
             "organization's owners can do the same within their organization whatever this says. Off by default."
         ),
     )
-    trace_break_glass_retention_days: Annotated[int, OMITTED] = Field(
+    trace_access_record_retention_days: Annotated[int, OMITTED] = Field(
         default=365,
         gt=0,
-        description="Delete the record of a break-glass opening this many days after it.",
+        description=(
+            "Delete the record of a read through a share, or of a break-glass opening, this many days after it, "
+            "whether or not the session is still kept."
+        ),
     )
     trace_content_key_backend: Annotated[Literal["secret_key", "aws_kms", "aws_kms_only"], OMITTED] = Field(
         default="secret_key",

@@ -5,7 +5,7 @@ from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import case, func, select, update
+from sqlalchemy import case, delete, func, select, update
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import TraceContentRead, TraceContentShare
@@ -114,9 +114,16 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
         )
 
     async def record_read(
-        self, share_id: uuid.UUID, reader_user_id: uuid.UUID, reader_email: str, *, unless_since: datetime
+        self,
+        share: TraceContentShare,
+        session_user_id: str | None,
+        reader_user_id: uuid.UUID,
+        reader_email: str,
+        *,
+        unless_since: datetime,
     ) -> None:
         """Stage the record of one read through a share, unless this reader already has one since ``unless_since``."""
+        share_id = share.id
         recent = await self.db.execute(
             select(TraceContentRead.id)
             .where(
@@ -128,7 +135,17 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
         )
         if recent.scalar_one_or_none() is not None:
             return
-        self.db.add(TraceContentRead(share_id=share_id, reader_user_id=reader_user_id, reader_email=reader_email))
+        self.db.add(
+            TraceContentRead(
+                share_id=share_id,
+                workspace_id=share.workspace_id,
+                trace_id=share.trace_id,
+                session_user_id=session_user_id,
+                audience=share.audience,
+                reader_user_id=reader_user_id,
+                reader_email=reader_email,
+            )
+        )
         await self.db.flush()
 
     async def latest_reads(self, share_ids: Sequence[uuid.UUID], *, per_share: int) -> Sequence[TraceContentRead]:
@@ -158,7 +175,7 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
             .where(TraceContentRead.share_id.in_(share_ids))
             .group_by(TraceContentRead.share_id)
         )
-        return {share_id: int(count) for share_id, count in result.tuples().all()}
+        return {share_id: int(count) for share_id, count in result.tuples().all() if share_id is not None}
 
     async def reads_page(self, share_id: uuid.UUID, *, limit: int, offset: int = 0) -> Sequence[TraceContentRead]:
         """A page of the reads through one share, newest first."""
@@ -170,3 +187,14 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
             .offset(offset)
         )
         return result.scalars().all()
+
+    async def forget_session_user(self, user_id: str) -> None:
+        """Clear whose session each read was of, for that user's erasure; the reads themselves stay recorded."""
+        await self.db.execute(
+            update(TraceContentRead).where(TraceContentRead.session_user_id == user_id).values(session_user_id=None)
+        )
+
+    async def delete_reads_before(self, cutoff: datetime) -> int:
+        """Delete the record of every read older than ``cutoff``, returning how many."""
+        result = await self.db.execute(delete(TraceContentRead).where(TraceContentRead.read_at < cutoff))
+        return int(getattr(result, "rowcount", 0) or 0)

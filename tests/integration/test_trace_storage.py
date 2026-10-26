@@ -27,7 +27,7 @@ from gateway.core.database import dispose_db, init_db
 from gateway.core.unit_of_work import create_unit_of_work
 from gateway.exceptions.traces_exceptions import GuardrailVersionLimitError, TraceAmbiguousError
 from gateway.models.tenancy import Workspace
-from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
+from gateway.models.traces import Trace, TraceContentRead, TraceGuardrailDefinition, TraceSpan
 from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
 from gateway.repositories.traces import TracesRepositories
@@ -986,11 +986,11 @@ async def test_break_glass_records_go_once_past_their_retention(
     reads, _ = await store.break_glass_reads(organization_id=organization_id, kind=None, limit=10)
     assert len(reads) == 1
 
-    assert await store.expire_break_glass(before=datetime.now(UTC) - timedelta(days=1)) == 0
-    assert await store.expire_break_glass(before=datetime.now(UTC) + timedelta(seconds=1)) == 1
+    assert await store.expire_access_records(before=datetime.now(UTC) - timedelta(days=1)) == 0
+    assert await store.expire_access_records(before=datetime.now(UTC) + timedelta(seconds=1)) == 1
 
 
-async def test_an_erased_users_id_goes_from_the_barrier_and_the_break_glass_records(
+async def test_an_erased_users_id_goes_from_the_barrier_and_the_access_records(
     store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession
 ) -> None:
     workspace, _ = tenants
@@ -1007,11 +1007,25 @@ async def test_an_erased_users_id_goes_from_the_barrier_and_the_break_glass_reco
         reference="LEGAL-1",
     )
     await store.break_glass_detail(TraceScope.deployment(), "s-1", break_glass=break_glass, workspace_id=workspace)
+    async_db.add(
+        TraceContentRead(
+            workspace_id=workspace,
+            trace_id="s-1",
+            session_user_id="alice",
+            audience="organization_admins",
+            reader_email="admin@example.test",
+        )
+    )
+    await async_db.commit()
 
     await store.purge_user("alice")
 
     [read], _ = await store.break_glass_reads(organization_id=None, kind=None, limit=10)
     assert read.session_user_id is None and read.reason == "Legal request from the regulator"
+    async_db.expire_all()
+    [share_read] = (await async_db.execute(select(TraceContentRead))).scalars().all()
+    assert share_read.session_user_id is None and share_read.reader_email == "admin@example.test"
+    assert await store.expire_access_records(before=datetime.now(UTC) + timedelta(seconds=1)) == 2
     kept_until = datetime.now(UTC) + trace_service_module.ERASURE_MARGIN + trace_service_module.ERASURE_KEPT_FOR
     assert await store.expire_erasures(now=kept_until - timedelta(minutes=1)) == 0
     assert await store.expire_erasures(now=kept_until + timedelta(minutes=1)) == 1

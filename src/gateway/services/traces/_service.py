@@ -349,7 +349,11 @@ class TraceService:
                     access = "share"
                     # Once an hour per reader, so a page polling an active session is one read, not one a poll.
                     await self._shares.record_read(
-                        share.id, scope.reader.user_id, scope.reader.email, unless_since=now - READ_RECORDED_EVERY
+                        share,
+                        row.user_id,
+                        scope.reader.user_id,
+                        scope.reader.email,
+                        unless_since=now - READ_RECORDED_EVERY,
                     )
         # Opened after the block, so a key source's round trip holds no connection. Break-glass
         # opens its keys afresh, bypassing the shared cache, so the key source records each opening.
@@ -403,10 +407,10 @@ class TraceService:
             )
         return tuple(_break_glass_read(row) for row in rows[:limit]), len(rows) > limit
 
-    async def expire_break_glass(self, *, before: datetime) -> int:
-        """Delete the records of break-glass openings made before ``before``."""
+    async def expire_access_records(self, *, before: datetime) -> int:
+        """Delete the records of reads through a share, and of break-glass openings, made before ``before``."""
         async with self._uow:
-            return await self._break_glass.delete_before(before)
+            return await self._shares.delete_reads_before(before) + await self._break_glass.delete_before(before)
 
     async def expire_erasures(self, *, now: datetime) -> int:
         """Forget users erased longer ago than any of their spans could still be waiting, and those never erased."""
@@ -487,7 +491,8 @@ class TraceService:
             counts = await self._shares.read_counts(ids)
         by_share: dict[uuid.UUID, list[ContentRead]] = defaultdict(list)
         for read in reads:
-            by_share[read.share_id].append(_read(read))
+            if read.share_id is not None:
+                by_share[read.share_id].append(_read(read))
         page = tuple(_share(share, tuple(by_share[share.id]), counts.get(share.id, 0)) for share in shares[:limit])
         return page, len(shares) > limit
 
@@ -623,6 +628,7 @@ class TraceService:
         async with self._uow:
             await self._erasures.erase(user_id, datetime.now(UTC))
             await self._break_glass.forget_session_user(user_id)
+            await self._shares.forget_session_user(user_id)
             return await self._traces.delete_for_user(user_id)
 
     async def expire(self, *, idle_before: datetime, started_before: datetime) -> int:

@@ -746,6 +746,39 @@ def test_a_share_lasts_until_it_is_ended(
     assert _tool_call(_detail(client, world["admin"]))["content"] == {"command": "pytest -x"}
 
 
+def test_the_record_of_a_read_through_a_share_outlives_the_session(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _seal_tool_call(db_session_factory)
+    _give_s_one_to(db_session_factory, "m@a.test")
+    created = _as(
+        client,
+        world["member"],
+        "POST",
+        "/organizations/me/traces/s-one/shares",
+        json={"audience": "organization_admins"},
+    )
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    assert _tool_call(_detail(client, world["admin"]))["content"] == {"command": "pytest -x"}
+
+    with db_session_factory() as session:
+        trace = session.scalars(select(Trace).where(col(Trace.trace_id) == "s-one")).one()
+        workspace_id, owner = trace.workspace_id, trace.user_id
+        session.delete(trace)
+        session.commit()
+
+    with db_session_factory() as session:
+        assert session.get(TraceContentShare, uuid.UUID(created.json()["id"])) is None
+        [read] = session.scalars(select(TraceContentRead)).all()
+        assert read.share_id is None
+        assert (read.workspace_id, read.trace_id, read.session_user_id) == (workspace_id, "s-one", owner)
+        assert (read.audience, read.reader_email) == ("organization_admins", "a@a.test")
+
+
 def _workspace_id(db_session_factory: Callable[[], Session], name: str) -> uuid.UUID:
     with db_session_factory() as session:
         workspace_id: uuid.UUID = session.scalars(select(col(Workspace.id)).where(col(Workspace.name) == name)).one()
@@ -859,9 +892,14 @@ def test_a_share_records_a_polling_reader_once_and_pages_a_long_history(
     assert (entry["read_count"], len(entry["reads"])) == (1, 1)
 
     with db_session_factory() as session:
+        trace = session.scalars(select(Trace).where(col(Trace.trace_id) == "s-one")).one()
         session.add_all(
             TraceContentRead(
                 share_id=uuid.UUID(share["id"]),
+                workspace_id=trace.workspace_id,
+                trace_id=trace.trace_id,
+                session_user_id=trace.user_id,
+                audience="organization_admins",
                 reader_email=f"r{n}@a.test",
                 read_at=datetime.now(UTC) - timedelta(days=1, minutes=n),
             )

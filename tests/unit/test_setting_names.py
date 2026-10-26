@@ -163,7 +163,7 @@ _SETTING_NAMES = frozenset(
         "terms_url",
         "tools_header",
         "trace_capture_enabled",
-        "trace_break_glass_retention_days",
+        "trace_access_record_retention_days",
         "trace_content_enabled",
         "trace_content_key_backend",
         "trace_content_kms_endpoint_url",
