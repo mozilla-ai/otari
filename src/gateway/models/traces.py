@@ -231,7 +231,13 @@ class TraceContentShare(Base):
     audience: Mapped[str] = mapped_column(String(32))
     # Why the owner shared it, in their words: shown to whoever reads through it.
     note: Mapped[str | None] = mapped_column(String(SHARE_NOTE_MAX_LENGTH))
-    shared_by_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    # Null once that account is gone, as ``reader_user_id`` on a read is: the share
+    # and the reads recorded against it are the owner's record of who opened their
+    # session, and must outlive whoever made it. Reading through it still stops,
+    # because a gone account is no member of the workspace.
+    shared_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("user.id", ondelete="SET NULL"), index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
     )
