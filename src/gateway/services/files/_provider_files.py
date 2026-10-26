@@ -125,6 +125,12 @@ def _decoded(data: Any) -> bytes | None:
         return None
 
 
+async def _stored(data: Any, mime_type: Any, store: InlineOutputStore) -> str | None:
+    """Store one inline output's base64 ``data``, returning its file ID, or ``None`` where it is not stored."""
+    decoded = _decoded(data)
+    return await store(decoded, str(mime_type or "")) if decoded is not None else None
+
+
 async def _store_messages_outputs(block: Any, store: InlineOutputStore) -> None:
     """Swap a ``code_execution_tool_result``'s ``inline_outputs`` for ``code_execution_output`` file blocks.
 
@@ -143,8 +149,7 @@ async def _store_messages_outputs(block: Any, store: InlineOutputStore) -> None:
     produced: list[CodeExecutionOutputBlock] = []
     unstored: list[Any] = []
     for output in outputs:
-        data = _decoded(_field(output, "data"))
-        file_id = await store(data, str(_field(output, "mime_type") or "")) if data is not None else None
+        file_id = await _stored(_field(output, "data"), _field(output, "mime_type"), store)
         if file_id is None:
             unstored.append(output)
         else:
@@ -168,8 +173,7 @@ async def _store_chat_outputs(extra_content: Any, store: InlineOutputStore) -> N
     for item in items if isinstance(items, list) else []:
         if not isinstance(item, dict) or item.get("type") != "code_execution_output":
             continue
-        data = _decoded(item.get("data"))
-        file_id = await store(data, str(item.get("mime_type") or "")) if data is not None else None
+        file_id = await _stored(item.get("data"), item.get("mime_type"), store)
         if file_id is not None:
             item.pop("data", None)
             item["file_id"] = file_id

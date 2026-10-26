@@ -433,18 +433,23 @@ async def _dispatch_search(
         # so the scope carries the tool's provider as the narrowing axis.
         scope=BudgetScopeRequest(api_key=api_key, provider_instance=tool.provider),
     )
+
+    async def refused_after_reservation(
+        detail: str, status_code: int, headers: dict[str, str] | None = None
+    ) -> HTTPException:
+        """Refund the reservation, log the refusal against the tool, and return the error to raise."""
+        await refund_reservation(db, reservation)
+        await log_rejection(detail, row_model=tool.name, row_provider=tool.provider, status_code=status_code)
+        return HTTPException(status_code=status_code, detail=detail, headers=headers)
+
     # After the budget checks, so a missing or exhausted budget answers first.
     try:
         refuse_unpriced_direct_search(
             search, priced=rate is not None, require_pricing=config.require_pricing, budget_exempt=budget_exempt
         )
     except DirectSearchPricingRequiredError as exc:
-        await refund_reservation(db, reservation)
         # The rejection row shows an operator the searches require_pricing turns away.
-        await log_rejection(exc.message, row_model=tool.name, row_provider=tool.provider, status_code=exc.status_code)
-        raise HTTPException(
-            status_code=exc.status_code, detail=exc.message, headers=error_headers(exc.error_code)
-        ) from exc
+        raise await refused_after_reservation(exc.message, exc.status_code, error_headers(exc.error_code)) from exc
     # Last, so a refusal above answers before the organization's funds are read.
     funding: DeploymentCharge | None = None
     if deployment_paid:
@@ -458,17 +463,8 @@ async def _dispatch_search(
                 request_id=request_id,
             )
         except InsufficientFundsError as exc:
-            await refund_reservation(db, reservation)
-            await log_rejection(
-                exc.public_message,
-                row_model=tool.name,
-                row_provider=tool.provider,
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=exc.public_message,
-                headers=error_headers(INSUFFICIENT_FUNDS),
+            raise await refused_after_reservation(
+                exc.public_message, status.HTTP_402_PAYMENT_REQUIRED, error_headers(INSUFFICIENT_FUNDS)
             ) from exc
         except Exception as exc:
             logger.error(
@@ -480,15 +476,8 @@ async def _dispatch_search(
             # Ends the transaction the port may have left failed, rolling it back
             # when it cannot commit, so the refund below has a usable session.
             await release_session(db)
-            await refund_reservation(db, reservation)
-            await log_rejection(
-                FUNDS_CHECK_UNAVAILABLE_DETAIL,
-                row_model=tool.name,
-                row_provider=tool.provider,
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=FUNDS_CHECK_UNAVAILABLE_DETAIL
+            raise await refused_after_reservation(
+                FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE
             ) from exc
 
     def usage_row(**overrides: Any) -> UsageLog:
@@ -537,14 +526,7 @@ async def _dispatch_search(
             organization_id,
             request_id,
         )
-        await refund_reservation(db, reservation)
-        await log_rejection(
-            FUNDS_CHECK_UNAVAILABLE_DETAIL,
-            row_model=tool.name,
-            row_provider=tool.provider,
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=FUNDS_CHECK_UNAVAILABLE_DETAIL)
+        raise await refused_after_reservation(FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE)
 
     try:
         result = await run_direct_search(search, web_provider_client)
