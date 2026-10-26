@@ -14,6 +14,7 @@ import { TextArea } from "@/design-system/forms/TextArea"
 import {
   useBreakGlass,
   useEndTraceShare,
+  useShareReads,
   useShareTrace,
   useTraceShares,
 } from "@/shared/api/traces"
@@ -257,6 +258,8 @@ function OwnerSharing({
             <ShareRow
               key={share.id}
               share={share}
+              traceId={traceId}
+              workspaceId={workspaceId}
               isEnding={endShare.isPending}
               onEnd={() =>
                 endShare.mutate({ traceId, workspaceId, shareId: share.id })
@@ -283,15 +286,36 @@ function shareState(share: TraceContentShare): string {
 
 function ShareRow({
   share,
+  traceId,
+  workspaceId,
   isEnding,
   onEnd,
 }: {
   share: TraceContentShare
+  traceId: string
+  workspaceId: string
   isEnding: boolean
   onEnd: () => void
 }) {
-  const reads = share.reads ?? []
-  const readCount = share.read_count ?? reads.length
+  const [isPaging, setIsPaging] = useState(false)
+  const newest = share.reads ?? []
+  const readCount = share.read_count ?? newest.length
+  const earlier = useShareReads(traceId, workspaceId, share.id, isPaging)
+  // Offsets over a log that grows at its head, so a read can appear on two pages.
+  const paged = [
+    ...new Map(
+      (earlier.data?.pages ?? [])
+        .flatMap((page) => page.items)
+        .map((read) => [`${read.reader_email}-${read.read_at}`, read]),
+    ).entries(),
+  ]
+  const reads =
+    isPaging && earlier.data
+      ? paged
+      : newest.map(
+          (read) => [`${read.reader_email}-${read.read_at}`, read] as const,
+        )
+
   return (
     <li className="flex flex-col gap-1 border border-border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -299,28 +323,42 @@ function ShareRow({
           {AUDIENCE_LABELS[share.audience]}, {shareState(share)}
         </span>
         {share.active ? (
-          <Button variant="ghost" onPress={onEnd} isDisabled={isEnding}>
+          <Button
+            variant="ghost"
+            className="min-h-11 shrink-0 md:min-h-9"
+            onPress={onEnd}
+            isDisabled={isEnding}
+          >
             Stop sharing
           </Button>
         ) : null}
       </div>
       {share.note ? <span className="text-caption">“{share.note}”</span> : null}
+      <ErrorBanner error={earlier.error} />
       {reads.length === 0 ? (
         <span className="text-caption">Nobody has read it.</span>
       ) : (
         <ul className="flex flex-col text-caption" aria-label="Who read it">
-          {reads.map((read) => (
-            <li key={`${read.reader_email}-${read.read_at}`}>
+          {reads.map(([key, read]) => (
+            <li key={key}>
               Read by {read.reader_email} on {formatDateTime(read.read_at)}
             </li>
           ))}
-          {readCount > reads.length ? (
-            <li>
-              The newest {reads.length} of {readCount} reads.
-            </li>
-          ) : null}
         </ul>
       )}
+      {readCount > reads.length || earlier.hasNextPage ? (
+        <Button
+          variant="ghost"
+          className="min-h-11 self-start md:min-h-9"
+          isDisabled={earlier.isFetching}
+          onPress={() => {
+            if (!isPaging) setIsPaging(true)
+            else void earlier.fetchNextPage()
+          }}
+        >
+          {`Show earlier reads (${readCount} in all)`}
+        </Button>
+      ) : null}
     </li>
   )
 }

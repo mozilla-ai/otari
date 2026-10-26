@@ -37,6 +37,7 @@ interface Sent {
 function mockApi(
   shares: TraceContentShare[] = [],
   more: TraceContentShare[] = [],
+  reads: { reader_user_id: null; reader_email: string; read_at: string }[] = [],
 ): Sent[] {
   const sent: Sent[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -48,11 +49,13 @@ function mockApi(
     })
     const older = String(input).includes("skip=20")
     const body =
-      method === "GET"
-        ? older
-          ? { items: more, has_more: false }
-          : { items: shares, has_more: more.length > 0 }
-        : SHARE
+      method !== "GET"
+        ? SHARE
+        : String(input).includes("/reads")
+          ? { items: reads, has_more: false }
+          : older
+            ? { items: more, has_more: false }
+            : { items: shares, has_more: more.length > 0 }
     return new Response(JSON.stringify(body), {
       status: method === "POST" ? 201 : 200,
       headers: { "Content-Type": "application/json" },
@@ -224,10 +227,53 @@ describe("SessionContent", () => {
     ).toBeInTheDocument()
     expect(screen.getByText(/Read by older@example.test/)).toBeInTheDocument()
     expect(screen.getAllByText(/, ended /)).toHaveLength(2)
-    expect(screen.getByText("The newest 1 of 12 reads.")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Show earlier reads (12 in all)" }),
+    ).toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: "Stop sharing" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("pages to every read of a share, not only the newest its entry carries", async () => {
+    const newest = {
+      reader_user_id: null as null,
+      reader_email: "newest@example.test",
+      read_at: "2026-10-22T10:00:00Z",
+    }
+    const earlier = {
+      reader_user_id: null as null,
+      reader_email: "earlier@example.test",
+      read_at: "2026-10-01T10:00:00Z",
+    }
+    const sent = mockApi(
+      [{ ...SHARE, reads: [newest], read_count: 2 }],
+      [],
+      [newest, earlier],
+    )
+    renderWith(
+      <SessionContent
+        detail={traceDetail({
+          summary: traceSummary({ user_id: "alice" }),
+          content_access: "owner",
+          spans: [{ ...tool, content: { command: "pytest -x" } }],
+        })}
+      />,
+    )
+
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: "Show earlier reads (2 in all)",
+      }),
+    )
+
+    expect(
+      await screen.findByText(/Read by earlier@example.test/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Read by newest@example.test/)).toBeInTheDocument()
+    expect(
+      sent.some((call) => call.url.includes(`/shares/${SHARE.id}/reads?`)),
+    ).toBe(true)
   })
 
   it("pages to older shares, so a running one past the first page can still be ended", async () => {
