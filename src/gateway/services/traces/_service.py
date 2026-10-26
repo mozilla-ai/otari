@@ -320,15 +320,10 @@ class TraceService:
             share = None
             if break_glass is not None:
                 await self._break_glass.record(
-                    kind=break_glass.kind,
-                    organization_id=break_glass.organization_id,
+                    break_glass,
                     workspace_id=row.workspace_id,
                     trace_id=row.trace_id,
                     session_user_id=row.user_id,
-                    reader_user_id=break_glass.reader_user_id,
-                    reader_email=break_glass.reader_email,
-                    reason=break_glass.reason,
-                    reference=break_glass.reference,
                 )
                 # Ids only: the reason is the reader's own prose, and stays in the record.
                 logger.info(

@@ -255,9 +255,9 @@ class TraceContentRead(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    share_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("trace_content_shares.id", ondelete="CASCADE"), index=True
-    )
+    # No index of its own: the composite above starts with this column and serves
+    # the foreign key's checks as well as the reads keyed on it.
+    share_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("trace_content_shares.id", ondelete="CASCADE"))
     reader_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("user.id", ondelete="SET NULL"), index=True
     )

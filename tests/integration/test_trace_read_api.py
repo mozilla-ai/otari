@@ -1076,7 +1076,7 @@ def test_nothing_opens_when_the_break_glass_record_cannot_be_written(
         opened.append("opened")
         return await real_open(self, *args, **kwargs)
 
-    async def refuse(self: Any, **values: object) -> None:
+    async def refuse(self: Any, *args: Any, **kwargs: Any) -> None:
         raise RuntimeError("the audit table is unavailable")
 
     monkeypatch.setattr(SpanContent, "open", tracked_open)
