@@ -49,6 +49,9 @@ _MAX_HELD_ELEMENTS = 1_000_000
 # What one kept string or row costs in memory beyond its text, counted against
 # ``_MAX_TEXT_BYTES`` so that millions of tiny ones cannot pass for little.
 _HELD_OBJECT_BYTES = 64
+# What one spreadsheet cell slot costs whether or not it holds text: its pointer
+# in the row's list and the " | " that renders it.
+_CELL_SLOT_BYTES = 11
 # The most pages an uploaded PDF is read for. Every PDFium call in the process
 # shares one lock, so this bounds how long one upload holds up every other.
 _MAX_PDF_PAGES = 1_000
@@ -272,18 +275,22 @@ def _inline_text(element: ElementTree.Element, limit: int | None = None) -> str:
     return "".join(parts)
 
 
-def _markdown_table(rows: list[list[str]]) -> list[str]:
+def _markdown_table(rows: list[list[str]]) -> Iterator[str]:
+    """The table's lines, one at a time, so a caller writing to a sink stops building them once it is full.
+
+    Every row is padded to the widest one, so a single wide row multiplies the
+    size of all the others.
+    """
     rows = [row for row in rows if any(row)]
     if not rows:
-        return []
+        return
     width = max(len(row) for row in rows)
-    lines = []
     for index, row in enumerate(rows):
         cells = [" ".join(cell.split()).replace("|", "\\|") for cell in row] + [""] * (width - len(row))
-        lines.append("| " + " | ".join(cells) + " |")
+        yield "| " + " | ".join(cells) + " |"
         if index == 0:
-            lines.append("|" + " --- |" * width)
-    return [*lines, ""]
+            yield "|" + " --- |" * width
+    yield ""
 
 
 def _table_rows(table: ElementTree.Element) -> list[list[str]]:
@@ -390,20 +397,25 @@ def _serial_date(value: str, date1904: bool) -> str:
 
 
 def _cell_value(cell: ElementTree.Element, book: _Workbook, limit: int) -> str:
-    """The cell's text, at most ``limit`` characters of it."""
+    """The cell's text, at most ``limit`` characters of it.
+
+    The limit applies to the resolved text, never to the stored value, which
+    for a shared string is an index that a cut would turn into another one.
+    """
+    limit = max(0, limit)
     kind = cell.get("t")
     if kind == "inlineStr":
         inline = next((child for child in cell if _local(child.tag) == "is"), None)
         return "" if inline is None else _inline_text(inline, limit)
-    value = next((child.text or "" for child in cell if _local(child.tag) == "v"), "")[: max(0, limit)]
-    if kind == "s":
-        return book.shared[int(value)] if value.isdecimal() and int(value) < len(book.shared) else ""
-    if kind == "b":
-        return {"0": "FALSE", "1": "TRUE"}.get(value, value)
+    value = next((child.text or "" for child in cell if _local(child.tag) == "v"), "")
     style = cell.get("s") or ""
-    if value and kind in (None, "n") and style.isdecimal() and int(style) in book.date_styles:
-        return _serial_date(value, book.date1904)
-    return value
+    if kind == "s":
+        value = book.shared[int(value)] if value.isdecimal() and int(value) < len(book.shared) else ""
+    elif kind == "b":
+        value = {"0": "FALSE", "1": "TRUE"}.get(value, value)
+    elif value and kind in (None, "n") and style.isdecimal() and int(style) in book.date_styles:
+        value = _serial_date(value, book.date1904)
+    return value[:limit]
 
 
 def _column_index(reference: str | None, default: int) -> int:
@@ -443,15 +455,17 @@ def _sheet_rows(archive: _Archive, member: str, book: _Workbook) -> list[list[st
             if _local(cell.tag) != "c":
                 continue
             column = _column_index(cell.get("r"), len(cells))
-            value = _cell_value(cell, book, max(0, _MAX_TEXT_BYTES - size))
+            value = _cell_value(cell, book, _MAX_TEXT_BYTES - size)
             if not value or column >= _MAX_SHEET_COLUMNS:
                 continue
+            # A cell far to the right pads the row with every slot before it,
+            # so each slot is charged, not only the ones holding text.
+            size += max(0, column + 1 - len(cells)) * _CELL_SLOT_BYTES + len(value)
+            if size > _MAX_TEXT_BYTES:
+                break
             if column >= len(cells):
                 cells.extend([""] * (column - len(cells) + 1))
             cells[column] = value
-            size += len(value) + 3
-            if size > _MAX_TEXT_BYTES:
-                break
         # An empty row renders as nothing, and keeping it would cost memory the
         # size check below never sees.
         if not cells:
@@ -480,8 +494,10 @@ def _xlsx_text(archive: _Archive, sink: _TextSink) -> None:
         member = targets.get(_relationship_id(sheet) or "") if _local(sheet.tag) == "sheet" else None
         if member is None or not archive.has(member):
             continue
-        lines = [f"## {sheet.get('name') or 'Sheet'}", *_markdown_table(_sheet_rows(archive, member, book))]
-        if not all(sink.add(line) for line in lines):
+        rows = _sheet_rows(archive, member, book)
+        if not sink.add(f"## {sheet.get('name') or 'Sheet'}") or not all(
+            sink.add(line) for line in _markdown_table(rows)
+        ):
             return
 
 

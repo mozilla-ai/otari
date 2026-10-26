@@ -200,6 +200,35 @@ def test_xlsx_does_not_keep_the_row_that_passes_the_ceiling(monkeypatch: pytest.
     assert file_extractors._sheet_rows(archive, "xl/worksheets/sheet1.xml", book) == [["1"]]
 
 
+def test_a_shared_string_index_is_resolved_before_the_cell_is_cut() -> None:
+    """Cutting the stored index ``10`` to ``1`` would read another string."""
+    from xml.etree import ElementTree
+
+    book = file_extractors._Workbook(shared=["", "wrong", *[""] * 8, "right"], date_styles=frozenset(), date1904=False)
+    cell = ElementTree.fromstring('<c t="s"><v>10</v></c>')
+
+    assert file_extractors._cell_value(cell, book, 1) == "r"
+
+
+def test_xlsx_charges_every_slot_a_far_right_cell_pads(monkeypatch: pytest.MonkeyPatch) -> None:
+    row_cost = file_extractors._HELD_OBJECT_BYTES + 16_384 * file_extractors._CELL_SLOT_BYTES + 1
+    monkeypatch.setattr(file_extractors, "_MAX_TEXT_BYTES", 2 * row_cost)
+    archive = file_extractors._Archive(_xlsx('<row><c r="XFD1"><v>1</v></c></row>' * 10))
+    book = file_extractors._Workbook(shared=[], date_styles=frozenset(), date1904=False)
+
+    rows = file_extractors._sheet_rows(archive, "xl/worksheets/sheet1.xml", book)
+
+    assert len(rows) == 2
+    assert len(rows[0]) == 16_384
+
+
+def test_a_table_is_rendered_one_line_at_a_time() -> None:
+    """One wide row pads every other one, so the lines are not all built before the sink stops."""
+    lines = file_extractors._markdown_table([["a"], ["b"]])
+
+    assert next(lines) == "| a |"
+
+
 def test_run_text_stops_at_its_limit() -> None:
     from xml.etree import ElementTree
 
