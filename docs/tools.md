@@ -897,7 +897,8 @@ one connects to the address that was checked, follows no redirect, and bypasses
 any environment proxy, as calls to a workspace's own model endpoint do. Moving
 a key that holds a secret to another `api_base` needs the secret in the same
 request (`api_key`, and any masked `options` entry), since the next call sends
-it there; an organization's model provider keys follow the same rule. A
+it there. An organization's model provider keys follow the same rule, with
+`client_args` in place of `options`. A
 `tavily` or `brave` key takes neither, since the older backend that runs them
 calls their public endpoints.
 A key's calls never fall back to the deployment's own key or endpoint for its
