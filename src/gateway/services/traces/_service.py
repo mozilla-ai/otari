@@ -407,11 +407,6 @@ class TraceService:
             )
         return tuple(_break_glass_read(row) for row in rows[:limit]), len(rows) > limit
 
-    async def expire_access_records(self, *, before: datetime) -> int:
-        """Delete the records of reads through a share, and of break-glass openings, made before ``before``."""
-        async with self._uow:
-            return await self._shares.delete_reads_before(before) + await self._break_glass.delete_before(before)
-
     async def expire_erasures(self, *, now: datetime) -> int:
         """Forget users erased longer ago than any of their spans could still be waiting, and those never erased."""
         async with self._uow:

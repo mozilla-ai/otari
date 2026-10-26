@@ -382,7 +382,6 @@ async def _retention(config: GatewayConfig) -> None:
         lambda uow: build_trace_service(uow, SpanContent.disabled(), NoSessionOwners()),
         retention_days=config.trace_retention_days,
         max_age_days=config.trace_session_max_age_days,
-        access_record_retention_days=config.trace_access_record_retention_days,
         interval=_RETENTION_INTERVAL_S,
     )
 

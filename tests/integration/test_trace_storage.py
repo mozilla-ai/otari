@@ -977,30 +977,6 @@ async def test_a_batch_another_replica_held_from_before_an_erasure_is_never_stor
     assert bob.accepted == 1
 
 
-async def test_break_glass_records_go_once_past_their_retention(
-    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession
-) -> None:
-    workspace, _ = tenants
-    await store.write((_write(workspace, "s-1", _span("step-0")),))
-    organization_id = (
-        await async_db.execute(select(col(Workspace.organization_id)).where(col(Workspace.id) == workspace))
-    ).scalar_one()
-    break_glass = BreakGlass(
-        kind="organization",
-        organization_id=organization_id,
-        reader_user_id=None,
-        reader_email="owner@example.test",
-        reason="An investigation the owner cannot be asked about",
-    )
-
-    await store.break_glass_detail(TraceScope.deployment(), "s-1", break_glass=break_glass, workspace_id=workspace)
-    reads, _ = await store.break_glass_reads(organization_id=organization_id, kind=None, limit=10)
-    assert len(reads) == 1
-
-    assert await store.expire_access_records(before=datetime.now(UTC) - timedelta(days=1)) == 0
-    assert await store.expire_access_records(before=datetime.now(UTC) + timedelta(seconds=1)) == 1
-
-
 async def test_an_erased_users_id_goes_from_the_barrier_and_the_access_records(
     store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession
 ) -> None:
@@ -1036,7 +1012,6 @@ async def test_an_erased_users_id_goes_from_the_barrier_and_the_access_records(
     async_db.expire_all()
     [share_read] = (await async_db.execute(select(TraceContentRead))).scalars().all()
     assert share_read.session_user_id is None and share_read.reader_email == "admin@example.test"
-    assert await store.expire_access_records(before=datetime.now(UTC) + timedelta(seconds=1)) == 2
     kept_until = datetime.now(UTC) + trace_service_module.ERASURE_MARGIN + trace_service_module.ERASURE_KEPT_FOR
     assert await store.expire_erasures(now=kept_until - timedelta(minutes=1)) == 0
     assert await store.expire_erasures(now=kept_until + timedelta(minutes=1)) == 1

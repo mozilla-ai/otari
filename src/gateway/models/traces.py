@@ -220,16 +220,14 @@ class TraceContentRead(Base):
     """One read of a session's content through a share, which the session's owner can see.
 
     Names the session itself, with no foreign key to it, so the record outlives the
-    session and its share: an access record lasts longer than what it describes. It
-    goes once it is older than ``trace_access_record_retention_days``, and an erasure
-    clears whose session it was.
+    session and its share: an access record lasts longer than what it describes. An
+    erasure clears whose session it was.
     """
 
     __tablename__ = "trace_content_reads"
     __table_args__ = (
         # The newest reads of a share, and whether a reader has one this hour.
         Index("ix_trace_content_reads_share_read_at", "share_id", "read_at"),
-        Index("ix_trace_content_reads_read_at", "read_at"),
         Index("ix_trace_content_reads_session_user_id", "session_user_id"),
     )
 
@@ -289,8 +287,7 @@ class TraceBreakGlassRead(Base):
     Written before the content is opened, and changed only by an erasure clearing
     whose session it was. Kept apart from the session and the organization, with no
     foreign key to either, so the record outlives both: an organization cannot
-    delete the record of the deployment's access to it. It goes once it is older
-    than ``trace_access_record_retention_days``.
+    delete the record of the deployment's access to it.
     """
 
     __tablename__ = "trace_break_glass_reads"

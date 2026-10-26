@@ -5,7 +5,7 @@ from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import case, func, select, update
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import TraceContentRead, TraceContentShare
@@ -193,8 +193,3 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
         await self.db.execute(
             update(TraceContentRead).where(TraceContentRead.session_user_id == user_id).values(session_user_id=None)
         )
-
-    async def delete_reads_before(self, cutoff: datetime) -> int:
-        """Delete the record of every read older than ``cutoff``, returning how many."""
-        result = await self.db.execute(delete(TraceContentRead).where(TraceContentRead.read_at < cutoff))
-        return int(getattr(result, "rowcount", 0) or 0)
