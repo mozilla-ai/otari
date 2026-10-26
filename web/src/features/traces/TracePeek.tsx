@@ -818,6 +818,8 @@ export function TracePeek({
         ) : null}
       </div>
 
+      {notice}
+
       <div ref={bodyRef} className="relative flex min-h-0 flex-1 overflow-auto">
         {error ? (
           <div className="flex-1 p-4">
@@ -909,7 +911,6 @@ export function TracePeek({
                   Back to the spans
                 </Button>
               </div>
-              {notice}
               {activeTab === "attributes" && observation ? (
                 <Attributes trace={trace} observation={observation} />
               ) : !observation && trace.gateway ? (
