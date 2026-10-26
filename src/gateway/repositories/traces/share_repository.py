@@ -85,6 +85,12 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
         )
         return result.scalars().first()
 
+    async def renote(self, share: TraceContentShare, note: str | None) -> None:
+        """Stage the share's note, unless it is already what is given."""
+        if share.note != note:
+            share.note = note
+            await self.db.flush()
+
     async def revoke(self, share: TraceContentShare, now: datetime) -> None:
         """Stage the share's end, unless it already ended."""
         if share.revoked_at is None:

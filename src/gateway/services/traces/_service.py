@@ -415,6 +415,11 @@ class TraceService:
     ) -> ContentShare:
         """Let ``audience`` read what the session was about until the share ends. Its own user only.
 
+        An audience already reading keeps the share it is reading through, so
+        sharing twice leaves one share to end rather than two, only the newer of
+        which anyone can see. Its note becomes the one given here, so the reason
+        its owner last stated is the reason its readers are shown.
+
         Raises:
             TraceNotFoundError: the scope holds no such trace.
             TraceAmbiguousError: no ``workspace_id`` was given and the id is in more than one workspace.
@@ -426,10 +431,16 @@ class TraceService:
             # again here, so a share is never made by someone whose membership has
             # just ended, however long ago this request resolved their scope. Taken
             # first, so on SQLite the block writes before it reads and waits its turn.
+            # The lock is also what makes the read below decisive: only this session's
+            # own user shares it, so no other request can add one in between.
             await self._erasures.lock([str(reader.user_id)])
             row = await self._owned(scope, trace_id, workspace_id)
             if not await self._owners.is_member(row.workspace_id, row.user_id):
                 raise TraceContentShareForbiddenError
+            running = await self._shares.active(row.workspace_id, row.trace_id, (audience,))
+            if running is not None:
+                await self._shares.renote(running, note)
+                return _share(running)
             share = await self._shares.add(
                 workspace_id=row.workspace_id,
                 trace_id=row.trace_id,
