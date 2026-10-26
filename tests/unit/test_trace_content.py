@@ -626,6 +626,21 @@ async def test_a_wrapper_no_longer_configured_is_rejected_and_pauses_nothing(kms
     assert await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2") is not None
 
 
+async def test_a_row_sealed_under_a_retired_secret_key_pauses_no_other_read(
+    kms: Any, key: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deployment that moved to KMS and retired OTARI_SECRET_KEY keeps reading its KMS rows."""
+    retired = await _secret_key_content().seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1")
+    content = SpanContent(_kms_keyring(kms, _new_kms_key(kms)))
+    current = await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2")
+    monkeypatch.delenv("OTARI_SECRET_KEY")
+    before = _count(UNOPENED, "rejected")
+
+    assert await content.open(retired, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == {}
+    assert _count(UNOPENED, "rejected") == before + 1
+    assert await content.open(current, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2") == _CONTENT
+
+
 async def test_a_listed_key_that_cannot_be_described_is_skipped(kms: Any) -> None:
     current = _new_kms_key(kms)
     sealed = await SpanContent(_kms_keyring(kms, current)).seal(

@@ -96,7 +96,10 @@ class SecretKeyContentKeys(DataKeySource):
         try:
             body = json.loads(decrypt_secret(wrapped.decode()))
         except SecretBoxUnavailableError:
-            raise ContentKeyError("unavailable", "OTARI_SECRET_KEY is not set") from None
+            # Rejected rather than unavailable: an unset key is a standing state no
+            # retry changes, and it says nothing about the source the deployment
+            # seals with now, whose rows must keep opening.
+            raise ContentKeyError("rejected", "no OTARI_SECRET_KEY is set to open this data key") from None
         except (SecretDecryptionError, UnicodeDecodeError, ValueError):
             raise ContentKeyError("rejected", "no configured OTARI_SECRET_KEY opens this data key") from None
         if not isinstance(body, dict) or body.get("c") != context or not isinstance(body.get("k"), str):
