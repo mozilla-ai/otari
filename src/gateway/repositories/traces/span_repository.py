@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Collection, Sequence
 from typing import Any, Never
 
-from sqlalchemy import func, select, tuple_, update
+from sqlalchemy import Select, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -15,6 +15,20 @@ from gateway.repositories.base_repository import BaseRepository
 from gateway.repositories.traces.trace_repository import TraceKey
 
 
+def holding_content(workspace_id: uuid.UUID, limit: int) -> Select[tuple[uuid.UUID, str, str]]:
+    """The keys of up to ``limit`` of the workspace's spans that still hold content.
+
+    NOTE: ``ix_trace_spans_workspace_sealed`` is partial on the same predicate and
+    serves this. Narrowing the predicate any further than that index drops it, and
+    clearing a workspace's content then scans every span it has already cleared.
+    """
+    return (
+        select(TraceSpan.workspace_id, TraceSpan.trace_id, TraceSpan.span_id)
+        .where(TraceSpan.workspace_id == workspace_id, TraceSpan.content_sealed.is_not(None))
+        .limit(limit)
+    )
+
+
 class SpanRepository(BaseRepository[TraceSpan, Never, Never]):
     """Insert a trace's spans once each, and read them back in start order."""
 
@@ -23,14 +37,13 @@ class SpanRepository(BaseRepository[TraceSpan, Never, Never]):
 
     async def clear_content(self, workspace_id: uuid.UUID, *, limit: int) -> int:
         """Drop the sealed content of up to ``limit`` spans in the workspace, returning how many held any."""
-        held = (
-            select(TraceSpan.workspace_id, TraceSpan.trace_id, TraceSpan.span_id)
-            .where(TraceSpan.workspace_id == workspace_id, TraceSpan.content_sealed.is_not(None))
-            .limit(limit)
-        )
         result = await self.db.execute(
             update(TraceSpan)
-            .where(tuple_(TraceSpan.workspace_id, TraceSpan.trace_id, TraceSpan.span_id).in_(held))
+            .where(
+                tuple_(TraceSpan.workspace_id, TraceSpan.trace_id, TraceSpan.span_id).in_(
+                    holding_content(workspace_id, limit)
+                )
+            )
             .values(content_sealed=None)
         )
         return int(getattr(result, "rowcount", 0) or 0)
