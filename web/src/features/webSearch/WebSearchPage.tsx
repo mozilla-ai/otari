@@ -155,14 +155,7 @@ export function WebSearchPage() {
     kind: ToolRateRow["kind"],
     modelKey: string,
     label: string,
-  ): ToolRateRow => ({
-    kind,
-    modelKey,
-    label,
-    provider: "",
-    role: "",
-    isConfigured: false,
-  })
+  ): ToolRateRow => ({ kind, modelKey, label, role: "" })
   const currentOf = (price: ToolPrice) =>
     price.state === "own" ? price.perMillion : undefined
 
