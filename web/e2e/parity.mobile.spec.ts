@@ -59,6 +59,12 @@ const PAGES = [
       ).toBeVisible()
     },
   },
+  {
+    route: "/admin/web-search",
+    heading: "Web search",
+    // Two tables of tools, each a card list at this width.
+    ready: (page: Page) => expect(table(page, "Search tools")).toBeVisible(),
+  },
 ] as const
 
 test.describe("a phone-width page does not pan sideways", () => {
