@@ -111,7 +111,7 @@ the corresponding startup value after the database is available.
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
 | `trace_content_enabled` | Keep what an agent session's spans were about: prompts, commands, file paths. Defaults to `false`. See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about). |
 | `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](traces.md#who-reads-content). |
-| `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`) or `aws_kms`. See [Sealing content with AWS KMS](traces.md#sealing-content-with-aws-kms). |
+| `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](traces.md#sealing-content-with-aws-kms). |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
 

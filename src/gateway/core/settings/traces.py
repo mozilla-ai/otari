@@ -52,12 +52,13 @@ class TraceSettings(BaseModel):
         gt=0,
         description="Delete the record of a break-glass opening this many days after it.",
     )
-    trace_content_key_backend: Annotated[Literal["secret_key", "aws_kms"], OMITTED] = Field(
+    trace_content_key_backend: Annotated[Literal["secret_key", "aws_kms", "aws_kms_only"], OMITTED] = Field(
         default="secret_key",
         description=(
             "What seals trace content: 'secret_key' wraps each data key with OTARI_SECRET_KEY, 'aws_kms' has AWS KMS "
             "make it under trace_content_kms_key_id. Content sealed either way stays readable while that key is "
-            "configured. Requires restart."
+            "configured. 'aws_kms_only' is 'aws_kms' with OTARI_SECRET_KEY left out: content it sealed reads back "
+            "empty, so nothing opens without a KMS call. Requires restart."
         ),
     )
     trace_content_kms_key_id: Annotated[str | None, OMITTED] = Field(

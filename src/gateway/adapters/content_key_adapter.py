@@ -119,7 +119,7 @@ class AwsKmsContentKeys(DataKeySource):
                 from botocore.config import Config
                 from botocore.exceptions import BotoCoreError
             except ImportError as exc:
-                msg = "trace_content_key_backend 'aws_kms' requires boto3. Install the kms extra: uv sync --extra kms"
+                msg = "a KMS content key requires boto3. Install the kms extra: uv sync --extra kms"
                 raise ImportError(msg) from exc
             # Tight timeouts and few retries: a KMS outage drops content, and must
             # not hold the trace writer's batch past its own time limit.
@@ -259,18 +259,21 @@ def _key_ids(raw: str | None) -> tuple[str, ...]:
 def build_content_key_port(config: GatewayConfig) -> ContentKeyPort:
     """Build the keyring ``trace_content_key_backend`` and the KMS settings describe.
 
-    ``OTARI_SECRET_KEY`` always opens what it wrapped. A KMS key, where one is
-    set, opens what it wrapped even while new keys are made with the secret key,
-    so a deployment can move back as well as forward.
+    ``OTARI_SECRET_KEY`` opens what it wrapped, except on ``aws_kms_only``. A KMS
+    key, where one is set, opens what it wrapped even while new keys are made
+    with the secret key, so a deployment can move back as well as forward.
 
     Raises:
-        ValueError: ``aws_kms`` is selected without ``trace_content_kms_key_id``.
+        ValueError: a KMS backend is selected without ``trace_content_kms_key_id``.
         ImportError: a KMS key is configured and boto3 is not installed.
     """
-    wrappers: dict[str, DataKeySource] = {SECRET_KEY_WRAPPER: SecretKeyContentKeys()}
+    backend = config.trace_content_key_backend
+    wrappers: dict[str, DataKeySource] = (
+        {} if backend == "aws_kms_only" else {SECRET_KEY_WRAPPER: SecretKeyContentKeys()}
+    )
     key_id = config.trace_content_kms_key_id
-    if config.trace_content_key_backend == "aws_kms" and not key_id:
-        msg = "trace_content_kms_key_id is required when trace_content_key_backend is 'aws_kms'"
+    if backend in ("aws_kms", "aws_kms_only") and not key_id:
+        msg = f"trace_content_kms_key_id is required when trace_content_key_backend is '{backend}'"
         raise ValueError(msg)
     if key_id:
         wrappers[KMS_WRAPPER] = AwsKmsContentKeys(
@@ -279,5 +282,5 @@ def build_content_key_port(config: GatewayConfig) -> ContentKeyPort:
             region=config.trace_content_kms_region,
             endpoint_url=config.trace_content_kms_endpoint_url,
         )
-    writer = KMS_WRAPPER if config.trace_content_key_backend == "aws_kms" else SECRET_KEY_WRAPPER
+    writer = SECRET_KEY_WRAPPER if backend == "secret_key" else KMS_WRAPPER
     return ContentKeyring(writer, wrappers)

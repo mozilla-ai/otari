@@ -421,6 +421,26 @@ async def test_a_kms_key_beside_the_secret_key_backend_still_opens_what_it_seale
     assert await SpanContent(keys).open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
 
 
+async def test_kms_only_without_a_key_id_refuses_to_build() -> None:
+    with pytest.raises(ValueError, match="trace_content_kms_key_id"):
+        build_content_key_port(_config(trace_content_key_backend="aws_kms_only"))
+
+
+async def test_kms_only_opens_nothing_the_secret_key_sealed(key: str, kms: Any) -> None:
+    key_id = _new_kms_key(kms)
+    by_secret_key = await _secret_key_content().seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="t1")
+    by_kms = await SpanContent(_kms_keyring(kms, key_id)).seal(
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="t2"
+    )
+
+    keys = build_content_key_port(_config(trace_content_key_backend="aws_kms_only", trace_content_kms_key_id=key_id))
+    content = SpanContent(keys)
+
+    assert keys.wrapper == KMS_WRAPPER
+    assert await content.open(by_secret_key, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="t1") == {}
+    assert await content.open(by_kms, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="t2") == _CONTENT
+
+
 async def test_previous_key_ids_accept_commas_and_whitespace(kms: Any) -> None:
     keys = build_content_key_port(
         _config(

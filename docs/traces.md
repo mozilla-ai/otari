@@ -460,11 +460,17 @@ usual chain (an ECS task role, an instance profile, environment variables).
 
 | Setting | Purpose |
 | --- | --- |
-| `trace_content_key_backend` | `secret_key` (the default) or `aws_kms`. |
-| `trace_content_kms_key_id` | The key new content is sealed under: a key id, key ARN or alias. Required by `aws_kms`. Set beside `secret_key`, it still opens what it sealed, so a deployment can move back. |
+| `trace_content_key_backend` | `secret_key` (the default), `aws_kms`, or `aws_kms_only`. |
+| `trace_content_kms_key_id` | The key new content is sealed under: a key id, key ARN or alias. Required by `aws_kms` and `aws_kms_only`. Set beside `secret_key`, it still opens what it sealed, so a deployment can move back. |
 | `trace_content_kms_previous_key_ids` | Earlier keys whose content still opens, separated by commas. |
 | `trace_content_kms_region` | The key's region. Unset uses the AWS SDK's default. |
 | `trace_content_kms_endpoint_url` | A KMS endpoint other than the region's, such as a VPC endpoint. |
+
+On `aws_kms`, content sealed with `OTARI_SECRET_KEY` (before the deployment
+moved to KMS) still opens, with no KMS call and so no CloudTrail record.
+`aws_kms_only` leaves `OTARI_SECRET_KEY` off the keyring: such content reads back
+empty, and nothing opens without the KMS key. Choose it where you need to say
+that only your KMS key opens session content.
 
 The gateway calls `kms:GenerateDataKey`, `kms:Decrypt` and `kms:DescribeKey`,
 always with the encryption context `otari:purpose=trace-content`,
