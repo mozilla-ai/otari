@@ -26,6 +26,7 @@ from sqlalchemy import (
     Uuid,
     false,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -111,6 +112,15 @@ class TraceSpan(Base):
         Index("ix_trace_spans_trace_tool_call", "workspace_id", "trace_id", "tool_call_id"),
         # Finds the session a request from the usage log was traced into.
         Index("ix_trace_spans_request_id", "request_id"),
+        # Finds the workspace's spans that still hold content, for deleting it a batch
+        # at a time. Partial, so it covers only those rows and a cleared one leaves it:
+        # without that, each batch steps over every span it has already cleared.
+        Index(
+            "ix_trace_spans_workspace_sealed",
+            "workspace_id",
+            postgresql_where=text("content_sealed IS NOT NULL"),
+            sqlite_where=text("content_sealed IS NOT NULL"),
+        ),
     )
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
