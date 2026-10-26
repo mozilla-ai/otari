@@ -30,11 +30,13 @@ configuration, pricing, aliases, and routing policies.
 
 ## Configuring a provider
 
-Declare a provider under `providers` in `config.yml`, or add it on the
-Hosted providers page. Either way it serves requests and its models are
-discovered. The `providers:` block is deprecated, and a start copies what it can
-onto hosted providers; see
-[Move config.yml providers to hosted providers](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/migrate-providers). Supply the key from the environment with a `${VAR}` reference:
+Add a provider as a [hosted provider](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers), on the Hosted
+providers page or through `/api/v1/hosted-providers`; it serves requests and its
+models are discovered. The `providers:` block of `config.yml` is deprecated, and
+a start copies what it can onto hosted providers (see
+[Upgrading](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers#upgrading)); it remains the place for a provider
+a hosted provider cannot hold, such as Bedrock on the server's own cloud role.
+An entry there supplies its key from the environment with a `${VAR}` reference:
 
 ```yaml
 providers:

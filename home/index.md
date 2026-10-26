@@ -1,7 +1,9 @@
 # What is Otari?
 
 Otari is an LLM gateway: one endpoint between your applications and the model
-providers they call. Applications send it OpenAI- or Anthropic-style requests,
+providers they call. 
+
+Your applications cand send requests (in Anthropic, Gemini and/or Openai),
 and Otari routes each one to any of the 40+ supported providers.
 
 On the way through, it:
