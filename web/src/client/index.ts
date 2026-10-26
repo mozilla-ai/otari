@@ -444,7 +444,12 @@ export type UpdateRateLimitRuleRequest = Schemas["RateLimitRuleUpdate"]
 // Search tools
 // ---------------------------------------------------------------------------
 export type SearchProviderInfo = Schemas["SearchProviderSchema"]
+export type SearchProviderOption = Schemas["SearchProviderOptionSchema"]
 export type StoredSearchTool = Schemas["StoredSearchToolSchema"]
+export type CreatedSearchTool = Schemas["CreatedSearchToolSchema"]
+export type SearchToolTestRequest = Schemas["SearchToolTestRequest"]
+export type StoredSearchToolTestRequest = Schemas["StoredSearchToolTestRequest"]
+export type SearchToolTestResponse = Schemas["SearchToolTestResponse"]
 export type ConfigSearchTool = Schemas["ConfigSearchToolSchema"]
 export type SearchToolsResponse = Schemas["SearchToolsResponse"]
 export type CreateSearchToolRequest = Schemas["CreateSearchToolRequest"]
