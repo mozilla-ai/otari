@@ -210,6 +210,19 @@ class TraceContentShare(Base):
             "audience IN ('organization_admins', 'deployment_operator')", name="check_trace_content_shares_audience"
         ),
         Index("ix_trace_content_shares_trace", "workspace_id", "trace_id"),
+        # A session has at most one running share per audience, so ending the share a
+        # reader can see ends the reading. Partial, so the ended ones stay for their
+        # read history. Serializing on the owner's barrier row is what keeps a second
+        # from being staged; this is the invariant that keeps one from being stored.
+        Index(
+            "uq_trace_content_shares_running",
+            "workspace_id",
+            "trace_id",
+            "audience",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+            sqlite_where=text("revoked_at IS NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
