@@ -1515,7 +1515,6 @@ def get_workspace_service(
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
 ) -> WorkspaceService:
-    """Build the workspace service on the request's session."""
     return WorkspaceService(db, uow=uow, membership_listener=membership_listener)
 
 
@@ -1527,7 +1526,6 @@ def get_workspace_activation_service(
     config: Annotated[GatewayConfig, Depends(get_config)],
     key_format: ApiKeyFormatPortDep,
 ) -> WorkspaceActivationService:
-    """Build the setup guide's service on the request's session, this app's config and its key format."""
     return WorkspaceActivationService(db, config, key_format)
 
 
@@ -1535,7 +1533,6 @@ WorkspaceActivationServiceDep = Annotated[WorkspaceActivationService, Depends(ge
 
 
 def get_workspace_mcp_server_service(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceMcpServerService:
-    """Build the workspace MCP server service on the request's session."""
     return WorkspaceMcpServerService(db)
 
 
@@ -1543,7 +1540,6 @@ WorkspaceMcpServerServiceDep = Annotated[WorkspaceMcpServerService, Depends(get_
 
 
 def get_org_provider_key_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrgProviderKeyService:
-    """Build the org provider key service on the request's session."""
     return OrgProviderKeyService(db)
 
 
@@ -1551,7 +1547,6 @@ OrgProviderKeyServiceDep = Annotated[OrgProviderKeyService, Depends(get_org_prov
 
 
 def get_organization_guardrail_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationGuardrailService:
-    """Build the organization guardrail service on the request's session."""
     return OrganizationGuardrailService(db)
 
 
