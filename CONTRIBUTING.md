@@ -202,7 +202,7 @@ are the sidebar groups under it:
 
 | Top bar | For |
 | --- | --- |
-| Home | What Otari is, a first request, and the base URLs and keys |
+| Home | What Otari is, and a first request |
 | Guides | Doing one thing with Otari: workspaces, keys, budgets, tools, integrations |
 | Self-Hosting | Deploying, configuring and operating your own gateway |
 | Reference | Lookup material: the API, models, routing, tools, file formats, protocols |
@@ -214,8 +214,9 @@ Say otari.ai or your own gateway only where it changes something:
 
 1. **Write for the product, not the deployment.** If a sentence is true on both, mention
    neither.
-2. **Base URLs live in one place.** [Connect to Otari](docs/connect.md) gives them, with the
-   form each SDK expects; elsewhere, use one in a command, or link there.
+2. **Base URLs live in one place.** The API reference's [Base URL](docs/api-reference.md#base-url)
+   section gives them, with the form each SDK expects; elsewhere, use one in a command, or
+   link there.
 3. **A procedure for running a gateway belongs in Self-Hosting**, and what only the service
    has, such as billing, says so in its title.
 

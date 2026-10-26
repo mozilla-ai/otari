@@ -8,7 +8,7 @@ What a key can carry, and who may manage which keys, is in
 Send the key as a bearer token (`Authorization: Bearer <key>`); the other
 accepted headers are in [Authentication](api-reference.md#authentication). The
 base URL to send it to, and the form each SDK expects, are in
-[Connect to Otari](connect.md).
+[Base URL](api-reference.md#base-url).
 
 ## Create a key
 

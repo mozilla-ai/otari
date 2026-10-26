@@ -42,9 +42,9 @@ quickstart uses `deepseek/deepseek-v4-pro-0813`.
 
 ## 4. Send a request
 
-Send a chat completion to otari.ai's OpenAI-compatible API. For an account in
-the European Union, use `eu.api.otari.ai` instead; [Connect to Otari](connect.md)
-lists the base URLs.
+otari.ai's API lives under `https://api.otari.ai/api`, or
+`https://eu.api.otari.ai/api` for an account in the European Union. Send a chat
+completion to it:
 
 ```bash
 curl https://api.otari.ai/api/v1/chat/completions \
@@ -59,7 +59,27 @@ curl https://api.otari.ai/api/v1/chat/completions \
 The answer is an OpenAI-style chat completion, with the model's reply in
 `choices[0].message.content`.
 
-## 5. See it in Usage
+## 5. Call it from your code
+
+Any OpenAI SDK works with Otari: point its base URL at the API plus `/v1`. With
+Python, after `pip install openai`:
+
+```python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(base_url="https://api.otari.ai/api/v1", api_key=os.environ["OTARI_API_KEY"])
+response = client.chat.completions.create(
+    model="deepseek/deepseek-v4-pro-0813",
+    messages=[{"role": "user", "content": "Say hello in one short sentence."}],
+)
+print(response.choices[0].message.content)
+```
+
+It prints the model's reply.
+
+## 6. See it in Usage
 
 Open the **Usage** tab: your request is listed with its model, its tokens and
 its cost.
@@ -69,6 +89,7 @@ they send is recorded against your workspace.
 
 ## Next steps
 
+- [Base URL](api-reference.md#base-url): the base URL each SDK and region takes.
 - [Use with Claude Code](use-with-claude-code.md): point Claude Code at otari.ai.
 - [Access control](access-control.md): workspaces, members, keys and budgets.
 - [Routing policies](routing.md): fall back to another model when one fails.
