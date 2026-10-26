@@ -3,8 +3,9 @@
 One application that calls Otari on behalf of many people can give each of them
 spend, a budget and per-minute limits of their own, without sharing the master
 key or minting a key per person. It does so with a **service key**: a key whose
-requests name an end user. For how service keys fit with users, keys and
-budgets, see [Access control](access-control.md#service-keys-and-end-users).
+requests name an end user. How end users relate to the key's user, its
+budgets and its limits is in
+[How end users are billed and capped](#how-end-users-are-billed-and-capped).
 
 This guide uses a service called `mlpa` with two features, each carrying its
 own per-user limit. You need the master key (or an operator session).
@@ -257,5 +258,5 @@ End users are supported on `/v1/chat/completions`, `/v1/responses`,
 `/v1/search` and `/v1/messages`. The other endpoints (embeddings, files,
 batches and the other pass-through routes) treat a service key as an ordinary
 key, so a `user` naming someone else is handled by the key's
-[`reject_user_mismatch`](access-control.md#mismatched-user-fields) setting
+[`reject_user_mismatch`](api-keys.md#mismatched-user-fields) setting
 there.

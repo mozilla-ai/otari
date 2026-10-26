@@ -1697,7 +1697,7 @@ class GatewayConfig(
         nature, and an ID that moves silently orphans every passkey registered
         under the previous one. So it is configured (``webauthn_rp_id``) or
         derived once from a configured address (``public_base_url``), and
-        `docs/access-control.md` documents which.
+        `docs/sign-in.md` documents which.
 
         The derivation drops the port along with the scheme: a relying-party ID
         is a bare domain, so 'https://localhost:8000' yields 'localhost', which

@@ -909,7 +909,7 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
   `search` price set on the dashboard's Web search pricing page or through the
   API), else `otari:web_search`; a price for one of DeepSeek's models never prices
   it. A key restricted to some models runs it when
-  [`allowed_tools`](access-control.md#users-and-identities), its own or its
+  [`allowed_tools`](api-keys.md#model-and-search-tool-access), its own or its
   user's, names it; `deepseek:*` in `allowed_models` grants DeepSeek's models
   alone. Name it apart from a DeepSeek fetch instance, such as `deepseek` and
   `deepseek-fetch`. DeepSeek's
