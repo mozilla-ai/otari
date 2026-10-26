@@ -142,6 +142,43 @@ describe("SessionsPage", () => {
     )
   })
 
+  it("draws no notice band on a session with nothing to say about its content", async () => {
+    mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    await within(peek).findByRole("button", { name: /^Tool, Bash/ })
+
+    // The band carries the notice and draws a rule under it, so it belongs to
+    // whatever has something to say. Wrapped by the peek instead, it is drawn
+    // for every session whether the notice renders anything or not.
+    expect(
+      peek.querySelectorAll(".border-b.border-border.px-4.py-3"),
+    ).toHaveLength(0)
+  })
+
+  it("keeps the session's privacy notice out of the pane a phone hides", async () => {
+    const privateDetail = traceDetail({
+      spans: traceDetail().spans.map((span) =>
+        span.span_id === "call-toolu_1"
+          ? { ...span, content: {}, content_private: true }
+          : span,
+      ),
+    })
+    mockApi({ traces: [traceSummary()], traceDetail: privateDetail })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    const control = await within(peek).findByRole("button", {
+      name: "Open by break-glass",
+    })
+
+    // Opened from the list no span is picked, so below md the detail pane is
+    // hidden. The notice is the session's, not the picked span's, so neither it
+    // nor the controls in it may sit inside that pane.
+    expect(control.closest(".hidden")).toBeNull()
+  })
+
   it("forgets a break-glass opening once the peek closes, so seeing it again is a new recorded opening", async () => {
     const user = userEvent.setup()
     const privateDetail = traceDetail({
