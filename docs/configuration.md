@@ -865,9 +865,10 @@ treated this way:
 - The call that describes an image for a text-only model is skipped, so the
   image falls back to OCR or is dropped, as when no `vision_describe_model` is
   set.
-- Embeddings, images, audio, moderations, rerank, decisions and creating a
-  batch are refused with a `403` and the `country_not_supported` code.
-  Reading a batch or its results is not checked.
+- Embeddings, images, audio, moderations, rerank, decisions and batches are
+  refused with a `403` and the `country_not_supported` code. A batch's status,
+  cancel, list and results calls are checked as its creation is, since they
+  reach the same provider.
 
 Every refusal except a batch's leaves an error row in usage.
 

@@ -39,10 +39,10 @@ class CountryGate:
         """Whether a hosted provider's own ``countries`` leave this request's out; None serves every country."""
         return countries is not None and self.country not in countries
 
-    def refusal_detail(self, selector: str) -> str:
-        """The caller-facing reason ``selector`` is refused."""
+    def refusal_detail(self, selector: str, *, noun: str = "Model") -> str:
+        """The caller-facing reason ``selector`` is refused; ``noun`` says what it names."""
         origin = f"from country '{self.country}'" if self.country is not None else "from an unknown country"
-        return f"Model '{selector}' is not available to requests {origin}."
+        return f"{noun} '{selector}' is not available to requests {origin}."
 
 
 class CountryNotServedError(Exception):

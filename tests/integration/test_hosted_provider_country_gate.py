@@ -3,7 +3,7 @@
 from collections.abc import Generator, Iterator
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import DEFAULT, AsyncMock, patch
 
 import pytest
 from any_llm.types.model import Model
@@ -17,7 +17,7 @@ from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
 
 from .conftest import build_test_client, shared_test_config
-from .test_batches_endpoint import _SupportsBatch
+from .test_batches_endpoint import _mock_batch, _SupportsBatch
 from .test_routing_policies import _awaited_model, _completion
 
 HEADERS = {API_KEY_HEADER: "Bearer test-master-key"}
@@ -183,3 +183,45 @@ def test_a_batch_is_refused_on_the_hosted_credential(client: TestClient) -> None
     assert resp.status_code == 403, resp.text
     assert resp.headers[ERROR_CODE_HEADER] == COUNTRY_NOT_SUPPORTED
     mock.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/batches/batch_abc123"),
+        ("POST", "/batches/batch_abc123/cancel"),
+        ("GET", "/batches"),
+        ("GET", "/batches/batch_abc123/results"),
+    ],
+)
+def test_a_batch_lifecycle_call_is_refused_on_the_hosted_credential(client: TestClient, method: str, path: str) -> None:
+    with patch.multiple(
+        "gateway.api.routes.batches",
+        new_callable=AsyncMock,
+        aretrieve_batch=DEFAULT,
+        acancel_batch=DEFAULT,
+        alist_batches=DEFAULT,
+        aretrieve_batch_results=DEFAULT,
+    ) as mocks:
+        resp = client.request(
+            method, f"{API_ROOT}{path}", params={"provider": "openai"}, headers={**HEADERS, _COUNTRY_HEADER: "FR"}
+        )
+
+    assert resp.status_code == 403, resp.text
+    assert resp.headers[ERROR_CODE_HEADER] == COUNTRY_NOT_SUPPORTED
+    assert resp.json()["detail"] == "Provider 'openai' is not available to requests from country 'FR'."
+    for mock in mocks.values():
+        mock.assert_not_awaited()
+
+
+def test_a_batch_status_call_from_a_listed_country_is_served_on_the_hosted_credential(client: TestClient) -> None:
+    with patch("gateway.api.routes.batches.aretrieve_batch", new=AsyncMock(return_value=_mock_batch())) as mock:
+        resp = client.get(
+            f"{API_ROOT}/batches/batch_abc123",
+            params={"provider": "openai"},
+            headers={**HEADERS, _COUNTRY_HEADER: "US"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert mock.await_args is not None
+    assert mock.await_args.kwargs["api_key"] == "sk-openai"

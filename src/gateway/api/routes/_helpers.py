@@ -522,10 +522,10 @@ def country_gate_for(config: GatewayConfig, raw_request: Request) -> CountryGate
     return request_country_gate(config, raw_request.headers, client.host if client is not None else None)
 
 
-def country_not_supported(gate: CountryGate, selector: str) -> HTTPException:
+def country_not_supported(gate: CountryGate, selector: str, *, noun: str = "Model") -> HTTPException:
     """The 403 for a ``selector`` whose provider ``gate`` closes to the request's country."""
     return HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail=gate.refusal_detail(selector),
+        detail=gate.refusal_detail(selector, noun=noun),
         headers=error_headers(COUNTRY_NOT_SUPPORTED),
     )
