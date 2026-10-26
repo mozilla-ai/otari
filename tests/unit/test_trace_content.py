@@ -7,6 +7,8 @@ import asyncio
 import base64
 import json
 import logging
+import threading
+import time
 import uuid
 from collections.abc import Iterator
 from types import SimpleNamespace
@@ -679,6 +681,120 @@ async def test_each_session_gets_a_data_key_of_its_own(key: str) -> None:
             await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=session, span_id=f"tool-{n}")
 
     assert keys.made == 3
+
+
+class _ConcurrentKms:
+    """A KMS client that records how many of its calls were in flight at once.
+
+    Each call holds briefly, so a call still waiting is still counted. The
+    executor is wider than any read needs, so a read that issues its calls
+    together has them all in flight and one that issues them in turn never
+    has two.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self._lock = threading.Lock()
+        self._in_flight = 0
+        self.most_in_flight = 0
+        self.describes = 0
+
+    def _run(self, method: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            self._in_flight += 1
+            self.most_in_flight = max(self.most_in_flight, self._in_flight)
+        try:
+            time.sleep(0.02)
+            return method(**kwargs)
+        finally:
+            with self._lock:
+                self._in_flight -= 1
+
+    def describe_key(self, **kwargs: Any) -> Any:
+        with self._lock:
+            self.describes += 1
+        return self._run(self._inner.describe_key, **kwargs)
+
+    def decrypt(self, **kwargs: Any) -> Any:
+        return self._run(self._inner.decrypt, **kwargs)
+
+    def generate_data_key(self, **kwargs: Any) -> Any:
+        return self._run(self._inner.generate_data_key, **kwargs)
+
+
+async def test_a_read_takes_one_round_trip_however_many_keys_are_listed(kms: Any) -> None:
+    current = _new_kms_key(kms)
+    sealed = await SpanContent(_kms_keyring(kms, current)).seal(
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
+    )
+    previous = tuple(_new_kms_key(kms) for _ in range(4))
+    counting = _ConcurrentKms(kms)
+    reader = SpanContent(_kms_keyring(counting, current, previous=previous))
+
+    assert await reader.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
+    # Five keys to describe and one ciphertext to open. Taken in turn they are six
+    # round trips, and a deployment listing enough keys never answers a read inside
+    # the deadline it is allowed; together they are one.
+    assert counting.most_in_flight == len(previous) + 2
+
+
+async def test_readers_arriving_together_resolve_the_allowed_keys_once(kms: Any) -> None:
+    """A read is on the request path, so readers arrive together; one resolution serves them all."""
+    current = _new_kms_key(kms)
+    previous = tuple(_new_kms_key(kms) for _ in range(3))
+    writer = SpanContent(_kms_keyring(kms, current))
+    sealed = [
+        await writer.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=f"session-{n}", span_id="tool-1")
+        for n in range(4)
+    ]
+    counting = _ConcurrentKms(kms)
+    reader = SpanContent(_kms_keyring(counting, current, previous=previous))
+
+    opened = await asyncio.gather(
+        *(
+            reader.open(value, workspace_id=_WORKSPACE, trace_id=f"session-{n}", span_id="tool-1")
+            for n, value in enumerate(sealed)
+        )
+    )
+
+    assert opened == [_CONTENT] * 4
+    # Four keys described once between them, and one decrypt per reader. Resolved
+    # per reader instead, four readers would each describe all four keys.
+    assert counting.describes == len(previous) + 1
+
+
+async def test_a_cancelled_reader_leaves_the_key_resolution_open_to_the_next(kms: Any) -> None:
+    """Cancelling the reader that is resolving must not shut the others out of resolving."""
+    current = _new_kms_key(kms)
+    sealed = await SpanContent(_kms_keyring(kms, current)).seal(
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
+    )
+    blocked = asyncio.Event()
+    inner = kms.describe_key
+
+    def hold(**kwargs: Any) -> Any:
+        blocked.set()
+        time.sleep(0.2)
+        return inner(**kwargs)
+
+    reader = SpanContent(_kms_keyring(_SlowDescribe(kms, hold), current))
+    first = asyncio.ensure_future(reader.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"))
+    await blocked.wait()
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    assert await reader.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
+
+
+class _SlowDescribe:
+    """A KMS client whose DescribeKey is replaced, the rest passing through."""
+
+    def __init__(self, inner: Any, describe: Any) -> None:
+        self._inner = inner
+        self.describe_key = describe
+        self.generate_data_key = inner.generate_data_key
+        self.decrypt = inner.decrypt
 
 
 class _ThrottledOnceKms:
