@@ -166,6 +166,8 @@ function mockApi(
     settingsRefusal?: string
     /** Refuse only the first price write, or price delete, then accept. */
     priceFailsOnce?: boolean
+    /** Rate reads, as `kind:model_key`, that answer 500. */
+    failingReads?: string[]
   } = {},
 ) {
   const requests: Request[] = []
@@ -242,7 +244,11 @@ function mockApi(
       const key = decodeURIComponent(
         path.pathname.slice(`${API_ROOT}/pricing/`.length),
       )
-      const found = rates[`${path.searchParams.get("kind")}:${key}`]
+      const id = `${path.searchParams.get("kind")}:${key}`
+      if (opts.failingReads?.includes(id)) {
+        return jsonResponse({ detail: "Database unavailable" }, 500)
+      }
+      const found = rates[id]
       return found
         ? jsonResponse(found)
         : jsonResponse({ detail: "Not found" }, 404)
@@ -725,5 +731,63 @@ describe("WebSearchPage", () => {
     expect(
       within(dialog).queryByText("Worked: 3 hits."),
     ).not.toBeInTheDocument()
+  })
+
+  it("prices a config.yml tool as a row of its own kind", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Edit the price of local" }),
+    )
+    await user.type(await screen.findByLabelText(/Price per call, USD/), "0.07")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(writes(requests, "POST", "/pricing")[0]?.body).toEqual({
+        kind: "search",
+        model_key: "local",
+        // Rounded: 0.07 * 1e6 is 70000.00000000001 in binary floating point.
+        input_price_per_million: 70000,
+        output_price_per_million: 0,
+        unit: "requests",
+      }),
+    )
+  })
+
+  it("leaves a rate config.yml sets to config.yml", async () => {
+    mockApi({
+      rates: {
+        "search:local": pricingResponse({
+          model_key: "local",
+          kind: "search",
+          input_price_per_million: 3000,
+          unit: "requests",
+          origin: "config",
+        }),
+      },
+    })
+    await renderPage()
+
+    const local = await findRow("Search tools", "local")
+    expect(
+      await within(local).findByText("Price in config.yml"),
+    ).toBeInTheDocument()
+    expect(
+      within(local).queryByRole("button", { name: "Edit the price of local" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("calls a tool unreadable, not unpriced, when the rate it falls back to could not be read", async () => {
+    mockApi({
+      failingReads: ["model:otari:web_search"],
+      requirePricing: true,
+    })
+    await renderPage()
+
+    const local = await findRow("Search tools", "local")
+    expect(await within(local).findByText("Could not read")).toBeInTheDocument()
+    expect(within(local).queryByText("Unpriced")).not.toBeInTheDocument()
   })
 })
