@@ -6,7 +6,7 @@ from another tenant answers 404 rather than reaching the service's logic.
 """
 
 import uuid
-from collections.abc import Awaitable
+from contextlib import AsyncExitStack
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
@@ -104,17 +104,13 @@ async def update_workspace(
     Turning content off keeps nothing new from the next export on; what is already
     stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
     """
-
-    def update() -> Awaitable[WorkspacePublic]:
-        return service.update_workspace(user=current_identity, workspace_id=workspace_id, workspace_update=body)
-
-    if body.trace_content_enabled is not False:
-        return await update()
-    return await traces.turn_content_off(
-        workspace_id,
-        authorize=lambda: service.require_management_access(user=current_identity, workspace_id=workspace_id),
-        switch=update,
-    )
+    async with AsyncExitStack() as stack:
+        if body.trace_content_enabled is False:
+            # Authorized before the block opens, because opening it already drops what
+            # the workspace's exports are holding.
+            await service.require_management_access(user=current_identity, workspace_id=workspace_id)
+            await stack.enter_async_context(traces.content_stopped(workspace_id))
+        return await service.update_workspace(user=current_identity, workspace_id=workspace_id, workspace_update=body)
 
 
 @router.delete("/{workspace_id}/trace-content")
