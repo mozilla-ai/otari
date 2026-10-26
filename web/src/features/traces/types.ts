@@ -43,6 +43,8 @@ export interface Observation {
   cost?: number
   input?: unknown
   output?: unknown
+  /** The span holds content this reader may not open, so none of it is here. */
+  contentPrivate?: boolean
   metadata?: Record<string, string>
   /** A guardrail gate's check: what the gate is, what it decided and what it read. */
   gate?: GateCheck

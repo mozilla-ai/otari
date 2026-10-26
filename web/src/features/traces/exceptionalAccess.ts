@@ -12,3 +12,7 @@ export function exceptionalAccess(platformBreakGlass: boolean): string {
     ? `${owners} The team that runs this deployment can do the same where required by law, recorded with a reference.`
     : owners
 }
+
+/** Said on a span whose content this reader may not open, in place of the content. */
+export const CONTENT_PRIVATE =
+  "Private to the person whose session this is. Anyone else reads it only through their share or a recorded break-glass opening."
