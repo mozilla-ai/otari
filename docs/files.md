@@ -184,7 +184,8 @@ request asked for code over that file:
   file ID of the caller's choosing from reaching the provider, whose files are
   scoped to the account rather than to the caller;
 - 400: a file with too little left for a copy to expire no later than it does;
-- 400: `files_provider_upload_enabled` set to `false`;
+- 400: `files_provider_upload_enabled` set to `false`, or
+  `OTARI_PROVIDER_ACCOUNT_PEPPER` unset;
 - 400: `file_understanding_enabled` set to `false`, because nothing then reads
   the block;
 - 400: a routing policy with no candidate whose provider can hold a copy;
@@ -380,7 +381,8 @@ a copy of an attached file may be stored at the provider that runs a request's
 code, and how long that copy lives (see
 [A file the provider's own code execution reads](#a-file-the-providers-own-code-execution-reads)).
 - `OTARI_PROVIDER_ACCOUNT_PEPPER`: the key for the digest that names the provider
-account a copy is in. Required while `files_provider_upload_enabled` is on (see
+account a copy is in. Without it, provider copies are off whatever
+`files_provider_upload_enabled` says (see
 [Provider copies](configuration.md#provider-copies)).
 - `file_understanding_enabled`: master switch for content normalization.
 - `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:

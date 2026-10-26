@@ -35,8 +35,8 @@ EOF
 - `OTARI_MASTER_KEY` signs you in to the dashboard.
 - `OTARI_DEFAULT_PRICING` prices common models from bundled rates.
 - `OTARI_SECRET_KEY` encrypts the provider keys you add in the dashboard.
-- `OTARI_PROVIDER_ACCOUNT_PEPPER` is required while provider copies of
-  attached files are on, which they are by default. See
+- `OTARI_PROVIDER_ACCOUNT_PEPPER` turns on provider copies of attached files.
+  Without it, Otari starts with them off and logs a warning. See
   [Provider copies](configuration.md#provider-copies).
 
 `.env` is gitignored. For a shared deployment, inject these through your

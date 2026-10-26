@@ -728,9 +728,11 @@ gets a short-lived copy of that file in the provider's account (see
 copy is in is named by a keyed digest of the credential that made it, so the
 digest needs a key of its own: `OTARI_PROVIDER_ACCOUNT_PEPPER`.
 
-Otari refuses to start while `files_provider_upload_enabled` is on, which it is
-by default, and the pepper is unset, shorter than 32 characters, or equal to the
-master key or an `OTARI_SECRET_KEY` key. Generate one with
+While the pepper is unset, Otari turns `files_provider_upload_enabled` off at
+startup and logs a warning, so a request that asks a provider's own code
+execution to run over an attached file is refused. Otari refuses to start when
+the pepper is shorter than 32 characters or equal to the master key or an
+`OTARI_SECRET_KEY` key. Generate one with
 `otari gen-provider-account-pepper` or `openssl rand -base64 32`, and keep it in
 your secret store. Rotating it costs nothing but a fresh copy of each file the
 next time a request uses it.

@@ -694,22 +694,25 @@ def _refuse_shared_secret(name: str, value: str, config: GatewayConfig) -> None:
 
 
 def _validate_provider_account_pepper(config: GatewayConfig) -> None:
-    """Refuse to start a deployment that makes provider copies without its own pepper.
+    """Turn provider copies off when no pepper is set, and refuse a pepper shared with another secret.
 
-    The pepper keys the digest that names a provider account, so it must be set
-    and must share no value with another secret. A shared value would let a leak
-    of one secret expose the other, and tie their rotations together.
+    The pepper keys the digest that names a provider account. A missing one only
+    warns, so a first run needs no secret invented for a feature it may never
+    use. A shared value would let a leak of one secret expose the other, and tie
+    their rotations together.
     """
     makes_copies = config.files_enabled and config.files_provider_upload_enabled
     if not makes_copies:
         return
     pepper = config.provider_account_pepper
     if pepper is None:
-        msg = (
-            "OTARI_PROVIDER_ACCOUNT_PEPPER must be set while files_provider_upload_enabled is on; "
-            "set it to a random value of at least 32 characters, or turn provider copies off"
+        logger.warning(
+            "OTARI_PROVIDER_ACCOUNT_PEPPER is unset, so provider copies of attached files are off: a request that "
+            "asks a provider's own code execution to run over an attached file is refused. Set it to a random "
+            "value of at least 32 characters (for example `otari gen-provider-account-pepper`) to turn them on."
         )
-        raise ValueError(msg)
+        config.files_provider_upload_enabled = False
+        return
     _refuse_shared_secret("OTARI_PROVIDER_ACCOUNT_PEPPER", pepper, config)
 
 
@@ -852,9 +855,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # Persisted dashboard overrides win over config/env; apply them
             # before pricing init so default-pricing behavior is consistent.
             await apply_overrides_from_db(config, session)
-            # Checked when serving starts rather than when the app is built,
-            # so a tool that only reads the schema needs no pepper, and after
-            # the overrides, so it sees the copy setting this process serves.
+            # After the overrides, so it sees the copy setting this process serves.
             _validate_provider_account_pepper(config)
             await load_persisted_price_snapshot(session)
             # Persisted tool/guardrail overrides (service URLs + web-search

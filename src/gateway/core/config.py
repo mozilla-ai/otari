@@ -1311,9 +1311,9 @@ class GatewayConfig(
         min_length=32,
         description=(
             "Key for the keyed digest that names the provider account a copy of an attached file "
-            "is in. Required while files_provider_upload_enabled is on, and must differ from "
-            "OTARI_SECRET_KEY and the master key. Rotating it only makes the next request copy "
-            "each file again."
+            "is in. Without it, provider copies are off whatever files_provider_upload_enabled "
+            "says. It must differ from OTARI_SECRET_KEY and the master key. Rotating it only "
+            "makes the next request copy each file again."
         ),
     )
     files_provider_upload_ttl_hours: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
