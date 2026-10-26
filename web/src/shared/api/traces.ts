@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query"
 import type {
   TraceBreakGlassReadList,
+  TraceContentReadList,
   TraceContentShare,
   TraceContentShareCreate,
   TraceContentShareList,
@@ -189,6 +190,18 @@ function sharesPath(
   return `${SHARE_BASE}/${encodeURIComponent(traceId)}/shares${tail}${query}`
 }
 
+function shareReadsPath(
+  traceId: string,
+  workspaceId: string,
+  shareId: string,
+  page: Record<string, string>,
+): string {
+  const params = new URLSearchParams(page)
+  if (workspaceId) params.set("workspace_id", workspaceId)
+  const share = `${encodeURIComponent(traceId)}/shares/${encodeURIComponent(shareId)}`
+  return `${SHARE_BASE}/${share}/reads?${params.toString()}`
+}
+
 const SHARES_PAGE = 20
 
 // The shares the session has had, a page at a time, running ones first, with
@@ -213,6 +226,35 @@ export function useTraceShares(
     getNextPageParam: (last, pages) =>
       last.has_more ? pages.length * SHARES_PAGE : undefined,
     enabled: enabled && traceId !== "",
+    staleTime: 10_000,
+  })
+}
+
+const SHARE_READS_PAGE = 50
+
+// Every read through one share, a page at a time. A share's own entry carries
+// only its newest few, so this is how the owner reaches the rest. Only the
+// session's own user may ask, so it is asked only for them.
+export function useShareReads(
+  traceId: string,
+  workspaceId: string,
+  shareId: string,
+  enabled: boolean,
+) {
+  return useInfiniteQuery({
+    queryKey: [TRACES, "shares", traceId, workspaceId, shareId, "reads"],
+    meta: workspaceMeta(workspaceId),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
+      apiFetch<TraceContentReadList>(
+        shareReadsPath(traceId, workspaceId, shareId, {
+          skip: String(pageParam),
+          limit: String(SHARE_READS_PAGE),
+        }),
+      ),
+    getNextPageParam: (last, pages) =>
+      last.has_more ? pages.length * SHARE_READS_PAGE : undefined,
+    enabled: enabled && traceId !== "" && shareId !== "",
     staleTime: 10_000,
   })
 }
