@@ -41,6 +41,7 @@ from gateway.api.routes import (
     catalog,
     end_users,
     health_checks,
+    hook_guardrails,
     hooks,
     hosted_providers,
     keys,
@@ -88,8 +89,8 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
 # putting it on the whole of `models.py`, `pricing.py`, `providers.py`,
 # `search_tools.py`, `tool_settings.py` or `usage.py` is the plausible wrong fix,
 # and it would take the dashboard's Models and Pricing pages, the organization
-# forms' lists of BYO providers, of search providers and of built-in guardrails,
-# and a data-plane gateway's usage report with it. An entry here is not
+# forms' lists of BYO providers, of search providers and of built-in guardrails
+# with it. An entry here is not
 # enforced by the totality case below, which sees only that a router declares
 # some gate in `_ROUTER_LEVEL_GATES`; a router split off the operator one has
 # to be added by hand.
@@ -106,6 +107,7 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("tools", tools.router, verify_catalog_reader),
     ("usage.key", usage.key_router, verify_api_key_or_master_key),
     ("hooks", hooks.router, hooks.verify_hook_caller),
+    ("hook_guardrails", hook_guardrails.router, verify_api_key_or_master_key),
     # Operator-only, with the 404 the admin surface answers rather than the 403:
     # the deployment's own credentials are not a surface to confirm to a member.
     ("hosted_providers", hosted_providers.router, require_deployment_operator_or_absent),
@@ -131,7 +133,6 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "images.router": _DATA_PLANE,
     "mcp.router": _DATA_PLANE,
     "messages.router": _DATA_PLANE,
-    "models.hybrid_router": "the caller's key is forwarded to the control plane, which verifies it and scopes the list",
     "moderations.router": _DATA_PLANE,
     "otlp.router": _DATA_PLANE,
     "rerank.router": _DATA_PLANE,
@@ -145,11 +146,9 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "identity.router": _PUBLIC_AUTH,
     "invitations.router": "the invitation token is the credential, and the invitee has no account yet",
     "oauth.router": "the identity token in the body is the credential, verified in the token exchange",
-    "bootstrap.router": "unauthenticated on purpose: how a browser learns which mode it reached",
+    "bootstrap.router": "unauthenticated on purpose: read before a browser knows whether to sign in",
     "health.router": "unauthenticated liveness and readiness",
-    "web_search_backend.router": "its own X-Gateway-Token, checked in the handler",
-    "hosted_mode.router": "mode stub: a 404 naming why the prefix is absent on this deployment",
-    "hybrid_mode.router": "mode stub, as above",
+    "retired_root.router": "a 404 naming the API root that replaced /v1; serves nothing",
 }
 
 

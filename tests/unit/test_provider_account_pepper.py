@@ -1,4 +1,4 @@
-"""The pepper that names provider accounts, which a deployment making provider copies must set."""
+"""The pepper that names provider accounts, without which a deployment makes no provider copies."""
 
 import uuid
 from pathlib import Path
@@ -27,11 +27,25 @@ def test_the_account_name_depends_on_the_pepper() -> None:
     assert _identity(_PEPPER) != _identity("q" * 32)
 
 
-def test_a_deployment_making_copies_needs_a_pepper(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_deployment_without_a_pepper_turns_copies_off(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     monkeypatch.delenv("OTARI_PROVIDER_ACCOUNT_PEPPER", raising=False)
+    config = GatewayConfig()
 
-    with pytest.raises(ValueError, match="OTARI_PROVIDER_ACCOUNT_PEPPER"):
-        _validate_provider_account_pepper(GatewayConfig())
+    _validate_provider_account_pepper(config)
+
+    assert config.files_provider_upload_enabled is False
+    assert "OTARI_PROVIDER_ACCOUNT_PEPPER" in caplog.text
+
+
+def test_a_deployment_with_a_pepper_keeps_copies_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+    config = GatewayConfig(provider_account_pepper=_PEPPER, master_key="m" * 32)
+
+    _validate_provider_account_pepper(config)
+
+    assert config.files_provider_upload_enabled is True
 
 
 @pytest.mark.parametrize(("files_enabled", "copies_enabled"), [(True, False), (False, True)])
@@ -72,12 +86,12 @@ def test_a_distinct_pepper_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
     _validate_provider_account_pepper(GatewayConfig(provider_account_pepper=_PEPPER, master_key="m" * 32))
 
 
-def test_an_app_builds_without_a_pepper_and_refuses_to_serve(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Building the app is not serving it: a tool that only reads the schema needs no pepper."""
+def test_an_app_serves_without_a_pepper_with_copies_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first run needs no pepper: the app serves, and provider copies stay off."""
     monkeypatch.delenv("OTARI_PROVIDER_ACCOUNT_PEPPER", raising=False)
+    config = GatewayConfig(database_url=f"sqlite:///{tmp_path / 'no-pepper.db'}")
 
-    app = create_app(GatewayConfig(database_url=f"sqlite:///{tmp_path / 'no-pepper.db'}"))
-    assert app.openapi()["info"]["title"] == "otari"
+    with TestClient(create_app(config)) as client:
+        assert client.get("/api/v1/health").status_code == 200
 
-    with pytest.raises(ValueError, match="OTARI_PROVIDER_ACCOUNT_PEPPER"), TestClient(app):
-        pass
+    assert config.files_provider_upload_enabled is False

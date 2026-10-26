@@ -40,7 +40,6 @@ def _price(case: dict[str, Any]) -> UsageCharge | None:
         if tokens is None or not (tokens["input"] or tokens["output"])
         else billable_usage(input_tokens=tokens["input"], output_tokens=tokens["output"], cache_tokens_included=True),
         units=case["units"],
-        legacy_unit_reading=case["legacy"],
     )
 
 
@@ -84,9 +83,7 @@ def test_the_gate_admits_exactly_what_settlement_can_price(case: dict[str, Any])
     meters = [meter for meter in ("images", "requests", "search_units") if meter in case["units"]]
     meter = meters[0] if meters else None
 
-    admitted = can_price(
-        _rate(case["rate"]), meter=meter, reports_tokens=reports_tokens, legacy_unit_reading=case["legacy"]
-    )
+    admitted = can_price(_rate(case["rate"]), meter=meter, reports_tokens=reports_tokens)
 
     assert admitted == (_price(case) is not None)
 
@@ -96,7 +93,7 @@ def test_a_count_that_is_not_a_whole_number_in_range_is_refused(count: object) -
     with pytest.raises(ValueError, match="whole number"):
         validated_units({"images": count})
     with pytest.raises(ValueError, match="whole number"):
-        price_usage(None, tokens=None, units={"requests": count}, legacy_unit_reading=True)
+        price_usage(None, tokens=None, units={"requests": count})
 
 
 def test_an_unknown_meter_is_dropped_rather_than_refused() -> None:
@@ -111,7 +108,7 @@ def test_a_requests_rate_settles_a_completion_as_the_cost_core_does() -> None:
 
     cost, meters, lines = price_request(rate)
 
-    assert price_usage(rate, tokens=tokens, units={}, legacy_unit_reading=False) == UsageCharge(cost, meters, lines)
+    assert price_usage(rate, tokens=tokens, units={}) == UsageCharge(cost, meters, lines)
 
 
 def test_a_token_rate_with_no_counts_settles_as_the_cost_core_does() -> None:
@@ -125,7 +122,7 @@ def test_a_token_rate_with_no_counts_settles_as_the_cost_core_does() -> None:
 
     cost, meters, lines = price_billable_usage(rate, tokens)
 
-    assert price_usage(rate, tokens=tokens, units={}, legacy_unit_reading=True) == UsageCharge(cost, meters, lines)
+    assert price_usage(rate, tokens=tokens, units={}) == UsageCharge(cost, meters, lines)
 
 
 @pytest.mark.parametrize("bad", ["NaN", "-1", "Infinity"])
@@ -134,35 +131,26 @@ def test_an_unusable_rate_prices_nothing_rather_than_serving_free(unit: str, bad
     rate = ModelPricing(model_key="provider:model", input_price_per_million=Decimal(bad), unit=unit)
     tokens = billable_usage(input_tokens=1000, output_tokens=0, cache_tokens_included=True)
 
-    assert price_usage(rate, tokens=tokens, units={"images": 1, "requests": 1}, legacy_unit_reading=True) is None
-    assert not can_price(rate, meter="images", reports_tokens=True, legacy_unit_reading=True)
+    assert price_usage(rate, tokens=tokens, units={"images": 1, "requests": 1}) is None
+    assert not can_price(rate, meter="images", reports_tokens=True)
 
 
 def test_an_unknown_rate_unit_prices_nothing() -> None:
     rate = ModelPricing(model_key="provider:model", input_price_per_million=Decimal(1), unit="seconds")
 
-    assert price_usage(rate, tokens=None, units={"requests": 1}, legacy_unit_reading=True) is None
-    assert not can_price(rate, meter="requests", reports_tokens=False, legacy_unit_reading=True)
+    assert price_usage(rate, tokens=None, units={"requests": 1}) is None
+    assert not can_price(rate, meter="requests", reports_tokens=False)
 
 
-def test_the_legacy_reading_warns_once_per_model_and_meter(caplog: pytest.LogCaptureFixture) -> None:
+def test_a_token_rate_read_per_unit_warns_once_per_model_and_meter(caplog: pytest.LogCaptureFixture) -> None:
     rate = ModelPricing(model_key="legacy:warned-once", input_price_per_million=Decimal("0.04"), unit="tokens")
 
     with caplog.at_level(logging.WARNING):
         for _ in range(3):
-            price_usage(rate, tokens=None, units={"images": 1}, legacy_unit_reading=True)
-        price_usage(rate, tokens=None, units={"requests": 1}, legacy_unit_reading=True)
+            price_usage(rate, tokens=None, units={"images": 1})
+        price_usage(rate, tokens=None, units={"requests": 1})
 
     warnings = [record.getMessage() for record in caplog.records if "legacy:warned-once" in record.getMessage()]
     assert len(warnings) == 2
     assert "set its unit to images and multiply its input price by 1,000,000" in warnings[0]
     assert "set its unit to requests, keeping its price" in warnings[1]
-
-
-def test_the_strict_reading_never_warns(caplog: pytest.LogCaptureFixture) -> None:
-    rate = ModelPricing(model_key="strict:never-warned", input_price_per_million=Decimal(5), unit="tokens")
-
-    with caplog.at_level(logging.WARNING):
-        price_usage(rate, tokens=None, units={"images": 1}, legacy_unit_reading=False)
-
-    assert not [record for record in caplog.records if "strict:never-warned" in record.getMessage()]

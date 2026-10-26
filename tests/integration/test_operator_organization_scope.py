@@ -118,6 +118,7 @@ def _tenant_rows(session: Session, world: _World, name: str, organization_id: uu
             session_source="none",
             started_at=_NOW,
             last_activity_at=_NOW,
+            span_count=1,
         )
     )
     if organization_id is not None:

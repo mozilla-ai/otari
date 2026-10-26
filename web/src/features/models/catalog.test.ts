@@ -3,8 +3,15 @@ import { describe, expect, it } from "vitest"
 import type { CatalogModelSummary } from "@/client"
 import {
   activeFilterCount,
+  CATALOG_URL_DEFAULTS,
+  type CatalogListState,
+  type CatalogUrlKey,
+  catalogListFromUrl,
+  catalogListToUrl,
   catalogRequest,
+  catalogUrlChanges,
   credentialLabel,
+  EMPTY_CATALOG_LIST,
   EMPTY_FILTERS,
   makerKeyOf,
   priceSourceLabel,
@@ -130,6 +137,90 @@ describe("catalogRequest", () => {
     expect(params.min_context).toBeUndefined()
     expect(params.max_input).toBeUndefined()
     expect(params.released_within_days).toBeUndefined()
+  })
+})
+
+// Reads a query the way `useUrlState` does: a missing key is its default, and a
+// blank value is no value.
+function readQuery(params: URLSearchParams) {
+  return {
+    get: (key: CatalogUrlKey) => params.get(key) ?? CATALOG_URL_DEFAULTS[key],
+    getAll: (key: CatalogUrlKey) => params.getAll(key).filter(Boolean),
+    getNumber: (key: CatalogUrlKey) =>
+      Number.parseInt(params.get(key) ?? CATALOG_URL_DEFAULTS[key], 10),
+  }
+}
+
+function writeQuery(list: CatalogListState): URLSearchParams {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(catalogListToUrl(list))) {
+    for (const one of Array.isArray(value) ? value : [value]) {
+      params.append(key, String(one))
+    }
+  }
+  return params
+}
+
+describe("the list's URL", () => {
+  it("round-trips every filter, both sorts and the page", () => {
+    const list: CatalogListState = {
+      filters: {
+        query: "glm",
+        inputModalities: ["image"],
+        outputModalities: ["text"],
+        providers: ["fireworks", "nebius"],
+        vendors: ["", "Z.ai"],
+        capabilities: ["reasoning"],
+        minContext: 128_000,
+        maxInput: 3,
+        pricing: "priced",
+        source: "discovered",
+        releasedWithinDays: 365,
+      },
+      sort: "name",
+      tableSort: { column: "input", direction: "desc" },
+      page: 2,
+      pageSize: 50,
+    }
+    expect(catalogListFromUrl(readQuery(writeQuery(list)))).toEqual(list)
+  })
+
+  it("names only the params that changed", () => {
+    const from = {
+      ...EMPTY_CATALOG_LIST,
+      filters: { ...EMPTY_FILTERS, query: "gl" },
+    }
+    const to = {
+      ...from,
+      filters: { ...from.filters, capabilities: ["reasoning"] },
+      page: 0,
+    }
+    expect(catalogUrlChanges(from, to, { q: "glm" })).toEqual({
+      capability: ["reasoning"],
+    })
+  })
+
+  it("adds and removes only this change's values in a repeated param", () => {
+    // The URL already holds a change the rendered list has not caught up with.
+    const seen = {
+      ...EMPTY_CATALOG_LIST,
+      filters: { ...EMPTY_FILTERS, inputModalities: ["pdf"] },
+    }
+    const latest = { input: ["pdf", "text"] }
+    const addImage = {
+      ...seen,
+      filters: { ...seen.filters, inputModalities: ["pdf", "image"] },
+    }
+    expect(catalogUrlChanges(seen, addImage, latest)).toEqual({
+      input: ["pdf", "text", "image"],
+    })
+    const dropPdf = {
+      ...seen,
+      filters: { ...seen.filters, inputModalities: [] },
+    }
+    expect(catalogUrlChanges(seen, dropPdf, latest)).toEqual({
+      input: ["text"],
+    })
   })
 })
 

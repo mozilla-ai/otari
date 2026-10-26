@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.responses import Response
 
 from gateway.core.config import API_ROOT, API_VERSION
+from gateway.core.error_codes import BUDGET_SCOPE_HEADER, ERROR_CODE_HEADER
 
 if TYPE_CHECKING:
     # Types come from the real library, which the dev group always installs, so
@@ -147,6 +148,16 @@ REQUEST_DURATION_SECONDS = Histogram(
     registry=REGISTRY,
 )
 
+# Refusals by their stable code, read off the response the way a client reads it,
+# so every coded refusal on every route counts once. Both labels are fixed
+# vocabularies (``core.error_codes``, ``models.budgets.ScopeType``).
+REFUSALS = Counter(
+    "gateway_refusals",
+    "Responses refused with an Otari-Error-Code, by code and, for a budget, the scope that refused",
+    ["code", "budget_scope"],
+    registry=REGISTRY,
+)
+
 ACTIVE_REQUESTS = Gauge(
     "gateway_active_requests",
     "Number of currently in-flight requests",
@@ -222,6 +233,23 @@ def _mount_prefix(scope: Scope, route: Any) -> str:
     return ""
 
 
+_ERROR_CODE_HEADER = ERROR_CODE_HEADER.lower().encode("latin-1")
+_BUDGET_SCOPE_HEADER = BUDGET_SCOPE_HEADER.lower().encode("latin-1")
+
+
+def _count_refusal(headers: list[tuple[bytes, bytes]]) -> None:
+    """Count a response carrying an ``Otari-Error-Code``, by that code and its budget scope (empty when none)."""
+    code = scope = ""
+    for name, value in headers:
+        lowered = name.lower()
+        if lowered == _ERROR_CODE_HEADER:
+            code = value.decode("latin-1")
+        elif lowered == _BUDGET_SCOPE_HEADER:
+            scope = value.decode("latin-1")
+    if code:
+        REFUSALS.labels(code=code, budget_scope=scope).inc()
+
+
 async def metrics_endpoint(request: Request) -> Response:
     """Serve Prometheus metrics."""
     body = generate_latest(REGISTRY)
@@ -251,6 +279,7 @@ class MetricsMiddleware:
             nonlocal status_code
             if message["type"] == "http.response.start":
                 status_code = message["status"]
+                _count_refusal(message.get("headers") or [])
             await send(message)
 
         ACTIVE_REQUESTS.inc()

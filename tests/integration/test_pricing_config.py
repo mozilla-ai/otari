@@ -241,6 +241,74 @@ def test_pricing_for_a_search_tool_provider_is_loaded(postgres_url: str, test_db
         dispose_override()
 
 
+def test_a_tools_price_per_call_is_stored_under_its_kind_and_name(postgres_url: str, test_db: Session) -> None:
+    """Beside a model price spelled like it, and a restart with the same rate adds no version."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        providers={"exa": {"provider": "openai", "api_key": "test-key"}},
+        search_tools={"exa": {"provider": "exa", "api_key": "test-key", "price_per_call": 0.005}},
+        fetch_tools={"exa-fetch": {"provider": "exa", "api_key": "test-key", "price_per_call": 0.001}},
+        pricing={"exa:exa": PricingConfig(input_price_per_million=1.0, output_price_per_million=2.0)},
+    )
+
+    for _restart in range(2):
+        app = create_app(config)
+        override_get_db, dispose_override = build_async_session_override(postgres_url)
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with TestClient(app):
+                pass
+        finally:
+            dispose_override()
+
+    rows = {(row.kind, row.model_key): row for row in test_db.query(ModelPricing).all()}
+    assert rows[("search", "exa")].input_price_per_million == 5000
+    assert rows[("search", "exa")].unit == "requests"
+    assert rows[("fetch", "exa-fetch")].input_price_per_million == 1000
+    assert rows[("model", "exa:exa")].input_price_per_million == 1
+    assert test_db.query(ModelPricing).filter(ModelPricing.kind == "search").count() == 1
+
+
+def test_pricing_under_a_search_tools_provider_naming_no_tool_is_skipped(
+    postgres_url: str, test_db: Session, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Only a tool's exact old key is a tool rate; the warning names the provider's tools."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        search_tools={"exa-search": {"provider": "exa", "api_key": "test-key"}},
+        pricing={
+            "exa:exa-search": PricingConfig(input_price_per_million=5000.0, output_price_per_million=0.0),
+            "exa:a-model": PricingConfig(input_price_per_million=1.0, output_price_per_million=2.0),
+        },
+    )
+
+    app = create_app(config)
+    override_get_db, dispose_override = build_async_session_override(postgres_url)
+    app.dependency_overrides[get_db] = override_get_db
+    gateway_logger = logging.getLogger("gateway")
+    gateway_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger="gateway"), TestClient(app):
+            assert test_db.query(ModelPricing).filter(ModelPricing.model_key == "exa:exa-search").first() is not None
+            assert test_db.query(ModelPricing).filter(ModelPricing.model_key == "exa:a-model").first() is None
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+        dispose_override()
+
+    [skipped] = [record.message for record in caplog.records if "Skipping pricing for 'exa:a-model'" in record.message]
+    # It names the provider's tools and how a tool is priced now, not the old <provider>:<tool> form.
+    assert "none of exa's search or fetch tools (exa-search)" in skipped
+    assert "price_per_call on its entry" in skipped and "with its kind and its name as model_key" in skipped
+    assert "Add 'exa' to the providers section" not in skipped
+    assert "exa:exa-search (deployment)" in caplog.text
+
+
 def test_pricing_for_a_fetch_instance_provider_is_loaded(postgres_url: str, test_db: Session) -> None:
     """A fetch instance's ``provider:instance`` rate is kept although its provider is not under ``providers``."""
     config = GatewayConfig(

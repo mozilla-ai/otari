@@ -66,6 +66,12 @@ class ApiKeyConfig(BaseModel):
         max_length=MAX_END_USER_BUDGETS,
         description="Budgets a request may start a new end user on with Otari-End-User-Budget.",
     )
+    max_end_users: int | None = Field(
+        default=None,
+        ge=0,
+        description="Most live end users the key may have on the budgets it assigns, or on any budget when it "
+        "assigns none; null is no cap.",
+    )
     ceiling: str | None = Field(
         default=None,
         description=(
@@ -115,9 +121,12 @@ class ApiKeyConfig(BaseModel):
         return declaration_digest(entry)
 
 
-def _https_url_problem(value: str) -> str | None:
+def https_url_problem(value: str) -> str | None:
     """Why ``value`` is not an absolute https URL without credentials, a query or a fragment, or None."""
-    parts = urlsplit(value)
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return "must be an absolute https URL"
     if parts.scheme != "https" or not parts.hostname:
         return "must be an absolute https URL"
     if parts.username or parts.password or parts.query or parts.fragment:
@@ -147,7 +156,7 @@ class FederationIssuer(BaseModel):
     @field_validator("issuer")
     @classmethod
     def _issuer_is_https(cls, value: str) -> str:
-        problem = _https_url_problem(value)
+        problem = https_url_problem(value)
         if problem is not None:
             msg = f"federation issuer '{value}' {problem}"
             raise ValueError(msg)
@@ -158,7 +167,7 @@ class FederationIssuer(BaseModel):
     def _jwks_uri_is_https(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        problem = _https_url_problem(value)
+        problem = https_url_problem(value)
         if problem is not None:
             msg = f"federation jwks_uri '{value}' {problem}"
             raise ValueError(msg)
@@ -173,7 +182,7 @@ class ApiKeySettings(BaseModel):
         description=(
             "API keys this deployment declares, keyed by a stable name. Each start creates a missing key and "
             "writes the declared secret and settings over an existing one, so config.yml wins over a change made "
-            "through the API. A key removed from here is kept as it is. Standalone mode only."
+            "through the API. A key removed from here is kept as it is."
         ),
     )
 
@@ -182,8 +191,16 @@ class ApiKeySettings(BaseModel):
         description=(
             "OpenID Connect issuers whose identity tokens may authenticate as an API key, in place of its secret, "
             "when they match one of the key's federation rules. Each entry is an https issuer URL or a mapping "
-            "with 'issuer' and an optional 'jwks_uri'. Empty, the default, turns workload identity off. "
-            "Standalone and hosted modes only."
+            "with 'issuer' and an optional 'jwks_uri'. Empty, the default, turns workload identity off."
+        ),
+    )
+
+    federation_member_rules: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
+        default=False,
+        description=(
+            "Let an organization's owners and admins give their own API keys federation rules naming any public "
+            "https issuer. Such a rule authenticates only through the token exchange that names it, never as a bare "
+            "identity token, so it cannot claim another tenant's workload. Off by default."
         ),
     )
 

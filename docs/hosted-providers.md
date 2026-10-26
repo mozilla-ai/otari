@@ -57,7 +57,8 @@ such as `openai-eu`, lets two endpoints of one provider be served side by side.
 
 The name is what pricing, budgets and usage are keyed on. A name may not
 contain `:` or `/`, may not be `otari` or `hosted`, and may not be another
-implementation's name.
+implementation's name. An `otari` provider therefore always takes a name of its
+own.
 
 ## Who manages hosted providers
 
@@ -107,10 +108,15 @@ Adding a provider offers every model its key lists:
 - Otherwise, where `default_pricing` is on, the model is seeded with its
   models.dev rate and switched on.
 - Where `default_pricing` is off, or models.dev does not price the model, it is
-  offered switched off until the operator prices it.
+  offered switched off until it is priced, by the operator or by a later
+  refresh once models.dev prices it.
 
 Refreshing a provider's models moves a seeded rate nobody has changed to the
-current default, and leaves a rate the operator set alone.
+current default, leaves a rate the operator set alone, and never switches on a
+model the operator switched off. A model switched on without a price on purpose
+stays on through a refresh: one a moved or copied provider lists, one an
+operator switched on while nothing priced it, and every model of a provider
+that serves models not on its list.
 
 ## Pricing
 
@@ -129,7 +135,8 @@ wrote itself, even one written while its own key still covered the model. A
 rate the operator set for an organization is listed beside the organization's
 own on the Providers page, and only the operator may change or remove it. The
 deployment price list has no dashboard page of its own; the models.dev defaults
-are kept current through `/api/v1/pricing/refresh` (see
+are kept current by **Update catalog** on the Hosted providers page, or on a
+schedule under `pricing_refresh` (see
 [Keeping the defaults current](configuration.md#keeping-the-defaults-current)).
 
 On the Providers page a model nothing prices is offered and left unserved, a
@@ -253,10 +260,11 @@ A configured entry:
 
 Taking an entry out of the configuration leaves its models in the database,
 serving nothing and offered in no catalog; they come back if the entry does.
-The next catalog sweep (`POST /api/v1/hosted-providers/refresh`, Refresh and
-purge on the page) deletes them and their prices, naming the provider in
-`orphaned_rosters`. Where no hosted provider offers a model at all, the sweep
-deletes those models and leaves every price in place.
+The next catalog update run with its cleanup (Update catalog on the page, or
+`POST /api/v1/hosted-providers/catalog-update` with `cleanup`) deletes them and
+their prices, naming the provider in `orphaned_rosters`. Where no hosted
+provider offers a model at all, the cleanup deletes those models and leaves
+every price in place.
 
 ## Copies of `providers:` entries
 
@@ -266,7 +274,7 @@ copied onto a hosted provider of the same name, once:
 
 - Its `${VAR}` values are read at that start.
 - The start asks the provider for its models and switches on every one it
-  lists, priced or not. An entry whose provider lists no models is not copied,
+  lists, priced or not, and a later refresh keeps them on. An entry whose provider lists no models is not copied,
   keeps serving from `config.yml`, and is tried again at the next start.
 - From then on the hosted provider serves the name, and the entry is no longer
   read; the start logs that it can be taken out of `config.yml`.
@@ -309,10 +317,13 @@ menu, and is listed only for a deployment operator.
   `serves_unlisted_models`.
 - **Models** carry a serving switch and a price, set per million tokens or per
   1,000 requests or images; a model nothing prices arrives switched off.
-- **Refresh models** asks one provider again. **Refresh and purge** asks every
-  provider, then removes priced models nothing on the deployment serves, along
-  with the model lists of providers nothing configures any more, listing them
-  before anything is removed.
+- **Refresh models** asks one provider again. **Update catalog** fetches the
+  latest models.dev prices and then asks every provider what it lists, showing
+  the price changes and each provider's new models before applying them (see
+  [Keeping the defaults current](configuration.md#keeping-the-defaults-current)).
+  Its optional cleanup also removes priced models nothing on the deployment
+  serves, along with the model lists of providers nothing configures any more,
+  listing them before anything is removed.
 - A provider kept to one organization shows which. That restriction is set
   through `/api/v1/hosted-providers`.
 - A provider's name opens Models filtered to it. Above the table, a summary
@@ -342,7 +353,10 @@ deployment pays that upstream bill, so the request also goes through
 - No funds are held while the request runs, so concurrent requests can take an
   organization below zero.
 
-A request on any other credential never reaches either port. The core's billing
+A request on any other credential never reaches either port, unless it may run a
+gateway tool on the deployment's account: that tool's calls are gated and
+charged the same way, and the model call is not (see
+[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool)). The core's billing
 adapter does nothing, so with no overlay a hosted-provider request is served and
 recorded as deployment-paid on its usage row, and no organization is charged.
 

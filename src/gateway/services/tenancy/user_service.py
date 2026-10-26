@@ -6,7 +6,7 @@ Ported from the platform's ``user_service`` (``authenticate``,
 ``resend_verification_email``, and the recover/reset password pair, the last
 two of which live in the platform's ``login.py`` route rather than its service),
 which is where the shape of this comes from. What it is *for* here is narrower,
-and settled by mozilla-ai/otari-ai#1716: the master key bootstraps a standalone
+and settled by mozilla-ai/otari-ai#1716: the master key bootstraps a
 deployment and stays its deployment-wide API credential, while a password
 against a `gateway.services.dashboard_session_service` session becomes the
 steady-state dashboard login. Retiring a login is not retiring a credential, so
@@ -29,7 +29,7 @@ Departures from the port, each for a reason that belongs to this edition:
   the rule ``resolve_dashboard_session`` already follows.
 - **Signup only ever claims an identity that already exists.** The platform's
   ``create_user_for_signup`` always inserts a new user into a brand-new
-  organization; a standalone deployment is one tenant with several people in
+  organization; a deployment with no overlay is one tenant with several people in
   it (`organization_service`'s own docstring), so this edition's signup
   completes an identity `organization_service.create_active_organization_member_for_user`
   or ``invite_active_organization_member_for_user`` already put on the roster,

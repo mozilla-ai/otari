@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type {
   ConfigField,
-  DeploymentBootstrap,
   GatewaySettings,
   HostedProvider,
   MailSettings,
@@ -181,7 +180,6 @@ const CONFIG: ConfigField[] = [
 ]
 
 const SETTINGS: GatewaySettings = {
-  mode: "standalone",
   version: "1.2.3",
   model_discovery: true,
   default_pricing: false,
@@ -215,16 +213,13 @@ function storedProvider(name: string, decryptable = true): HostedProvider {
   }
 }
 
-function renderWithClient(
-  ui: ReactElement,
-  deployment: Partial<DeploymentBootstrap> = {},
-) {
+function renderWithClient(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <DeploymentProvider value={bootstrap(deployment)}>
+      <DeploymentProvider value={bootstrap()}>
         <AuthProvider>{ui}</AuthProvider>
       </DeploymentProvider>
     </QueryClientProvider>,
@@ -341,22 +336,13 @@ describe("SettingsPage", () => {
     window.localStorage.clear()
   })
 
-  it("offers the rate limit rules on a standalone gateway", async () => {
+  it("offers the rate limit rules", async () => {
     mockApi()
 
     renderWithClient(<SettingsPage />)
 
     await screen.findByText(/Version 1.2.3/)
     expect(screen.getByText("Rate limit rules")).toBeInTheDocument()
-  })
-
-  it("does not offer the rate limit rules on a hosted control plane", async () => {
-    mockApi()
-
-    renderWithClient(<SettingsPage />, { deployment_type: "hosted" })
-
-    await screen.findByText(/Version 1.2.3/)
-    expect(screen.queryByText("Rate limit rules")).not.toBeInTheDocument()
   })
 
   it("reflects the current settings on its switches", async () => {

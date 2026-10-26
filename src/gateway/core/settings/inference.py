@@ -8,7 +8,7 @@ from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 
 
 class InferenceSettings(BaseModel):
-    """How a completion request is retried upstream, deduplicated, streamed and attributed to an end user."""
+    """How a completion request is sent and retried upstream, deduplicated, streamed and attributed to an end user."""
 
     provider_max_retries: Annotated[int | None, Shown(SettingsGroup.MODELS)] = Field(
         default=None,
@@ -21,20 +21,24 @@ class InferenceSettings(BaseModel):
         ),
     )
 
-    provider_user_identifier_enabled: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
-        default=True,
+    provider_request_timeout_seconds: Annotated[float, Shown(SettingsGroup.MODELS)] = Field(
+        default=600.0,
+        gt=0,
         description=(
-            "Whether each provider call carries an opaque identifier of the end user behind it. A startup "
-            "setting: the dashboard shows it but cannot change it. See "
-            "docs/configuration.md#end-user-identifiers."
+            "How long a non-streaming provider call may take, in seconds, for providers that take a "
+            "per-request timeout. Connecting stays capped at 5 seconds where the provider's SDK allows "
+            "it. Without one the Anthropic SDK refuses a non-streaming request with a large max_tokens "
+            "before sending it."
         ),
     )
+
     provider_user_identifier_key: Annotated[str | None, SECRET] = Field(
         default=None,
         min_length=32,
         description=(
-            "Key for the digest behind provider_user_identifier_enabled. Unset, the digest is unkeyed. "
-            "Must differ from OTARI_SECRET_KEY and the master key."
+            "Key for the digest behind the opaque end-user identifier each provider call carries. Unset, "
+            "the digest is unkeyed. Must differ from OTARI_SECRET_KEY and the master key. See "
+            "docs/configuration.md#end-user-identifiers."
         ),
     )
 
@@ -42,7 +46,7 @@ class InferenceSettings(BaseModel):
         default=15000,
         ge=0,
         description=(
-            "How long in milliseconds a standalone gateway holds a streaming response's status line "
+            "How long in milliseconds the gateway holds a streaming response's status line "
             "for the provider's first chunk, so a provider failure before any output is answered with "
             "its own HTTP status (and falls over in a routing policy) rather than as an error event "
             "after a 200. A provider slower than this still streams: the response is committed and "
@@ -58,7 +62,7 @@ class InferenceSettings(BaseModel):
             "How long a non-streaming completion sent with an Idempotency-Key is kept, so that a "
             "retry with the same key returns the stored response instead of calling the provider "
             "and billing again. The stored response includes the generated content. 0 ignores the "
-            "header. Standalone mode only."
+            "header."
         ),
     )
     idempotency_lease_sec: Annotated[int, OMITTED] = Field(

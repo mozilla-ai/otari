@@ -47,6 +47,7 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential
 from gateway.schemas.tools import SearchRequest, SearchResponse, SearchResultItem
+from gateway.services.tools._web_provider_client import web_provider_client_for
 from gateway.services.tools._web_search._litellm import (
     SearchQuery,
     direct_count,
@@ -55,6 +56,7 @@ from gateway.services.tools._web_search._litellm import (
 )
 from gateway.services.tools._web_search._resolve import ResolvedSearch, resolve_search
 from gateway.services.tools._web_tool_failure import WebToolFailure, failed_text
+from gateway.types.tool_charges import RateKey, describe_rate_key
 
 
 @dataclass(frozen=True)
@@ -197,14 +199,14 @@ def refuse_unpriced_direct_search(
     """Refuse a direct search that ``require_pricing`` cannot bill.
 
     ``priced`` says one of the call's rate keys found a pricing row. For an
-    instance's ``<provider>:<instance>`` only the operator's price or override
-    counts, since the deployment pays for the call; for ``otari:web_search``,
+    instance's own price, or the ``<provider>:<instance>`` row it was priced
+    under before it had a kind, only the operator's price or override counts,
+    since the deployment pays for the call; for ``otari:web_search``,
     the organization's own override counts too. The search is refused when
     ``require_pricing`` is on and nothing priced it, even if the provider
     reports its own cost; a zero rate is a price. Two calls pass unpriced: one
     on a key exempt from budgets, which is never debited, and one with no rate
-    keys (a hybrid control plane's credential), which this gateway does not
-    settle. Raises :class:`DirectSearchPricingRequiredError`, whose message
+    keys, which this gateway does not settle. Raises :class:`DirectSearchPricingRequiredError`, whose message
     names the row to add.
     """
     rate_keys = search.resolved.rate_keys
@@ -215,26 +217,29 @@ def refuse_unpriced_direct_search(
     )
 
 
-def _unpriced_detail(tool: str, rate_key: str, *, organization_key: bool) -> str:
-    """The 402's message: the row ``rate_key`` that prices a search on ``tool``, and where to set it.
+def _unpriced_detail(tool: str, rate_key: RateKey, *, organization_key: bool) -> str:
+    """The 402's message: the price ``rate_key`` names for a search on ``tool``, and where to set it.
 
-    Of the two rows, only ``otari:web_search`` can be set on the dashboard (Tools
-    & Guardrails); an instance's row needs the API or the configuration file.
+    Both can be set on the dashboard's Web search pricing page or through the
+    API, and an instance declared in the configuration file by its ``price_per_call``.
     """
     if organization_key:
-        missing = "which has no pricing"
-        where = (
-            f"POST {API_ROOT}/pricing, the pricing section of config.yml, or the dashboard's Tools & Guardrails screen"
+        missing = f"is priced at {describe_rate_key(rate_key)}, which has no pricing"
+        how = (
+            f"Set a per-request rate for it (POST {API_ROOT}/pricing, the pricing section of config.yml, "
+            "or the dashboard's Web search pricing page)"
         )
     else:
         # The deployment pays for the call, so an organization's own override does not count.
-        missing = "which the deployment's operator has not priced"
-        where = f"POST {API_ROOT}/pricing or the pricing section of config.yml"
+        missing = "has no price the deployment's operator set"
+        how = (
+            f"Set one on the dashboard's Web search pricing page, with POST {API_ROOT}/pricing using kind "
+            "'search' and the tool's name as model_key, or with price_per_call on its entry if it is declared "
+            "in config.yml"
+        )
     return (
-        f"A search on '{tool}' is priced under '{rate_key}', {missing}, and require_pricing is on, "
-        "so the gateway will not run a search it cannot bill. "
-        f"Set a per-request price for model_key '{rate_key}' ({where}); a zero rate is valid. "
-        "Or set require_pricing to false to serve searches unpriced."
+        f"A search on '{tool}' {missing}, and require_pricing is on, so it is not run. "
+        f"{how}; a zero rate is valid. Or set require_pricing to false to serve searches unpriced."
     )
 
 
@@ -276,7 +281,7 @@ async def _on_any_search(search: DirectSearch, client: httpx.AsyncClient) -> Dir
         api_key=resolved.api_key,
         api_base=resolved.api_base,
         timeout=resolved.timeout,
-        client=client,
+        client=web_provider_client_for(client, tenant_endpoint=resolved.tenant_endpoint),
     ) as engine:
         result = await engine.search(search.query.query, max_results=search.query.max_results, **options)
     if result.error is not None:

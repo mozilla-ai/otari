@@ -1,6 +1,6 @@
 """The envelope every provider answers in, and the metadata that describes each one."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -8,6 +8,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 TimeRange = Literal["day", "week", "month", "year"]
 """The shared recency filter every adapter maps onto its provider's own."""
+
+TIME_RANGE_SPANS: dict[TimeRange, timedelta] = {
+    "day": timedelta(days=1),
+    "week": timedelta(weeks=1),
+    "month": timedelta(days=30),
+    "year": timedelta(days=365),
+}
+"""How far back each range reaches, for a provider that takes the date it starts on."""
 
 OptionType = Literal["string", "integer", "number", "boolean", "array", "object"]
 

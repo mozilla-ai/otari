@@ -1,11 +1,12 @@
 import { Button, buttonVariants, Drawer } from "@heroui/react"
 import { useState } from "react"
-import { FaGithub } from "react-icons/fa"
+import { FaDiscord, FaGithub } from "react-icons/fa"
 import { FiMenu } from "react-icons/fi"
 import {
   publicCatalogHref,
   siteHomeHref,
 } from "@/features/models/publicCatalog"
+import { OTARI_COMMUNITY_URL } from "@/shared/helpers/community"
 import { documentationHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -20,8 +21,8 @@ const DRAWER_LINK =
 
 /**
  * The public catalog's bar: the same destinations as the site in front of it
- * (Models, Documentation, Log in, Sign up, GitHub), so a visitor who came from
- * that site's navbar finds the same one here. The logo goes back to the site
+ * (Models, Documentation, Log in, Sign up, GitHub, Discord), so a visitor who
+ * came from that site's navbar finds the same one here. The logo goes back to the site
  * where the deployment names one (`site_url`), else to the catalog.
  *
  */
@@ -80,6 +81,15 @@ export function PublicCatalogBar({ onList }: { onList: boolean }) {
         >
           <FaGithub aria-hidden className="size-[1.125rem]" />
         </a>
+        <a
+          href={OTARI_COMMUNITY_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Discord"
+          className={LINK}
+        >
+          <FaDiscord aria-hidden className="size-[1.125rem]" />
+        </a>
         <Drawer isOpen={menuOpen} onOpenChange={setMenuOpen}>
           <Drawer.Trigger
             aria-label="Open menu"
@@ -130,6 +140,15 @@ export function PublicCatalogBar({ onList }: { onList: boolean }) {
                   >
                     <FaGithub aria-hidden className="size-4" />
                     GitHub
+                  </a>
+                  <a
+                    href={OTARI_COMMUNITY_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={DRAWER_LINK}
+                  >
+                    <FaDiscord aria-hidden className="size-4" />
+                    Discord
                   </a>
                   <hr className="my-2 border-border" />
                   <a href="#/" className={DRAWER_LINK}>

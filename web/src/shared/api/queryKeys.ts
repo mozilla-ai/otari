@@ -59,8 +59,11 @@ export const HEALTH_CHECKS = "health-checks"
 // at the same pace while it is open.
 export const HEALTH_CHECKS_POLL_MS = 15_000
 export const BUILD = "build"
-export const HEALTH = "health"
 export const KEYS = "keys"
+// One key's federation rules. Its own root rather than a child of KEYS: a key
+// edit invalidates KEYS, and that changes nothing about which identities may
+// stand in for the key.
+export const FEDERATION_RULES = "federation-rules"
 export const BUDGETS = "budgets"
 export const SCOPED_BUDGETS = "scoped-budgets"
 export const USERS = "users"
@@ -82,14 +85,13 @@ export const DEPLOYMENT_ADMIN = "deployment-admin"
 // offered models: a catalog sweep touches every provider at once, so one
 // invalidation of the root covers the list and every open panel.
 export const HOSTED_PROVIDERS = "hosted-providers"
-// What a provider says it serves on the stored key, and what a sweep would
-// remove. Both dial the upstream, so neither sits under HOSTED_PROVIDERS: every
+// What a provider says it serves on the stored key, and what a catalog update
+// would do. Both dial the upstream, so neither sits under HOSTED_PROVIDERS: every
 // save there would re-dial, and the preview would refetch while its confirm
 // dialog is still open, asking every provider a second time.
 export const HOSTED_PROVIDER_AVAILABLE_MODELS =
   "hosted-provider-available-models"
-export const HOSTED_PROVIDERS_REFRESH_PREVIEW =
-  "hosted-providers-refresh-preview"
+export const HOSTED_CATALOG_UPDATE_PREVIEW = "hosted-catalog-update-preview"
 // The signed-in identity read on its own (`GET /v1/auth/profile`), for a caller
 // the organization context cannot describe because it has no organization. Not
 // a child of ORGANIZATIONS: switching organization does not change who you are.
@@ -161,12 +163,6 @@ export const MAILED_LINK_STATUS = "mailed-link-status"
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
 // open, so a minute keeps a deploy from going unnoticed for long.
 export const BUILD_POLL_MS = 60_000
-// How often the hybrid landing page re-asks whether this gateway is up and can
-// still reach its control plane. That pair is the only thing on that page which
-// changes, and it is the reason to leave the page open, so it ticks faster than
-// the build check. The gateway bounds its own upstream probe (`resolve_timeout_ms`),
-// so a stalled control plane answers "no" rather than piling up requests.
-export const HEALTH_POLL_MS = 15_000
 
 // The four queries below are backed by provider or models.dev fan-out
 // gateway-side. That is cached and refreshed in the background now, so they are

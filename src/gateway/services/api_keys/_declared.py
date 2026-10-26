@@ -67,6 +67,7 @@ async def apply_declared_key(
         "is_service_key": spec.is_service_key,
         "end_user_budget_id": spec.end_user_budget_id,
         "end_user_budget_ids": end_user_budget_ids,
+        "max_end_users": spec.max_end_users,
         "exclude_from_budget": spec.exclude_from_budget,
         "reject_user_mismatch": spec.reject_user_mismatch,
         "declared_digest": digest,

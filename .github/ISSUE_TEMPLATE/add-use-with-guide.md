@@ -21,7 +21,7 @@ Coding tools are the most common reason people reach for a gateway. Each one set
 1. Copy the matching exemplar (`docs/use-with-claude-code.md` for Anthropic/Messages clients, or `docs/use-with-opencode.md` for OpenAI-compatible clients) to `docs/use-with-<tool>.md`.
 2. Fill in each section for this tool:
    - [ ] **Intro**: which API surface the tool speaks (OpenAI `/v1/chat/completions`, Anthropic `/v1/messages`, etc.) and which Otari endpoints it hits
-   - [ ] **Quick start**: cover both **Connected to otari.ai** and **Standalone**, either as separate subsections or clearly labeled examples, with the exact env vars or config file the tool uses (base URL, auth token, model)
+   - [ ] **Quick start**: cover both **Connected to otari.ai** and **Self-hosted**, either as separate subsections or clearly labeled examples, with the exact env vars or config file the tool uses (base URL, auth token, model)
    - [ ] **Choosing a model**: document the selector format this tool passes to Otari (for example `provider:model`, `provider/model`, or tool-prefixed forms like `otari/openai:gpt-4o`), with an example or two the tool supports
    - [ ] **Gotchas**: anything tool-specific (header names, base URL with or without `/v1`, user-id handling), like the `ANTHROPIC_AUTH_TOKEN` vs `ANTHROPIC_API_KEY` note in the Claude Code guide
    - [ ] **See also**: link back to the Quickstart and the provider setup
@@ -33,7 +33,7 @@ Coding tools are the most common reason people reach for a gateway. Each one set
 
 - [ ] New file at `docs/use-with-<tool>.md`
 - [ ] Follows the matching exemplar for the tool's API surface
-- [ ] Both "Connected to otari.ai" and "Standalone" variants covered, either as separate subsections or clearly labeled examples
+- [ ] Both "Connected to otari.ai" and "Self-hosted" variants covered, either as separate subsections or clearly labeled examples
 - [ ] The tool's selector format for Otari is explained with concrete examples
 - [ ] At least one tool-specific gotcha called out
 - [ ] Linked from `docs/index.md`

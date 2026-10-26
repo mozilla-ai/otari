@@ -20,7 +20,6 @@ The request path's read, with no identity and the workspace from the key, is
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -247,40 +246,31 @@ class WorkspaceCodeExecutionPolicyPublic(BaseModel):
         )
 
 
-def read_code_execution_policy(answer: Mapping[str, Any]) -> ResolvedCodeExecutionPolicy:
-    """Read the control plane's answer for one workspace's code execution policy.
-
-    Raises ``ValueError`` when a field is malformed, so a policy that cannot be read fails closed.
-    A ceiling above this gateway's own is read as sent, because it can only lower a limit.
-    """
-    enabled = answer.get("enabled")
-    if not isinstance(enabled, bool):
-        raise ValueError("enabled must be a boolean")
-    hint = answer.get("default_purpose_hint")
-    if hint is not None and not isinstance(hint, str):
-        raise ValueError("default_purpose_hint must be a string")
-    tools = answer.get("tools")
-    if tools is not None and (not isinstance(tools, list) or any(not isinstance(tool, str) for tool in tools)):
-        raise ValueError("tools must be a list of strings")
-    executor = answer.get("executor")
-    if executor is not None and CodeExecutor.parse(executor) is None:
-        raise ValueError("executor must be one of auto, otari or provider")
-    return ResolvedCodeExecutionPolicy(
-        enabled=enabled,
-        default_purpose_hint=_blank_to_none(hint),
-        max_iterations=_answer_ceiling(answer, "max_iterations"),
-        exec_timeout_s=_answer_ceiling(answer, "exec_timeout_s"),
-        image=None,
-        tools=frozenset(tools) if tools is not None else None,
-        executor=CodeExecutor.parse(executor),
-    )
+# The policy of a workspace that holds no row where this deployment makes code execution opt-in.
+_NOT_TURNED_ON = ResolvedCodeExecutionPolicy(
+    enabled=False,
+    default_purpose_hint=None,
+    max_iterations=None,
+    exec_timeout_s=None,
+    image=None,
+    tools=None,
+    executor=None,
+)
 
 
 class WorkspaceCodeExecutionPolicies:
     """The policy each workspace's requests run under, read on the request path with no identity."""
 
-    def __init__(self, policies: WorkspaceCodeExecutionPolicyRepository) -> None:
+    def __init__(self, policies: WorkspaceCodeExecutionPolicyRepository, *, on_without_policy: bool) -> None:
         self._policies = policies
+        self._on_without_policy = on_without_policy
+
+    async def for_request(self, workspace_id: uuid.UUID) -> ResolvedCodeExecutionPolicy | None:
+        """The policy a request runs under: the stored one, or the deployment's default where there is none."""
+        policy = await self.resolve(workspace_id)
+        if policy is None and not self._on_without_policy:
+            return _NOT_TURNED_ON
+        return policy
 
     async def resolve(self, workspace_id: uuid.UUID) -> ResolvedCodeExecutionPolicy | None:
         """The workspace's stored policy, or ``None`` when it has none.
@@ -453,17 +443,6 @@ def _stored_values(request: WorkspaceCodeExecutionPolicyUpdate) -> dict[str, Any
         "tools": request.tools,
         "executor": request.executor.value if request.executor is not None else None,
     }
-
-
-def _answer_ceiling(answer: Mapping[str, Any], field: str) -> int | None:
-    """A ceiling from the control plane's answer, or ``None`` when it sends none."""
-    value = answer.get(field)
-    if value is None:
-        return None
-    # ``bool`` is an ``int`` subclass, so a JSON ``true`` would otherwise read as 1.
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise ValueError(f"{field} must be a positive integer")
-    return int(value)
 
 
 def _blank_to_none(value: str | None) -> str | None:

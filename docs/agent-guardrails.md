@@ -8,7 +8,8 @@ the agent hands it back.
 The rules live in `.otari/`, committed with the code. `otari hook` runs them: a
 coding agent's hook system invokes it, it collects the evidence that event
 carries, and it evaluates the rules in process. It needs no gateway, no
-account, and no credential.
+account, and no credential, unless you choose to
+[report its checks to Otari](#reporting-to-otari).
 
 This is not [Inference Guardrails](guardrails.md), which check request input and
 output at inference time. A gate checks agent actions and repository diffs.
@@ -26,6 +27,7 @@ Contents:
 - [Where the files live](#where-the-files-live)
 - [Checking a guardrail before it runs](#checking-a-guardrail-before-it-runs)
 - [Checking a pull request in CI](#checking-a-pull-request-in-ci)
+- [Reporting to Otari](#reporting-to-otari)
 - [Generating gates from AGENTS.md or CLAUDE.md](#generating-gates-from-agentsmd-or-claudemd)
 - [Your own guardrail in `~/.otari/`](#your-own-guardrail-in-otari)
 - [Recommendations](#recommendations)
@@ -329,6 +331,37 @@ Otari's own repository does this in
 [`.github/workflows/otari-guardrails-check.yml`](../.github/workflows/otari-guardrails-check.yml)
 and
 [`.github/workflows/otari-guardrails-judges.yml`](../.github/workflows/otari-guardrails-judges.yml).
+
+## Reporting to Otari
+
+`otari hook` can report every gate it checks to an Otari server, so a team sees
+which gates ran, which blocked, and which never fire. Setting the server and an
+API key where the agent runs turns it on, for every repository the agent works
+in:
+
+```bash
+export OTARI_URL="http://localhost:8000"     # or your Otari deployment
+export OTARI_API_KEY="tk-your-import-key"    # budget-exempt, as for an OTLP export
+```
+
+The server receives each gate's definition, its `message` included, and that
+covers your own gates in `~/.otari/`, so set `OTARI_URL` only for a server you
+would show your guardrails to. A session then shows each gate's message where it
+blocked, and lists the gates the guardrail declares that never ran. When the
+agent also exports its own spans, as
+[Claude Code can](use-with-claude-code.md#send-claude-code-sessions-to-otari), a
+gate shows under the tool call it checked, and a `Stop` gate under the turn it
+held. Claude Code does not pass `OTEL_*` variables to its hooks, so it needs
+`OTARI_URL` and `OTARI_API_KEY` set in the `env` block of its settings, as that
+page shows.
+
+Reporting never slows a check or changes its verdict. To also send the command
+or paths a check read, set `OTARI_HOOK_REPORT_CONTENT=1`; a server keeps them
+only where it keeps content (see
+[Keeping what a span was about](traces.md#keeping-what-a-span-was-about)).
+`OTARI_HOOK_REPORT=off` turns reporting off. What a report carries, how it is
+queued and sent, and what a judge gate's usage costs are in
+[What `otari hook` reports](agent-guardrails-reference.md#what-otari-hook-reports).
 
 ## Generating gates from AGENTS.md or CLAUDE.md
 

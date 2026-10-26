@@ -10,7 +10,7 @@ name: Otari Libs Live
 #
 # Weekly, so a change is noticed in a quiet week; GitHub notifies the person who
 # last changed the schedule of a failed scheduled run. Also on a pull request
-# that changes either library, unlike otari-live-providers.yml: a run costs a
+# that changes either library: a run costs a
 # few cents and the providers' answers are stable enough to block a merge on.
 # A pull request from a fork gets no secrets, so its live tests skip, as they do
 # anywhere without a key, and a notice says so. A scheduled or manual run without
@@ -45,6 +45,7 @@ jobs:
       HAS_EXA_KEY: ${{ secrets.EXA_API_KEY != '' }}
       HAS_MOJEEK_KEY: ${{ secrets.MOJEEK_API_KEY != '' }}
       HAS_TABSTACK_KEY: ${{ secrets.TABSTACK_API_KEY != '' }}
+      HAS_DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY != '' }}
 
     steps:
     - name: Say so when the Exa key is absent
@@ -77,11 +78,21 @@ jobs:
         echo "::error::The TABSTACK_API_KEY secret is not set, so the Tabstack live tests cannot run."
         exit 1
 
+    - name: Say so when the DeepSeek key is absent
+      if: env.HAS_DEEPSEEK_KEY != 'true' && github.event_name == 'pull_request'
+      run: echo "::notice::The DEEPSEEK_API_KEY secret is not available to this run; the DeepSeek live tests skip."
+
+    - name: Fail a scheduled or manual run without the DeepSeek key
+      if: env.HAS_DEEPSEEK_KEY != 'true' && github.event_name != 'pull_request'
+      run: |
+        echo "::error::The DEEPSEEK_API_KEY secret is not set, so the DeepSeek live tests cannot run."
+        exit 1
+
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
 
-    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+    - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       with:
         python-version: 3.14
         activate-environment: true
@@ -95,6 +106,7 @@ jobs:
         ANY_SEARCH_LIVE: "1"
         EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
         MOJEEK_API_KEY: ${{ secrets.MOJEEK_API_KEY }}
+        DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       run: uv run pytest -v -rs any-search/tests/test_live.py
 
     - name: Live fetches
@@ -102,4 +114,5 @@ jobs:
         ANY_FETCH_LIVE: "1"
         EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
         TABSTACK_API_KEY: ${{ secrets.TABSTACK_API_KEY }}
+        DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       run: uv run pytest -v -rs any-fetch/tests/test_live.py

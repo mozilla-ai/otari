@@ -1,4 +1,4 @@
-"""The guardrails the caller's organization defined for Otari to run itself (standalone mode only).
+"""The guardrails the caller's organization defined for Otari to run itself.
 
 Thin composition over
 `gateway.services.tenancy.organization_guardrail_definition_service`: resolve the
@@ -12,8 +12,8 @@ say different things. A definition is *what* a check is, and one of them can be
 mandated under several profiles; a mandate is *where* a check runs and how hard
 it bites. The keys differ with them, which is why the tables do.
 
-Scoped to ``/me`` for the reason the mandates next door are: a standalone
-deployment has one organization and the caller's identity already points at it,
+Scoped to ``/me`` for the reason the mandates next door are: a deployment with
+no overlay has one organization and the caller's identity already points at it,
 so a request cannot name one.
 """
 
@@ -37,7 +37,7 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionUpdate,
 )
 
-# Master key on the router, as every standalone management router declares it.
+# Master key on the router, as every management router declares it.
 # The role gate is a separate question answered in the service: the credential
 # says a request is the operator's, the membership says whether that identity may
 # spend the organization's vendor accounts.

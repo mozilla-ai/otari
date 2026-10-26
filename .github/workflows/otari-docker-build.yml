@@ -20,7 +20,7 @@ name: Otari Docker Build
 # cli/src/** is listed because the liveness check asserts what `otari --version`
 # reports inside the image. The two libraries' pyproject.toml and src/** are
 # listed as cli's are, since the image installs every workspace member from its
-# source tree.
+# source tree. README.md is listed because its quickstart is run as written.
 #
 # Single-platform on purpose too: this proves the recipe works and the container
 # boots. The publish workflow still builds linux/arm64 under QEMU, which is
@@ -43,8 +43,9 @@ on:
       - 'any-fetch/src/**'
       - 'uv.lock'
       - 'scripts/docker_liveness_check.sh'
-      - 'scripts/hybrid_edition_smoke.py'
       - 'scripts/oss_edition_smoke.py'
+      - 'scripts/readme_quickstart_check.py'
+      - 'README.md'
       - '.github/workflows/otari-docker-build.yml'
   workflow_dispatch:
 
@@ -83,26 +84,25 @@ jobs:
       - name: Run container liveness check
         run: ./scripts/docker_liveness_check.sh otari-pr:${{ github.sha }}
 
+      # The README's quickstart, run as written with only the image swapped: no
+      # pepper, no master key, no config file. The two checks around it set the
+      # secrets they need, so only this one sees a first run that cannot start.
+      - name: Run the README quickstart
+        run: python3 scripts/readme_quickstart_check.py --image otari-pr:${{ github.sha }}
+
       # Liveness proves the container answers its health probes. This proves it
-      # can serve a request: the same hybrid walk as otari-oss-edition.yml, run
-      # against the image a deployment actually pulls rather than a source
-      # checkout. The image pins OTARI_HOST/OTARI_PORT as environment variables,
-      # which beat a mounted config file, so an image that boots but cannot
-      # serve is a break only this step sees.
+      # can serve a request: the same walk as otari-oss-edition.yml, run against
+      # the image a deployment actually pulls rather than a source checkout, on
+      # a SQLite file inside the container. The image pins OTARI_HOST/OTARI_PORT
+      # as environment variables, which beat a mounted config file, so an image
+      # that boots but cannot serve is a break only this step sees.
       - name: Install the smoke's environment
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.14"
 
-      - name: Smoke the container in hybrid mode
-        run: |
-          uv sync --frozen --no-dev
-          uv run --frozen --no-dev python scripts/hybrid_edition_smoke.py \
-            --image otari-pr:${{ github.sha }}
-
-      # The standalone walk against the same image, on a SQLite file inside the
-      # container: the image path under test is the same whatever the database.
       - name: Smoke the container as the OSS edition
         run: |
+          uv sync --frozen --no-dev
           uv run --frozen --no-dev python scripts/oss_edition_smoke.py \
             --image otari-pr:${{ github.sha }}

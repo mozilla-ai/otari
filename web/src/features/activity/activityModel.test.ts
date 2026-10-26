@@ -615,9 +615,9 @@ describe("the row formatters", () => {
     expect(formatLatencyCell(842)).toBe("842 ms")
   })
 
-  it("roll a long total time up into minutes and hours, never below zero", () => {
+  it("roll a long total time up into minutes, hours and days, never below zero", () => {
     expect(formatLatencyCell(11_000_000)).toBe("3h 03m")
-    expect(formatLatencyCell(259_200_000)).toBe("72h 00m")
+    expect(formatLatencyCell(259_200_000)).toBe("3d 00h")
     expect(formatLatencyCell(-5)).toBe("0 ms")
   })
 

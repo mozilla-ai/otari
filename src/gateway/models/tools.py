@@ -41,7 +41,7 @@ class SearchToolCredential(Base):
     search row's enrichment instance. The API key is held encrypted
     (``secret_box``) and is optional, because a ``searxng`` backend is normally
     keyless; ``last4`` is kept in clear only so the UI can show which key is set
-    without ever decrypting. Standalone mode only.
+    without ever decrypting.
     """
 
     __tablename__ = "search_tool_credentials"
@@ -88,8 +88,7 @@ class WorkspaceMcpServer(Base):
     """One MCP server a workspace has configured, referenced by id from a request.
 
     Ported from otari-ai's ``mcp_server`` table (otari#658). A request names
-    stored servers with ``mcp_server_ids``; hybrid mode resolves those ids
-    through the platform and standalone mode resolves them here, against the
+    stored servers with ``mcp_server_ids``, resolved here against the
     workspace the request's key belongs to. There is no deployment-wide MCP
     server list for these rows to narrow, which is why MCP is the stated
     exception to the "a workspace row never grants" rule in
@@ -132,6 +131,10 @@ class WorkspaceMcpServer(Base):
     purpose_hint: Mapped[str | None] = mapped_column(Text, default=None)
     allowed_tools: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # The last connection check, in the shape ``WorkspaceMcpServerHealth``
+    # publishes; null until one has run, and cleared when the URL, the token or
+    # the allow-list changes, since it described the old ones.
+    health: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     # ``UtcDateTime`` for the same reason ``WorkspaceBudgetDefault``'s are: these
     # go over the wire and a naive SQLite round-trip would drop the offset.
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
@@ -204,8 +207,7 @@ class WorkspaceCodeExecutionPolicy(Base):
     credential are operator concerns and never move here, see
     ``src/gateway/AGENTS.md``); this row says who on that deployment may ask
     for it and within which limits. Resolved at admission by
-    ``prepare_gateway_tools`` and applied to the tool loop, the standalone
-    counterpart of the hybrid path's ``/gateway/code-execution/resolve``.
+    ``prepare_gateway_tools`` and applied to the tool loop.
 
     A row may only *narrow*: ``enabled=False`` refuses the tool for this
     workspace, and the two limits are floored against the values a request
@@ -285,14 +287,12 @@ class WorkspaceCodeExecutionPolicy(Base):
 
 
 class WorkspaceWebSearchConfig(Base):
-    """A workspace's configuration over the deployment-wide web-search backend.
+    """A workspace's configuration over the web search it runs on.
 
-    The backend itself stays deployment-wide (``web_search_url`` and the
-    credential the adapter in front of it holds are operator concerns and never
-    move here, see ``src/gateway/AGENTS.md``); this row says which workspaces
-    may reach it and how their searches are constrained. Resolved at admission
-    by ``prepare_gateway_tools``, the standalone counterpart of the hybrid
-    path's ``/gateway/web-search/resolve``.
+    What the workspace searches with is the deployment's instance, or its
+    organization's own key (:class:`OrgWebSearchKey`), which this row never
+    holds; this row says whether the workspace may search and how its searches
+    are constrained. Resolved at admission by ``prepare_gateway_tools``.
 
     A row may only *narrow*: ``enabled=False`` refuses ``otari_web_search`` for
     the workspace, ``max_results`` is floored against what the request asked
@@ -364,32 +364,37 @@ class WorkspaceWebSearchConfig(Base):
 
 
 class OrgWebSearchKey(Base):
-    """One web search provider key an organization brings, for its workspaces' searches.
+    """One web search or fetch provider key an organization brings, for its workspaces' calls.
 
     The search counterpart of ``OrgProviderKey`` (``models/provider_keys.py``), decided
     at otari-ai#1748 and mozilla-ai/otari#1724: archival, one default per organization
-    and provider, and per-workspace pin or turn-off overrides
-    (:class:`WorkspaceWebSearchKeyOverride`). A workspace with a usable key searches
-    with it; any other workspace uses the deployment's own search, which this table
-    never changes. The two never merge.
+    and kind, and per-workspace pin or turn-off overrides
+    (:class:`WorkspaceWebSearchKeyOverride`). A workspace with a usable key of a kind
+    uses it for that kind's calls; any other workspace uses the deployment's own
+    instance, which this table never changes. The two never merge.
 
-    ``provider`` is one of ``WEB_SEARCH_PROVIDERS``, the services the managed search
-    tool can call with a key. ``encrypted_api_key`` is Fernet-encrypted with
-    ``OTARI_SECRET_KEY`` (``services/secret_box.py``) and never serialized; ``last4``
-    is what an operator tells two keys apart by.
+    ``kind`` is ``search`` or ``fetch`` and never changes: a search key serves the
+    search tool, a fetch key the fetch tool and the enrichment of search hits.
+    ``provider`` is one the libraries serve for the kind. ``encrypted_api_key`` is
+    Fernet-encrypted with ``OTARI_SECRET_KEY`` (``services/secret_box.py``) and never
+    serialized, and ``None`` for a provider that takes no key; ``last4`` is what an
+    operator tells two keys apart by. ``api_base`` and ``options`` are the key's own
+    endpoint and provider options, ``None`` for the provider's defaults.
 
     CASCADE: an organization-owned credential means nothing once its organization is gone.
     """
 
     __tablename__ = "org_web_search_keys"
     __table_args__ = (
-        UniqueConstraint("organization_id", "provider", "name", name="uq_org_web_search_keys_org_provider_name"),
-        # One live default per (organization, provider), arbitrated by the database
+        UniqueConstraint(
+            "organization_id", "kind", "provider", "name", name="uq_org_web_search_keys_org_kind_provider_name"
+        ),
+        # One live default per (organization, kind), arbitrated by the database
         # so two concurrent "set default" calls cannot both win.
         Index(
-            "uq_org_web_search_keys_org_default",
+            "uq_org_web_search_keys_org_kind_default",
             "organization_id",
-            "provider",
+            "kind",
             unique=True,
             postgresql_where=text("is_org_default AND archived_at IS NULL"),
             sqlite_where=text("is_org_default AND archived_at IS NULL"),
@@ -397,15 +402,21 @@ class OrgWebSearchKey(Base):
         # The target of the override table's composite FK, which pins an override
         # to a key of its own organization.
         UniqueConstraint("organization_id", "id", name="uq_org_web_search_keys_org_id"),
+        # The request schema refuses any other kind first; this is the backstop for
+        # a writer that is not the service.
+        CheckConstraint("kind IN ('search', 'fetch')", name="ck_org_web_search_keys_kind"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="search", server_default="search")
     provider: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    encrypted_api_key: Mapped[str] = mapped_column(Text, nullable=False)
+    api_base: Mapped[str | None] = mapped_column(String(1024), default=None)
+    options: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    encrypted_api_key: Mapped[str | None] = mapped_column(Text, default=None)
     last4: Mapped[str | None] = mapped_column(String(8), default=None)
     archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
     is_org_default: Mapped[bool] = mapped_column(default=False, nullable=False, server_default=false())
@@ -463,8 +474,6 @@ class WebToolCredentialSource(StrEnum):
 
     # The organization's own key, read from this deployment's rows.
     ORG = "org"
-    # The control plane's answer to a hybrid data plane's resolve.
-    HYBRID = "hybrid"
 
 
 @dataclass(frozen=True)
@@ -516,7 +525,7 @@ class ResolvedCodeExecutionPolicy:
 
 
 class WebTool(StrEnum):
-    """A managed web tool a request can declare, named as the model and the control plane see it."""
+    """A managed web tool a request can declare, named as the model sees it."""
 
     SEARCH = "web_search"
     FETCH = "web_fetch"
@@ -573,3 +582,22 @@ class SandboxContainer(Base):
     # same workspace at the same time. Cleared when the request records its
     # lease; the timestamp releases one a crashed gateway never gave back.
     in_use_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+
+
+class SandboxCredential(Base):
+    """The key this deployment leases a hosted sandbox provider's sandboxes with, set through the dashboard.
+
+    The stored counterpart of the provider's own environment variable
+    (``E2B_API_KEY``), and it wins over it, the way a ``ProviderCredential`` wins
+    over a ``providers:`` entry: rotating the key is a write, not a redeploy.
+    One row per provider. ``encrypted_api_key`` is Fernet-encrypted with
+    ``OTARI_SECRET_KEY`` (``services/secret_box.py``) and never serialized;
+    ``last4`` is kept in clear so an operator can tell which key is set.
+    """
+
+    __tablename__ = "sandbox_credentials"
+
+    provider: Mapped[str] = mapped_column(primary_key=True)
+    encrypted_api_key: Mapped[str] = mapped_column()
+    last4: Mapped[str] = mapped_column()
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))

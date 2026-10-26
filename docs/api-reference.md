@@ -8,7 +8,10 @@ artifacts are the source of truth for paths, parameters, and schemas.
 
 The API is mounted at `/api/v1` under the base URL, whose values for otari.ai
 and for your own gateway (`http://localhost:8000` by default) are in
-[Connect to Otari](connect.md), with the form each SDK expects. OTLP ingest is a sibling at `/otlp`:
+[Connect to Otari](connect.md), with the form each SDK expects. A request under
+the old `/v1` root (a base URL of `http://localhost:8000/v1`, for example) is not
+served: it gets a 404 whose detail names the same path under `/api/v1`. OTLP
+ingest is a sibling at `/otlp`:
 point `OTEL_EXPORTER_OTLP_ENDPOINT` at `http://localhost:8000/otlp` and the
 exporter appends `/v1/traces`, `/v1/logs` and `/v1/metrics`.
 
@@ -88,11 +91,18 @@ no way to send them back.
 
 ### Request ID and inline cost
 
-Every Chat, Messages, and Responses response carries an `Otari-Request-ID`
-header, streaming or not. The gateway also names the
+Chat, Messages, and Responses responses carry an `Otari-Request-ID` header,
+streaming or not, and so do the responses of the embeddings, rerank, images,
+audio, moderations, decisions and search endpoints. The exception is a request
+rejected before the gateway handles it: a failed authentication (`401`) or a
+body that does not validate (`422`) carries none. The gateway mints it, sends
+it on its own refusals as well, and records it on the request's usage rows, so
+[`GET /api/v1/usage/requests/{request_id}`](#cost-of-a-failed-or-interrupted-request)
+finds the request's cost by it. The gateway also names the
 provider instance and model that served the request, whether a fallback did, and
 how long it took, in `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`,
-`Otari-Fallback` and `Otari-Response-Duration-Ms`; see
+`Otari-Fallback` and `Otari-Response-Duration-Ms`, and splits that duration into
+its own time and the provider's in `Server-Timing`; see
 [What is billed and what the caller sees](routing.md#what-is-billed-and-what-the-caller-sees).
 
 A priced response also carries its cost on the usage object it already returns,
@@ -169,9 +179,9 @@ whose `delta` has no content or tool calls, so a client that reads only `choices
 passes over it. Match entries by `id`: the ended one replaces the started one.
 
 ```text
-data: {"id":"chatcmpl-…","choices":[{"delta":{"content":null,…},"finish_reason":null,"index":0}],…,"otari_tool_calls":[{"id":"otari_ws_5f0c…","type":"web_search","status":"in_progress","query":"latest python release"}]}
+data: {"id":"chatcmpl-…","choices":[{"delta":{},"index":0,"finish_reason":null}],…,"otari_tool_calls":[{"id":"otari_ws_5f0c…","type":"web_search","status":"in_progress","query":"latest python release"}]}
 
-data: {"id":"chatcmpl-…","choices":[{"delta":{"content":null,…},"finish_reason":null,"index":0}],…,"otari_tool_calls":[{"id":"otari_ws_5f0c…","type":"web_search","status":"completed","query":"latest python release","sources":[…]}]}
+data: {"id":"chatcmpl-…","choices":[{"delta":{},"index":0,"finish_reason":null}],…,"otari_tool_calls":[{"id":"otari_ws_5f0c…","type":"web_search","status":"completed","query":"latest python release","sources":[…]}]}
 ```
 
 The entries are not in the `delta`, where the OpenAI Python SDK's stream helper
@@ -320,7 +330,7 @@ A non-streaming Chat, Messages, or Responses request may carry an
 characters, usually a UUID. A retry with the same key and the same request gets
 the original response, with its original `Otari-Request-ID`, serving headers
 and `usage.cost_usd`, plus `Otari-Idempotent-Replayed: true` (and no
-`Otari-Response-Duration-Ms`, which described the original), without calling the
+`Otari-Response-Duration-Ms` or `Server-Timing`, which described the original), without calling the
 provider or billing again.
 
 | Aspect | Behavior |
@@ -399,8 +409,13 @@ for it works against Otari with its base URL changed. `include_raw` and
 the only configured tool. A call that names no tool runs on the workspace's
 [organization search key](tools.md#organization-search-keys) when it has a usable
 one; a named call runs on that tool with its own key. Either way the tool decides
-the key allow-list entry (`<provider>:<tool>`), the `rate_limits` rules, the
-timeout and the usage row's model and provider.
+the access check, the `rate_limits` rules, the timeout and the usage row's model
+and provider. The access check reads the key's `allowed_tools`, else its user's,
+for the tool's name or `*`. With neither set, it follows the key's model access,
+or its user's when the key has none: unrestricted model access runs every search
+tool, and restricted model access runs only a tool named by its deprecated
+`<provider>:<tool>` entry in `allowed_models`
+([access control](access-control.md#users-and-identities)).
 
 **Request.**
 
@@ -447,6 +462,15 @@ A service key's `user` field names one of its end users here as it does on chat
 completions: the search is billed to that end user, under the key's end-user
 budget, and counted by `rate_limits`.
 
+**Price.** A search is billed at the provider's reported cost when it reports
+one, else at the tool's own per-call rate: its `price_per_call`, or a price row
+of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
+`kind`, as do the pricing reads and deletes, as a `?kind=` query, and
+`/api/v1/organizations/me/pricing`, where only a deployment operator sets a
+`search` or `fetch` override). A row written under the old
+`<provider>:<tool>` key is read after it, until a later release. See
+[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool) for the order and the organization key's rate.
+
 **Errors.** Where a refusal carries a stable code, it is in the
 `Otari-Error-Code` header and the body's `code`; see [Error codes](#error-codes).
 
@@ -460,11 +484,11 @@ budget, and counted by `rate_limits`.
 | The master key without a `user` | 400 | |
 | The body fails schema validation, such as an `include_raw` that is not a boolean | 422 | `invalid_request` |
 | The workspace turned web search off | 403 | |
-| The key's allow-list does not name `<provider>:<tool>` | 403 | |
+| The key's `allowed_tools`, or the deprecated `<provider>:<tool>` entry in `allowed_models`, does not grant the tool | 403 | |
 | A `user` naming another user, where the key rejects a mismatch | 403 | |
 | A service key's `Otari-End-User-Budget` is not one it may use | 403 | `end_user_budget_not_allowed` |
 | A budget refuses the search | 403 | `budget_exceeded` |
-| `require_pricing` is on and the search's pricing row is missing (`<provider>:<tool>`, or `otari:web_search` for a search the workspace's organization key serves); the detail names it | 402 | `pricing_required` |
+| `require_pricing` is on and the search has no price (a row of kind `search` keyed by the tool's name, or its `price_per_call`; `otari:web_search` for a search the workspace's organization key serves); the detail names it | 402 | `pricing_required` |
 | A rate limit is full | 429 | `rate_limited` |
 | The workspace's organization search key cannot be used as it is | 502 | |
 | The provider failed the search, or could not be reached | 502 | |
@@ -689,6 +713,12 @@ A refusal a caller is expected to act on carries a stable code, both as an
 code: it keeps its meaning across releases, while the `detail` text may be
 reworded.
 
+The Messages routes (`/api/v1/messages` and `/api/v1/messages/count_tokens`)
+answer every error in Anthropic's envelope instead, the body Anthropic's SDKs
+read: `{"type": "error", "error": {"type": "rate_limit_error", "message": "..."}, "code": "rate_limited"}`.
+A body that fails validation there is a 400 `invalid_request_error`, as
+Anthropic answers it, whose message names each failing field.
+
 | `Otari-Error-Code` | Status | Meaning | Also sent |
 |---|---|---|---|
 | `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one |
@@ -704,12 +734,13 @@ reworded.
 | `unsupported_content` | 400 | The provider refused content the request carries because the model does not accept it, such as an image sent to a text-only model. Sent only when Otari recognizes the provider's wording for that refusal; a refusal worded otherwise stays a `400` carrying the provider's message and no code. `detail` names the model where it can. A routing policy moves on to its next candidate first, and answers with this code when every candidate gave a refusal Otari recognizes | |
 | `all_candidates_rejected` | 400 | Every model a routing policy or a catalog ID tried rejected the request as invalid | |
 | `insufficient_funds` | 402 | The model is served on a credential the deployment pays for, and the organization has no funds paid in to cover it. Nothing was sent upstream | |
-| `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price, or a direct search's pricing row is missing (see [Search](#search)). An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
+| `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price, a direct search has no price (see [Search](#search)), or a gateway-run tool the request declares has no row to price its calls ([Tools](tools.md#pricing-a-gateway-run-tool)). An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
 | `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: an operator adds the provider as a [hosted provider](hosted-providers.md) (switching on the model), or the organization adds its own provider key. A provider's environment variable alone serves nothing | |
 | `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401, or a 403 other than one rejecting the request, which is a 400). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
+| `end_user_limit_reached` | 403 | A service key already has as many end users as its `max_end_users` allows, so a request that would create a new end user or revive a deleted one is refused. End users it already has are unaffected | |
 | `terms_not_accepted` | 400 | The deployment publishes terms (`terms_url`), and creating or first claiming the account needs them accepted: send `terms_accepted` with the signup, the invitation's first password, the password reset, or the OAuth callback | |
-| `invalid_request` | 422 | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type` | |
+| `invalid_request` | 422, or 400 on the Messages routes | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type`; on the Messages routes, `error.message` names them instead | |
 | `provider_error` | 502, or 200 in a stream's error event | As a 502, the provider answered a non-streamed chat completion with no choices. In a stream's error event, the provider failed after the stream started, for a reason no other code names | |
 | `provider_stream_interrupted` | 200, in a stream's error event only | The provider's stream ended before it finished: it closed without reporting a `finish_reason` (Chat Completions) or without the event that ends a response (Responses, from a provider with its own Responses API), or the connection carrying it was cut. The output received so far is truncated | |
 

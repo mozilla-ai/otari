@@ -9,6 +9,7 @@ from gateway.exceptions.budget_exceptions import (
     EndUserBudgetNotFoundError,
     EndUserDefaultNotListedError,
     EndUserIdInvalidError,
+    EndUserLimitReachedError,
     EndUserNotFoundError,
     EndUserOwnerUnavailableError,
     EndUserPathInvalidError,
@@ -58,15 +59,17 @@ class _EndUsers:
         its counters kept so that deleting an end user cannot clear what they
         spent. An existing end user keeps its budget whatever a request names, so
         a request cannot undo an operator's move; a budget the key may not assign
-        is refused either way.
+        is refused either way. Creating or reviving one is refused once the key
+        has its ``max_end_users``.
         """
         _check_external_id(external_id)
         requested = await self._listed_budget(api_key, requested_budget_id) if requested_budget_id else None
         owner_user_id = await self._available_owner(api_key)
         existing = await self._repositories.end_users.find(owner_user_id, external_id)
+        if existing is None or existing.deleted_at is not None:
+            existing = await self._admitted(api_key, owner_user_id, external_id, existing)
         if existing is not None:
-            if existing.deleted_at is not None:
-                existing.deleted_at = None
+            existing.deleted_at = None
             return ResolvedEndUser(existing.user_id, existing.budget_id)
 
         budget = requested
@@ -92,6 +95,10 @@ class _EndUsers:
         budget = await self._listed_budget(api_key, budget_id)
         owner_user_id = await self._available_owner(api_key)
         user = await self._repositories.end_users.find(owner_user_id, external_id)
+        if user is None or user.deleted_at is not None:
+            user = await self._admitted(api_key, owner_user_id, external_id, user)
+        elif user.budget_id != budget.budget_id:
+            await self._admit_move(api_key, owner_user_id, user)
         if user is None:
             user = _new_end_user(owner_user_id, external_id, budget)
             if await self._repositories.end_users.add(user):
@@ -110,6 +117,7 @@ class _EndUsers:
         if budget_id is not None:
             budget = await self._listed_budget(api_key, budget_id)
             if user.budget_id != budget.budget_id:
+                await self._admit_move(api_key, str(api_key.user_id), user)
                 _put_on_budget(user, budget)
         if blocked is not None:
             user.blocked = blocked
@@ -167,6 +175,49 @@ class _EndUsers:
         """Refuse a service key whose own user is blocked or deleted."""
         _require_service_key(api_key)
         await self._available_owner(api_key)
+
+    async def _admitted(self, api_key: APIKey, owner_user_id: str, external_id: str, found: User | None) -> User | None:
+        """``found`` again, once the key's ``max_end_users`` admits one more live end user.
+
+        Counted on the budgets the key assigns, so two keys of one owner, each
+        with budgets of its own, keep separate caps over end users they share
+        an owner for. The owner's row is locked first, so replicas admitting at
+        once cannot overshoot; an existing end user's requests never get here.
+        The end user is looked up again under that lock: a request for the same
+        id may have created or revived it while this one waited, and then it
+        takes no new place.
+        """
+        if api_key.max_end_users is None:
+            return found
+        await self._repositories.end_users.lock_owner(owner_user_id)
+        found = await self._repositories.end_users.find(owner_user_id, external_id)
+        if found is not None and found.deleted_at is None:
+            return found
+        await self._refuse_when_full(api_key, owner_user_id, api_key.max_end_users)
+        return found
+
+    async def _admit_move(self, api_key: APIKey, owner_user_id: str, user: User) -> None:
+        """Refuse moving a live end user onto the key's budgets from outside them when the key is full.
+
+        Such a move adds to the key's count as a new end user does, typically one
+        another key of the same owner started. A move between the key's own
+        budgets, or for a key that counts every budget, adds nothing.
+        """
+        counted, unbudgeted = _counted(api_key)
+        if api_key.max_end_users is None or counted is None or user.budget_id in counted:
+            return
+        if user.budget_id is None and unbudgeted:
+            return
+        await self._repositories.end_users.lock_owner(owner_user_id)
+        await self._refuse_when_full(api_key, owner_user_id, api_key.max_end_users)
+
+    async def _refuse_when_full(self, api_key: APIKey, owner_user_id: str, max_end_users: int) -> None:
+        counted, unbudgeted = _counted(api_key)
+        live = await self._repositories.end_users.count_live_on_budgets(
+            owner_user_id, counted, with_unbudgeted=unbudgeted
+        )
+        if live >= max_end_users:
+            raise EndUserLimitReachedError()
 
     async def _available_owner(self, api_key: APIKey) -> str:
         """The key's user, refused when it is blocked or deleted, since its end users bill through it."""
@@ -255,6 +306,18 @@ def _put_on_budget(user: User, budget: Budget) -> None:
     window = budget_window(now, budget)
     user.budget_id = budget.budget_id
     user.budget_started_at, user.next_budget_reset_at = window if window is not None else (now, None)
+
+
+def _counted(api_key: APIKey) -> tuple[list[str] | None, bool]:
+    """The budgets a key's ``max_end_users`` counts (None for every one), and whether it counts end users on none.
+
+    A key with a list and no default starts an end user on no budget when a
+    request names none, so those are its end users too.
+    """
+    budgets = api_key.assignable_end_user_budgets()
+    if not budgets:
+        return None, False
+    return budgets, api_key.end_user_budget_id is None
 
 
 def _new_end_user(owner_user_id: str, external_id: str, budget: Budget | None) -> User:

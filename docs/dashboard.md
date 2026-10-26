@@ -114,9 +114,21 @@ gateway process rather than to any organization on it:
 | Settings | The running configuration, and the Rate limit rules card | [Settings](#settings) |
 | Accounts | Every account on the deployment | [Deployment-wide account administration](access-control.md#deployment-wide-account-administration) |
 | Hosted providers | The provider keys the deployment serves inference on | [The Hosted providers page](hosted-providers.md#the-hosted-providers-page) |
+| Web search pricing, Code execution pricing | What the deployment charges per successful call of a tool it runs itself | [Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool) |
 
-Accounts and Hosted providers are listed only for a deployment operator, and
-answer anyone else that they are not available to them. Providers answers to the
+Accounts, Hosted providers and the two pricing pages are listed only for a
+deployment operator, and answer anyone else that they are not available to them.
+
+Web search pricing lists the `otari:web_search` and `otari:web_fetch` rates and
+each search and fetch instance's own rate, saying which rate an instance with
+none of its own falls back to; Code execution pricing lists
+`otari:code_execution`. Edit sets a rate in dollars per call, in force from the
+moment it is saved, and 0 prices a tool as free. An instance whose rate comes
+from `price_per_call` in `config.yml` is marked and changed there. With
+`require_pricing` on, the page warns while a tool it lists has no rate, because
+a request that would run it is refused.
+
+Providers answers to the
 organization role rather than to deployment authority: its owners and admins
 manage the keys, the models each key offers, and the rate each model is billed
 at. Which rate applies is in [Pricing](hosted-providers.md#pricing).
@@ -134,7 +146,11 @@ What a page shows can depend on who is signed in, not only on the deployment:
   always billed to themselves and never budget-exempt. An operator, or an
   organization owner or admin, can also cap a key's own spend: the key's create
   and edit forms take an existing budget or a custom amount and reset, and a
-  Budget column shows each key's spend this period against its limit.
+  Budget column shows each key's spend this period against its limit. Where the
+  deployment turns on `federation_member_rules`, a key's actions menu offers
+  Workload identity… to the operator, and to an organization owner or admin on
+  their own keys; see
+  [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key).
 - **Overview.** Everyone lands on their own spend, traffic and recent requests.
   An organization owner or admin also gets a budget-health figure, read from the
   spend ceilings holding their organization, while a deployment operator gets
@@ -172,9 +188,13 @@ its offerings in the order a request sent by catalog id tries them for your
 organization (see [Catalog spellings](models.md#catalog-spellings)). Beside each
 it counts the requests (an absorbed attempt is not one), the successful ones a
 later offering served, and the ones that named one offering or a policy rather
-than the catalog id and so had no automatic fallback. Under each offering it
-says who runs the built-in tools: the provider's own where it runs them itself,
-Otari's where it does not. That assumes a caller who declares the tools in the
+than the catalog id and so had no automatic fallback. A model most of whose
+requests named one provider shows that provider alone, marked "No backup ·
+pinned", because those requests get no fallback until they send the catalog id.
+Under each provider it says who runs the built-in tools: "Own tools" where the
+provider runs at least one itself, "Otari's tools" where Otari runs them all;
+the response's `own_tools` and `otari_tools` name which tool is whose. That
+assumes a caller who declares the tools in the
 provider's own words and sends no `Otari-*` executor header, so the
 deployment's code execution executor and web search interception decide; a
 workspace's code execution pin is not reflected. The order is the catalog's,
@@ -254,7 +274,10 @@ Activity is the per-request log. Sessions lists [agent sessions](traces.md)
 where the deployment records traces (`trace_capture_enabled`, on by default), and has no entry where it does not. Its chart
 counts sessions per hour or day as succeeded or failed, and its Levels column
 counts each session's errors, tools' errors included; a tool's error alone does
-not fail a session (see [Sessions and failures](traces.md#sessions-and-failures)). A session
+not fail a session (see [Sessions and failures](traces.md#sessions-and-failures)). The
+Last activity, Levels, Latency, Tokens and Total cost headers sort the list
+across every page: a header's first press puts the largest first and a second
+press flips it, and the order is kept in the URL with the filters. A session
 opens in a side panel as a tree of its turns, LLM calls and tool calls, a
 timeline of the same spans, or a flat log. The token count in its header breaks
 down into input, the share of it the prompt cache served, and output, for the

@@ -287,7 +287,7 @@ def test_a_messages_local_adapter_fault_tells_a_client_not_to_retry(
         response = client.post(f"{API_ROOT}/messages", json=messages_request_body, headers=api_key_header)
 
     assert response.status_code == 500, response.text
-    assert response.json()["detail"]["error"]["type"] == "api_error"
+    assert response.json()["error"]["type"] == "api_error"
     assert response.headers["x-should-retry"] == "false"
 
 
@@ -388,7 +388,7 @@ def test_a_messages_stream_that_fails_before_its_first_event_is_answered_with_it
         )
 
     assert response.status_code == 500, response.text
-    assert response.json()["detail"]["error"]["type"] == "api_error"
+    assert response.json()["error"]["type"] == "api_error"
     assert "event: error" not in response.text
     assert "sk-live-abc123" not in response.text
 

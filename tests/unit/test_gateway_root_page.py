@@ -7,9 +7,7 @@ from _dashboard_bundle_support import requires_dashboard_bundle
 from fastapi.testclient import TestClient
 
 import gateway.main as gateway_main
-from gateway.api.deps import reset_config
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.database import reset_db
 from gateway.dashboard import get_dashboard_dir
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
@@ -176,7 +174,7 @@ def test_brand_fonts_and_their_licenses_are_served(tmp_path: Path) -> None:
 
 
 def test_fonts_are_absent_without_dashboard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The faces ride with the dashboard, so hybrid mode serves none of them."""
+    """The faces ride with the dashboard, so a gateway without one serves none of them."""
     monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: None)
     app = create_app(_config(tmp_path, "gateway-no-fonts-test.db"))
 
@@ -210,105 +208,6 @@ def test_dashboard_without_pwa_dir_still_starts(tmp_path: Path, monkeypatch: pyt
     # The stale index.html still links a manifest; it 404s rather than taking
     # the gateway down with it, and the page itself keeps working.
     assert manifest.status_code == 404
-
-
-def _hybrid_config(tmp_path: Path, name: str) -> GatewayConfig:
-    """A gateway attached to a control plane, which is what selects hybrid mode."""
-    return GatewayConfig(
-        mode="hybrid",
-        database_url=f"sqlite:///{tmp_path / name}",
-        platform={"base_url": "http://platform.test"},
-    )
-
-
-def _fake_bundle(tmp_path: Path) -> Path:
-    """A minimal built bundle, so this runs without `make dashboard`.
-
-    The serving path does not care what is in the files, only that the directory
-    has the shape Vite produces, so a synthetic one keeps these assertions out of
-    the bundle-gated job and running on every backend change.
-    """
-    bundle = tmp_path / "dashboard"
-    (bundle / "assets").mkdir(parents=True)
-    (bundle / "pwa").mkdir()
-    (bundle / "pwa" / "manifest.webmanifest").write_text('{"name": "Otari"}')
-    (bundle / "index.html").write_text('<html><body><div id="root"></div></body></html>')
-    return bundle
-
-
-def test_hybrid_mode_serves_the_dashboard_at_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Hybrid boots to the landing page, which is the same bundle standalone serves.
-
-    Which surfaces exist is the browser's question to ask once, of
-    ``/api/v1/bootstrap``, rather than something this process answers by withholding
-    files: the page renders the data-plane landing page from that answer. Serving
-    the tutorial here instead would leave a hybrid operator with no status page at
-    all.
-    """
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw-test-token")
-    monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: _fake_bundle(tmp_path))
-    app = create_app(_hybrid_config(tmp_path, "gateway-hybrid-dashboard-test.db"))
-
-    with TestClient(app) as client:
-        root = client.get("/")
-        bootstrap = client.get(f"{API_ROOT}/bootstrap")
-
-    assert root.status_code == 200
-    assert '<div id="root">' in root.text
-    # The page it boots into: the same root, answering hybrid.
-    assert bootstrap.json()["deployment_type"] == "hybrid"
-    assert bootstrap.json()["surfaces"] == []
-
-    reset_config()
-    reset_db()
-
-
-def test_hybrid_mode_serves_no_install_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Only the standalone dashboard is an app worth installing.
-
-    A hybrid gateway's root is a status page for a control plane that lives
-    elsewhere, so an installed icon named "Otari" would promise management this
-    deployment does not have. The index still links the manifest,
-    so what stops the install offer is this 404, which must not be cached: /pwa/
-    carries a day of caching for the icons it usually serves, and a day-long 404
-    would outlive a switch to standalone and keep the prompt away from a
-    deployment that had since started offering it.
-    """
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw-test-token")
-    monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: _fake_bundle(tmp_path))
-    app = create_app(_hybrid_config(tmp_path, "gateway-hybrid-pwa-test.db"))
-
-    with TestClient(app) as client:
-        response = client.get("/pwa/manifest.webmanifest")
-
-    assert response.status_code == 404
-    assert response.headers["cache-control"] == "private, no-store, no-cache"
-
-    reset_config()
-    reset_db()
-
-
-def test_hybrid_root_carries_no_platform_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The two things a hybrid gateway hands an unauthenticated browser.
-
-    The landing page reads its deployment from ``/api/v1/bootstrap`` and its status
-    from ``/health``, and neither may carry the credential this gateway calls the
-    platform with. The page itself is checked alongside them because it is served
-    to the same anonymous browser and is now served in this mode at all.
-    """
-    token = "gw-secret-platform-token"
-    monkeypatch.setenv("OTARI_AI_TOKEN", token)
-    monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: _fake_bundle(tmp_path))
-    app = create_app(_hybrid_config(tmp_path, "gateway-hybrid-secret-test.db"))
-
-    with TestClient(app) as client:
-        served = [client.get("/").text, client.get(f"{API_ROOT}/bootstrap").text, client.get(f"{API_ROOT}/health").text]
-
-    for body in served:
-        assert token not in body
-
-    reset_config()
-    reset_db()
 
 
 def test_create_app_rejects_invalid_secret_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -363,33 +262,3 @@ def test_missing_dashboard_is_explained_at_startup(
 
     assert "make dashboard" in caplog.text
     assert "static/dashboard" in caplog.text
-
-
-def test_hybrid_mode_also_reports_a_missing_dashboard(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """A hybrid gateway serves the same bundle, as its landing page.
-
-    The notice used to be standalone-only, back when hybrid served the tutorial
-    at "/" by design and `make dashboard` would have sent that operator after a
-    bundle this mode did not use. It now degrades the same way standalone does,
-    so it is told the same thing.
-    """
-    monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: None)
-    # The platform token alone selects hybrid, which is how a hybrid deployment is
-    # configured (see docs/modes.md). It is resolved once at config-load time, so
-    # it has to be set before the config is built.
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw-test-token")
-    config = GatewayConfig(
-        database_url=f"sqlite:///{tmp_path / 'gateway-hybrid-log-test.db'}",
-        platform={"base_url": "http://platform.test"},
-    )
-    assert config.is_hybrid_mode
-
-    _capture_gateway_logs(caplog)
-    try:
-        create_app(config)
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
-
-    assert "make dashboard" in caplog.text

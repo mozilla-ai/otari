@@ -255,7 +255,7 @@ covers them.
 ## What stayed in otari-ai
 
 Its marketing type roles, pre-login gradient, activation-modal and border-beam tokens, and
-HubSpot patch dress a public site and a hosted signup that do not exist here. The
+HubSpot patch dress otari.ai's public site and signup, which do not exist here. The
 first-request setup guide *is* ported (`features/onboarding/SetupGuideCard.tsx`), and it
 deliberately dresses itself in the status and surface families rather than bringing that
 bespoke `activation-*` set with it: a panel on the Overview page is a card with a status
@@ -340,7 +340,7 @@ class name needs something that reads class names.
   `--z-overlay`, and so on), reuse a value an existing sibling already uses rather than
   inventing a higher one, and say in a comment what the new layer sits above. A `z-[999]`
   is the finding this is here to prevent.
-- **Keep it recognizable as `otari-ai/frontend/src/index.css`.** The control-plane pages land
+- **Keep it recognizable as `otari-ai/frontend/src/index.css`.** otari.ai's own pages land
   here at M5 and have to land on this palette without a reconciliation pass, so a divergence
   in a token's name, value, or reasoning comment costs more than it looks like it does.
 ## Chart colors

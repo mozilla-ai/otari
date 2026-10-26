@@ -47,9 +47,11 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError, MissingApiKeyError
+from botocore.config import Config as BotocoreConfig
 
 from gateway.auth.vertex_auth import setup_vertex_environment
 from gateway.core.config import (
+    API_ROOT,
     KEYLESS_SELF_HOSTED_PROVIDERS,
     PROVIDER_TYPE_ALIASES,
     RESERVED_PROVIDER_INSTANCE_NAMES,
@@ -60,7 +62,6 @@ from gateway.core.error_codes import PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import FORBIDDEN_ENDPOINT_DEFAULTS
 from gateway.log_config import logger
 from gateway.services.alias_service import resolve_effective_alias
-from gateway.services.bedrock_gateway_auth import with_bedrock_read_timeout
 from gateway.services.catalog import resolve_catalog_offerings, resolve_catalog_selector, resolve_undated_selector
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.tenancy.org_provider_key_service import cached_org_provider_kwargs
@@ -71,7 +72,42 @@ if TYPE_CHECKING:
 
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
-_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries", "messages_api")
+_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries", "messages_api", "request_fields")
+
+# How long a Bedrock client waits for the next byte of a response. botocore's
+# default of 60s fails a stream whose model goes quiet for a minute, which a model
+# writing a long tool call does. Callers run their own inactivity deadlines, so this
+# one only has to outlast them. Matches the Anthropic SDK's default read timeout.
+BEDROCK_READ_TIMEOUT_SECONDS = 600
+
+
+def with_bedrock_read_timeout(client_args: Mapping[str, Any] | None) -> dict[str, Any]:
+    """``client_args`` whose Bedrock client waits :data:`BEDROCK_READ_TIMEOUT_SECONDS` for a response.
+
+    A ``config`` the operator supplied, as a botocore ``Config`` or as the mapping
+    a YAML file gives, is merged over the default, so a read timeout it sets wins.
+    A pre-built ``client`` is left as built. The mapping is copied, never mutated,
+    because it can be the one held by the deployment's config.
+
+    Raises:
+        ValueError: ``config`` is neither a ``Config`` nor a mapping.
+    """
+    args = dict(client_args or {})
+    if "client" in args:
+        return args
+    default = BotocoreConfig(read_timeout=BEDROCK_READ_TIMEOUT_SECONDS)
+    config = args.get("config")
+    if config is None:
+        args["config"] = default
+    elif isinstance(config, BotocoreConfig):
+        args["config"] = default.merge(config)
+    elif isinstance(config, Mapping):
+        args["config"] = default.merge(BotocoreConfig(**config))
+    else:
+        msg = f"Bedrock client_args.config must be a botocore Config or a mapping, not {type(config).__name__}."
+        raise ValueError(msg)
+    return args
+
 
 # Providers whose any-llm client is built by an SDK that takes ``max_retries``
 # in its constructor (OpenAI's, Anthropic's and the SDKs generated the same
@@ -427,20 +463,22 @@ def prune_uncredentialed_providers(config: GatewayConfig) -> dict[str, tuple[str
 
 
 def warn_about_ignored_provider_variables(config: GatewayConfig) -> None:
-    """Warn once that a provider's own key variable is set and no ``providers:`` entry reads it.
+    """Warn once that a provider's own key variable is set and no entry reads it.
 
     Such a variable serves no request, which an operator upgrading from a release
     that fell back to it would otherwise learn only from refused requests. An
     entry reads it when its ``api_key`` holds the variable's value, which is what
     ``${VAR}`` interpolation leaves behind. It is a match on values, because the
     loader keeps no record of which variable filled an entry, so the same key
-    pasted in literally also counts as read. Only the ``<PROVIDER>_API_KEY``
-    spelling is checked, because confirming any other name means importing every
-    provider's SDK. Names only, never values.
+    pasted in literally also counts as read. A search or fetch tool's entry
+    counts too: DeepSeek's search reads the ``DEEPSEEK_API_KEY`` its models do.
+    Only the ``<PROVIDER>_API_KEY`` spelling is checked, because confirming any
+    other name means importing every provider's SDK. Names only, never values.
     """
     keys_in_use = {
         entry.get("api_key")
-        for entry in config.providers.values()
+        for entries in (config.providers, config.search_tools, config.fetch_tools)
+        for entry in entries.values()
         if isinstance(entry, Mapping) and entry.get("api_key")
     }
     ignored: list[tuple[str, str]] = []
@@ -454,9 +492,10 @@ def warn_about_ignored_provider_variables(config: GatewayConfig) -> None:
         return
     name, variable = ignored[0]
     logger.warning(
-        "Ignoring %s: no providers: entry reads it, and a provider's own environment variable serves nothing "
-        "on its own. Name it in the entry that should use it (providers: {%s: {api_key: ${%s}}}) or store the "
-        "key on the dashboard's Providers page.",
+        "Ignoring %s: no entry in providers, search_tools or fetch_tools reads it, and a provider's own "
+        "environment variable serves nothing on its own. Add %s as a hosted provider with that key (the "
+        f"Hosted providers page, or POST {API_ROOT}/hosted-providers), or name it in the search or fetch "
+        "tool that should use it (api_key: ${%s}).",
         # codeql[py/clear-text-logging-sensitive-data]
         ", ".join(variable for _, variable in ignored),
         name,
@@ -989,15 +1028,20 @@ def is_deployment_instance_key(config: GatewayConfig, model_key: str) -> bool:
     return split is not None and split[0] in config.providers
 
 
+# What a caller can do about a missing credential, in words that name no setting a caller cannot reach.
+_CONFIGURE_A_CREDENTIAL = (
+    "An operator can add the provider as a hosted provider, or the organization can add its own provider key."
+)
+
+
 @dataclass(frozen=True)
 class MissingCredential:
     """A call any-llm refused locally because no credential resolved for its provider.
 
     Nothing reached the provider, so the failure is the deployment's
     configuration rather than the provider's, and it is named in Otari's terms.
-    The variable is a name, never a value, so it is safe to show. A request that
-    named an alias is told the ``alias`` instead of the provider and its
-    variable, both of which give away the target the alias hides.
+    A request that named an alias is told the ``alias`` instead of the provider,
+    which would give away the target the alias hides.
 
     Answered with a 424 rather than a 502: clients retry a 5xx, and no retry can
     supply a key. ``code`` lets a caller tell it from a provider's own 424.
@@ -1019,21 +1063,10 @@ class MissingCredential:
 
     @property
     def detail(self) -> str:
-        if self.alias is not None:
-            return (
-                f"No credential is configured for the provider behind model '{self.alias}'. "
-                "Declare it under providers: in config.yml, add it on the Hosted providers page, "
-                "or add an organization provider key."
-            )
-        # The variable is offered as what a declaration reads its key from: set
-        # alone, it serves nothing.
-        variable = self.env_var.split("/")[0] if self.env_var else None
-        declare = f" (api_key: ${{{variable}}})" if variable else ""
-        return (
-            f"No credential is configured for provider '{self.provider}'. "
-            f"Declare it under providers: in config.yml{declare}, add it on the Hosted providers page, "
-            "or add an organization provider key."
+        subject = (
+            f"the provider behind model '{self.alias}'" if self.alias is not None else f"provider '{self.provider}'"
         )
+        return f"No credential is configured for {subject}. {_CONFIGURE_A_CREDENTIAL}"
 
 
 def missing_credential(exc: BaseException) -> MissingCredential | None:
@@ -1053,5 +1086,24 @@ def no_candidate_configured_detail(missing: Sequence[MissingCredential]) -> str:
     names = ", ".join(sorted({entry.provider for entry in missing})) or "unknown"
     return (
         f"No credential is configured for any provider this request could use ({len(missing)} attempts: {names}). "
-        "Add one in config.yml or through the dashboard."
+        f"{_CONFIGURE_A_CREDENTIAL}"
     )
+
+
+def with_request_fields(
+    config: GatewayConfig, instance: str, request_fields: dict[str, Any], extras: Mapping[str, Any]
+) -> dict[str, Any]:
+    """``request_fields`` plus the caller's extra fields this instance's ``request_fields`` lets through.
+
+    ``extras`` are the fields a request carried beyond the ones its schema declares,
+    which are otherwise dropped. Only the names the operator listed for this provider
+    instance in config.yml are forwarded, in ``extra_body``, which the OpenAI SDK and
+    the SDKs built the same way merge into the request body. An ``extra_body`` the
+    fields already carry keeps its entries. Another instance, or an instance listing
+    none, gets the request fields unchanged.
+    """
+    allowed = (config.providers.get(instance) or {}).get("request_fields") or ()
+    passed = {name: extras[name] for name in allowed if name in extras}
+    if not passed:
+        return request_fields
+    return {**request_fields, "extra_body": {**passed, **(request_fields.get("extra_body") or {})}}

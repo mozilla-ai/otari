@@ -186,6 +186,7 @@ class WebFetchBackend:
                 label=resolved.label,
                 rate_keys=resolved.rate_keys,
                 cost=page.cost if page is not None else None,
+                deployment_paid=not resolved.on_credential,
             )
         if self._trace is not None:
             self._trace.record_tool_call(

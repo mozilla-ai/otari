@@ -29,12 +29,14 @@ from gateway.services.tools import (
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     WEB_SEARCH_PURPOSE_HINT,
     WEB_SEARCH_TOOL_NAME,
+    AdmittedWebTools,
     InLoopSearch,
     WebFetchBackend,
     WebSearchBackend,
     WebToolCallCap,
     WebToolFailure,
     build_web_search_backends,
+    resolve_fetch,
     resolve_in_loop_search,
 )
 from gateway.services.traces import RequestTrace
@@ -42,7 +44,7 @@ from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
 from gateway.services.web_retrieval_backend import WebRetrievalBackend
 from gateway.services.web_retrieval_network import PinnedAsyncHTTPTransport, TrustedProxyAsyncHTTPTransport
 from gateway.services.web_retrieval_policy import DomainPolicy, canonicalize_domain_rules, canonicalize_web_url
-from gateway.types.tool_charges import LabelCalls
+from gateway.types.tool_charges import LabelCalls, instance_rate_key
 
 _SEARCH = "fake-search"
 _FETCH = "fake-fetch"
@@ -218,7 +220,7 @@ def test_the_count_is_the_declarations_lowered_by_the_resolved_options(
         config,
         _search(config),
         search_tool_entry=entry,
-        fetch_declared=False,
+        fetch=None,
         fetch_policy=DomainPolicy(),
         cap=WebToolCallCap(10),
         purpose_hint=None,
@@ -346,7 +348,7 @@ def _search_and_fetch(
         config,
         _search(config),
         search_tool_entry={},
-        fetch_declared=True,
+        fetch=resolve_fetch(config, None, requested=None, for_search=None),
         fetch_policy=DomainPolicy(),
         cap=cap,
         purpose_hint=None,
@@ -588,11 +590,12 @@ async def test_the_search_and_its_enrichment_are_recorded_under_the_instance_wit
         LabelCalls(
             tool=WEB_SEARCH_TOOL_NAME,
             label=_LABEL,
-            rate_keys=(_LABEL, "otari:web_search"),
+            rate_keys=(instance_rate_key("search", _SEARCH, "fake"), "otari:web_search"),
             calls=2,
             unreported_calls=1,
             reported_cost=Decimal("0.005"),
             enrichment_cost=Decimal("0.004"),
+            deployment_paid=True,
         )
     ], "two hits enriched at 0.002; an enrichment fetcher that reports nothing adds nothing"
 
@@ -687,13 +690,13 @@ def _context(config: GatewayConfig, *, search: bool, fetch: bool, entry: dict[st
         use_sandbox=False,
         sandbox_tool_entry=None,
         code_execution_port=None,
-        use_web_search=search,
-        web_search_tool_entry=search_entry,
-        web_search_url=None,
-        web_search_auth_token=None,
-        web_search=in_loop,
-        use_web_fetch=fetch,
-        web_fetch_tool_entry={"type": "otari_web_fetch"} if fetch else None,
+        web=AdmittedWebTools(
+            search_tool_entry=search_entry,
+            fetch_tool_entry={"type": "otari_web_fetch"} if fetch else None,
+            fetch_policy=DomainPolicy(),
+            in_loop_search=in_loop,
+            fetch=resolve_fetch(config, None, requested=None, for_search=None) if fetch else None,
+        ),
         remaining_user_tools=None,
         max_tool_iterations=10,
         tools_header=None,

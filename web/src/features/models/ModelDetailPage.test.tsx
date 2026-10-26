@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -203,12 +210,15 @@ describe("ModelDetailPage", () => {
     expect(screen.getByText("Z.ai's flagship.")).toBeInTheDocument()
     // Derived limits carry their rule: the largest any offering serves.
     expect(screen.getByText("up to 200K")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "← All models" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "← Models" })).toHaveAttribute(
       "href",
       "/models",
     )
 
     const offerings = screen.getByRole("grid", { name: "Offerings of GLM-5.3" })
+    expect(
+      within(offerings).getByRole("columnheader", { name: "Price from" }),
+    ).toBeInTheDocument()
     const rows = within(offerings).getAllByRole("row").slice(1)
     expect(rows).toHaveLength(2)
     // Cheapest first: Fireworks' sub-cent rate keeps its digits (otari#700).
@@ -351,6 +361,43 @@ describe("ModelDetailPage", () => {
     )
   })
 
+  it("lets the selector in the drawer's header be copied and highlighted", async () => {
+    mockApi()
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+    const user = userEvent.setup()
+    // A spy on userEvent's own clipboard stub, so `restoreAllMocks` undoes it.
+    const writeText = vi.spyOn(navigator.clipboard, "writeText")
+
+    await user.click(
+      await screen.findByRole("button", { name: "Use this model" }),
+    )
+    const drawer = await screen.findByRole("dialog", { name: "Use this model" })
+
+    await user.click(
+      within(drawer).getByRole("button", { name: "Copy model selector" }),
+    )
+    expect(writeText).toHaveBeenCalledWith("z-ai/glm-5.3")
+
+    // Everything outside the drawer's body is its drag handle. A drag across
+    // the selector has to stay a text selection rather than pull the drawer
+    // shut. jsdom has no pointer capture, which the drag takes as it starts.
+    const setPointerCapture = vi.fn()
+    Object.assign(drawer, { setPointerCapture, releasePointerCapture: vi.fn() })
+    const selector = within(drawer).getByText("z-ai/glm-5.3")
+    fireEvent.pointerDown(selector, { button: 0, clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(selector, { clientX: 200, pointerId: 1 })
+    expect(setPointerCapture).not.toHaveBeenCalled()
+    expect(drawer.style.transform).toBe("")
+    fireEvent.pointerUp(selector, { clientX: 200, pointerId: 1 })
+
+    // The rest of the header still drags, so the drawer keeps its swipe to
+    // dismiss.
+    const heading = within(drawer).getByRole("heading", { name: /^Use / })
+    fireEvent.pointerDown(heading, { button: 0, clientX: 100, pointerId: 2 })
+    fireEvent.pointerMove(heading, { clientX: 140, pointerId: 2 })
+    expect(setPointerCapture).toHaveBeenCalledWith(2)
+  })
+
   it("names each offering's model ID among the drawer's providers", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
@@ -418,7 +465,7 @@ describe("ModelDetailPage", () => {
   })
 
   it("gives a deployment operator its organization's own rate link", async () => {
-    // On a standalone deployment the operator *is* the single organization's
+    // On a single-tenant deployment the operator *is* the organization's
     // owner, so a gate that excluded them would leave the one caller who can set
     // a rate without the link to set it.
     mockApi()

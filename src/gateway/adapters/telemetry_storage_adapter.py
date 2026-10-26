@@ -123,9 +123,9 @@ class DatabaseTelemetryStorageAdapter(TelemetryStoragePort):
 
     Session-bound, unlike the stateless core adapters beside it: every method
     is a query, so the request's session is the whole of what it needs. The
-    surfaces that reach this port are standalone-only, so a ``None`` session
-    means a caller mounted one somewhere it cannot work rather than an ordinary
-    hybrid request, and it fails loudly instead of silently storing nothing.
+    surfaces that reach this port always hold a session, so a ``None`` one
+    means a caller mounted one somewhere it cannot work, and it fails loudly
+    instead of silently storing nothing.
 
     The session is the caller's own (``get_telemetry_storage_port`` names
     ``get_db``, which FastAPI caches per callable), and the writes here commit.

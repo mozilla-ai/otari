@@ -343,7 +343,7 @@ def test_a_request_none_of_whose_candidates_can_run_the_code_is_refused(
     response, seen = _post_messages(client, {**api_key_header, _HEADER: "otari"}, _messages_body("claude-then-vertex"))
 
     assert response.status_code == 403, response.text
-    assert "not enabled" in response.json()["detail"]["error"]["message"]
+    assert "not enabled" in response.json()["error"]["message"]
     assert seen.provider_calls == []
     assert seen.loop_calls == []
 

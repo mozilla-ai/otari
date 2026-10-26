@@ -12,11 +12,6 @@ unavailable rather than hidden (a client seeing ``available: false`` learns the
 tool exists and the operator has not configured it, which is the actionable
 distinction).
 
-Standalone-only, like every other non-completion router. Hybrid mode could not
-answer this honestly: there the platform owns the per-workspace tool policy
-(``WebSearchPolicyPort``), so a tool this gateway has configured may
-still be refused with a 403 for the caller asking. Reporting ``available: true``
-from local config alone would be worse than not answering.
 """
 
 from typing import Annotated, Any, Literal
@@ -32,6 +27,7 @@ from gateway.services.tools import (
     Tool,
     code_execution_declaration_forms,
     web_fetch_tool_definition,
+    web_search_configured,
     web_search_declaration_forms,
     web_search_tool_definition,
 )
@@ -85,7 +81,7 @@ def _managed_tools(config: GatewayConfig) -> list[ManagedTool]:
     # provider needs no URL, so deriving this from sandbox_url would publish
     # "unavailable" for a deployment that runs code perfectly well.
     sandbox_configured = config.sandbox_configured()
-    can_web_search = config.web_search_configured()
+    can_web_search = web_search_configured(config)
     return [
         ManagedTool(
             id=Tool.WEB_FETCH,

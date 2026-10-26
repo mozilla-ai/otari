@@ -33,7 +33,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.models.inference import IdempotencyRecord, IdempotencyState
 from gateway.repositories.inference import InferenceRepositories
-from gateway.schemas.inference import EmbeddingResponse, InlineCost, RerankResponse
+from gateway.schemas.inference import EmbeddingResponse, RerankResponse
 from gateway.services.inference._embeddings import embedding_provider_options
 from gateway.services.inference._passthrough_responses import embeddings_response, rerank_response
 from gateway.services.pricing_service import ResolvedPricing
@@ -199,10 +199,9 @@ class InferenceService:
         *,
         pricing: ResolvedPricing | None,
         cost: Decimal | None,
-        inline_cost: InlineCost | None = None,
     ) -> RerankResponse:
         """The rerank response the gateway publishes for ``result``, with its metering and inline cost."""
-        return rerank_response(result, pricing=pricing, cost=cost, inline_cost=inline_cost)
+        return rerank_response(result, pricing=pricing, cost=cost)
 
     @staticmethod
     def embeddings_response(
@@ -210,10 +209,9 @@ class InferenceService:
         *,
         pricing: ResolvedPricing | None,
         cost: Decimal | None,
-        inline_cost: InlineCost | None = None,
     ) -> EmbeddingResponse:
         """The embeddings response the gateway publishes for ``result``, in OpenAI's shape with the inline cost."""
-        return embeddings_response(result, pricing=pricing, cost=cost, inline_cost=inline_cost)
+        return embeddings_response(result, pricing=pricing, cost=cost)
 
     @staticmethod
     def is_enabled(config: GatewayConfig) -> bool:

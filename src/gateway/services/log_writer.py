@@ -254,19 +254,6 @@ def create_log_writer(strategy: str, signal: UsageSignalPort) -> LogWriter:
     return SignalingLogWriter(inner, signal)
 
 
-class NoopLogWriter:
-    """LogWriter implementation that discards all writes (used when DB is unavailable)."""
-
-    async def put(self, log: UsageLog) -> bool:  # noqa: D401,B027 - trivial no-op
-        return False
-
-    async def start(self) -> None:  # noqa: D401,B027
-        return None
-
-    async def stop(self) -> None:  # noqa: D401,B027
-        return None
-
-
 class TracingLogWriter:
     """A usage log writer that also hands each row to its request's trace as an LLM call.
 
@@ -396,9 +383,6 @@ def _integration_traffic(source: str, endpoint: str) -> bool:
     """Whether a row was served here from somebody's own code rather than from the Playground.
 
     The setup guide's test, ``_integration_traffic`` in
-    ``services/tenancy/workspace_activation_service``, applied to one row. That
-    one also excludes rows billed to the credential a hosted control plane
-    forwards its Playground under, but those rows are written from a data-plane
-    gateway's usage report and never pass through this writer.
+    ``services/tenancy/workspace_activation_service``, applied to one row.
     """
     return source == SERVED_HERE_SLUG and endpoint != PLAYGROUND_USAGE_ENDPOINT

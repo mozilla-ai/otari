@@ -15,6 +15,13 @@ updates:
           - "minor"
           - "patch"
 
+  # The Dockerfile's base images are pinned by digest, which goes stale the same
+  # way a pinned action SHA does; Dependabot moves the digest when the tag does.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
   # Python dependencies resolved through uv. The ecosystem must be "uv", not
   # "pip": the pip ecosystem does not understand uv.lock, so it would leave the
   # lockfile (the thing CI and the Docker image actually install from, both via
@@ -25,9 +32,9 @@ updates:
   # bumps arrived for years while a stale-but-unvulnerable package like
   # a floored dependency sat six releases behind.
   #
-  # What version updates do for a lockfile entry whose declared floor already
-  # permits the newer version is not documented for uv, so
-  # otari-lock-refresh.yml is the path that does not depend on the answer.
+  # A direct dependency moves by raising its floor. An indirect one with no
+  # advisory stays where it is locked until someone runs `uv lock --upgrade`
+  # (CONTRIBUTING.md).
   - package-ecosystem: "uv"
     directory: "/"
     schedule:

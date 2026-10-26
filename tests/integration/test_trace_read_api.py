@@ -24,8 +24,11 @@ from sqlmodel import col
 
 from gateway.core.config import API_ROOT
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
-from gateway.models.traces import Trace, TraceSpan
+from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
+from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.secret_box import generate_secret_key
+from gateway.services.traces._content import seal_content
 
 from .test_otlp import _agent_span, _exempt_key, _otlp_traces
 
@@ -334,6 +337,7 @@ def test_the_list_sorts_by_the_column_asked_for_across_pages(
                     output_tokens=tokens[1],
                     cost_snapshot=Decimal(cost),
                     error_count=errors,
+                    span_count=1,
                 )
             )
         session.commit()
@@ -379,6 +383,7 @@ def test_sessions_that_tie_on_the_sort_page_once_each(
                     output_tokens=5,
                     cost_snapshot=Decimal("0.02"),
                     error_count=0,
+                    span_count=1,
                 )
             )
         session.commit()
@@ -449,3 +454,139 @@ def test_a_span_received_over_otlp_reads_back_with_the_otel_ids_it_was_sent(
 
     [read] = detail["spans"]
     assert (read["otel_trace_id"], read["otel_span_id"]) == ("5b8efff798038103d269b633813fc60c", "eee19b7ec3c1b174")
+
+
+def test_the_detail_counts_each_gate_an_agents_hook_reported_and_names_the_ones_that_never_ran(
+    client: TestClient, world: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    with db_session_factory() as session:
+        workspace_id = session.scalars(select(Trace.workspace_id).where(col(Trace.trace_id) == "s-one")).one()
+        gate = {"gate_type": "path", "enforcement": "required", "origin": "repo", "runs": ["pre_tool_use.edit_target"]}
+        session.add(
+            TraceGuardrailDefinition(
+                workspace_id=workspace_id,
+                digest="0123456789abcdef",
+                gates=[
+                    {**gate, "gate_id": "no-changelog", "message": "CHANGELOG.md is generated."},
+                    {**gate, "gate_id": "no-secret-reads", "message": ""},
+                ],
+            )
+        )
+        for index, (outcome, blocked) in enumerate([("pass", False), ("pass", False), ("fail", True)]):
+            session.add(
+                TraceSpan(
+                    workspace_id=workspace_id,
+                    trace_id="s-one",
+                    span_id=f"gate-{index}",
+                    kind="guardrail",
+                    origin="otlp",
+                    name="gate:no-changelog",
+                    outcome="blocked" if blocked else "ok",
+                    start_time=_T0 + timedelta(seconds=index),
+                    end_time=_T0 + timedelta(seconds=index),
+                    attributes={
+                        "otari.gate.id": "no-changelog",
+                        "otari.gate.outcome": outcome,
+                        "otari.gate.blocked": blocked,
+                        "otari.policy.digest": "0123456789abcdef",
+                    },
+                )
+            )
+        session.commit()
+
+    detail = _operator_get(client, world, "/traces/s-one").json()
+
+    assert detail["gates"] == [
+        {
+            "gate_id": "no-changelog",
+            "passed": 2,
+            "blocked": 1,
+            "flagged": 0,
+            "refused": 0,
+            "undecided": 0,
+            "span_id": "gate-2",
+            "gate_type": "path",
+            "enforcement": "required",
+            "message": "CHANGELOG.md is generated.",
+            "runs": ["pre_tool_use.edit_target"],
+            "origin": "repo",
+        },
+        {
+            "gate_id": "no-secret-reads",
+            "passed": 0,
+            "blocked": 0,
+            "flagged": 0,
+            "refused": 0,
+            "undecided": 0,
+            "span_id": None,
+            "gate_type": "path",
+            "enforcement": "required",
+            "message": None,
+            "runs": ["pre_tool_use.edit_target"],
+            "origin": "repo",
+        },
+    ]
+    assert _operator_get(client, world, "/traces/s-two").json()["gates"] == []
+
+
+def test_the_detail_returns_what_a_span_was_about_where_it_was_kept(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    with db_session_factory() as session:
+        span = session.scalars(
+            select(TraceSpan).where(col(TraceSpan.trace_id) == "s-one", col(TraceSpan.span_id) == "call-toolu_1")
+        ).one()
+        span.content_sealed = seal_content(
+            {"command": "pytest -x"}, workspace_id=span.workspace_id, span_id=span.span_id
+        )
+        session.commit()
+
+    detail = _operator_get(client, world, "/traces/s-one").json()
+
+    contents = {span["span_id"]: span["content"] for span in detail["spans"]}
+    assert contents["call-toolu_1"] == {"command": "pytest -x"}
+    assert contents["req-1"] == {}
+
+
+def test_only_a_manager_or_the_sessions_own_user_reads_what_its_spans_were_about(
+    client: TestClient,
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    with db_session_factory() as session:
+        span = session.scalars(
+            select(TraceSpan).where(col(TraceSpan.trace_id) == "s-one", col(TraceSpan.span_id) == "call-toolu_1")
+        ).one()
+        span.content_sealed = seal_content(
+            {"command": "pytest -x"}, workspace_id=span.workspace_id, span_id=span.span_id
+        )
+        session.commit()
+
+    def content(cookie: str) -> dict[str, str]:
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        try:
+            response = client.get(f"{API_ROOT}/organizations/me/traces/s-one")
+        finally:
+            client.cookies.clear()
+        assert response.status_code == status.HTTP_200_OK, response.text
+        contents: dict[str, dict[str, str]] = {span["span_id"]: span["content"] for span in response.json()["spans"]}
+        return contents["call-toolu_1"]
+
+    assert content(world["member"]) == {}
+    assert content(world["admin"]) == {"command": "pytest -x"}
+
+    with db_session_factory() as session:
+        member = session.scalars(select(User).where(col(User.email) == "m@a.test")).one()
+        trace = session.scalars(select(Trace).where(col(Trace.trace_id) == "s-one")).one()
+        session.add(BillingUser(user_id=str(member.id)))
+        session.flush()
+        trace.user_id = str(member.id)
+        session.commit()
+
+    assert content(world["member"]) == {"command": "pytest -x"}

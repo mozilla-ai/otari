@@ -268,37 +268,7 @@ async def test_purpose_hint_is_emitted() -> None:
 
 
 @pytest.mark.asyncio
-async def test_auth_token_forwarded_as_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When ``auth_token`` is set, every sandbox call carries Authorization: Bearer.
-
-    This lets the platform-hosted /v1/sandbox proxy authenticate the caller's
-    workspace token and derive tenancy + per-workspace code-exec policy from it.
-    """
-    result_block = {"type": "code_execution_tool_result", "content": {"stdout": "ok"}}
-    transport = _patched_async_client(
-        {
-            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "sbx_abc"}),
-            ("POST", "/sessions/sbx_abc/exec"): httpx.Response(200, json={"result_block": result_block}),
-            ("DELETE", "/sessions/sbx_abc"): httpx.Response(204),
-        },
-        monkeypatch,
-    )
-
-    async with SandboxBackend(
-        port=ProtocolCodeExecutionAdapter("http://sandbox:8080"),
-        auth_token="tk_workspace_token",  # noqa: S106 — test fixture, not a real secret
-    ) as backend:
-        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
-
-    # Every request to the backend (create / exec / delete) carries the header.
-    assert transport.captured, "expected at least one request"
-    for request in transport.captured:
-        assert request.headers["Authorization"] == "Bearer tk_workspace_token"
-
-
-@pytest.mark.asyncio
-async def test_no_auth_header_when_auth_token_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A standalone exec-service backend (no auth_token) sends no Authorization header."""
+async def test_sandbox_calls_carry_no_authorization_header(monkeypatch: pytest.MonkeyPatch) -> None:
     transport = _patched_async_client(
         {
             ("POST", "/sessions"): httpx.Response(200, json={"session_id": "sbx_abc"}),
@@ -1499,11 +1469,10 @@ class _RecordingPort:
         image: str | None = None,
         timeout_s: float,
         session_ttl_s: float,
-        auth_token: str | None = None,
         resume: str | None = None,
         keep_alive_s: float | None = None,
     ) -> AsyncIterator[Any]:
-        del image, timeout_s, auth_token, resume, keep_alive_s
+        del image, timeout_s, resume, keep_alive_s
         self.session_ttl_s = session_ttl_s
         yield SimpleNamespace(session_id="s-recording", holds_across_requests=True, discard=lambda: None)
 
@@ -1703,11 +1672,10 @@ class _HoldingPort(_RecordingPort):
         image: str | None = None,
         timeout_s: float,
         session_ttl_s: float,
-        auth_token: str | None = None,
         resume: str | None = None,
         keep_alive_s: float | None = None,
     ) -> AsyncIterator[Any]:
-        del image, timeout_s, auth_token
+        del image, timeout_s
         self.session_ttl_s = session_ttl_s
         self.resume = resume
         self.keep_alive_s = keep_alive_s

@@ -131,8 +131,8 @@ DELETE /api/v1/provider-endpoints/{endpoint_id}     # not yet wrapped
 # Hosted providers (the deployment's own upstream credentials, operator-only)
 GET /api/v1/hosted-providers                        # dashboard-only
 POST /api/v1/hosted-providers                       # dashboard-only
-GET /api/v1/hosted-providers/refresh/preview        # dashboard-only
-POST /api/v1/hosted-providers/refresh               # dashboard-only
+POST /api/v1/hosted-providers/catalog-update/preview  # dashboard-only
+POST /api/v1/hosted-providers/catalog-update        # dashboard-only
 POST /api/v1/hosted-providers/test                  # dashboard-only
 POST /api/v1/hosted-providers/reencrypt             # dashboard-only
 GET /api/v1/hosted-providers/migration              # dashboard-only
@@ -275,6 +275,7 @@ GET /api/v1/agent-telemetry/series                  # not yet wrapped
 DELETE /api/v1/agent-telemetry                      # not yet wrapped
 # Agent Gates' Hook Server: a hook-protocol endpoint for agent tooling, not an SDK surface
 POST /api/v1/hooks/check                            # not yet wrapped
+POST /api/v1/hooks/guardrails                       # not yet wrapped
 # Routing policies
 GET /api/v1/routing/policies                        # not yet wrapped
 POST /api/v1/routing/policies                       # not yet wrapped
@@ -284,8 +285,6 @@ POST /api/v1/routing/preferences/rank               # not yet wrapped
 GET /api/v1/routing/status                          # not yet wrapped
 POST /api/v1/routing/recommend                      # not yet wrapped
 # Pricing refresh workflow
-POST /api/v1/pricing/refresh                        # not yet wrapped
-POST /api/v1/pricing/refresh/confirm                # not yet wrapped
 POST /api/v1/pricing/refresh/reject                 # not yet wrapped
 GET /api/v1/pricing/refresh/pending                 # not yet wrapped
 GET /api/v1/pricing/snapshots                       # not yet wrapped
@@ -303,6 +302,8 @@ GET /api/v1/tools                                   # not yet wrapped
 GET /api/v1/tool-settings                           # not yet wrapped
 PATCH /api/v1/tool-settings                         # not yet wrapped
 POST /api/v1/tool-settings/{service}/test           # not yet wrapped
+PUT /api/v1/tool-settings/sandbox/credential       # not yet wrapped
+DELETE /api/v1/tool-settings/sandbox/credential    # not yet wrapped
 GET /api/v1/tool-settings/guardrails/profiles       # not yet wrapped
 GET /api/v1/tool-settings/guardrails/catalog        # not yet wrapped
 POST /api/v1/search                                 # not yet wrapped
@@ -389,6 +390,9 @@ POST /api/v1/organizations/me/keys                              # dashboard-only
 PATCH /api/v1/organizations/me/keys/{key_id}                    # dashboard-only
 DELETE /api/v1/organizations/me/keys/{key_id}                   # dashboard-only
 POST /api/v1/organizations/me/keys/{key_id}/rotate              # dashboard-only
+POST /api/v1/organizations/me/keys/{key_id}/federation-rules    # dashboard-only
+GET /api/v1/organizations/me/keys/{key_id}/federation-rules     # dashboard-only
+DELETE /api/v1/organizations/me/keys/{key_id}/federation-rules/{rule_id}  # dashboard-only
 # The organization's own budgets and the ceilings enforcing them
 # (otari-ai#1943), excluded for the same reason as the keys above: the
 # organization is resolved from the caller's dashboard session rather than named
@@ -507,11 +511,7 @@ DELETE /api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}             # 
 # by id in `mcp_server_ids` on a completion request, which is already covered.
 GET /api/v1/workspaces/{workspace_id}/mcp-servers                             # operator surface
 POST /api/v1/workspaces/{workspace_id}/mcp-servers                            # operator surface
+POST /api/v1/workspaces/{workspace_id}/mcp-servers/check                      # operator surface
 PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}               # operator surface
 DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}              # operator surface
-# Web-search backend (otari#882): the SearXNG-shaped endpoint one gateway calls
-# on another, authenticated by a shared deployment token rather than an API key.
-# Its caller is a data-plane gateway, not an application, and no SDK holds that
-# token; an application reaches the same search through the otari_web_search
-# tool on a completion request.
-GET /api/v1/web-search/search                                                 # gateway-to-gateway
+POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check          # operator surface

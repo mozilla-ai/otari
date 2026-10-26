@@ -19,7 +19,7 @@ function wrapper(value = bootstrap()) {
 
 describe("useDeployment", () => {
   it("hands back the bootstrap the page was served with", () => {
-    const served = bootstrap({ deployment_type: "hybrid" })
+    const served = bootstrap({ docs_url: "https://docs.example.com" })
     const { result } = renderHook(() => useDeployment(), {
       wrapper: wrapper(served),
     })
@@ -29,7 +29,7 @@ describe("useDeployment", () => {
 
   it("throws outside a provider rather than guessing a deployment", () => {
     // A tree with no bootstrap has not been told what it is running against.
-    // Defaulting to standalone here would put the failure somewhere else.
+    // Defaulting to an empty one here would put the failure somewhere else.
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 
     expect(() => renderHook(() => useDeployment())).toThrow(
@@ -49,14 +49,6 @@ describe("useSurfaces", () => {
     expect(result.current("usage")).toBe(true)
     expect(result.current("models")).toBe(true)
     expect(result.current("budgets")).toBe(false)
-  })
-
-  it("hosts nothing on a hybrid gateway", () => {
-    const { result } = renderHook(() => useSurfaces(), {
-      wrapper: wrapper(bootstrap({ deployment_type: "hybrid", surfaces: [] })),
-    })
-
-    expect(result.current("usage")).toBe(false)
   })
 })
 

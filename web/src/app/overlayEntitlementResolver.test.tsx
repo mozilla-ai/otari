@@ -13,11 +13,7 @@ import {
   EntitlementProvider,
   useEntitlements,
 } from "@/shared/hooks/useEntitlements"
-import {
-  bootstrap,
-  organizationContext,
-  STANDALONE_SURFACES,
-} from "@/tests/fixtures"
+import { bootstrap, organizationContext, SURFACES } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
 // Through `vi.hoisted`, because a `vi.mock` factory is hoisted above every
@@ -240,7 +236,7 @@ describe("the shell's mount point", () => {
       <p>ORGANIZATION USAGE</p>,
       "/organization/usage",
       bootstrap({
-        surfaces: STANDALONE_SURFACES.filter(
+        surfaces: SURFACES.filter(
           (surface) => surface !== "organization_usage",
         ),
       }),

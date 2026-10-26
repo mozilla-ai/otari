@@ -138,9 +138,9 @@ def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | No
     ``"conn_err"``, or ``None``, and ``status_code`` is the HTTP status the
     exception carries, or ``None``. At most one of the two is set. ``kind`` is
     a ``Literal``, not a bare ``str``, so a typo at a ``kind == "..."``
-    comparison site (e.g. in :func:`_classify_upstream_error`) is a mypy error
-    instead of a silent no-op. Shared by :func:`_classify_upstream_error`
-    (drives the hybrid-mode fallback decision) and
+    comparison site is a mypy error instead of a silent no-op. Shared by
+    :func:`gateway.api.routes._attempts.classify_local_attempt_error` (labels
+    the walker's failures) and
     :func:`gateway.api.routes._pipeline.classify_provider_error` (drives the
     final client-facing status/detail), so the two stay in sync.
 

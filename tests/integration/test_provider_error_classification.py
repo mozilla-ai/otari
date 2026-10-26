@@ -258,7 +258,7 @@ def test_messages_surfaces_reasoning_effort_tools_conflict(
         response = client.post(f"{API_ROOT}/messages", json=messages_request_body, headers=master_key_header)
 
     assert response.status_code == 400
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["type"] == "error"
     assert detail["error"]["type"] == "invalid_request_error"
     assert detail["error"]["message"] == _REASONING_TOOLS_MSG
@@ -317,7 +317,7 @@ def test_messages_classifies_provider_error(
         response = client.post(f"{API_ROOT}/messages", json=messages_request_body, headers=master_key_header)
 
     assert response.status_code == expected_status
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["type"] == "error"
     assert detail["error"]["type"] == expected_type
     assert detail["error"]["message"] == expected_detail
@@ -407,7 +407,7 @@ def test_messages_answers_a_provider_400_with_the_providers_sentence(
         response = client.post(f"{API_ROOT}/messages", json=messages_request_body, headers=master_key_header)
 
     assert response.status_code == 400
-    assert response.json()["detail"]["error"] == {
+    assert response.json()["error"] == {
         "type": "invalid_request_error",
         "message": "max_tokens: Field required",
     }

@@ -81,7 +81,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
     ) -> User:
         """Stage a local identity, claimable later.
 
-        A standalone operator is an operator-defined label rather than a
+        An operator identity is an operator-defined label rather than a
         sign-in address, so the row is stored with no email by default; the
         nullable column tolerates that where a create schema requiring an address
         would not. Any gateway users a future convergence brings onto this table

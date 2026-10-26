@@ -52,7 +52,7 @@ def test_unsafe_guardrail_url_returns_400(
     )
 
     assert resp.status_code == 400, resp.text
-    assert "link-local" in resp.json()["detail"]
+    assert "link-local" in resp.json()["error"]["message"]
 
 
 def test_unsafe_output_only_guardrail_url_returns_400(
@@ -75,7 +75,7 @@ def test_unsafe_output_only_guardrail_url_returns_400(
     )
 
     assert resp.status_code == 400, resp.text
-    assert "link-local" in resp.json()["detail"]
+    assert "link-local" in resp.json()["error"]["message"]
 
 
 def test_safe_mcp_server_url_no_longer_validated_at_parse_time() -> None:

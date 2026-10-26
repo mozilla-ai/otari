@@ -19,13 +19,13 @@ from gateway.core.settings.tools import (
     effective_fetch_instances,
     instance_name_problems,
     option_problems,
-    search_default_to_pin,
     validate_fetch_tool_entry,
     validate_search_tool_entry,
     validate_search_tool_transport,
 )
 from gateway.exceptions.tools_exceptions import SearchToolRefusedError
 from gateway.services.tool_settings_service import validate_url
+from gateway.services.tools._web_search import search_default_to_pin
 
 
 def _section(kind: ToolKind) -> str:

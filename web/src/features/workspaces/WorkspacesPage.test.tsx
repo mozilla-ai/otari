@@ -730,8 +730,8 @@ describe("WorkspacesPage", () => {
   })
 
   it("shows no provider-key column where the organization holds no keys", async () => {
-    // Every standalone deployment: organization-owned keys are a hosted
-    // surface, so the column would be a header over blank cells.
+    // The usual state when the organization holds no provider keys of its own,
+    // so the column would be a header over blank cells.
     mockApi()
     renderPage(<WorkspacesPage />)
 

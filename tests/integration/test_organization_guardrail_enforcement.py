@@ -170,7 +170,7 @@ def test_a_scoped_entry_blocks_a_request_the_caller_asked_no_guardrail_for(
     response = _post(client, api_key_header, _REQUEST, guardrails, monkeypatch)
 
     assert response.status_code == 403
-    detail = response.json()["detail"]
+    detail = response.json()["error"]
     assert detail["code"] == "guardrail_violation"
     assert [entry["profile"] for entry in detail["guardrails"]] == ["prompt-injection"]
     assert guardrails.profiles == ["prompt-injection"]
@@ -243,25 +243,23 @@ def test_a_request_whose_tenancy_will_not_resolve_is_refused_rather_than_uncheck
 ) -> None:
     """The fail-closed arm, on the one input that proves the tenancy is unresolvable.
 
-    Unreachable today, since `resolve_workspace_id` always answers and falls
-    back to the default workspace. Pinned because what it guards is an
-    enforcement decision: falling through would serve a request its organization
-    requires a blocking guardrail on, unchecked, with nothing to notice.
+    Unreachable while every workspace row has an organization. Pinned because
+    what it guards is an enforcement decision: falling through would serve a
+    request its organization requires a blocking guardrail on, unchecked.
     """
     monkeypatch.setenv("OTARI_GUARDRAILS_URL", _DEPLOYMENT_URL)
     _mandate(client, master_key_header, profile="prompt-injection", mode="block", applies_to_all_workspaces=True)
 
-    async def no_workspace(*_args: Any, **_kwargs: Any) -> None:
+    async def no_organization(*_args: Any, **_kwargs: Any) -> None:
         return None
 
-    monkeypatch.setattr("gateway.api.routes._pipeline.resolve_workspace_id", no_workspace)
+    monkeypatch.setattr("gateway.api.routes._pipeline.organization_for_workspace_id", no_organization)
     guardrails = _Guardrails(valid=True)
 
     response = _post(client, api_key_header, _REQUEST, guardrails, monkeypatch)
 
     assert response.status_code == 500
-    detail = response.json()["detail"]
-    assert detail["error"]["message"] == "Organization guardrails could not be resolved for this request"
+    assert response.json()["error"]["message"] == "Organization guardrails could not be resolved for this request"
     assert guardrails.calls == [], "and the provider was never reached either"
 
 
@@ -579,7 +577,7 @@ def test_a_mandate_naming_a_definition_is_answered_here_and_sent_nowhere(
     response = _post(client, api_key_header, _REQUEST, guardrails, monkeypatch)
 
     assert response.status_code == 403
-    detail = response.json()["detail"]
+    detail = response.json()["error"]
     assert detail["code"] == "guardrail_violation"
     assert [entry["profile"] for entry in detail["guardrails"]] == ["prompt-injection"]
     assert guardrails.calls == [], "nothing was posted to the deployment's guardrails service"
@@ -676,7 +674,7 @@ def test_a_definition_this_worker_does_not_hold_fails_closed(
     response = _post(client, api_key_header, _REQUEST, guardrails, monkeypatch)
 
     assert response.status_code == 502
-    assert response.json()["detail"] == "guardrail profile 'prompt-injection' could not be evaluated"
+    assert response.json()["error"]["message"] == "guardrail profile 'prompt-injection' could not be evaluated"
     assert guardrails.calls == []
     assert definition["id"] not in response.text
 

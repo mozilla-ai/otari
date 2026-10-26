@@ -34,7 +34,7 @@ from decimal import Decimal
 
 from gateway.core.metered_pricing import to_decimal
 from gateway.models.money import MAX_USD_COST
-from gateway.types.tool_charges import PROVIDER_WEB_SEARCH_TOOL, LabelCalls, provider_web_search_label
+from gateway.types.tool_charges import PROVIDER_WEB_SEARCH_TOOL, LabelCalls, RateKey, provider_web_search_label
 
 # Every tool backend marks a recoverable failure by prefixing the string it hands
 # back to the model. The tool loop's own error path uses the same prefix, so this
@@ -89,7 +89,7 @@ class ToolUsageTally:
 
     def __init__(self) -> None:
         self._counts: dict[str, dict[str, int]] = {}
-        self._labels: dict[tuple[str, str | None, tuple[str, ...] | None, bool | None], _LabelTotals] = {}
+        self._labels: dict[tuple[str, str | None, tuple[RateKey, ...] | None, bool | None], _LabelTotals] = {}
         self._overflowed = False
 
     def record_result(
@@ -98,9 +98,10 @@ class ToolUsageTally:
         text: str,
         *,
         label: str | None = None,
-        rate_keys: tuple[str, ...] | None = None,
+        rate_keys: tuple[RateKey, ...] | None = None,
         cost: Decimal | None = None,
         enrichment_cost: Decimal | None = None,
+        deployment_paid: bool | None = None,
     ) -> None:
         """Record a call that returned, classifying it on the sentinel.
 
@@ -110,13 +111,15 @@ class ToolUsageTally:
         prices the call. A failed call's costs are dropped, since it is never
         billed. A cost that is negative, not finite, or more than a cost column
         holds is unusable: the call reads as unreported, and an enrichment cost
-        as none.
+        as none. ``deployment_paid`` says whose account ran the call, which
+        decides whose prices count and whether the organization's funds pay for
+        it; ``None`` reads it off the label.
         """
         failed = is_tool_error(text)
         key = self._record(tool, failed=failed)
         if failed:
             return
-        totals = self._labels.setdefault((key, label, rate_keys, None), _LabelTotals())
+        totals = self._labels.setdefault((key, label, rate_keys, deployment_paid), _LabelTotals())
         totals.calls += 1
         reported = _usable_cost(cost)
         if reported is None:

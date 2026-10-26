@@ -202,7 +202,7 @@ async def test_search_calls_are_metered_priced_and_spent(
         # so patching it there is what intercepts every iteration.
         patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
         patch(
-            "gateway.services.web_search_backend.WebSearchBackend._search_tool",
+            "gateway.services.web_retrieval_backend.WebSearchBackend._search_tool",
             new=AsyncMock(return_value="search results for otari"),
         ),
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
@@ -260,7 +260,7 @@ async def test_failed_search_is_counted_but_never_billed(
     with (
         patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
         patch(
-            "gateway.services.web_search_backend.WebSearchBackend._search_tool",
+            "gateway.services.web_retrieval_backend.WebSearchBackend._search_tool",
             new=AsyncMock(return_value="[tool error] backend unreachable"),
         ),
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
@@ -297,7 +297,7 @@ async def test_a_search_with_no_hits_is_billed_at_the_rate(
 
     with (
         patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
-        patch("gateway.services.web_search_backend.WebSearchBackend._search", new=AsyncMock(return_value=[])),
+        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search", new=AsyncMock(return_value=[])),
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
     ):
         response = client.post(
@@ -320,6 +320,8 @@ async def test_a_search_with_no_hits_is_billed_at_the_rate(
         "units": 1,
         "unit_rate": pytest.approx(_SEARCH_UNIT_COST),
         "cost": pytest.approx(_SEARCH_UNIT_COST),
+        # The legacy settings' search runs on the deployment's account.
+        "deployment_paid": True,
     }
 
 
@@ -386,6 +388,52 @@ async def test_a_search_on_an_instance_is_priced_at_its_own_row_with_its_enrichm
     assert (line["label"], line["units"]) == (f"fake:{_FAKE_SEARCH}", 1)
     assert line["cost"] == pytest.approx(0.004 + 0.004)
     assert set((row.billing_meters or {})[TOOL_METER_NAMESPACE]) == {"web_search"}, "enrichment records no fetch"
+
+
+@pytest.mark.asyncio
+async def test_a_search_on_an_instance_takes_its_search_row_and_an_operator_override_on_its_old_key(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    model_pricing: dict[str, Any],
+    search_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    """The instance's search row wins over its old ``fake:<instance>`` row; an operator's override wins over both."""
+    _serve_search_on_fake(monkeypatch, test_config, search={}, fetch={})
+    for body in (
+        {"model_key": f"fake:{_FAKE_SEARCH}", "input_price_per_million": 4_000.0},
+        {"kind": "search", "model_key": _FAKE_SEARCH, "input_price_per_million": 2_500.0},
+    ):
+        response = client.post(
+            f"{API_ROOT}/pricing", json={**body, "output_price_per_million": 0.0}, headers=master_key_header
+        )
+        assert response.status_code == 200, response.text
+
+    def billed() -> tuple[str, float]:
+        """The label and cost of the newest usage row's search line."""
+        row = _latest_row(db_session_factory, api_key_obj["user_id"])
+        [line] = [entry for entry in (row.pricing_breakdown or []) if entry["meter"] == "web_search_calls"]
+        return line["label"], line["cost"]
+
+    _search_once(client, api_key_header)
+    label, cost = billed()
+    # The label still names what served the call.
+    assert label == f"fake:{_FAKE_SEARCH}"
+    assert cost == pytest.approx(0.0025)
+
+    # Every override is tried before any deployment price, the old key included.
+    override = client.post(
+        f"{API_ROOT}/organizations/me/pricing",
+        json={"model_key": f"fake:{_FAKE_SEARCH}", "input_price_per_million": 1_000.0, "output_price_per_million": 0.0},
+        headers=master_key_header,
+    )
+    assert override.status_code == 201, override.text
+    _search_once(client, api_key_header)
+    assert billed()[1] == pytest.approx(0.001)
 
 
 @pytest.mark.asyncio
@@ -460,13 +508,22 @@ async def test_a_reported_zero_settles_at_zero_beside_an_unreported_call_at_the_
 
     [row] = writer.logs
     assert row.pricing_breakdown == [
-        {"meter": "web_search_calls", "label": "exa:exa-search", "units": 1, "unit_rate": 0.0, "cost": 0.0},
+        {
+            "meter": "web_search_calls",
+            "label": "exa:exa-search",
+            "units": 1,
+            "unit_rate": 0.0,
+            "cost": 0.0,
+            "deployment_paid": True,
+        },
         {
             "meter": "web_search_calls",
             "label": "otari:web_search",
             "units": 1,
             "unit_rate": _SEARCH_UNIT_COST,
             "cost": _SEARCH_UNIT_COST,
+            # Recorded with no payer, so read off its label.
+            "deployment_paid": False,
         },
     ]
     meter = (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"]
@@ -579,20 +636,23 @@ async def test_a_fetch_on_an_instance_is_priced_at_the_instances_own_row(
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
 ) -> None:
-    """``fake:<instance>`` wins over ``otari:web_fetch``, which is also priced (design L)."""
+    """The instance's fetch row wins over its old ``fake:<instance>`` row and ``otari:web_fetch`` (design L)."""
     _serve_fetch_on_fake(monkeypatch, test_config)
-    response = client.post(
-        f"{API_ROOT}/pricing",
-        json={"model_key": f"fake:{_FAKE_FETCH}", "input_price_per_million": 4_000.0, "output_price_per_million": 0.0},
-        headers=master_key_header,
-    )
-    assert response.status_code == 200, response.text
+    for body in (
+        {"model_key": f"fake:{_FAKE_FETCH}", "input_price_per_million": 4_000.0},
+        {"kind": "fetch", "model_key": _FAKE_FETCH, "input_price_per_million": 2_500.0},
+    ):
+        response = client.post(
+            f"{API_ROOT}/pricing", json={**body, "output_price_per_million": 0.0}, headers=master_key_header
+        )
+        assert response.status_code == 200, response.text
 
     _fetch_once(client, api_key_header)
 
     line = _fetch_line(db_session_factory, api_key_obj["user_id"])
+    # The label is unchanged: it names what served the call, which the breakdown's readers key on.
     assert (line["label"], line["units"]) == (f"fake:{_FAKE_FETCH}", 1)
-    assert line["cost"] == pytest.approx(0.004)
+    assert line["cost"] == pytest.approx(0.0025)
 
 
 @pytest.mark.asyncio
@@ -642,7 +702,7 @@ async def test_a_built_in_fetch_is_labeled_builtin_fetch_and_priced_under_otari_
 
 @pytest.fixture
 def configured_fetch_price_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
-    """A gateway whose configuration file serves fetch on a ``fake`` instance and prices it.
+    """A gateway whose configuration file serves fetch on a ``fake`` instance and prices it per call.
 
     Built rather than copied from ``test_config``: a copy keeps the shared config's
     baseline of fetch instances, which the startup overlay restores.
@@ -654,12 +714,9 @@ def configured_fetch_price_client(test_config: GatewayConfig, clean_database: No
         require_pricing=False,
         providers=declared_test_providers(),
         web_fetch_enabled=True,
-        fetch_tools={_FAKE_FETCH: {"provider": "fake"}},
+        fetch_tools={_FAKE_FETCH: {"provider": "fake", "price_per_call": 0.003}},
         web_fetch_default_tool=_FAKE_FETCH,
-        pricing={
-            f"fake:{_FAKE_FETCH}": PricingConfig(input_price_per_million=3_000.0, output_price_per_million=0.0),
-            MODEL_NAME: PricingConfig(input_price_per_million=1.0, output_price_per_million=1.0),
-        },
+        pricing={MODEL_NAME: PricingConfig(input_price_per_million=1.0, output_price_per_million=1.0)},
     )
     yield from build_test_client(config)
 
@@ -862,6 +919,8 @@ async def test_searches_the_provider_ran_are_billed_at_its_list_price(async_db: 
         "units": 2,
         "unit_rate": 0.01,
         "cost": 0.02,
+        # The model call was not deployment-paid, so neither were its provider's searches.
+        "deployment_paid": False,
     }
     assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"]["billed"] == 2
     assert row.cost is not None

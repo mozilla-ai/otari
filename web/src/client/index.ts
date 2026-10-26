@@ -24,11 +24,6 @@ type Schemas = components["schemas"]
  * is true of a response and false of a request body: the point of a default is
  * that a client may omit it. Applied only where the dashboard actually omits
  * one, so it stays a correction rather than a blanket loosening.
- *
- * Exported because the response side has the same problem from the other
- * direction: a gateway older than a field does not send it, whatever the
- * current schema says. `WireBootstrap` in `shared/helpers/bootstrap.ts` is that
- * case, and reuses this rather than restating it.
  */
 export type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 
@@ -39,23 +34,6 @@ export type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 // knows whether it can authenticate at all.
 // ---------------------------------------------------------------------------
 export type DeploymentBootstrap = Schemas["DeploymentBootstrap"]
-export type DeploymentType = DeploymentBootstrap["deployment_type"]
-export type SessionType = DeploymentBootstrap["session_type"]
-
-/**
- * `GET /health`, which the hybrid landing page reads for its two status rows.
- *
- * A flat string map rather than a named schema, because the route returns one:
- * `status` always, plus `mode` and `platform_reachable` ("yes" / "no") when the
- * gateway is attached to a control plane. Derived from the operation rather than
- * restated, but an index signature cannot police key names, so nothing here
- * would notice one being renamed: what pins the keys is
- * `test_hybrid_mode_health_reports_reachability`, which asserts the whole dict.
- * Giving the route a response model is what would move that guarantee into the
- * type.
- */
-export type GatewayHealth =
-  operations["health-health_check"]["responses"][200]["content"]["application/json"]
 
 // ---------------------------------------------------------------------------
 // Dashboard sign-in credentials
@@ -129,6 +107,8 @@ export type TraceSeries = Schemas["TraceSeriesPublic"]
 export type TraceDetail = Schemas["TraceDetailPublic"]
 export type TraceSpan = Schemas["SpanPublic"]
 export type TraceTurn = Schemas["TurnPublic"]
+export type TraceGateSummary = Schemas["GateSummaryPublic"]
+export type TraceToolCost = Schemas["ToolCostPublic"]
 export type UsageCount = Schemas["UsageCount"]
 export type UsageTotals = Schemas["UsageTotals"]
 export type UsageSummary = Schemas["UsageSummary"]
@@ -237,6 +217,8 @@ export type UpdateKeyRequest = Schemas["UpdateKeyRequest"]
 // owner and the budget exemption, which that surface derives or refuses.
 export type CreateOwnKeyRequest = Schemas["CreateOwnKeyRequest"]
 export type UpdateOwnKeyRequest = Schemas["UpdateOwnKeyRequest"]
+export type FederationRule = Schemas["FederationRulePublic"]
+export type CreateFederationRuleRequest = Schemas["FederationRuleCreate"]
 export type Budget = Schemas["BudgetResponse"]
 export type CreateBudgetRequest = Schemas["CreateBudgetRequest"]
 export type UpdateBudgetRequest = Schemas["UpdateBudgetRequest"]
@@ -379,6 +361,11 @@ export type HostedAvailableModels = Schemas["HostedAvailableModelsPublic"]
 export type HostedCatalogRefresh = Schemas["HostedCatalogRefreshPublic"]
 export type HostedCatalogProviderRefresh =
   Schemas["HostedCatalogProviderRefreshPublic"]
+export type HostedCatalogPriceUpdate = Schemas["HostedCatalogPriceUpdatePublic"]
+export type HostedCatalogUpdatePreview =
+  Schemas["HostedCatalogUpdatePreviewPublic"]
+export type HostedCatalogUpdateResult = Schemas["HostedCatalogUpdatePublic"]
+export type HostedCatalogUpdateRequest = Schemas["HostedCatalogUpdateRequest"]
 export type TestHostedProviderRequest = Schemas["HostedProviderTestRequest"]
 export type HostedProviderTestResult = Schemas["HostedProviderTestPublic"]
 export type ReencryptHostedProvidersResult =
@@ -426,6 +413,8 @@ export type ManagedTool = Schemas["ManagedTool"]
 export type ToolsResponse = Schemas["ToolsResponse"]
 export type ToolSettingField = Schemas["ToolSettingField"]
 export type ToolSettingsResponse = Schemas["ToolSettingsResponse"]
+export type SandboxCredentialPublic = Schemas["SandboxCredentialPublic"]
+export type SandboxCredentialRequest = Schemas["SandboxCredentialRequest"]
 export type UpdateToolSettingsRequest = Schemas["UpdateToolSettingsRequest"]
 export type TestServiceResponse = Schemas["TestServiceResponse"]
 
@@ -463,7 +452,7 @@ export type UpdateSearchToolRequest = Schemas["UpdateSearchToolRequest"]
 // Tenancy: organizations, workspaces, and the memberships joining them
 //
 // Rehomed from the platform with their shapes intact, which is the point: the
-// pages built on them here are the ones otari.ai's control plane brings across
+// pages built on them here are the ones otari.ai brings across
 // at M5, so a renamed field would have to be reconciled twice.
 // ---------------------------------------------------------------------------
 // One organization is provisioned at first boot and that is what most
@@ -655,6 +644,10 @@ export type GuardrailTestResult =
 // bearer token is write-only, so the public shape reports only `has_token`.
 export type WorkspaceMcpServer = Schemas["WorkspaceMcpServerPublic"]
 export type WorkspaceMcpServers = Schemas["WorkspaceMcpServersPublic"]
+export type WorkspaceMcpServerHealth = Schemas["WorkspaceMcpServerHealth"]
+export type McpServerCheckFailure = Schemas["CheckFailure"]
+export type CheckWorkspaceMcpServerRequest =
+  Schemas["WorkspaceMcpServerCheckRequest"]
 export type CreateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCreate"]
 export type UpdateWorkspaceMcpServerRequest =

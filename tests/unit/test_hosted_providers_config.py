@@ -142,16 +142,22 @@ DOCUMENTED_KEYLESS = {
 
 @pytest.mark.parametrize("provider", sorted(DOCUMENTED_KEYLESS))
 def test_a_keyless_backend_may_leave_the_key_out(provider: str) -> None:
-    entry = _validated({provider: {"api_base": "http://localhost:8000/v1"}}).hosted_provider_entries()[provider]
+    block = {"own": {"provider": provider, "api_base": "http://localhost:8000/v1"}}
 
-    assert entry.api_key is None
+    assert _validated(block).hosted_provider_entries()["own"].api_key is None
+
+
+def test_an_otari_entry_must_take_a_name_of_its_own() -> None:
+    """``otari`` prefixes the gateway's own tool prices, so a provider under it would lose its model prices."""
+    with pytest.raises(ValueError, match=r"hosted_providers\.otari: the name is reserved; give the provider a name"):
+        _validated({"otari": {"api_base": "http://localhost:8000/v1"}})
 
 
 def test_the_documented_keyless_providers_are_exactly_those_accepted_without_a_key() -> None:
     accepted = set()
     for provider in LLMProvider:
         try:
-            _validated({provider.value: {}})
+            _validated({"own": {"provider": provider.value}})
         except ValueError:
             continue
         accepted.add(provider.value)
