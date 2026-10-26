@@ -1553,7 +1553,7 @@
         "type": "object"
       },
       "Annotations": {
-        "additionalProperties": true,
+        "description": "Optional annotations the client can use to inform how objects are used or displayed.",
         "properties": {
           "audience": {
             "anyOf": [
@@ -1572,6 +1572,17 @@
               }
             ],
             "title": "Audience"
+          },
+          "lastModified": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastmodified"
           },
           "priority": {
             "anyOf": [
@@ -1749,8 +1760,7 @@
         "type": "object"
       },
       "AudioContent": {
-        "additionalProperties": true,
-        "description": "Audio content for a message.",
+        "description": "Audio provided to or from an LLM.",
         "properties": {
           "_meta": {
             "anyOf": [
@@ -1784,12 +1794,12 @@
           },
           "type": {
             "const": "audio",
+            "default": "audio",
             "title": "Type",
             "type": "string"
           }
         },
         "required": [
-          "type",
           "data",
           "mimeType"
         ],
@@ -2031,7 +2041,6 @@
         "type": "object"
       },
       "BlobResourceContents": {
-        "additionalProperties": true,
         "description": "Binary contents of a resource.",
         "properties": {
           "_meta": {
@@ -2062,8 +2071,6 @@
             "title": "Mimetype"
           },
           "uri": {
-            "format": "uri",
-            "minLength": 1,
             "title": "Uri",
             "type": "string"
           }
@@ -2651,8 +2658,7 @@
         "type": "object"
       },
       "CallToolResult": {
-        "additionalProperties": true,
-        "description": "The server's response to a tool call.",
+        "description": "The server's response to a tool call.\n\nErrors that originate from the tool SHOULD be reported inside the result\nwith `is_error` set to true, not as an MCP protocol-level error, so the LLM\ncan see and self-correct. Errors in finding the tool, or any other\nexceptional condition, should be reported as an MCP error response.",
         "properties": {
           "_meta": {
             "anyOf": [
@@ -2694,16 +2700,23 @@
             "title": "Iserror",
             "type": "boolean"
           },
-          "structuredContent": {
+          "resultType": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "enum": [
+                  "complete",
+                  "input_required"
+                ],
+                "type": "string"
               },
               {
-                "type": "null"
+                "type": "string"
               }
             ],
+            "default": "complete",
+            "title": "Resulttype"
+          },
+          "structuredContent": {
             "title": "Structuredcontent"
           }
         },
@@ -6523,7 +6536,6 @@
         "type": "object"
       },
       "EmbeddedResource": {
-        "additionalProperties": true,
         "description": "The contents of a resource, embedded into a prompt or tool call result.\n\nIt is up to the client how best to render embedded resources for the benefit\nof the LLM and/or the user.",
         "properties": {
           "_meta": {
@@ -6561,12 +6573,12 @@
           },
           "type": {
             "const": "resource",
+            "default": "resource",
             "title": "Type",
             "type": "string"
           }
         },
         "required": [
-          "type",
           "resource"
         ],
         "title": "EmbeddedResource",
@@ -9811,8 +9823,7 @@
         "type": "object"
       },
       "Icon": {
-        "additionalProperties": true,
-        "description": "An icon for display in user interfaces.",
+        "description": "An optionally-sized icon for display in a user interface (2025-11-25+).",
         "properties": {
           "mimeType": {
             "anyOf": [
@@ -9842,6 +9853,21 @@
           "src": {
             "title": "Src",
             "type": "string"
+          },
+          "theme": {
+            "anyOf": [
+              {
+                "enum": [
+                  "light",
+                  "dark"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theme"
           }
         },
         "required": [
@@ -9851,8 +9877,7 @@
         "type": "object"
       },
       "ImageContent": {
-        "additionalProperties": true,
-        "description": "Image content for a message.",
+        "description": "An image provided to or from an LLM.",
         "properties": {
           "_meta": {
             "anyOf": [
@@ -9886,12 +9911,12 @@
           },
           "type": {
             "const": "image",
+            "default": "image",
             "title": "Type",
             "type": "string"
           }
         },
         "required": [
-          "type",
           "data",
           "mimeType"
         ],
@@ -18176,7 +18201,6 @@
         "type": "object"
       },
       "ResourceLink": {
-        "additionalProperties": true,
         "description": "A resource that the server is capable of reading, included in a prompt or tool call result.\n\nNote: resource links returned by tools are not guaranteed to appear in the results of `resources/list` requests.",
         "properties": {
           "_meta": {
@@ -18265,20 +18289,18 @@
           },
           "type": {
             "const": "resource_link",
+            "default": "resource_link",
             "title": "Type",
             "type": "string"
           },
           "uri": {
-            "format": "uri",
-            "minLength": 1,
             "title": "Uri",
             "type": "string"
           }
         },
         "required": [
           "name",
-          "uri",
-          "type"
+          "uri"
         ],
         "title": "ResourceLink",
         "type": "object"
@@ -20699,8 +20721,7 @@
         "type": "object"
       },
       "TextContent": {
-        "additionalProperties": true,
-        "description": "Text content for a message.",
+        "description": "Text provided to or from an LLM.",
         "properties": {
           "_meta": {
             "anyOf": [
@@ -20730,19 +20751,18 @@
           },
           "type": {
             "const": "text",
+            "default": "text",
             "title": "Type",
             "type": "string"
           }
         },
         "required": [
-          "type",
           "text"
         ],
         "title": "TextContent",
         "type": "object"
       },
       "TextResourceContents": {
-        "additionalProperties": true,
         "description": "Text contents of a resource.",
         "properties": {
           "_meta": {
@@ -20773,8 +20793,6 @@
             "type": "string"
           },
           "uri": {
-            "format": "uri",
-            "minLength": 1,
             "title": "Uri",
             "type": "string"
           }

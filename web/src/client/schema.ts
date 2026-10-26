@@ -7837,14 +7837,17 @@ export interface components {
             total_count: number;
             worst: components["schemas"]["WorstAllocationResponse"] | null;
         };
-        /** Annotations */
+        /**
+         * Annotations
+         * @description Optional annotations the client can use to inform how objects are used or displayed.
+         */
         Annotations: {
             /** Audience */
             audience?: ("user" | "assistant")[] | null;
+            /** Lastmodified */
+            lastModified?: string | null;
             /** Priority */
             priority?: number | null;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * AnthropicError
@@ -7936,7 +7939,7 @@ export interface components {
         };
         /**
          * AudioContent
-         * @description Audio content for a message.
+         * @description Audio provided to or from an LLM.
          */
         AudioContent: {
             /** Meta */
@@ -7950,11 +7953,10 @@ export interface components {
             mimeType: string;
             /**
              * Type
+             * @default audio
              * @constant
              */
             type: "audio";
-        } & {
-            [key: string]: unknown;
         };
         /**
          * AudioSpeechRequest
@@ -8119,13 +8121,8 @@ export interface components {
             blob: string;
             /** Mimetype */
             mimeType?: string | null;
-            /**
-             * Uri
-             * Format: uri
-             */
+            /** Uri */
             uri: string;
-        } & {
-            [key: string]: unknown;
         };
         /** Body_audio-create_transcription */
         "Body_audio-create_transcription": {
@@ -8367,6 +8364,11 @@ export interface components {
         /**
          * CallToolResult
          * @description The server's response to a tool call.
+         *
+         *     Errors that originate from the tool SHOULD be reported inside the result
+         *     with `is_error` set to true, not as an MCP protocol-level error, so the LLM
+         *     can see and self-correct. Errors in finding the tool, or any other
+         *     exceptional condition, should be reported as an MCP error response.
          */
         CallToolResult: {
             /** Meta */
@@ -8380,12 +8382,13 @@ export interface components {
              * @default false
              */
             isError: boolean;
+            /**
+             * Resulttype
+             * @default complete
+             */
+            resultType: ("complete" | "input_required") | string;
             /** Structuredcontent */
-            structuredContent?: {
-                [key: string]: unknown;
-            } | null;
-        } & {
-            [key: string]: unknown;
+            structuredContent?: unknown;
         };
         /**
          * CallerIdentityPublic
@@ -10134,11 +10137,10 @@ export interface components {
             resource: components["schemas"]["TextResourceContents"] | components["schemas"]["BlobResourceContents"];
             /**
              * Type
+             * @default resource
              * @constant
              */
             type: "resource";
-        } & {
-            [key: string]: unknown;
         };
         /**
          * EmbeddingData
@@ -11694,7 +11696,7 @@ export interface components {
         };
         /**
          * Icon
-         * @description An icon for display in user interfaces.
+         * @description An optionally-sized icon for display in a user interface (2025-11-25+).
          */
         Icon: {
             /** Mimetype */
@@ -11703,12 +11705,12 @@ export interface components {
             sizes?: string[] | null;
             /** Src */
             src: string;
-        } & {
-            [key: string]: unknown;
+            /** Theme */
+            theme?: ("light" | "dark") | null;
         };
         /**
          * ImageContent
-         * @description Image content for a message.
+         * @description An image provided to or from an LLM.
          */
         ImageContent: {
             /** Meta */
@@ -11722,11 +11724,10 @@ export interface components {
             mimeType: string;
             /**
              * Type
+             * @default image
              * @constant
              */
             type: "image";
-        } & {
-            [key: string]: unknown;
         };
         /**
          * ImageGenerationRequest
@@ -15857,16 +15858,12 @@ export interface components {
             title?: string | null;
             /**
              * Type
+             * @default resource_link
              * @constant
              */
             type: "resource_link";
-            /**
-             * Uri
-             * Format: uri
-             */
+            /** Uri */
             uri: string;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * ResponsesRequest
@@ -16922,7 +16919,7 @@ export interface components {
         };
         /**
          * TextContent
-         * @description Text content for a message.
+         * @description Text provided to or from an LLM.
          */
         TextContent: {
             /** Meta */
@@ -16934,11 +16931,10 @@ export interface components {
             text: string;
             /**
              * Type
+             * @default text
              * @constant
              */
             type: "text";
-        } & {
-            [key: string]: unknown;
         };
         /**
          * TextResourceContents
@@ -16953,13 +16949,8 @@ export interface components {
             mimeType?: string | null;
             /** Text */
             text: string;
-            /**
-             * Uri
-             * Format: uri
-             */
+            /** Uri */
             uri: string;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * TokenChargeLine

@@ -204,11 +204,11 @@ async def test_a_definitive_result_survives_a_cleanup_failure(session: _FakeSess
 
 @pytest.mark.asyncio
 async def test_a_server_reported_error_is_a_definitive_result(session: _FakeSession) -> None:
-    session.result = CallToolResult(content=[TextContent(type="text", text="denied")], isError=True)
+    session.result = CallToolResult(content=[TextContent(type="text", text="denied")], is_error=True)
 
     result = await execute_stored_tool(SERVER, "create_issue", {})
 
-    assert result.isError is True
+    assert result.is_error is True
 
 
 @pytest.mark.asyncio

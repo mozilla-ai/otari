@@ -1,14 +1,14 @@
-"""mcp's pyproject.toml constraint must keep mcp 2.0+ out of a fresh
-resolution, not just satisfy the committed uv.lock.
+"""mcp's pyproject.toml constraint must keep a breaking mcp release out of a
+fresh resolution, not just satisfy the committed uv.lock.
 
-uv.lock pins mcp 1.28.1, so `uv sync` here never re-resolves and never
+uv.lock pins one mcp, so `uv sync` here never re-resolves and never
 notices a missing (or misplaced) ceiling: CI stays green even though a
 fresh, unlocked resolution elsewhere (a fresh clone before the first `uv
 lock`, a consuming superset build resolving otari's tree alongside its own)
-can pick up mcp 2.0, which removed
-`mcp.client.streamable_http.streamablehttp_client`.
-`gateway/services/mcp_client.py` imports that at module scope, so every
-gateway command dies with ImportError the moment that happens. See #689.
+can pick up a release that removed a name the gateway imports. mcp 2.0 did,
+removing `mcp.client.streamable_http.streamablehttp_client`, which
+`gateway/services/mcp_client.py` imported at module scope, so every gateway
+command died with ImportError. See #689.
 
 This resolves mcp into a throwaway venv using only the constraint declared
 in pyproject.toml - uv.lock is never consulted - and proves the actual
@@ -36,6 +36,13 @@ import pytest
 from packaging.requirements import Requirement
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# The mcp names the gateway imports at module scope.
+_IMPORTS = (
+    "from mcp.client.streamable_http import streamable_http_client; "
+    "from mcp.shared.exceptions import MCPError; "
+    "from mcp.types import PaginatedRequestParams"
+)
 
 
 def _mcp_requirement() -> Requirement:
@@ -78,7 +85,7 @@ def test_mcp_constraint_resolves_to_an_importable_version(tmp_path: Path) -> Non
     assert install.returncode == 0, f"fresh install of '{requirement}' failed:\n{install.stderr}"
 
     imported = subprocess.run(
-        [str(venv_python), "-c", "from mcp.client.streamable_http import streamablehttp_client"],
+        [str(venv_python), "-c", _IMPORTS],
         capture_output=True,
         text=True,
         check=False,
@@ -86,5 +93,5 @@ def test_mcp_constraint_resolves_to_an_importable_version(tmp_path: Path) -> Non
     )
     assert imported.returncode == 0, (
         f"a fresh install of '{requirement}' (ignoring uv.lock) cannot import "
-        f"streamablehttp_client, the same break as #689:\n{imported.stderr}"
+        f"what the gateway imports, the same break as #689:\n{imported.stderr}"
     )

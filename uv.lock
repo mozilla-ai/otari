@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version == '3.14.*' and sys_platform == 'linux'",
@@ -1308,6 +1308,7 @@ dependencies = [
     { name = "dnspython" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "httpx2" },
     { name = "idna" },
     { name = "mcp" },
     { name = "opentelemetry-api" },
@@ -1396,6 +1397,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.153.0" },
     { name = "fsspec", marker = "extra == 'fsspec'", specifier = ">=2026.6.0" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "httpx2", specifier = ">=2.13.1" },
     { name = "idna", specifier = ">=3.10" },
     { name = "mcp", specifier = ">=2.3.0,<2.4.0" },
     { name = "numpy", marker = "extra == 'ocr'", specifier = ">=2.5.4" },

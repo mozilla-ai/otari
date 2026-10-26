@@ -58,6 +58,9 @@ dependencies = [
     # Direct dependency for gateway-managed HTTP clients and the public
     # transport API used by pinned web retrieval.
     "httpx>=0.28.1",
+    # The client the mcp SDK's transport takes (`http_client=`), which Otari
+    # builds itself to keep MCP redirects and response sizes bounded.
+    "httpx2>=2.13.1",
     # IDNA2008 for email-domain ownership and one UTS #46/STD3 identity for
     # URL policy and pinned retrieval. Declared rather than leaned on as a
     # transitive dependency, because the standard library's own "idna" codec
@@ -74,7 +77,7 @@ dependencies = [
     # written into `docs/public/openapi.json` and from there into the Postman
     # collection and `web/src/client/schema.ts`, all three committed with drift
     # checks. An mcp release that touches any of those shapes therefore changes
-    # three generated files here. Left open to `<2.0.0`, a `uv lock` run for an
+    # three generated files here. Left open to the next major, a `uv lock` run for an
     # unrelated dependency would move mcp and those artifacts as a side effect,
     # and the drift checks would fail on a PR whose diff explained none of it.
     # Bumping this is deliberate work: raise the ceiling, then regenerate both

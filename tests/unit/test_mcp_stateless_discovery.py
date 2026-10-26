@@ -16,7 +16,7 @@ from typing import Any
 import anyio
 import pytest
 from mcp import ClientSession
-from mcp.types import ListToolsResult
+from mcp.types import ListToolsResult, PaginatedRequestParams
 from mcp.types import Tool as MCPTool
 
 from gateway.models.mcp import ResolvedMcpServer
@@ -40,7 +40,7 @@ SERVER = ResolvedMcpServer(
 
 
 def _tool(name: str, **overrides: Any) -> MCPTool:
-    fields: dict[str, Any] = {"name": name, "description": name, "inputSchema": {"type": "object"}}
+    fields: dict[str, Any] = {"name": name, "description": name, "input_schema": {"type": "object"}}
     fields.update(overrides)
     return MCPTool(**fields)
 
@@ -50,7 +50,7 @@ class _FakeSession:
         self._tools = tools
         self.delay = 0.0
 
-    async def list_tools(self, cursor: str | None = None) -> ListToolsResult:
+    async def list_tools(self, *, params: PaginatedRequestParams | None = None) -> ListToolsResult:
         if self.delay:
             await asyncio.sleep(self.delay)
         return ListToolsResult(tools=self._tools)
@@ -82,8 +82,8 @@ async def test_the_admitted_catalog_is_returned(opened: dict[str, Any]) -> None:
 async def test_a_real_client_session_closes_without_cancelling_discovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def list_tools(_session: ClientSession, cursor: str | None = None) -> ListToolsResult:
-        assert cursor is None
+    async def list_tools(_session: ClientSession, *, params: PaginatedRequestParams | None = None) -> ListToolsResult:
+        assert params is None
         return ListToolsResult(tools=[_tool("create_issue")])
 
     @asynccontextmanager
@@ -107,7 +107,7 @@ async def test_a_real_client_session_closes_without_cancelling_discovery(
 @pytest.mark.asyncio
 async def test_one_unusable_descriptor_is_omitted_and_labeled(opened: dict[str, Any]) -> None:
     huge = {"type": "object", "properties": {"x": {"description": "y" * (SCHEMA_MAX_BYTES + 1)}}}
-    opened["session"] = _FakeSession([_tool("create_issue"), _tool("broken", inputSchema=huge)])
+    opened["session"] = _FakeSession([_tool("create_issue"), _tool("broken", input_schema=huge)])
 
     catalog = await discover_stored_tools(SERVER)
 
@@ -121,7 +121,7 @@ async def test_an_omitted_descriptor_does_not_count_toward_the_returned_tool_cei
 ) -> None:
     external_schema = {"type": "object", "$ref": "https://example.com/schema"}
     opened["session"] = _FakeSession(
-        [_tool(f"valid{i}") for i in range(DISCOVERY_MAX_TOOLS)] + [_tool("broken", inputSchema=external_schema)]
+        [_tool(f"valid{i}") for i in range(DISCOVERY_MAX_TOOLS)] + [_tool("broken", input_schema=external_schema)]
     )
 
     catalog = await discover_stored_tools(SERVER)
@@ -217,7 +217,7 @@ async def test_a_server_dying_mid_pagination_is_a_connection_failure(
     opened: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def die(cursor: str | None = None) -> Any:
+    async def die(*, params: PaginatedRequestParams | None = None) -> Any:
         raise BaseExceptionGroup("unhandled errors in a TaskGroup", [asyncio.CancelledError()])
 
     monkeypatch.setattr(opened["session"], "list_tools", die)
