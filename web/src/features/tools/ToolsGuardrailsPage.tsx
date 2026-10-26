@@ -1,10 +1,6 @@
 import { Link } from "@tanstack/react-router"
 import { Fragment } from "react"
-import type {
-  ToolServiceName,
-  ToolSettingField,
-  UpdateToolSettingsRequest,
-} from "@/client"
+import type { ToolServiceName, ToolSettingField } from "@/client"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Skeleton } from "@/design-system/feedback/Skeleton"
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -12,8 +8,12 @@ import { CONTROL_LANE, SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { AdvancedRows } from "@/features/tools/AdvancedRows"
 import { SandboxCredentialRow } from "@/features/tools/SandboxCredentialRow"
-import type { FieldCopy } from "@/features/tools/ToolSettingRows"
-import { ToolSettingRow } from "@/features/tools/ToolSettingRows"
+import {
+  copyFor,
+  oneField,
+  type SettingCopy,
+  ToolSettingRow,
+} from "@/features/tools/ToolSettingRows"
 import {
   ToolStatusGroup,
   ToolStatusRow,
@@ -29,15 +29,6 @@ import {
 } from "@/shared/api/tools"
 import { docsSourceHref } from "@/shared/helpers/docs"
 
-// One settable field maps onto one key of the update request; cast at this one
-// boundary (the keys come from the backend's field list).
-function oneField(
-  key: string,
-  value: boolean | number | string | null,
-): UpdateToolSettingsRequest {
-  return { [key]: value } as UpdateToolSettingsRequest
-}
-
 /**
  * What each key is called in the dashboard, and the one line under it.
  *
@@ -46,7 +37,7 @@ function oneField(
  * fit under a label, so the page carries its own copy and falls back to the
  * backend's for a key it has not been told about yet.
  */
-const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
+const FIELD_COPY: Record<string, SettingCopy> = {
   sandbox_url: {
     label: "Sandbox URL",
     help: "A sandbox you run that speaks the code-execution protocol. While unset, otari_code_execution requests are rejected with 400.",
@@ -85,19 +76,6 @@ const EXECUTOR_NEEDS_SANDBOX =
 
 // Fields only the `protocol` provider reads; E2B ignores both.
 const PROTOCOL_ONLY_KEYS = new Set(["sandbox_url", "sandbox_session_image"])
-
-function copyFor(field: ToolSettingField): FieldCopy & {
-  defaultLabel?: string
-} {
-  return (
-    FIELD_COPY[field.key] ?? {
-      label: field.key,
-      help: field.description ?? "",
-      placeholder: "",
-      isMachineReadable: true,
-    }
-  )
-}
 
 interface ManagedToolSpec {
   toolId: string
@@ -382,7 +360,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
             .map((key) => byKey.get(key))
             .filter((field): field is ToolSettingField => Boolean(field))
         const renderField = (field: ToolSettingField) => {
-          const copy = copyFor(field)
+          const copy = copyFor(FIELD_COPY, field)
           return (
             <ToolSettingRow
               key={field.key}

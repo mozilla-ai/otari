@@ -1245,7 +1245,8 @@ calls use them by name, or the default one (below) when they name none, and the
 in-loop `otari_web_search` tool uses the default one. `fetch_tools` names fetch instances, for the `otari_web_fetch` tool
 and for enriching search results. Both can also be stored at runtime through
 `/api/v1/search-tools`, a fetch instance with `kind: fetch` and listed with
-`?kind=fetch`, and search instances from Tools too. A stored instance wins over
+`?kind=fetch`, or from the dashboard's deployment Web search page, which also
+sets each one's price and the defaults. A stored instance wins over
 a configuration file entry of the same name and kind.
 
 ```yaml

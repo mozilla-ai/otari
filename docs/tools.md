@@ -153,8 +153,8 @@ otari:web_search
 otari:web_fetch
 ```
 
-The dashboard's Web search pricing and Code execution pricing pages, in the
-deployment view, set these rates and each search or fetch instance's own, in
+The dashboard's Web search and Code execution pricing pages, in the deployment
+view, set these rates, and Web search each search or fetch tool's own, in
 dollars per call. The pricing API stores the value in
 `input_price_per_million`, so one cent per call is `10000`.
 
@@ -287,7 +287,7 @@ the caller's budget before it runs, and it is billed when the provider reports
 no charge of its own. A provider's reported charge still comes first. A zero
 rate is valid too and bills as before, but holds nothing. A row written as
 `exa:exa-search` before tools had a kind still counts. The dashboard's Web
-search pricing page sets a tool's rate too, except one written from
+search page sets a tool's rate too, except one written from
 `price_per_call`, which the configuration file restores on every start.
 `require_pricing: false` serves unpriced searches again, and unpriced models with
 them. And whether `require_pricing` is on or not, an organization's own pricing
@@ -716,7 +716,7 @@ one, and never with the provider's own message.
   instance apart from a DeepSeek search tool, such as `deepseek-fetch`, since
   names are unique across `search_tools` and `fetch_tools`. It reports no cost, so
   a fetch is billed at the instance's own rate (its `price_per_call`, or a `fetch`
-  price set on the dashboard's Web search pricing page or through the API), else
+  price set on the dashboard's Web search page or through the API), else
   `otari:web_fetch`; a price for one of DeepSeek's models never prices it.
   DeepSeek's [pricing](https://api-docs.deepseek.com/guides/search), read
   2026-10-19, is $0.75 per 1,000 successful fetches, with at most 25 fetches a
@@ -853,7 +853,7 @@ A workspace web-access policy can:
 - supply provider options
 
 Manage it under `/api/v1/workspaces/{workspace_id}/web-search`. The dashboard's
-Web search page sets `enabled`, `max_results` and the domain lists; the purpose
+Tools > Web search page sets `enabled`, `max_results` and the domain lists; the purpose
 hint and provider options are set through the API.
 `max_results`, the purpose hint, and provider options apply only to Search.
 Workspace values can narrow deployment policy but cannot enable a missing
@@ -974,7 +974,7 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
 - **DeepSeek** (`deepseek`) needs an API key, read from the tool's `api_key`, such
   as `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too. It reports no
   cost, so a search is billed at the tool's own rate (its `price_per_call`, or a
-  `search` price set on the dashboard's Web search pricing page or through the
+  `search` price set on the dashboard's Web search page or through the
   API), else `otari:web_search`; a price for one of DeepSeek's models never prices
   it. A key restricted to some models runs it when
   [`allowed_tools`](access-control.md#users-and-identities), its own or its

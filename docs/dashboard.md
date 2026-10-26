@@ -158,20 +158,37 @@ gateway process rather than to any organization on it:
   automatically at startup. Any that could not be moved are listed in a banner
   with the reason: once the cause is fixed, move it from there, or Discard it,
   since a row left behind serves nothing.
-- Web search pricing and Code execution pricing, what the deployment charges
-  per successful call of a tool it runs itself. Web search pricing lists the
-  `otari:web_search` and `otari:web_fetch` rates and each search and fetch
-  instance's own rate, saying which rate an instance with none of its own falls
-  back to. Code execution pricing lists `otari:code_execution`. Edit sets a
-  rate in dollars per call, in force from the moment it is saved, and 0 prices a
-  tool as free. An instance whose rate comes from `price_per_call` in
-  `config.yml` is marked and changed there. With `require_pricing` on, the page
+- Web search, the search and fetch tools the deployment runs for every
+  workspace and what each call costs. Its two tables list the search tools and
+  the fetch tools, `builtin_fetch` first, each with its key's last four and its
+  price per call, and end with the `otari:web_search` or `otari:web_fetch` rate
+  that prices what no tool's own rate does. A search tool with no price of its
+  own takes that rate for the model's searches, while its calls on the search
+  API go unpriced. A row opens its endpoint, enrichment and options; its star
+  makes it the default the model uses, and Test runs one search or fetch and
+  says how many hits or characters came back. Add search tool and Add fetch tool
+  pick a provider first, then ask for what it needs (its key, an endpoint when it
+  has none of its own) and a price, with the endpoint, timeout, enrichment and
+  the provider's options under More settings, typed from the provider catalog or
+  written as JSON. Edit and Remove change a stored tool; a `config.yml` tool,
+  `builtin_fetch` and the two fallback rates take only a price, and a rate from
+  `price_per_call` is changed in `config.yml`. Below the tables, The model's web
+  tools turns the model's search off, and sets the calls a request may make, the
+  results per search, reading pages for hits without text, and running a
+  provider's own web search here. The legacy SearXNG backend's URL and engines
+  show while they are set.
+- Code execution pricing, what the deployment charges per successful call of
+  `otari:code_execution`.
+
+  On both pages, Edit sets a rate in dollars per call, in force from the moment
+  it is saved, and 0 prices a tool as free. With `require_pricing` on, the page
   warns while a tool it lists has no rate, because a request that would run it
   is refused. See [Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool).
 
 Accounts and Hosted providers are listed only for a deployment operator, and
-answer anyone else that they are not available to them. The two pricing pages
-are listed for one too, and say the same to anyone else who opens them.
+answer anyone else that they are not available to them. Web search and Code
+execution pricing are listed for one too, and say the same to anyone else who
+opens them. Tools > Web search links an operator to the Web search page.
 
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the
