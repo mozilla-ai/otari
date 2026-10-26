@@ -1,7 +1,7 @@
 import secrets
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated
@@ -1804,15 +1804,8 @@ async def is_workspace_member(
     billing user no dashboard identity stands behind is none of them, and nor is
     a deactivated account, which can no longer sign in to read or manage it.
     """
-    if user_id is None:
-        return False
-    try:
-        person = uuid.UUID(user_id)
-    except ValueError:
-        return False
-    # The canonical spelling only: ownership compares the id as a string, so another
-    # spelling of the same id would keep content its owner could never open.
-    if str(person) != user_id:
+    person = _person(user_id)
+    if person is None:
         return False
     if workspace is None:
         workspace = await WorkspaceRepository(db).get(workspace_id)
@@ -1832,6 +1825,49 @@ async def is_workspace_member(
     return member is not None and member.status == "active"
 
 
+def _person(user_id: str | None) -> uuid.UUID | None:
+    """The identity a trace's user id names, or None for one that names no person.
+
+    The canonical spelling only: ownership compares the id as a string, so another
+    spelling of the same id would keep content its owner could never open.
+    """
+    if user_id is None:
+        return None
+    try:
+        person = uuid.UUID(user_id)
+    except ValueError:
+        return None
+    return person if str(person) == user_id else None
+
+
+async def workspace_members(
+    db: AsyncSession, pairs: Collection[tuple[uuid.UUID, str | None]]
+) -> set[tuple[uuid.UUID, str | None]]:
+    """Which of these (workspace, user) pairs :func:`is_workspace_member` holds for, in four queries."""
+    people = {pair: person for pair in pairs if (person := _person(pair[1])) is not None}
+    if not people:
+        return set()
+    workspaces = {
+        workspace.id: workspace.organization_id
+        for workspace in await WorkspaceRepository(db).get_by_ids({workspace_id for workspace_id, _ in people})
+    }
+    active = await UserRepository(db).get_active_ids(set(people.values()))
+    candidates = {pair: person for pair, person in people.items() if pair[0] in workspaces and person in active}
+    roles = await OrganizationMemberRepository(db).get_active_roles(
+        {workspaces[workspace_id] for workspace_id, _ in candidates}, set(candidates.values())
+    )
+    by_organization = {pair: roles.get((workspaces[pair[0]], person)) for pair, person in candidates.items()}
+    explicit = await WorkspaceMemberRepository(db).get_active_pairs(
+        {workspace_id for (workspace_id, _), role in by_organization.items() if role is not None},
+        {candidates[pair] for pair, role in by_organization.items() if role is not None},
+    )
+    return {
+        pair
+        for pair, role in by_organization.items()
+        if role is not None and (role in MANAGEMENT_ROLES or (pair[0], candidates[pair]) in explicit)
+    }
+
+
 class DatabaseSessionOwners:
     """:class:`SessionOwners` over this deployment's memberships, on the request's session."""
 
@@ -1841,12 +1877,18 @@ class DatabaseSessionOwners:
     async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
         return await is_workspace_member(self._db, workspace_id, user_id)
 
+    async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
+        return await workspace_members(self._db, pairs)
+
 
 class NoSessionOwners:
     """:class:`SessionOwners` for work that never opens a share: nobody is anybody's member."""
 
     async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
         return False
+
+    async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
+        return set()
 
 
 async def workspace_keeps_trace_content(

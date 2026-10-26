@@ -31,7 +31,7 @@ from gateway.models.traces import Trace, TraceGuardrailDefinition, TraceSpan
 from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
 from gateway.repositories.traces import TracesRepositories
-from gateway.repositories.traces.barrier_repository import ContentBarrierRepository
+from gateway.repositories.traces.barrier_repository import ContentBarrierRepository, UserBarrierRepository
 from gateway.repositories.traces.definition_repository import GuardrailDefinitionRepository
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.traces import SpanContent, TraceService
@@ -58,6 +58,9 @@ class _Members:
 
     async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
         return user_id is not None and user_id not in self.gone
+
+    async def members(self, pairs: Any) -> set[tuple[uuid.UUID, str | None]]:
+        return {pair for pair in pairs if await self.is_member(*pair)}
 
 
 @pytest_asyncio.fixture
@@ -863,6 +866,57 @@ async def test_a_delete_waits_for_a_write_already_holding_the_workspace_and_then
         await asyncio.wait_for(asyncio.gather(writing, forgetting), timeout=10)
 
         assert await _sealed_of(async_db, "s-1") is None
+    finally:
+        await dispose_db()
+
+
+async def test_forgetting_erasures_skips_a_user_a_write_holds_rather_than_waiting_for_it(
+    test_config: GatewayConfig,
+    tenants: tuple[uuid.UUID, uuid.UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    clean_database: None,
+) -> None:
+    init_db(test_config)
+    try:
+        workspace, _ = tenants
+        async with create_unit_of_work() as uow:
+            await _store_on(test_config, uow).write(
+                (
+                    _write(workspace, "s-bob", _span("step-0"), user_id="bob"),
+                    _write(workspace, "s-alice", _span("step-0")),
+                )
+            )
+        locked, release = asyncio.Event(), asyncio.Event()
+        real_lock = UserBarrierRepository.lock
+
+        async def lock_and_hold(self: UserBarrierRepository, user_ids: Any) -> dict[str, datetime | None]:
+            held = await real_lock(self, user_ids)
+            if "alice" in user_ids and not locked.is_set():
+                locked.set()
+                await release.wait()
+            return held
+
+        monkeypatch.setattr(UserBarrierRepository, "lock", lock_and_hold)
+
+        async def write() -> None:
+            async with create_unit_of_work() as uow:
+                await _store_on(test_config, uow).write((_write(workspace, "s-alice", _span("step-1")),))
+
+        writing = asyncio.create_task(write())
+        await asyncio.wait_for(locked.wait(), timeout=5)
+        try:
+            async with create_unit_of_work() as uow:
+                # Locking in scan order, as a plain DELETE does, would wait here for the write.
+                forgotten = await asyncio.wait_for(
+                    _store_on(test_config, uow).expire_erasures(now=datetime.now(UTC)), timeout=5
+                )
+        finally:
+            release.set()
+            await asyncio.wait_for(writing, timeout=10)
+
+        assert forgotten == 1
+        async with create_unit_of_work() as uow:
+            assert await _store_on(test_config, uow).expire_erasures(now=datetime.now(UTC)) == 1
     finally:
         await dispose_db()
 
