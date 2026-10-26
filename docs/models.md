@@ -241,7 +241,9 @@ own, with nothing marked.
 Either way, the usage reports the tokens written to and read from the cache, and
 Otari bills them at the model's `cache_write_price_per_million` and
 `cache_read_price_per_million` when the pricing sets them, and at the input price
-otherwise. The time a Gemini cache is stored is not billed separately.
+otherwise. On either route, a Claude model whose cache writes are priced bills a
+1-hour write at twice its input price, as Anthropic does, on a `cache_write_1h`
+charge line. The time a Gemini cache is stored is not billed separately.
 
 ## Model aliases
 

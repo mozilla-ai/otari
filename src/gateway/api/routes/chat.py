@@ -53,7 +53,7 @@ from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.core.usage import GatewayUsage, reasoning_tokens_of
+from gateway.core.usage import GatewayUsage, cache_write_1h_tokens_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
@@ -330,6 +330,7 @@ class _ChatAdapter:
             prompt_tokens_details=details,
             cache_read_tokens=(details.cached_tokens or 0) if details is not None else 0,
             cache_write_tokens=(details.cache_write_tokens or 0) if details is not None else 0,
+            cache_write_1h_tokens=cache_write_1h_tokens_of(chunk.usage),
             reasoning_tokens=reasoning_tokens_of(chunk.usage),
         )
         return GatewayUsage(**fields)
