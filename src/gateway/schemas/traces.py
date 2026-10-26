@@ -191,6 +191,29 @@ class ToolCostPublic(BaseModel):
     subagent: float | None = Field(description="What a subagent the call ran cost, exactly.")
 
 
+class TraceContentPolicyPublic(BaseModel):
+    """What this deployment keeps of agent sessions, and who besides a session's owner can open it."""
+
+    content_available: bool = Field(
+        description=(
+            "Whether this deployment lets a workspace keep what its agent sessions were about. A workspace "
+            "keeps it only once its managers turn it on as well."
+        )
+    )
+    platform_break_glass: bool = Field(
+        description=(
+            "Whether the deployment's operator may open any organization's session content without its owner's "
+            "share, recorded with a reason and a reference."
+        )
+    )
+    retention_days: int = Field(
+        description=("Days after its last activity that a session, with what it was about and its shares, is deleted.")
+    )
+    session_max_age_days: int = Field(
+        description="Days after it started that a session is deleted, however active it still is."
+    )
+
+
 class ContentReadPublic(BaseModel):
     """One read of a session's content through a share."""
 

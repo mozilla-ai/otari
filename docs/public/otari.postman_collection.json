@@ -11370,6 +11370,26 @@
     {
       "item": [
         {
+          "name": "Get Trace Content Policy",
+          "request": {
+            "description": "What this deployment keeps of agent sessions, and who besides a session's owner can open it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "trace-content",
+                "policy"
+              ],
+              "raw": "{{baseUrl}}/api/v1/trace-content/policy"
+            }
+          }
+        },
+        {
           "name": "List Traces",
           "request": {
             "description": "List agent sessions, most recently active first unless ``sort`` says otherwise.",

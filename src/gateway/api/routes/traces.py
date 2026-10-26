@@ -12,7 +12,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from gateway.api.deps import (
     NoSessionOwners,
@@ -20,6 +20,7 @@ from gateway.api.deps import (
     PlatformBreakGlass,
     TraceServiceDep,
     build_trace_service,
+    get_config,
     get_deployment_trace_scope,
     get_organization_break_glass,
     get_organization_trace_scope,
@@ -39,6 +40,7 @@ from gateway.schemas.traces import (
     ContentShareListPublic,
     ContentSharePublic,
     PlatformBreakGlassCreate,
+    TraceContentPolicyPublic,
     TraceCountPublic,
     TraceDetailPublic,
     TraceListPublic,
@@ -234,6 +236,26 @@ async def list_break_glass_reads(
     return BreakGlassReadListPublic(items=[break_glass_read_public(read) for read in reads], has_more=has_more)
 
 
+# Behind a sign-in rather than on the public bootstrap: whether a deployment keeps
+# prompts, and whether its operator can open them, is nothing to tell a visitor.
+policy_router = APIRouter(prefix="/trace-content", tags=["traces"], dependencies=[Depends(verify_master_key)])
+
+
+@policy_router.get("/policy", response_model=TraceContentPolicyPublic)
+async def get_trace_content_policy(
+    request: Request, config: Annotated[GatewayConfig, Depends(get_config)]
+) -> TraceContentPolicyPublic:
+    """What this deployment keeps of agent sessions, and who besides a session's owner can open it."""
+    content: SpanContent | None = getattr(request.app.state, "trace_content", None)
+    return TraceContentPolicyPublic(
+        # A deployment with no key to seal with keeps no content, whatever its settings say.
+        content_available=config.trace_content_enabled and content is not None and content.sealing,
+        platform_break_glass=config.trace_platform_break_glass_enabled,
+        retention_days=config.trace_retention_days,
+        session_max_age_days=config.trace_session_max_age_days,
+    )
+
+
 # Authentication only, like the rest of ``/organizations/me``: the scope dependency
 # is what confines each read, from the caller's own memberships.
 organization_router = build_trace_router(
@@ -369,7 +391,7 @@ FEATURE = CoreFeature(
     name="traces",
     surface=Surface("traces"),
     enabled=lambda config: config.trace_capture_enabled,
-    routers=lambda config: (router, organization_router),
+    routers=lambda config: (router, organization_router, policy_router),
 )
 
 # Apart from capture, so a deployment that stops recording still deletes what

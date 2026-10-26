@@ -12,7 +12,7 @@ operator configured, not credentials.
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,7 +45,6 @@ from gateway.log_config import logger
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy.user_service import operator_has_password, password_sign_in_possible
 from gateway.services.tenancy.webauthn_service import has_any_credential
-from gateway.services.traces import SpanContent
 
 router = APIRouter(prefix="/bootstrap", tags=["bootstrap"])
 
@@ -213,27 +212,6 @@ class DeploymentBootstrap(BaseModel):
             "federation_member_rules setting), so the dashboard offers workload identity on their keys."
         )
     )
-    trace_content_available: bool = Field(
-        description=(
-            "Whether this deployment lets a workspace keep what its agent sessions were about. A workspace "
-            "keeps it only once its managers turn it on as well."
-        )
-    )
-    trace_platform_break_glass: bool = Field(
-        description=(
-            "Whether the deployment's operator may open any organization's session content without its owner's "
-            "share, recorded with a reason and a reference."
-        )
-    )
-    trace_retention_days: int = Field(
-        description=(
-            "Days after its last activity that a session, with what it was about, its shares and their reads, is "
-            "deleted."
-        )
-    )
-    trace_session_max_age_days: int = Field(
-        description="Days after it started that a session is deleted, however active it still is."
-    )
     mail_ready: bool = Field(
         description=(
             "Whether this deployment can deliver a message carrying a link back to itself "
@@ -247,15 +225,8 @@ class DeploymentBootstrap(BaseModel):
     )
 
 
-def _content_sealing(request: Request) -> bool:
-    """Whether this process has a key to seal session content with; a workspace turning it on otherwise keeps none."""
-    content: SpanContent | None = getattr(request.app.state, "trace_content", None)
-    return content is not None and content.sealing
-
-
 @router.get("", response_model=DeploymentBootstrap)
 async def get_bootstrap(
-    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     enabled_features: Annotated[tuple[CoreFeature, ...], Depends(get_enabled_features)],
@@ -286,12 +257,6 @@ async def get_bootstrap(
         feedback_enabled=any(feature.name == "feedback" for feature in enabled_features),
         federation_member_rules=config.federation_member_rules,
         mail_ready=config.mail_ready,
-        trace_content_available=config.trace_capture_enabled
-        and config.trace_content_enabled
-        and _content_sealing(request),
-        trace_platform_break_glass=config.trace_platform_break_glass_enabled,
-        trace_retention_days=config.trace_retention_days,
-        trace_session_max_age_days=config.trace_session_max_age_days,
         # Gated on mail as well as on the setting, and not only because the
         # route refuses without it: an operator who turned open signup on and
         # has no transport would otherwise get a page inviting registrations

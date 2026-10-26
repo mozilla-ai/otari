@@ -6404,26 +6404,6 @@
             ],
             "description": "Where this deployment's terms of service live. Set, the account menu carries a Terms of service row pointing at them; null, no address is configured and the menu carries no such row. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.",
             "title": "Terms Url"
-          },
-          "trace_content_available": {
-            "description": "Whether this deployment lets a workspace keep what its agent sessions were about. A workspace keeps it only once its managers turn it on as well.",
-            "title": "Trace Content Available",
-            "type": "boolean"
-          },
-          "trace_platform_break_glass": {
-            "description": "Whether the deployment's operator may open any organization's session content without its owner's share, recorded with a reason and a reference.",
-            "title": "Trace Platform Break Glass",
-            "type": "boolean"
-          },
-          "trace_retention_days": {
-            "description": "Days after its last activity that a session, with what it was about, its shares and their reads, is deleted.",
-            "title": "Trace Retention Days",
-            "type": "integer"
-          },
-          "trace_session_max_age_days": {
-            "description": "Days after it started that a session is deleted, however active it still is.",
-            "title": "Trace Session Max Age Days",
-            "type": "integer"
           }
         },
         "required": [
@@ -6440,10 +6420,6 @@
           "open_signup",
           "feedback_enabled",
           "federation_member_rules",
-          "trace_content_available",
-          "trace_platform_break_glass",
-          "trace_retention_days",
-          "trace_session_max_age_days",
           "mail_ready"
         ],
         "title": "DeploymentBootstrap",
@@ -21661,6 +21637,39 @@
           "failed"
         ],
         "title": "TraceBucketPublic",
+        "type": "object"
+      },
+      "TraceContentPolicyPublic": {
+        "description": "What this deployment keeps of agent sessions, and who besides a session's owner can open it.",
+        "properties": {
+          "content_available": {
+            "description": "Whether this deployment lets a workspace keep what its agent sessions were about. A workspace keeps it only once its managers turn it on as well.",
+            "title": "Content Available",
+            "type": "boolean"
+          },
+          "platform_break_glass": {
+            "description": "Whether the deployment's operator may open any organization's session content without its owner's share, recorded with a reason and a reference.",
+            "title": "Platform Break Glass",
+            "type": "boolean"
+          },
+          "retention_days": {
+            "description": "Days after its last activity that a session, with what it was about and its shares, is deleted.",
+            "title": "Retention Days",
+            "type": "integer"
+          },
+          "session_max_age_days": {
+            "description": "Days after it started that a session is deleted, however active it still is.",
+            "title": "Session Max Age Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content_available",
+          "platform_break_glass",
+          "retention_days",
+          "session_max_age_days"
+        ],
+        "title": "TraceContentPolicyPublic",
         "type": "object"
       },
       "TraceCountPublic": {
@@ -46255,6 +46264,36 @@
         "summary": "List Tools",
         "tags": [
           "tools"
+        ]
+      }
+    },
+    "/api/v1/trace-content/policy": {
+      "get": {
+        "description": "What this deployment keeps of agent sessions, and who besides a session's owner can open it.",
+        "operationId": "traces-get_trace_content_policy",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceContentPolicyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Trace Content Policy",
+        "tags": [
+          "traces"
         ]
       }
     },

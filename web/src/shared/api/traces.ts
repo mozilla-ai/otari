@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query"
 import type {
   TraceBreakGlassReadList,
+  TraceContentPolicy,
   TraceContentShare,
   TraceContentShareCreate,
   TraceContentShareList,
@@ -44,6 +45,32 @@ export function useTraceScope(): { base: string; isReady: boolean } {
     base: operator.isOperator ? "/traces" : "/organizations/me/traces",
     isReady: operator.isSettled,
   }
+}
+
+// What a deployment with traces off answers, and what is shown until the policy
+// loads: no content, so nothing is offered before the deployment says it keeps any.
+const NO_CONTENT_POLICY: TraceContentPolicy = {
+  content_available: false,
+  platform_break_glass: false,
+  retention_days: 30,
+  session_max_age_days: 90,
+}
+
+// What the deployment keeps of agent sessions, and who besides a session's owner
+// can open it. Behind a sign-in, not on the public bootstrap; a deployment with
+// traces off has no such route, which reads as keeping no content.
+export function useTraceContentPolicy(): {
+  policy: TraceContentPolicy
+  isPending: boolean
+} {
+  const queryClient = useQueryClient()
+  const query = useQuery({
+    queryKey: [TRACES, "content-policy"],
+    queryFn: () => apiFetch<TraceContentPolicy>("/trace-content/policy"),
+    retry: retryUnlessNotFound(queryClient),
+    staleTime: 5 * 60 * 1000,
+  })
+  return { policy: query.data ?? NO_CONTENT_POLICY, isPending: query.isPending }
 }
 
 export function traceParams(filters: TraceFilters): URLSearchParams {

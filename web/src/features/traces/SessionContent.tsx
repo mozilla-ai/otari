@@ -15,10 +15,10 @@ import {
   useBreakGlass,
   useEndTraceShare,
   useShareTrace,
+  useTraceContentPolicy,
   useTraceShares,
 } from "@/shared/api/traces"
 import { formatDate, formatDateTime } from "@/shared/helpers/format"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { exceptionalAccess } from "./exceptionalAccess"
 
@@ -186,7 +186,7 @@ function OwnerSharing({
   /** Whether there is content to share; nothing new is offered without it. */
   canShare: boolean
 }) {
-  const platformBreakGlass = useDeployment().trace_platform_break_glass
+  const platformBreakGlass = useTraceContentPolicy().policy.platform_break_glass
   const traceId = detail.summary.trace_id
   const workspaceId = detail.summary.workspace_id
   const shares = useTraceShares(traceId, workspaceId, true)
@@ -315,7 +315,7 @@ function ShareDialog({
   workspaceId: string
   onClose: () => void
 }) {
-  const platformBreakGlass = useDeployment().trace_platform_break_glass
+  const platformBreakGlass = useTraceContentPolicy().policy.platform_break_glass
   const share = useShareTrace()
   const [audience, setAudience] = useState<TraceShareAudience>(
     "organization_admins",

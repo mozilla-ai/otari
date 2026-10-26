@@ -21,6 +21,7 @@ import {
   DEFAULT_TRACE_SORT,
   type TraceFilters,
   useTrace,
+  useTraceContentPolicy,
   useTraceCount,
   useTraceSeries,
   useTraces,
@@ -37,7 +38,6 @@ import {
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDebounced } from "@/shared/hooks/useDebounced"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 import { BreakGlassLog } from "./BreakGlassLog"
 import { exceptionalAccess } from "./exceptionalAccess"
 import { formatDuration, formatTraceTimestamp } from "./format"
@@ -207,10 +207,10 @@ export function SessionsPage() {
   // Said on the page as well as in the workspace's settings, because a manager
   // turns it on and a member may never have opted in themselves.
   const workspaces = useWorkspaces()
-  const deployment = useDeployment()
-  const platformBreakGlass = deployment.trace_platform_break_glass
+  const { policy } = useTraceContentPolicy()
+  const platformBreakGlass = policy.platform_break_glass
   const keepsContent =
-    deployment.trace_content_available &&
+    policy.content_available &&
     (workspaces.data ?? []).some(
       (candidate) =>
         candidate.trace_content_enabled &&

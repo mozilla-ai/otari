@@ -281,8 +281,11 @@ settings, or sends `PATCH /api/v1/workspaces/{id}` with
 next export on; `DELETE /api/v1/workspaces/{id}/trace-content` also deletes what
 is already stored, and the sessions stay. Either one also covers content the
 gateway accepted before and had not stored yet, on every replica: it is never
-stored. `GET /api/v1/bootstrap` reports
-`trace_content_available`, whether the deployment allows content at all.
+stored. `GET /api/v1/trace-content/policy`, for any signed-in caller, reports
+`content_available` (whether the deployment allows content at all),
+`platform_break_glass`, and the retention a session's content is kept for. It is
+not on the public bootstrap: whether a deployment keeps prompts, and whether its
+operator can open them, is nothing to tell an anonymous visitor.
 
 Content is kept only for a session a current member of the workspace owns: the
 API key that exports it belongs to an active owner or admin of the organization,

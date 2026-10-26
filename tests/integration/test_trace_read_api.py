@@ -859,18 +859,28 @@ def test_a_workspaces_managers_delete_its_stored_content_and_keep_its_sessions(
     assert held == [] and kept
 
 
-def test_the_bootstrap_says_whether_the_deployment_keeps_content(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+def test_the_content_policy_says_whether_the_deployment_keeps_content_and_only_to_a_signed_in_caller(
+    client: TestClient, world: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = cast(FastAPI, client.app).state.config
-    assert client.get(f"{API_ROOT}/bootstrap").json()["trace_content_available"] is False
+    path = "/trace-content/policy"
+    assert client.get(f"{API_ROOT}{path}").status_code == status.HTTP_401_UNAUTHORIZED
+    assert "trace_content_available" not in client.get(f"{API_ROOT}/bootstrap").json()
+
+    policy = _as(client, world["member"], "GET", path).json()
+    assert policy == {
+        "content_available": False,
+        "platform_break_glass": False,
+        "retention_days": config.trace_retention_days,
+        "session_max_age_days": config.trace_session_max_age_days,
+    }
 
     monkeypatch.setattr(config, "trace_content_enabled", True)
     monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
     # Allowed, but with no key to seal it with nothing would be kept, so a workspace is not offered it.
-    assert client.get(f"{API_ROOT}/bootstrap").json()["trace_content_available"] is False
+    assert _as(client, world["member"], "GET", path).json()["content_available"] is False
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
-    assert client.get(f"{API_ROOT}/bootstrap").json()["trace_content_available"] is True
+    assert _as(client, world["member"], "GET", path).json()["content_available"] is True
 
 
 def test_a_share_records_a_polling_reader_once_and_pages_a_long_history(

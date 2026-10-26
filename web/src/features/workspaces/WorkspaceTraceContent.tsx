@@ -7,11 +7,11 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { exceptionalAccess } from "@/features/traces/exceptionalAccess"
+import { useTraceContentPolicy } from "@/shared/api/traces"
 import {
   useDeleteWorkspaceTraceContent,
   useSetWorkspaceTraceContent,
 } from "@/shared/api/workspaces"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 
 const LABEL = "Keep what agent sessions were about"
 
@@ -29,15 +29,15 @@ type Pending = "on" | "off" | "delete"
  * with turning content off, so it stays reachable while content is off.
  */
 export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
-  const deployment = useDeployment()
-  const available = deployment.trace_content_available
+  const { policy, isPending: policyPending } = useTraceContentPolicy()
+  const available = policy.content_available
   const setContent = useSetWorkspaceTraceContent()
   const deleteContent = useDeleteWorkspaceTraceContent()
   const [pending, setPending] = useState<Pending>()
   const [deleteStored, setDeleteStored] = useState(false)
   const enabled = workspace.trace_content_enabled ?? false
-  const exceptions = exceptionalAccess(deployment.trace_platform_break_glass)
-  const retention = `A session is deleted, with what it was about, ${deployment.trace_retention_days} days after its last activity, and ${deployment.trace_session_max_age_days} days after it started at the latest.`
+  const exceptions = exceptionalAccess(policy.platform_break_glass)
+  const retention = `A session is deleted, with what it was about, ${policy.retention_days} days after its last activity, and ${policy.session_max_age_days} days after it started at the latest.`
 
   const close = () => {
     setPending(undefined)
@@ -79,7 +79,7 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
           isSelected={available && enabled}
           onChange={(next) => setPending(next ? "on" : "off")}
           label={LABEL}
-          isDisabled={!available || setContent.isPending}
+          isDisabled={!available || policyPending || setContent.isPending}
         />
       </div>
       <div className="flex flex-wrap items-center gap-2">

@@ -6142,6 +6142,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/trace-content/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trace Content Policy
+         * @description What this deployment keeps of agent sessions, and who besides a session's owner can open it.
+         */
+        get: operations["traces-get_trace_content_policy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/traces": {
         parameters: {
             query?: never;
@@ -10299,26 +10319,6 @@ export interface components {
              * @description Where this deployment's terms of service live. Set, the account menu carries a Terms of service row pointing at them; null, no address is configured and the menu carries no such row. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
              */
             terms_url: string | null;
-            /**
-             * Trace Content Available
-             * @description Whether this deployment lets a workspace keep what its agent sessions were about. A workspace keeps it only once its managers turn it on as well.
-             */
-            trace_content_available: boolean;
-            /**
-             * Trace Platform Break Glass
-             * @description Whether the deployment's operator may open any organization's session content without its owner's share, recorded with a reason and a reference.
-             */
-            trace_platform_break_glass: boolean;
-            /**
-             * Trace Retention Days
-             * @description Days after its last activity that a session, with what it was about, its shares and their reads, is deleted.
-             */
-            trace_retention_days: number;
-            /**
-             * Trace Session Max Age Days
-             * @description Days after it started that a session is deleted, however active it still is.
-             */
-            trace_session_max_age_days: number;
         };
         /**
          * DeploymentProviderMigrationPublic
@@ -17665,6 +17665,32 @@ export interface components {
              * @description Sessions active in the bucket that did not fail.
              */
             succeeded: number;
+        };
+        /**
+         * TraceContentPolicyPublic
+         * @description What this deployment keeps of agent sessions, and who besides a session's owner can open it.
+         */
+        TraceContentPolicyPublic: {
+            /**
+             * Content Available
+             * @description Whether this deployment lets a workspace keep what its agent sessions were about. A workspace keeps it only once its managers turn it on as well.
+             */
+            content_available: boolean;
+            /**
+             * Platform Break Glass
+             * @description Whether the deployment's operator may open any organization's session content without its owner's share, recorded with a reason and a reference.
+             */
+            platform_break_glass: boolean;
+            /**
+             * Retention Days
+             * @description Days after its last activity that a session, with what it was about and its shares, is deleted.
+             */
+            retention_days: number;
+            /**
+             * Session Max Age Days
+             * @description Days after it started that a session is deleted, however active it still is.
+             */
+            session_max_age_days: number;
         };
         /** TraceCountPublic */
         TraceCountPublic: {
@@ -29679,6 +29705,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ToolsResponse"];
+                };
+            };
+        };
+    };
+    "traces-get_trace_content_policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceContentPolicyPublic"];
                 };
             };
         };
