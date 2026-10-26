@@ -626,6 +626,20 @@ async def test_a_wrapper_no_longer_configured_is_rejected_and_pauses_nothing(kms
     assert await content.seal(_CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2") is not None
 
 
+async def test_a_wrapper_that_is_down_pauses_its_own_rows_alone(kms: Any, key: str) -> None:
+    down = _FailingKmsClient(EndpointConnectionError(endpoint_url="https://kms.invalid"))
+    under_kms = await SpanContent(_kms_keyring(kms, _new_kms_key(kms))).seal(
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1"
+    )
+    under_secret_key = await _secret_key_content().seal(
+        _CONTENT, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2"
+    )
+    content = SpanContent(_kms_keyring(down, "alias/otari-trace-content"))
+
+    assert await content.open(under_kms, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == {}
+    assert await content.open(under_secret_key, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-2") == _CONTENT
+
+
 async def test_a_row_sealed_under_a_retired_secret_key_pauses_no_other_read(
     kms: Any, key: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
