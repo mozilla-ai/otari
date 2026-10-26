@@ -27,7 +27,7 @@ export function RemoveWebToolDialog({
   // to has the same name, so the same price.
   const [alsoPrice, setAlsoPrice] = useState(!tool.overridesConfig)
   // Set once the tool is gone, so confirming again after a failed price
-  // delete retries only that, not a delete the API now answers with 404.
+  // delete retries only that: deleting a tool already gone answers 404.
   const [isToolRemoved, setIsToolRemoved] = useState(false)
 
   const confirm = async () => {
