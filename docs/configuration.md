@@ -1318,8 +1318,8 @@ characters came back, never the content. `builtin_fetch` is tested as a fetch to
 call runs it: through the built-in fetcher, with no domain policy and no private
 hosts.
 
-The defaults and the call limit are runtime settings, also set from Tools or
-`/api/v1/tool-settings`. Clearing a runtime value falls back to the configuration
+The defaults and the call limit are runtime settings, also set from the
+dashboard's deployment Web search page or `/api/v1/tool-settings`. Clearing a runtime value falls back to the configuration
 file or environment, then to the built-in default.
 
 - `web_search_default_tool`: the search instance the in-loop tool uses when no
