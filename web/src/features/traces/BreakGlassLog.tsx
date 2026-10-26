@@ -11,7 +11,7 @@ import { formatDateTime } from "@/shared/helpers/format"
  * so it is on the page owners already use rather than behind a request.
  */
 export function BreakGlassLog() {
-  const log = useBreakGlassLog(true)
+  const log = useBreakGlassLog()
   // Offset pages over a log that grows at its head, so an opening can appear on two; each is listed once.
   const items = [
     ...new Map(

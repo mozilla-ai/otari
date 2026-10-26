@@ -459,7 +459,6 @@ export function SessionsPage() {
               }
             />
           </TableScrollFrame>
-          {isOwner ? <BreakGlassLog /> : null}
           <TablePagination
             page={page}
             pageSize={pageSize}
@@ -472,6 +471,7 @@ export function SessionsPage() {
             hasNextFallback={traces.data?.has_more ?? false}
             label="Sessions"
           />
+          {isOwner ? <BreakGlassLog /> : null}
         </div>
       </div>
 
