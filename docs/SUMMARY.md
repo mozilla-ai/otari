@@ -58,7 +58,6 @@
 * [Use with a ChatGPT subscription](chatgpt-subscription.md)
 * [Hosted providers and BYO credentials](hosted-providers.md)
 * [Provider endpoints](provider-endpoints.md)
-* [Move config.yml providers to hosted providers](migrate-providers.md)
 
 ## Operations
 

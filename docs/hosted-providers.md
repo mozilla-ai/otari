@@ -296,8 +296,7 @@ start logs why. That is an entry that:
 
 `import_configured_providers: false` (`OTARI_IMPORT_CONFIGURED_PROVIDERS`)
 turns the copy off, so every entry keeps serving from `config.yml`. For the
-steps of moving a deployment, see
-[Move config.yml providers to hosted providers](migrate-providers.md).
+steps of moving a deployment, see [Upgrading](#upgrading).
 
 ## The Hosted providers page
 
@@ -336,7 +335,7 @@ menu, and is listed only for a deployment operator.
   to enable default pricing when pricing is required and nothing sets it.
 - Providers that could not be moved from the retired Deployment providers page
   are listed in a banner with the reason; see
-  [Move config.yml providers to hosted providers](migrate-providers.md#providers-from-the-deployment-providers-page).
+  [From the Deployment providers page](#from-the-deployment-providers-page).
 
 ## Deployment-paid credentials
 
@@ -367,3 +366,45 @@ moderations) and batches. A routing policy asks for each candidate as it
 reaches it, so the one that serves is the one that settles, and one the
 organization cannot fund is skipped. A batch is admitted when it is created and
 charged when its results are accounted.
+
+## Upgrading
+
+### From a `providers:` block in config.yml
+
+1. Set `OTARI_SECRET_KEY` first if it is not set (`otari gen-secret-key`): an
+   entry whose key cannot be encrypted is not copied. To keep serving every
+   entry from `config.yml` for now, set `import_configured_providers: false`
+   instead.
+2. Start the upgraded gateway, and read its log: it names each entry it copied
+   and, for each one it kept, why ([Copies of `providers:` entries](#copies-of-providers-entries)).
+3. Remove the copied entries from `config.yml`, since they are no longer read,
+   and rotate their keys on the Hosted providers page from now on.
+4. For an entry the start kept, either leave it in `config.yml`, where it keeps
+   serving, or remove what stops the copy (such as `models` or `max_retries`)
+   and restart.
+
+A copied provider sits on the last rung of the
+[credential ladder](#the-credential-ladder): an organization that holds its own
+key for the provider is served on that key, where the `config.yml` entry was
+asked before it.
+
+### From the Deployment providers page
+
+The retired Deployment providers page (`/api/v1/provider-credentials`) is gone.
+At startup each provider it stored becomes a hosted provider of the same name,
+so a selector, routing policy or alias naming it keeps working. Every model the
+provider lists is switched on, priced or not, and stays on after a later
+**Update catalog**; "Serve models not on its list" starts off.
+
+A provider the move cannot take is logged, listed in a banner on the Hosted
+providers page with the reason (`GET /api/v1/hosted-providers/migration`), and
+serves nothing until it is added again. The reasons: it lists no models, a
+hosted provider already holds the name, no configured `OTARI_SECRET_KEY` reads
+its key, it is named after another provider, or it is a keyless Bedrock or
+SageMaker provider on the server's own cloud role, which belongs under
+`providers:` in `config.yml`. Once the cause is fixed, move it from the banner,
+or Discard it.
+
+A moved provider is asked after an organization's own key, where a stored
+provider was asked before it, and a `config.yml` provider of the same name now
+serves ahead of it.

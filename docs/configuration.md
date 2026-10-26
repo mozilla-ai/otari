@@ -19,11 +19,10 @@ A small configuration looks like this:
 database_url: "postgresql://otari:otari@postgres:5432/otari"
 master_key: ${OTARI_MASTER_KEY}
 default_pricing: true
-
-providers:
-  openai:
-    api_key: ${OPENAI_API_KEY}
 ```
+
+Providers are added as [hosted providers](hosted-providers.md), on the Hosted
+providers page or under `hosted_providers:`.
 
 String values support `${ENV_VAR}` interpolation. Keep credentials in the
 environment or a secret store rather than committing them to YAML. A
@@ -61,10 +60,8 @@ Use only one; raw YAML wins when both are present.
 
 ```bash
 export OTARI_CONFIG_YAML='
+master_key: ${OTARI_MASTER_KEY}
 default_pricing: true
-providers:
-  openai:
-    api_key: ${OPENAI_API_KEY}
 '
 ```
 
@@ -396,7 +393,7 @@ The `providers:` block is deprecated in favor of
 [hosted providers](hosted-providers.md). At startup, each entry a hosted
 provider can hold is copied onto one and is no longer read; see
 [Copies of `providers:` entries](hosted-providers.md#copies-of-providers-entries)
-and [Move config.yml providers to hosted providers](migrate-providers.md).
+and [Upgrading](hosted-providers.md#upgrading).
 
 The `providers` map is keyed by provider instance. Only a provider it declares
 (or a hosted provider, or an organization's key) serves requests. A standard
@@ -1346,4 +1343,4 @@ after an unconfirmed delivery can produce a duplicate.
 - **Declared budgets and keys.** The first start of a version that records a
   digest of each declared entry writes every entry once, as if each had changed.
 - **`providers:` entries and the Deployment providers page.** See
-  [Move config.yml providers to hosted providers](migrate-providers.md).
+  [Upgrading](hosted-providers.md#upgrading).
