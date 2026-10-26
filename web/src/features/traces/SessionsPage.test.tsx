@@ -892,6 +892,32 @@ describe("SessionsPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("says a withheld span is private in the Log tab too, not that it has no input", async () => {
+    const user = userEvent.setup()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: traceDetail({
+        spans: traceDetail().spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, content: {}, content_private: true }
+            : span,
+        ),
+      }),
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession(user)
+    await user.click(
+      await within(peek).findByRole("button", { name: "Log View" }),
+    )
+    await user.click(await within(peek).findByRole("button", { name: /Bash/ }))
+
+    expect(
+      await within(peek).findByText(/^Private to the person/),
+    ).toBeInTheDocument()
+    expect(within(peek).queryByText("No input or output")).toBeNull()
+  })
+
   it("has no Gates tab for a session no hook reported to", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 

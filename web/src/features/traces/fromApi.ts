@@ -152,13 +152,8 @@ function spanStatus(
 }
 
 // What the span was about, where the deployment keeps content: the one value on
-// its own, so a command or a prompt reads as text rather than as an object. A
-// span whose content the reader may not open says so rather than showing none.
-export const PRIVATE_CONTENT =
-  "Private to the person whose session this is. Anyone else reads it only through their share or a recorded break-glass opening."
-
+// its own, so a command or a prompt reads as text rather than as an object.
 function spanInput(span: TraceSpan): unknown {
-  if (span.content_private) return PRIVATE_CONTENT
   const values = Object.values(span.content)
   if (values.length === 0) return undefined
   return values.length === 1 ? values[0] : span.content
@@ -361,6 +356,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         type: TYPE_BY_KIND[span.kind] ?? "SPAN",
         name: spanLabel(span),
         input: spanInput(span),
+        contentPrivate: span.content_private,
         gate: gateCheck(span, gateSummaries, checkEvidence),
         detail:
           span.operation === "tool.blocked_on_user" ||

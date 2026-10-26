@@ -14,6 +14,7 @@ import { SearchField } from "@/design-system/forms/SearchField"
 import { copyToClipboard } from "@/design-system/helpers/clipboard"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 
+import { CONTENT_PRIVATE } from "./exceptionalAccess"
 import { formatDuration, formatRelativeTime } from "./format"
 import { type Format, IOBlock } from "./IOBlock"
 import { LevelChip } from "./LevelChip"
@@ -204,7 +205,9 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
               </button>
               {isOpen ? (
                 <div className="flex flex-col gap-4 border-t border-border bg-surface-alt px-4 py-3">
-                  {obs.input == null && obs.output == null ? (
+                  {obs.contentPrivate ? (
+                    <span className="text-caption">{CONTENT_PRIVATE}</span>
+                  ) : obs.input == null && obs.output == null ? (
                     <span className="text-caption">No input or output</span>
                   ) : null}
                   {obs.input != null ? (
