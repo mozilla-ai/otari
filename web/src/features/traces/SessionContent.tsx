@@ -166,7 +166,11 @@ function BreakGlassAction({
   return (
     <>
       <div>
-        <Button variant="ghost" onPress={() => setIsOpen(true)}>
+        <Button
+          variant="ghost"
+          className="min-h-11 md:min-h-9"
+          onPress={() => setIsOpen(true)}
+        >
           Open by break-glass
         </Button>
       </div>
@@ -209,7 +213,7 @@ function OwnerSharing({
   const platformBreakGlass = useDeployment().trace_platform_break_glass
   const traceId = detail.summary.trace_id
   const workspaceId = detail.summary.workspace_id
-  const shares = useTraceShares(traceId, workspaceId, true)
+  const shares = useTraceShares(traceId, workspaceId)
   const endShare = useEndTraceShare()
   const [isSharing, setIsSharing] = useState(false)
   // Pages are offsets over an order that moves as shares end, so a share can
@@ -235,7 +239,11 @@ function OwnerSharing({
       <ErrorBanner error={shares.error ?? endShare.error} />
       {canShare ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="primary" onPress={() => setIsSharing(true)}>
+          <Button
+            variant="primary"
+            className="min-h-11 md:min-h-9"
+            onPress={() => setIsSharing(true)}
+          >
             Share this session
           </Button>
         </div>
@@ -244,6 +252,7 @@ function OwnerSharing({
         <div>
           <Button
             variant="ghost"
+            className="min-h-11 md:min-h-9"
             onPress={() => void shares.fetchNextPage()}
             isDisabled={shares.isFetchingNextPage}
           >

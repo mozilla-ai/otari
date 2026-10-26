@@ -6,6 +6,7 @@ import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Toggle } from "@/design-system/forms/Toggle"
+import { SettingRow } from "@/design-system/layout/SettingRow"
 import { exceptionalAccess } from "@/features/traces/exceptionalAccess"
 import {
   useDeleteWorkspaceTraceContent,
@@ -66,25 +67,26 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-body">{LABEL}</p>
-          <p className="mt-1 max-w-md text-caption">
-            {available
-              ? `Stores the prompt that starts each turn, the commands and file paths your agents' tools use, and what guardrail checks looked at. Never tool output or model responses. It is stored encrypted, though not end to end: this deployment holds the keys, so it can read it. Otari shows it only to the person whose session it is, unless they share a session for review. ${exceptions} Other members of this workspace, including its admins, see that a session ran and what it cost, but not what it was about. It is collected only for the workspace's current members; what is already stored stays until it is deleted, after its owner leaves too. Your agents also have to be set to send it. ${retention}`
-              : `This deployment does not keep session content, so a workspace cannot turn it on. Sessions still record their tools, costs and outcomes. ${retention}`}
-          </p>
-        </div>
-        <Toggle
-          isSelected={available && enabled}
-          onChange={(next) => setPending(next ? "on" : "off")}
-          label={LABEL}
-          isDisabled={!available || setContent.isPending}
-        />
-      </div>
+      <SettingRow
+        label={LABEL}
+        help={
+          available
+            ? `Stores the prompt that starts each turn, the commands and file paths your agents' tools use, and what guardrail checks looked at. Never tool output or model responses. It is stored encrypted, though not end to end: this deployment holds the keys, so it can read it. Otari shows it only to the person whose session it is, unless they share a session for review. ${exceptions} Other members of this workspace, including its admins, see that a session ran and what it cost, but not what it was about. It is collected only for the workspace's current members; what is already stored stays until it is deleted, after its owner leaves too. Your agents also have to be set to send it. ${retention}`
+            : `This deployment does not keep session content, so a workspace cannot turn it on. Sessions still record their tools, costs and outcomes. ${retention}`
+        }
+        control={
+          <Toggle
+            isSelected={available && enabled}
+            onChange={(next) => setPending(next ? "on" : "off")}
+            label={LABEL}
+            isDisabled={!available || setContent.isPending}
+          />
+        }
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="ghost"
+          className="min-h-11 md:min-h-9"
           onPress={() => setPending("delete")}
           isDisabled={deleteContent.isPending}
         >

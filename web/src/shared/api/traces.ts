@@ -207,11 +207,7 @@ const SHARES_PAGE = 20
 // The shares the session has had, a page at a time, running ones first, with
 // the newest reads made through each. Only the session's own user may ask, so
 // it is asked only for them.
-export function useTraceShares(
-  traceId: string,
-  workspaceId: string,
-  enabled: boolean,
-) {
+export function useTraceShares(traceId: string, workspaceId: string) {
   return useInfiniteQuery({
     queryKey: [TRACES, "shares", traceId, workspaceId],
     meta: workspaceMeta(workspaceId),
@@ -225,7 +221,7 @@ export function useTraceShares(
       ),
     getNextPageParam: (last, pages) =>
       last.has_more ? pages.length * SHARES_PAGE : undefined,
-    enabled: enabled && traceId !== "",
+    enabled: traceId !== "",
     staleTime: 10_000,
   })
 }
@@ -330,7 +326,7 @@ const BREAK_GLASS_PAGE = 50
 
 // The organization's owners' break-glass openings, newest first, a page at a
 // time, so every opening stays reachable however many follow it. Owners only.
-export function useBreakGlassLog(enabled: boolean) {
+export function useBreakGlassLog() {
   return useInfiniteQuery({
     queryKey: [TRACES, "break-glass"],
     initialPageParam: 0,
@@ -343,7 +339,6 @@ export function useBreakGlassLog(enabled: boolean) {
       ),
     getNextPageParam: (last, pages) =>
       last.has_more ? pages.length * BREAK_GLASS_PAGE : undefined,
-    enabled,
     staleTime: 30_000,
   })
 }
