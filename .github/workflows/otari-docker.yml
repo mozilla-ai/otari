@@ -20,6 +20,7 @@ on:
       - 'pyproject.toml'
       - 'uv.lock'
       - 'scripts/docker_liveness_check.sh'
+      - 'scripts/readme_quickstart_check.py'
       - '.github/workflows/otari-docker.yml'
   release:
     types: [published]
@@ -90,6 +91,11 @@ jobs:
 
       - name: Run container liveness check
         run: ./scripts/docker_liveness_check.sh otari-test:${{ github.sha }}
+
+      # Before the push, so an image whose README quickstart cannot start never
+      # becomes `latest`. The PR build skips src/gateway/**, where that breaks.
+      - name: Run the README quickstart
+        run: python3 scripts/readme_quickstart_check.py --image otari-test:${{ github.sha }}
 
       - name: Build and push Docker image
         id: push
