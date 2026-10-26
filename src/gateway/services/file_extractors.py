@@ -236,24 +236,36 @@ def _main_part(archive: _Archive, default: str) -> str:
     )
 
 
-def _inline_text(element: ElementTree.Element) -> str:
-    """The text of ``element``'s runs, each nested paragraph on a line of its own."""
+def _inline_text(element: ElementTree.Element, limit: int | None = None) -> str:
+    """The text of ``element``'s runs, each nested paragraph on a line of its own.
+
+    Collection stops at ``limit`` characters (``_MAX_TEXT_BYTES`` by default),
+    so a run too long to keep is never copied whole.
+    """
+    remaining = _MAX_TEXT_BYTES if limit is None else limit
     parts: list[str] = []
+
+    def add(text: str) -> None:
+        nonlocal remaining
+        parts.append(text[:remaining])
+        remaining -= len(parts[-1])
 
     def visit(node: ElementTree.Element) -> None:
         for child in node:
+            if remaining <= 0:
+                return
             name = _local(child.tag)
             if name in _SKIPPED:
                 continue
             if name == "t":
-                parts.append(child.text or "")
+                add(child.text or "")
             elif name == "tab":
-                parts.append("\t")
+                add("\t")
             elif name in ("br", "cr"):
-                parts.append("\n")
+                add("\n")
             else:
                 if name == "p" and parts:
-                    parts.append("\n")
+                    add("\n")
                 visit(child)
 
     visit(element)
@@ -377,12 +389,13 @@ def _serial_date(value: str, date1904: bool) -> str:
     return moment.isoformat(sep=" ")
 
 
-def _cell_value(cell: ElementTree.Element, book: _Workbook) -> str:
+def _cell_value(cell: ElementTree.Element, book: _Workbook, limit: int) -> str:
+    """The cell's text, at most ``limit`` characters of it."""
     kind = cell.get("t")
     if kind == "inlineStr":
         inline = next((child for child in cell if _local(child.tag) == "is"), None)
-        return "" if inline is None else _inline_text(inline)
-    value = next((child.text or "" for child in cell if _local(child.tag) == "v"), "")
+        return "" if inline is None else _inline_text(inline, limit)
+    value = next((child.text or "" for child in cell if _local(child.tag) == "v"), "")[: max(0, limit)]
     if kind == "s":
         return book.shared[int(value)] if value.isdecimal() and int(value) < len(book.shared) else ""
     if kind == "b":
@@ -409,7 +422,7 @@ def _shared_strings(archive: _Archive, member: str) -> list[str]:
     size = 0
     # sst > si
     for item in archive.iter_at_depth(member, 1):
-        text = _inline_text(item)
+        text = _inline_text(item, _MAX_TEXT_BYTES - size)
         size += _HELD_OBJECT_BYTES + len(text)
         if size > _MAX_TEXT_BYTES:
             break
@@ -425,21 +438,25 @@ def _sheet_rows(archive: _Archive, member: str, book: _Workbook) -> list[list[st
         if _local(row.tag) != "row":
             continue
         cells: list[str] = []
+        size += _HELD_OBJECT_BYTES
         for cell in row:
             if _local(cell.tag) != "c":
                 continue
             column = _column_index(cell.get("r"), len(cells))
-            value = _cell_value(cell, book)
+            value = _cell_value(cell, book, max(0, _MAX_TEXT_BYTES - size))
             if not value or column >= _MAX_SHEET_COLUMNS:
                 continue
             if column >= len(cells):
                 cells.extend([""] * (column - len(cells) + 1))
             cells[column] = value
+            size += len(value) + 3
+            if size > _MAX_TEXT_BYTES:
+                break
         # An empty row renders as nothing, and keeping it would cost memory the
         # size check below never sees.
         if not cells:
+            size -= _HELD_OBJECT_BYTES
             continue
-        size += _HELD_OBJECT_BYTES + sum(len(cell) + 3 for cell in cells)
         if size > _MAX_TEXT_BYTES:
             break
         rows.append(cells)

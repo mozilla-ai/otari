@@ -200,6 +200,27 @@ def test_xlsx_does_not_keep_the_row_that_passes_the_ceiling(monkeypatch: pytest.
     assert file_extractors._sheet_rows(archive, "xl/worksheets/sheet1.xml", book) == [["1"]]
 
 
+def test_run_text_stops_at_its_limit() -> None:
+    from xml.etree import ElementTree
+
+    element = ElementTree.fromstring("<si><t>abc</t><t>defgh</t><t>ijk</t></si>")
+
+    assert file_extractors._inline_text(element, 5) == "abcde"
+    assert file_extractors._inline_text(element, 0) == ""
+
+
+def test_a_cell_is_cut_at_the_budget_rather_than_read_whole() -> None:
+    from xml.etree import ElementTree
+
+    book = file_extractors._Workbook(shared=[], date_styles=frozenset(), date1904=False)
+    inline = ElementTree.fromstring('<c t="inlineStr"><is><t>' + "x" * 100 + "</t></is></c>")
+    number = ElementTree.fromstring("<c><v>123456</v></c>")
+
+    assert file_extractors._cell_value(inline, book, 10) == "x" * 10
+    assert file_extractors._cell_value(number, book, 3) == "123"
+    assert file_extractors._cell_value(number, book, -5) == ""
+
+
 def test_the_shared_string_table_stops_at_the_text_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(file_extractors, "_MAX_TEXT_BYTES", 3 * (file_extractors._HELD_OBJECT_BYTES + 1))
     data = _zip({"sst.xml": f"<sst {_S}>" + "<si><t>a</t></si>" * 100 + "</sst>"})
