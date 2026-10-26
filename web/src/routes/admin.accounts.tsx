@@ -1,7 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router"
-
-import { DeploymentAccountsPage } from "@/features/admin/DeploymentAccountsPage"
+import { createFileRoute, redirect } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/admin/accounts")({
-  component: DeploymentAccountsPage,
+  // Moved under /deployment with the rest of the deployment's own pages. The
+  // old path redirects so bookmarks and links in sent mail keep working.
+  beforeLoad: () => {
+    throw redirect({ to: "/deployment/accounts", search: true, replace: true })
+  },
 })

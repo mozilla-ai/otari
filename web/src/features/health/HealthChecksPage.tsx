@@ -383,7 +383,10 @@ function AlertsCard({ saved }: { saved: string[] }) {
           <InfoBanner tone="warning">
             This deployment can't send email yet, so nobody below hears about a
             failure. Set up outgoing mail in{" "}
-            <Link to="/settings" className="text-link hover:underline">
+            <Link
+              to="/deployment/settings"
+              className="text-link hover:underline"
+            >
               Settings
             </Link>
             .
@@ -483,7 +486,7 @@ export function HealthChecksPage() {
             <InfoBanner tone="warning">
               The last run found no chat model to check. Switch a model on under{" "}
               <Link
-                to="/admin/hosted-providers"
+                to="/deployment/hosted-providers"
                 className="text-link hover:underline"
               >
                 Hosted providers
@@ -532,7 +535,7 @@ export function HealthChecksPage() {
                     : `${disable.data.disabled} models switched off.`}{" "}
                   Switch them back on under{" "}
                   <Link
-                    to="/admin/hosted-providers"
+                    to="/deployment/hosted-providers"
                     className="text-link hover:underline"
                   >
                     Hosted providers

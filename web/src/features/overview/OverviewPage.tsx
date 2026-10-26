@@ -861,9 +861,10 @@ export function OverviewPage({
         recent={recent}
         activeKeys={summary.data ? activeKeys : null}
         activeMembers={summary.data ? activeMembers : null}
-        // An operator reaches every one of these; the rail on the tenant page
-        // drops the two the organization rail withholds from a member.
-        links={RAIL_LINKS}
+        // The summary is unfiltered here, so the rail counts the deployment
+        // and links to the deployment's own pages.
+        title="This deployment"
+        links={DEPLOYMENT_RAIL_LINKS}
       />
     </div>
   )
@@ -942,7 +943,7 @@ function GetStartedStrip({
                 // anyone else to `OrganizationOverview`), so it goes to the
                 // deployment's own keys.
                 action === "provider"
-                  ? "/admin/hosted-providers"
+                  ? "/deployment/hosted-providers"
                   : "/organization/provider-keys",
             })
           }
@@ -1012,31 +1013,31 @@ function AttentionStrip({
     if (down > 0) {
       problems.push({
         text: `${down} provider${down === 1 ? "" : "s"} unreachable`,
-        to: "/admin/hosted-providers",
+        to: "/deployment/hosted-providers",
       })
     }
     if (degraded > 0) {
       problems.push({
         text: `${degraded} provider${degraded === 1 ? "" : "s"} without model discovery`,
-        to: "/admin/hosted-providers",
+        to: "/deployment/hosted-providers",
       })
     }
   }
   if (budget.overCount > 0) {
     problems.push({
       text: `${budget.overCount} budget${budget.overCount === 1 ? "" : "s"} over limit`,
-      to: "/budgets",
+      to: "/deployment/budgets",
     })
   } else if (budget.nearCount > 0) {
     problems.push({
       text: `${budget.nearCount} budget${budget.nearCount === 1 ? "" : "s"} near limit`,
-      to: "/budgets",
+      to: "/deployment/budgets",
     })
   }
   if (errStatus === "alert" && errRate !== null) {
     problems.push({
       text: `error rate ${formatPct(errRate)}`,
-      to: "/activity",
+      to: "/deployment/activity",
       search: { status: "error" },
     })
   }
@@ -1103,6 +1104,7 @@ function SpendChart({
   series: { bucket_start: string; cost: number }[]
   isReady: boolean
 }) {
+  const isDeploymentWide = useIsDeploymentScope()
   const [hovered, setHovered] = useState<number>()
   if (!isReady || series.length < 2) {
     return null
@@ -1119,10 +1121,10 @@ function SpendChart({
       <div className="flex items-baseline justify-between">
         <h2 className="text-title">Spend, last 30 days</h2>
         <Link
-          to="/usage"
+          to={isDeploymentWide ? "/deployment/activity" : "/usage"}
           className="text-sm text-muted underline underline-offset-2 hover:text-foreground"
         >
-          View usage →
+          {isDeploymentWide ? "View activity →" : "View usage →"}
         </Link>
       </div>
       <div className="mt-4 flex">
@@ -1313,12 +1315,13 @@ function RecentActivity({
   loading: boolean
   error: unknown
 }) {
+  const isDeploymentWide = useIsDeploymentScope()
   return (
     <section className="flex flex-col pt-6 lg:pr-6">
       <div className="flex items-baseline justify-between pb-3">
         <h2 className="text-title">Recent activity</h2>
         <Link
-          to="/activity"
+          to={isDeploymentWide ? "/deployment/activity" : "/activity"}
           className="text-sm text-muted underline underline-offset-2 hover:text-foreground"
         >
           View all →
@@ -1352,12 +1355,14 @@ function ActivitySplit({
   activeKeys,
   activeMembers,
   links,
+  title = "This workspace",
   hasNoWorkspace = false,
 }: {
   recent: ReturnType<typeof useUsageLogs>
   activeKeys: number | null
   activeMembers: number | null
   links: readonly RailDestination[]
+  title?: string
   /** A member in no workspace yet, whose rail has no workspace to count. */
   hasNoWorkspace?: boolean
 }) {
@@ -1375,6 +1380,7 @@ function ActivitySplit({
           activeKeys={activeKeys}
           activeMembers={activeMembers}
           links={links}
+          title={title}
           hasNoWorkspace={hasNoWorkspace}
         />
       </div>
@@ -1394,6 +1400,13 @@ const RAIL_LINKS: readonly RailDestination[] = [
   { to: "/organization/members", label: "Members", organization: true },
   { to: "/budgets", label: "Budgets", organization: true },
   { to: "/activity", label: "Activity" },
+]
+
+const DEPLOYMENT_RAIL_LINKS: readonly RailDestination[] = [
+  { to: "/deployment/keys", label: "API keys" },
+  { to: "/deployment/accounts", label: "Accounts" },
+  { to: "/deployment/budgets", label: "Budgets" },
+  { to: "/deployment/activity", label: "Activity" },
 ]
 
 /**
@@ -1419,11 +1432,13 @@ function WorkspaceRail({
   activeKeys,
   activeMembers,
   links,
+  title,
   hasNoWorkspace,
 }: {
   activeKeys: number | null
   activeMembers: number | null
   links: readonly RailDestination[]
+  title: string
   hasNoWorkspace: boolean
 }) {
   return (
@@ -1440,7 +1455,7 @@ function WorkspaceRail({
         </div>
       ) : (
         <div>
-          <h2 className="text-title">This workspace</h2>
+          <h2 className="text-title">{title}</h2>
           <dl className="mt-3 flex gap-8 lg:flex-col lg:gap-4">
             <RailStat
               label="Active keys"

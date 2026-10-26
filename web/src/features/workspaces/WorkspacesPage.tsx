@@ -98,7 +98,7 @@ function DefaultBudgetPicker({
 }) {
   return (
     <Select
-      label="Default member budget"
+      label="Default member budget (deployment)"
       value={value}
       onChange={onChange}
       // No description and nothing that can be invalid, so there is no message
@@ -805,7 +805,7 @@ export function WorkspacesPage() {
       },
       {
         id: "default-budget",
-        header: "Default member budget",
+        header: "Default member budget (deployment)",
         cell: (workspace) => {
           const name = defaultBudgetName.get(workspace.id)
           // A name, not a chip. It is the budget's own name and nothing

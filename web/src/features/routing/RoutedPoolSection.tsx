@@ -274,7 +274,10 @@ export function RoutedPoolSection({
         ) : isPriority ? (
           <>
             Only a model with a per-model limit ever fills; set one under{" "}
-            <Link to="/settings" className="text-link hover:underline">
+            <Link
+              to="/deployment/settings"
+              className="text-link hover:underline"
+            >
               Settings, Rate limit rules
             </Link>
             . A model that fails before responding moves the request down this

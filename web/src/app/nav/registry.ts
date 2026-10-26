@@ -430,14 +430,14 @@ const DEPLOYMENT_SECTIONS = [
     label: "General",
     items: [
       {
-        to: "/settings",
+        to: "/deployment/settings",
         label: "Settings",
         surface: "settings",
         icon: FiSliders,
         operatorOnly: "refused",
       },
       {
-        to: "/admin/accounts",
+        to: "/deployment/accounts",
         label: "Accounts",
         surface: "admin",
         operatorOnly: "unlisted",
@@ -447,7 +447,7 @@ const DEPLOYMENT_SECTIONS = [
       // none of its own. Unlisted like Accounts, because its API refuses a
       // non-operator with the same 404.
       {
-        to: "/admin/hosted-providers",
+        to: "/deployment/hosted-providers",
         label: "Hosted providers",
         surface: "hosted_providers",
         operatorOnly: "unlisted",
@@ -457,21 +457,21 @@ const DEPLOYMENT_SECTIONS = [
       // Hosted providers is for its models. Refused rather than unlisted:
       // `/pricing` answers a non-operator 403.
       {
-        to: "/admin/web-search",
+        to: "/deployment/web-search-pricing",
         label: "Web search pricing",
         surface: "pricing",
         operatorOnly: "refused",
         icon: FiGlobe,
       },
       {
-        to: "/admin/code-execution",
+        to: "/deployment/code-execution-pricing",
         label: "Code execution pricing",
         surface: "pricing",
         operatorOnly: "refused",
         icon: FiCode,
       },
       {
-        to: "/health-checks",
+        to: "/deployment/health",
         label: "Health",
         surface: "health_checks",
         icon: FiActivity,
