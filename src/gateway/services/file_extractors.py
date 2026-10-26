@@ -556,7 +556,7 @@ def _extract_sync(data: bytes, extension: str) -> ExtractionResult:
         return ExtractionResult("", False, "document inflates past the extraction limit")
     except Exception as exc:  # noqa: BLE001 — surface as a failed extraction, not a 500
         logger.warning("text extraction failed for %s: %s", extension, exc)
-        return ExtractionResult("", False, f"extraction error: {exc}")
+        return ExtractionResult("", False, f"extraction error: {type(exc).__name__}")
 
     text = sink.text()
     if not text:

@@ -224,7 +224,7 @@ def test_a_file_that_is_not_the_zip_its_name_claims_fails_cleanly() -> None:
     result = file_extractors._extract_sync(b"not a zip", ".xlsx")
 
     assert result.ok is False
-    assert result.detail.startswith("extraction error:")
+    assert result.detail == "extraction error: BadZipFile"
 
 
 def test_text_past_the_ceiling_is_cut_and_reported(monkeypatch: pytest.MonkeyPatch) -> None:
