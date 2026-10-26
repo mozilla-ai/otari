@@ -22,11 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.adapters.content_key_adapter import build_content_key_port
+from gateway.api.deps import is_workspace_member, workspaces_keeping_content_for
 from gateway.core.config import GatewayConfig
 from gateway.core.database import dispose_db, init_db
 from gateway.core.unit_of_work import create_unit_of_work
 from gateway.exceptions.traces_exceptions import TraceAmbiguousError
-from gateway.models.tenancy import Workspace
+from gateway.models.tenancy import OrganizationMember, Workspace
+from gateway.models.tenancy import User as TenancyUser
 from gateway.models.traces import Trace, TraceSpan
 from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
@@ -52,7 +54,7 @@ class _Members:
     async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
         return user_id is not None and user_id not in self.gone
 
-    async def members(self, pairs: Any) -> set[tuple[uuid.UUID, str | None]]:
+    async def content_kept_for(self, pairs: Any) -> set[tuple[uuid.UUID, str | None]]:
         return {pair for pair in pairs if await self.is_member(*pair)}
 
 
@@ -964,6 +966,39 @@ async def test_an_upload_admitted_before_an_erasure_and_finished_long_after_is_n
     assert result.accepted == 0
     async_db.expire_all()
     assert (await async_db.execute(select(Trace.trace_id))).scalars().all() == []
+
+
+async def test_content_is_kept_only_where_the_workspace_switch_is_still_on(
+    tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession
+) -> None:
+    """The switch is read where content is stored, not trusted from the export's admission.
+
+    Turning it off and moving the workspace's content generation on are two commits,
+    so an export let in between them carries a generation that is still current.
+    """
+    workspace_id, _ = tenants
+    workspace = await async_db.get(Workspace, workspace_id)
+    assert workspace is not None
+    person = TenancyUser(email="switch@example.test", full_name="Dev", active_organization_id=workspace.organization_id)
+    async_db.add(person)
+    await async_db.flush()
+    async_db.add(
+        OrganizationMember(organization_id=workspace.organization_id, user_id=person.id, role="admin", status="active")
+    )
+    # A member's spend identity is their control-plane id, which is what a trace carries.
+    async_db.add(User(user_id=str(person.id)))
+    workspace.trace_content_enabled = True
+    await async_db.commit()
+    pair = (workspace_id, str(person.id))
+
+    assert await workspaces_keeping_content_for(async_db, [pair]) == {pair}
+
+    workspace.trace_content_enabled = False
+    await async_db.commit()
+
+    assert await workspaces_keeping_content_for(async_db, [pair]) == set()
+    # Still a member; it is the workspace that stopped keeping content.
+    assert await is_workspace_member(async_db, workspace_id, str(person.id))
 
 
 async def test_an_upload_still_held_when_its_users_erasure_is_forgotten_is_never_stored(
