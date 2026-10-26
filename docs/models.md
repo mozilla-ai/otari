@@ -432,7 +432,9 @@ The listing has one entry per model, and its `id` is the model's catalog id
 as `model` and Otari chooses the provider: it tries the model's offerings best
 first (priced before unpriced, then your organization's own key, then the
 model's own vendor, then the cheapest) and falls back to the next when one
-fails. An entry's price, limits, capabilities and `deployment_managed` are those
+fails. A catalog id spelled like the legacy `provider/model` of one of its own
+offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that
+offering first (see [Catalog spellings](#catalog-spellings)). An entry's price, limits, capabilities and `deployment_managed` are those
 of the offering tried first, and `owned_by` is the model's vendor.
 
 To pin a request to one provider, send its `provider:model` selector, which

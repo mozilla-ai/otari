@@ -22,10 +22,12 @@ from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.catalog import apply_model_metadata, load_catalog_metadata
 from gateway.services.merged_catalog_service import (
+    CatalogScope,
     ModelObject,
     alias_model,
     apply_default_pricing,
     apply_organization_pricing,
+    build_merged_catalog,
     catalog_aliases,
     catalog_scope,
     created_timestamp,
@@ -53,7 +55,7 @@ from gateway.services.model_discovery_service import (
 )
 from gateway.services.pricing_service import latest_price_version
 from gateway.services.provider_kwargs import normalize_pricing_key
-from gateway.services.selector_index_service import find_listed_model, list_models_by_identity
+from gateway.services.selector_index_service import answered_by_listing, models_by_identity
 
 if TYPE_CHECKING:
     pass
@@ -203,9 +205,25 @@ async def list_models(
     `instance:model` selector still pins a request to one provider, and
     GET /api/v1/catalog/models/{model_id} lists the offerings of a model.
     """
-    return ModelListResponse(
-        data=await list_models_by_identity(db, config, auth, session_identity, model_provider, provider=provider)
+    return ModelListResponse(data=await _listing(db, config, auth, session_identity, model_provider, provider=provider))
+
+
+async def _listing(
+    db: AsyncSession,
+    config: GatewayConfig,
+    auth: tuple[APIKey | None, bool],
+    session_identity: TenancyUser | None,
+    model_provider: ModelProviderPort,
+    *,
+    provider: str | None = None,
+) -> list[ModelObject]:
+    catalog = await build_merged_catalog(
+        db, config, auth=auth, session_identity=session_identity, provider=provider, model_provider=model_provider
     )
+    models = list(catalog.models.values())
+    organization_id = await viewer_organization(db, auth, session_identity)
+    await apply_organization_pricing(db, config, models, catalog.aliases, organization_id)
+    return models_by_identity(config, catalog.models_dev, models, organization_id=organization_id)
 
 
 # Served before GET /models/{model_id:path}, which FastAPI would otherwise match
@@ -296,24 +314,26 @@ async def get_model(
     model_provider: RequestSessionModelProviderPortDep,
 ) -> ModelObject:
     """Get details for a specific model, by catalog id, alias or `instance:model` selector."""
-    listed = await find_listed_model(db, config, model_id, auth, session_identity, model_provider)
-    if listed is not None:
-        return listed
-    obj, aliases = await _find_model(db, config, model_id, auth, session_identity, model_provider)
+    scope, aliases = await _caller_scope(db, config, auth, session_identity, model_provider)
+    if answered_by_listing(model_id, aliases):
+        listed = await _listing(db, config, auth, session_identity, model_provider)
+        found = next((obj for obj in listed if obj.id == model_id), None)
+        if found is not None:
+            return found
+    obj = await _find_model(db, config, model_id, scope, aliases)
     organization_id = await viewer_organization(db, auth, session_identity)
     await apply_organization_pricing(db, config, [obj], aliases, organization_id)
     return obj
 
 
-async def _find_model(
+async def _caller_scope(
     db: AsyncSession,
     config: GatewayConfig,
-    model_id: str,
     auth: tuple[APIKey | None, bool],
     session_identity: TenancyUser | None,
     model_provider: ModelProviderPort,
-) -> tuple[ModelObject, dict[str, str]]:
-    """The model ``model_id`` names, priced from the deployment's list, with the caller's aliases."""
+) -> tuple[CatalogScope, dict[str, str]]:
+    """The caller's catalog scope and the aliases it reads."""
     api_key, _is_master_key = auth
     # Same scoping as the listing, the workspace layer included: the caller's own
     # aliases, plus their workspace's and the configured ones. A master-key caller
@@ -325,7 +345,13 @@ async def _find_model(
         caller_workspace_id=api_key.workspace_id if api_key is not None else None,
         workspace_layer=scope.reads_workspace_layer,
     )
+    return scope, aliases
 
+
+async def _find_model(
+    db: AsyncSession, config: GatewayConfig, model_id: str, scope: CatalogScope, aliases: dict[str, str]
+) -> ModelObject:
+    """The model ``model_id`` names, priced from the deployment's list."""
     # Model access control: a denied model returns 404, indistinguishable from a
     # missing one, so this endpoint cannot be used to probe which models exist
     # behind an allow-list. Uses the same matcher/canonical key as the listing and
@@ -352,7 +378,7 @@ async def _find_model(
             alias_target,
             normalized_pricing_lookup(config, pricing_map),
             models_dev=await load_catalog_metadata(config),
-        ), aliases
+        )
 
     # Check the pricing table first.
     pricing = await latest_price_version(db, model_id)
@@ -398,7 +424,7 @@ async def _find_model(
             apply_model_metadata(config, await load_catalog_metadata(config), fallback)
             return mark_deployment_managed(
                 config, fallback, deployment_supplied_providers=scope.deployment_supplied_providers
-            ), aliases
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Model '{model_id}' not found",
@@ -417,14 +443,10 @@ async def _find_model(
         )
         apply_default_pricing(obj)
         apply_model_metadata(config, await load_catalog_metadata(config), obj)
-        return mark_deployment_managed(
-            config, obj, deployment_supplied_providers=scope.deployment_supplied_providers
-        ), aliases
+        return mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)
 
     # Pricing-only model (no discovery data).
     assert pricing is not None
     obj = model_from_pricing(pricing)
     apply_model_metadata(config, await load_catalog_metadata(config), obj)
-    return mark_deployment_managed(
-        config, obj, deployment_supplied_providers=scope.deployment_supplied_providers
-    ), aliases
+    return mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)

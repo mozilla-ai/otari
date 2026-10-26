@@ -7,7 +7,7 @@ import pytest
 from gateway.core.config import GatewayConfig
 from gateway.services import catalog as selectors
 from gateway.services.merged_catalog_service import ALIAS_OWNED_BY, ModelObject, ModelPricingInfo
-from gateway.services.selector_index_service import models_by_identity
+from gateway.services.selector_index_service import answered_by_listing, models_by_identity
 
 _NEBIUS = "nebius:zai-org/GLM-5.3"
 _FIREWORKS = "fireworks:accounts/fireworks/models/glm-5p3"
@@ -105,3 +105,12 @@ def test_a_name_an_alias_already_takes_is_left_to_the_alias(config: GatewayConfi
     listed = models_by_identity(config, None, [alias, _offering("openai:gpt-4o", 2.5)])
 
     assert [(row.id, row.owned_by) for row in listed] == [("openai/gpt-4o", ALIAS_OWNED_BY)]
+
+
+@pytest.mark.parametrize(
+    ("model_id", "expected"),
+    [("z-ai/glm-5.3", True), ("my-policy", True), ("fast", False), (_NEBIUS, False)],
+)
+def test_only_a_catalog_id_or_policy_is_read_from_the_listing(model_id: str, expected: bool) -> None:
+    """An alias and a selector have cheaper reads of their own, so the catalog is not built for them."""
+    assert answered_by_listing(model_id, {"fast": _NEBIUS}) is expected
