@@ -145,6 +145,11 @@ export function useTrace(traceId: string, workspaceId = "") {
       ),
     enabled: scope.isReady && traceId !== "",
     staleTime: 5_000,
+    // Dropped as soon as nothing renders it, rather than held for the default few
+    // minutes: this payload carries the session's prompts, commands and file paths
+    // where the reader may open them, and a share the owner ended in between would
+    // otherwise be painted from the cache before the refetch answered.
+    gcTime: 0,
     refetchInterval: (query) =>
       query.state.data?.state === "active" ? 5_000 : false,
   })
