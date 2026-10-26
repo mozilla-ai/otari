@@ -49,9 +49,33 @@ describe("BreakGlassLog", () => {
       await screen.findByText(/owner@example.test opened session s-one/),
     ).toBeInTheDocument()
     expect(screen.getByText("“HR matter 17”")).toBeInTheDocument()
+    expect(screen.getByText("Session of u")).toBeInTheDocument()
     expect(String(fetch.mock.calls[0][0])).toBe(
       `${API_ROOT}/organizations/me/traces/audit/break-glass?skip=0&limit=50`,
     )
+  })
+
+  it("does not report that nobody has opened anything when the read failed", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Forbidden" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <BreakGlassLog />
+      </QueryClientProvider>,
+    )
+
+    // The point of the record is that another owner can check it, so a read that
+    // failed must not read as a session nobody opened.
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
+    expect(screen.queryByText(/No owner has opened/)).toBeNull()
   })
 
   it("pages to openings past the newest fifty", async () => {

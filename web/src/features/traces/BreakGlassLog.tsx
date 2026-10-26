@@ -25,7 +25,8 @@ export function BreakGlassLog() {
     <SettingsGroup title="Break-glass openings">
       <div className="flex flex-col gap-2 py-3">
         <ErrorBanner error={log.error} />
-        {log.isPending && !log.data ? null : items.length === 0 ? (
+        {(log.isPending || log.isError) && !log.data ? null : items.length ===
+          0 ? (
           <p className="text-caption">
             No owner has opened a session's content by break-glass.
           </p>
@@ -41,21 +42,28 @@ export function BreakGlassLog() {
                   {formatDateTime(read.read_at)}
                 </span>
                 <span className="text-caption">“{read.reason}”</span>
+                {read.session_user_id ? (
+                  // As an id rather than in the sentence: the record carries no
+                  // email for the session's own user, and a bare user id reads
+                  // as a mistake where a name belongs.
+                  <span className="text-mono-caption text-subtle">
+                    Session of {read.session_user_id}
+                  </span>
+                ) : null}
               </li>
             ))}
-            {log.hasNextPage ? (
-              <li>
-                <Button
-                  variant="ghost"
-                  onPress={() => void log.fetchNextPage()}
-                  isDisabled={log.isFetchingNextPage}
-                >
-                  Show older openings
-                </Button>
-              </li>
-            ) : null}
           </ul>
         )}
+        {log.hasNextPage ? (
+          <Button
+            variant="ghost"
+            className="min-h-11 self-start md:min-h-9"
+            onPress={() => void log.fetchNextPage()}
+            isDisabled={log.isFetchingNextPage}
+          >
+            Show older openings
+          </Button>
+        ) : null}
       </div>
     </SettingsGroup>
   )
