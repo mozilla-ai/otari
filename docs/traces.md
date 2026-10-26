@@ -410,7 +410,10 @@ extend them. Content that cannot be opened reads back empty. Both are counted, o
 `gateway_trace_content_unsealed` and `gateway_trace_content_unopened`, by reason.
 
 Content stored by earlier versions, sealed with `OTARI_SECRET_KEY` alone, still
-reads back, and ages out with the session; nothing needs re-encrypting.
+reads back, and ages out with the session; nothing needs re-encrypting. That
+older form names only its workspace and its span, so it is bound to those two
+and not to its session: the three-way binding above covers what this version
+seals. It ages out within `trace_session_max_age_days`.
 
 ### Sealing content with AWS KMS
 
