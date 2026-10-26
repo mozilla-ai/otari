@@ -1928,12 +1928,12 @@ async def _caller_workspace_ids(
 CallerWorkspaces = Annotated[frozenset[uuid.UUID], Depends(_caller_workspace_ids)]
 
 
-def _caller_workspace_query(organization_id: CallerOrganization) -> Select[tuple[uuid.UUID]]:
+def _caller_workspace_query(organization_id: CallerOrganization) -> Select[uuid.UUID]:
     """The same workspaces as a subquery, so a read of a growing table filters in the database."""
     return ids_in_organization(organization_id)
 
 
-CallerWorkspaceQuery = Annotated[Select[tuple[uuid.UUID]], Depends(_caller_workspace_query)]
+CallerWorkspaceQuery = Annotated[Select[uuid.UUID], Depends(_caller_workspace_query)]
 
 
 def _caller_usage_scope(workspaces: CallerWorkspaceQuery) -> ColumnElement[bool]:

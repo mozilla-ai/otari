@@ -226,7 +226,7 @@ def _reject_user_scope(user_id: str | None) -> None:
         )
 
 
-def _visible_workspace_ids(scope: VisibleWorkspaceScope) -> Select[tuple[uuid.UUID]]:
+def _visible_workspace_ids(scope: VisibleWorkspaceScope) -> Select[uuid.UUID]:
     """The workspace ids whose stored rows this caller may be shown.
 
     A subquery rather than a clause over one table, so the policies list and the

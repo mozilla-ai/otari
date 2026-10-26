@@ -68,7 +68,7 @@ _default_workspace: uuid.UUID | None = None
 
 
 async def list_stored_aliases(
-    db: AsyncSession, *, workspaces: Select[tuple[uuid.UUID]], workspace_id: uuid.UUID | None
+    db: AsyncSession, *, workspaces: Select[uuid.UUID], workspace_id: uuid.UUID | None
 ) -> list[ModelAlias]:
     """Return the stored aliases in these workspaces, by name, narrowed to ``workspace_id`` when given."""
     statement = select(ModelAlias).where(ModelAlias.workspace_id.in_(workspaces))

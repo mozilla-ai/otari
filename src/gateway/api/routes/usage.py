@@ -695,10 +695,10 @@ async def get_request_settlement(
     return RequestSettlement(
         request_id=request_id,
         status="error" if errors else "success",
-        cost_usd=f"{quantize_cost(cost):.6f}" if priced_rows else None,
-        prompt_tokens=int(prompt_tokens),
-        completion_tokens=int(completion_tokens),
-        total_tokens=int(total_tokens),
+        cost_usd=f"{quantize_cost(cost):.6f}" if priced_rows and cost is not None else None,
+        prompt_tokens=int(prompt_tokens or 0),
+        completion_tokens=int(completion_tokens or 0),
+        total_tokens=int(total_tokens or 0),
         row_count=int(row_count),
     )
 
@@ -768,7 +768,7 @@ async def count_usage(
         # promise rows _selection_conditions then refuses to touch.
         conditions.append(UsageLog.source != SERVED_HERE_SLUG)
     stmt: Any = select(func.count()).select_from(UsageLog).where(*conditions)
-    total = (await db.execute(stmt)).scalar_one()
+    total: int = (await db.execute(stmt)).scalar_one()
     return UsageCount(total=total)
 
 

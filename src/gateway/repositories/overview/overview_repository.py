@@ -186,6 +186,7 @@ class OverviewRepository:
         worst = None
         if worst_row is not None:
             ceiling, max_budget = worst_row
+            assert max_budget is not None  # the query excludes an uncapped budget
             worst = Allocation(
                 name=ceiling.name,
                 budget_id=ceiling.budget_id,

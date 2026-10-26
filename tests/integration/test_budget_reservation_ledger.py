@@ -648,6 +648,7 @@ async def test_every_ending_writes_the_user_before_the_ceiling(
     def record(_conn: Any, _cursor: Any, statement: str, *_: Any) -> None:
         statements.append(statement)
 
+    assert async_db.bind is not None
     sync_engine = async_db.bind.sync_engine
     event.listen(sync_engine, "before_cursor_execute", record)
     try:

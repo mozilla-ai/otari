@@ -73,7 +73,7 @@ _default_workspace: uuid.UUID | None = None
 
 
 async def list_stored_policies(
-    db: AsyncSession, *, workspaces: Select[tuple[uuid.UUID]], workspace_id: uuid.UUID | None
+    db: AsyncSession, *, workspaces: Select[uuid.UUID], workspace_id: uuid.UUID | None
 ) -> list[RoutingPolicy]:
     """Return the stored routing policies in these workspaces, by name, narrowed to ``workspace_id`` when given."""
     statement = select(RoutingPolicy).where(RoutingPolicy.workspace_id.in_(workspaces))

@@ -5,7 +5,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, func, nulls_last, or_, select, update
+from sqlalchemy import CursorResult, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,7 +31,7 @@ def user_alphabetical_order() -> ColumnElement[str]:
     so an email-less operator would otherwise head the roster on the engine the
     OSS base ships by default.
     """
-    return nulls_last(func.lower(func.coalesce(func.nullif(func.trim(col(User.full_name)), ""), col(User.email))))
+    return func.lower(func.coalesce(func.nullif(func.trim(col(User.full_name)), ""), col(User.email))).nulls_last()
 
 
 def user_matches_search(term: str) -> ColumnElement[bool]:

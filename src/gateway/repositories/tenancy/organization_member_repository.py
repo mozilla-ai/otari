@@ -164,7 +164,7 @@ class OrganizationMemberRepository(
             .order_by(col(OrganizationMember.created_at), col(OrganizationMember.id))
         )
         first: dict[uuid.UUID, uuid.UUID] = {}
-        for user_id, organization_id in result.tuples():
+        for user_id, organization_id in result.all():
             first.setdefault(user_id, organization_id)
         return first
 

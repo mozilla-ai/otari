@@ -32,7 +32,7 @@ _UNIQUE_VIOLATION = frozenset({"23505", "SQLITE_CONSTRAINT_UNIQUE"})
 _FOREIGN_KEY_VIOLATION = frozenset({"23503"})
 
 
-def ids_in_organization(organization_id: uuid.UUID) -> Select[tuple[uuid.UUID]]:
+def ids_in_organization(organization_id: uuid.UUID) -> Select[uuid.UUID]:
     """Select the ID of every workspace in an organization, for use as a subquery."""
     return select(col(Workspace.id)).where(col(Workspace.organization_id) == organization_id)
 
