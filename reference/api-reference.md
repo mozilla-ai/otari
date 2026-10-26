@@ -290,10 +290,10 @@ often fill it with one. In Otari it names the user a request is billed to, so it
 is not free-form. A request made with an API key may name only that key's own
 user: any other value is refused with
 `403 'user' field does not match the authenticated API key's user`. A key's
-`reject_user_mismatch` (see [Mismatched `user` fields](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides#mismatched-user-fields)), or the
+`reject_user_mismatch` (see [Mismatched `user` fields](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/organizations-and-access/api-keys#mismatched-user-fields)), or the
 deployment-wide setting of the same name, can accept other values instead, in
 which case the value is ignored and spend stays with the key's user. A
-[service key](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides#service-keys-and-end-users) may name its own end
+[service key](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/organizations-and-access/end-users) may name its own end
 users, and a master-key request must name the user to bill. Chat Completions
 and Responses never send `user` to the provider.
 
@@ -438,7 +438,7 @@ for the tool's name or `*`. With neither set, it follows the key's model access,
 or its user's when the key has none: unrestricted model access runs every search
 tool, and restricted model access runs only a tool named by its deprecated
 `<provider>:<tool>` entry in `allowed_models`
-([access control](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides#users-and-identities)).
+([Model and search tool access](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/organizations-and-access/api-keys#model-and-search-tool-access)).
 
 **Request.**
 
@@ -770,9 +770,9 @@ Anthropic answers it, whose message names each failing field.
 A `budget_exceeded` refusal's `detail` tells a spent budget (`... has exceeded
 budget limit`) from a request whose estimated cost is larger than the budget it
 has left (`... has $X of budget remaining, less than this request's estimated
-cost of $Y`); see [Budgets](access-control.md#budgets). Its `Retry-After` is
+cost of $Y`); see [Budgets](budgets.md#what-a-budget-limits). Its `Retry-After` is
 when the budget resets, which may be days away for a monthly budget; see
-[Refusals and `Retry-After`](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides#refusals-and-retry-after).
+[Refusals and `Retry-After`](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/organizations-and-access/budgets#refusals-and-retry-after).
 
 ### Provider failures
 

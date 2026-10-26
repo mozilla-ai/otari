@@ -1166,7 +1166,7 @@ smtp_password: ${SMTP_PASSWORD}
 
 Invitation email is limited over any 24 hours. Both limits are counted in
 `rate_limit_store`, and `null` turns one off; see
-[Invitations](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides#invitations) for why and what an invitation over
+[Invitations](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides/organizations-and-access/members#invitations) for why and what an invitation over
 a limit does:
 
 | Setting | Limits | Default |
@@ -1185,7 +1185,7 @@ where logs are shared. Test delivery from Settings or
 sign-in do with an address nobody has added or invited. `true` gives each new
 address an organization of its own. The signup form needs [mail](#mail)
 configured either way, because it sends a verification link; a provider sign-in
-does not. See [Signup](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides#signup).
+does not. See [Signup](sign-in.md#signup).
 
 ## Built-in tools and guardrails variables
 
@@ -1292,7 +1292,7 @@ refused.
 Left unset on a split deployment, an OAuth callback lands the browser on an
 origin holding none of the sign-in state it started with, and the sign-in fails
 with the authorization code unspent. Passkeys need their own settings there; see
-[Access control](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/guides#passkeys).
+[Set up passkeys](sign-in.md#set-up-passkeys).
 
 ## Extending Otari with a bootstrap module
 

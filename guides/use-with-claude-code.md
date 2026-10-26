@@ -27,7 +27,7 @@ Otari user ID, so create or update its API key with
 `reject_user_mismatch: false`, or pick **Always accept** for "Mismatched `user`
 field" under the dashboard key form's **Advanced** section. Spend still binds
 to the key's user; see
-[Mismatched `user` fields](access-control.md#mismatched-user-fields).
+[Mismatched `user` fields](api-keys.md#mismatched-user-fields).
 
 ```bash
 curl "$OTARI_URL/api/v1/keys" \

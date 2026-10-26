@@ -3,6 +3,7 @@
 * [Self-hosted quickstart](self-hosted-quickstart.md)
 * [Deployment](deployment.md)
 * [Configuration](configuration.md)
+* [Sign-in and accounts](sign-in.md)
 
 ## Providers
 

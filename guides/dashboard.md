@@ -37,11 +37,11 @@ the master key. The master key remains valid for management API calls and can
 reset the operator password. It resets the operator's password only: to help a
 member who forgot theirs, send them a password link from Accounts, which emails
 it where mail is configured and otherwise gives you the link to share (see
-[Access control](access-control.md#deployment-wide-account-administration)).
+[Deployment-wide account administration](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/sign-in#deployment-wide-account-administration)).
 
 When the sign-in page offers the password form, and when it offers the
 master-key box beside it, is described in
-[Dashboard sessions and identity](access-control.md#dashboard-sessions-and-identity).
+[Dashboard sessions and identity](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/sign-in#dashboard-sessions-and-identity).
 
 Account settings also carries the name you are known by, which is not a
 credential: it is what the account menu, the organization roster and the user
@@ -92,17 +92,17 @@ The workspace view contains day-to-day gateway operations:
 | Models | The catalog grouped by model | [Models and Routing](#models-and-routing), [Models](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#the-catalog-grouped-by-model) |
 | Routing | Routing policies, aliases and Automatic fallback | [Models and Routing](#models-and-routing), [Routing](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/routing) |
 | Tools | Built-in tools, MCP servers and guardrails for the workspace | [Built-in tools](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/tools) |
-| API keys | Workspace API keys | [API keys](access-control.md#api-keys) |
-| Members | Workspace members | [Access control](access-control.md#organizations-and-workspaces) |
+| API keys | Workspace API keys | [API keys](api-keys.md) |
+| Members | Workspace members | [Members and invitations](members.md) |
 
 The organization view contains tenant-wide administration:
 
 | Page | What it is | Rules |
 | --- | --- | --- |
-| Usage | Organization-wide usage | [Workspace-scoped spend](access-control.md#workspace-scoped-spend) |
+| Usage | Organization-wide usage | [Workspace-scoped spend](organizations-and-workspaces.md#workspace-scoped-spend) |
 | Workspaces, Members | Workspaces and organization members, with invitations | [Organization](#organization) |
-| Email domains | Domains whose colleagues join automatically | [Email-domain auto-join](access-control.md#email-domain-auto-join) |
-| Spend and budgets | Budgets and the spend ceilings holding them | [Budgets](access-control.md#budgets) |
+| Email domains | Domains whose colleagues join automatically | [Email-domain auto-join](members.md#email-domain-auto-join) |
+| Spend and budgets | Budgets and the spend ceilings holding them | [Budgets](budgets.md) |
 | Providers (under General) | The organization's own provider keys, the models each one offers, and what the organization pays for them | [Organization provider keys](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers#organization-provider-keys), [Who is shown which models](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/models#who-is-shown-which-models) |
 | Guardrails, Org settings (under General) | Organization guardrail policy and settings | [Guardrails](guardrails.md) |
 
@@ -112,7 +112,7 @@ gateway process rather than to any organization on it:
 | Page | What it is | Rules |
 | --- | --- | --- |
 | Settings | The running configuration, and the Rate limit rules card | [Settings](#settings) |
-| Accounts | Every account on the deployment | [Deployment-wide account administration](access-control.md#deployment-wide-account-administration) |
+| Accounts | Every account on the deployment | [Deployment-wide account administration](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/sign-in#deployment-wide-account-administration) |
 | Hosted providers | The provider keys the deployment serves inference on | [The Hosted providers page](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/providers/hosted-providers#the-hosted-providers-page) |
 | Web search pricing, Code execution pricing | What the deployment charges per successful call of a tool it runs itself | [Pricing a gateway-run tool](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/reference/gateway/tools#pricing-a-gateway-run-tool) |
 
@@ -326,10 +326,8 @@ front of sign-in carry the address the same way: from the sign-in screen to
 address was mailed and on to another resend, and back to the sign-in screen
 after a verification or a recovery request. A password never travels with it.
 
-On Members, an invited row offers Reissue and Revoke, and says when its
-invitation has expired. Reissue sends a new accept link (or shows it to share,
-when the email did not go out) and the old one stops working, which is how a
-lost link is recovered.
+On Members, an invited row offers Reissue and Revoke; see
+[Manage existing members](members.md#manage-existing-members).
 
 ## Authentication options
 
@@ -337,8 +335,7 @@ Password sign-in works for an existing account. Optional passkeys, Google OAuth
 and GitHub OAuth add more ways to sign in, and where the deployment sets
 `open_signup: true` a new address can also create an account with its own
 organization, through the signup form or a Google or GitHub sign-in. Setup and
-the rules for each are in
-[Dashboard sessions and identity](access-control.md#dashboard-sessions-and-identity).
+the rules for each are in [Sign-in and accounts](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/sign-in).
 
 Where the deployment publishes terms (`terms_url`), the signup page asks for
 them before any of those, and the invitation page asks before "Accept and sign
@@ -351,10 +348,10 @@ first, then that page once you have signed in, whichever method you use.
 
 Signing in can also add a membership, where an organization has proven the
 email domain of the identity's verified address; see
-[Email-domain auto-join](access-control.md#email-domain-auto-join).
+[Email-domain auto-join](members.md#email-domain-auto-join).
 
 Mail is optional: when an invitation email does not go out, you get the accept
-link to share. See [Invitations](access-control.md#invitations) and
+link to share. See [Invitations](members.md#invitations) and
 [Mail](https://mozilla-ai.gitbook.io/otari-preview/wBxOPVaXYufbmAHVFj2k/self-hosting/configuration#mail).
 
 ## Custom documentation
