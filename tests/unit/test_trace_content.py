@@ -7,6 +7,7 @@ import asyncio
 import base64
 import json
 import logging
+import time
 import uuid
 from collections.abc import Iterator
 from types import SimpleNamespace
@@ -653,6 +654,24 @@ async def test_a_listed_key_that_cannot_be_described_is_skipped(kms: Any) -> Non
     reader = SpanContent(_kms_keyring(kms, current, previous=("alias/gone",)))
 
     assert await reader.open(sealed, workspace_id=_WORKSPACE, trace_id=_TRACE, span_id="tool-1") == _CONTENT
+
+
+async def test_the_listed_keys_are_described_together_not_one_after_another() -> None:
+    class _SlowDescribe:
+        def describe_key(self, KeyId: str) -> dict[str, Any]:  # noqa: N803 - boto3's own keyword
+            time.sleep(0.4)
+            return {"KeyMetadata": {"Arn": f"arn:aws:kms:{_REGION}:000000000000:key/{KeyId}"}}
+
+    keys = AwsKmsContentKeys("k1", ("k2", "k3", "k4"), client=_SlowDescribe())
+    started = time.monotonic()
+    try:
+        allowed = await keys._allowed()
+    finally:
+        keys.close()
+
+    assert len(allowed) == 4
+    # One after another would take 1.6 s; together, about one call's 0.4 s.
+    assert time.monotonic() - started < 1.0
 
 
 async def test_an_alias_pointed_at_a_new_key_is_followed_without_a_restart(

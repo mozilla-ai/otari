@@ -14,6 +14,9 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import TraceContentBarrier, TraceUserBarrier
 from gateway.repositories.base_repository import BaseRepository
 
+# Rows locked and deleted per statement, well under asyncpg's 32,767 bound parameters for the IN list.
+FORGET_BATCH = 5_000
+
 
 class ContentBarrierRepository(BaseRepository[TraceContentBarrier, Never, Never]):
     """Read, lock and move on each workspace's content generation."""
@@ -97,19 +100,24 @@ class UserBarrierRepository(BaseRepository[TraceUserBarrier, Never, Never]):
         A never-erased user's row only serializes writes and is made again on the
         next one, so no user's id is kept past its use. Rows are locked in ``user_id``
         order, as writers lock them, so the two never deadlock; a row a writer holds
-        is skipped and goes on the next run.
+        is skipped and goes on the next run. Deleted ``FORGET_BATCH`` rows at a time.
         """
-        locked = await self.db.execute(
-            select(TraceUserBarrier.user_id)
-            .where(or_(TraceUserBarrier.erased_at.is_(None), TraceUserBarrier.erased_at < cutoff))
-            .order_by(TraceUserBarrier.user_id)
-            .with_for_update(skip_locked=True)
-        )
-        user_ids = list(locked.scalars().all())
-        if not user_ids:
-            return 0
-        result = await self.db.execute(delete(TraceUserBarrier).where(TraceUserBarrier.user_id.in_(user_ids)))
-        return int(getattr(result, "rowcount", 0) or 0)
+        removed = 0
+        while True:
+            locked = await self.db.execute(
+                select(TraceUserBarrier.user_id)
+                .where(or_(TraceUserBarrier.erased_at.is_(None), TraceUserBarrier.erased_at < cutoff))
+                .order_by(TraceUserBarrier.user_id)
+                .limit(FORGET_BATCH)
+                .with_for_update(skip_locked=True)
+            )
+            user_ids = list(locked.scalars().all())
+            if not user_ids:
+                return removed
+            result = await self.db.execute(delete(TraceUserBarrier).where(TraceUserBarrier.user_id.in_(user_ids)))
+            removed += int(getattr(result, "rowcount", 0) or 0)
+            if len(user_ids) < FORGET_BATCH:
+                return removed
 
     async def erase(self, user_id: str, at: datetime) -> None:
         """Record the user's erasure, holding their row until the transaction ends."""

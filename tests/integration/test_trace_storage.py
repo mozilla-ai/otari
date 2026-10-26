@@ -27,10 +27,10 @@ from gateway.core.database import dispose_db, init_db
 from gateway.core.unit_of_work import create_unit_of_work
 from gateway.exceptions.traces_exceptions import GuardrailVersionLimitError, TraceAmbiguousError
 from gateway.models.tenancy import Workspace
-from gateway.models.traces import Trace, TraceContentRead, TraceGuardrailDefinition, TraceSpan
+from gateway.models.traces import Trace, TraceContentRead, TraceGuardrailDefinition, TraceSpan, TraceUserBarrier
 from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
-from gateway.repositories.traces import TracesRepositories
+from gateway.repositories.traces import TracesRepositories, barrier_repository
 from gateway.repositories.traces.barrier_repository import ContentBarrierRepository, UserBarrierRepository
 from gateway.repositories.traces.definition_repository import GuardrailDefinitionRepository
 from gateway.services.secret_box import generate_secret_key
@@ -868,6 +868,17 @@ async def test_a_delete_waits_for_a_write_already_holding_the_workspace_and_then
         assert await _sealed_of(async_db, "s-1") is None
     finally:
         await dispose_db()
+
+
+async def test_forgetting_erasures_deletes_in_batches_and_still_reaches_every_row(
+    store: TraceService, async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(barrier_repository, "FORGET_BATCH", 2)
+    async_db.add_all(TraceUserBarrier(user_id=f"user-{n}") for n in range(5))
+    await async_db.commit()
+
+    assert await store.expire_erasures(now=datetime.now(UTC)) == 5
+    assert (await async_db.execute(select(TraceUserBarrier))).scalars().all() == []
 
 
 async def test_forgetting_erasures_skips_a_user_a_write_holds_rather_than_waiting_for_it(

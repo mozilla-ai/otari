@@ -178,7 +178,8 @@ class AwsKmsContentKeys(DataKeySource):
 
         Each id is resolved on its own, so a listed key that is gone or not
         describable costs only what it sealed, and an alias pointed at a new key is
-        followed without a restart.
+        followed without a restart. The ids are described together, so the list
+        costs one round trip however long it is.
         """
         now = monotonic()
         ttl = _ALLOWED_KEYS_TTL_S if self._allowed_complete else _PARTIAL_KEYS_TTL_S
@@ -186,13 +187,17 @@ class AwsKmsContentKeys(DataKeySource):
             return self._allowed_arns
         arns: set[str] = set()
         failure: ContentKeyError | None = None
-        for key_id in self._key_ids:
-            try:
-                described = await self._call("DescribeKey", self._client.describe_key, KeyId=key_id)
-            except ContentKeyError as exc:
-                failure = failure or exc
+        results = await asyncio.gather(
+            *(self._call("DescribeKey", self._client.describe_key, KeyId=key_id) for key_id in self._key_ids),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, ContentKeyError):
+                failure = failure or result
                 continue
-            arns.add(described["KeyMetadata"]["Arn"])
+            if isinstance(result, BaseException):
+                raise result
+            arns.add(result["KeyMetadata"]["Arn"])
         if not arns:
             raise failure or ContentKeyError("unavailable", "no configured KMS key could be described")
         if failure is not None:
