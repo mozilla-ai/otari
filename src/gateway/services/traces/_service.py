@@ -333,7 +333,7 @@ class TraceService:
                 )
                 access = "break_glass"
             elif access == "none" and sealed and scope.reader is not None and scope.reader.audiences:
-                share = await self._shares.active(row.workspace_id, row.trace_id, scope.reader.audiences, now)
+                share = await self._shares.active(row.workspace_id, row.trace_id, scope.reader.audiences)
                 # A share lasts only while its owner belongs: one who left can no longer manage it,
                 # so nobody reads through it, and it is ended for good rather than revived on a return.
                 if share is not None and not await self._owners.is_member(row.workspace_id, row.user_id):
@@ -414,10 +414,9 @@ class TraceService:
         *,
         audience: ShareAudience,
         note: str | None,
-        days: int,
         workspace_id: uuid.UUID | None = None,
     ) -> ContentShare:
-        """Let ``audience`` read what the session was about for ``days`` days. Its own user only.
+        """Let ``audience`` read what the session was about until the share ends. Its own user only.
 
         Raises:
             TraceNotFoundError: the scope holds no such trace.
@@ -440,7 +439,6 @@ class TraceService:
                 audience=audience,
                 note=note,
                 shared_by_user_id=reader.user_id,
-                expires_at=datetime.now(UTC) + timedelta(days=days),
             )
             return _share(share)
 
@@ -465,7 +463,7 @@ class TraceService:
     ) -> tuple[tuple[ContentShare, ...], bool]:
         """A page of the shares the session has had, newest first, and whether more follow. Its own user only.
 
-        Ended and expired shares are listed too, so their reads stay visible. Each
+        Ended shares are listed too, so their reads stay visible. Each
         carries its newest ``SHARE_LATEST_READS`` reads and how many it has had;
         :meth:`content_share_reads` pages through the rest.
 
@@ -477,11 +475,7 @@ class TraceService:
         _owner(scope)
         async with self._uow:
             row = await self._owned(scope, trace_id, workspace_id)
-            shares = list(
-                await self._shares.for_trace(
-                    row.workspace_id, row.trace_id, now=datetime.now(UTC), limit=limit + 1, offset=offset
-                )
-            )
+            shares = list(await self._shares.for_trace(row.workspace_id, row.trace_id, limit=limit + 1, offset=offset))
             ids = [share.id for share in shares[:limit]]
             reads = await self._shares.latest_reads(ids, per_share=SHARE_LATEST_READS)
             counts = await self._shares.read_counts(ids)
@@ -835,7 +829,6 @@ def _share(row: TraceContentShare, reads: tuple[ContentRead, ...] = (), read_cou
         audience=row.audience,  # type: ignore[arg-type]
         note=row.note,
         created_at=row.created_at,
-        expires_at=row.expires_at,
         revoked_at=row.revoked_at,
         reads=reads,
         read_count=read_count,

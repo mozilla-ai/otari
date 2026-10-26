@@ -7983,7 +7983,7 @@
               },
               "raw": "{\n  \"audience\": \"organization_admins\"\n}"
             },
-            "description": "Let the organization's admins, or the deployment's operator, read what one of your sessions was about.\n\nA session's content is private to its own user. A share lets its audience read\nit until it expires or you end it, and each read through it is recorded for you.\nOnly the session's own user can share it.",
+            "description": "Let the organization's admins, or the deployment's operator, read what one of your sessions was about.\n\nA session's content is private to its own user. A share lets its audience read\nit until you end it or lose the workspace, and each read through it is recorded for you.\nOnly the session's own user can share it.",
             "header": [
               {
                 "key": "Content-Type",

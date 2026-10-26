@@ -4622,14 +4622,6 @@
             "title": "Audience",
             "type": "string"
           },
-          "days": {
-            "default": 30,
-            "description": "How long the share lasts.",
-            "maximum": 90.0,
-            "minimum": 1.0,
-            "title": "Days",
-            "type": "integer"
-          },
           "note": {
             "anyOf": [
               {
@@ -4693,11 +4685,6 @@
             "title": "Created At",
             "type": "string"
           },
-          "expires_at": {
-            "format": "date-time",
-            "title": "Expires At",
-            "type": "string"
-          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -4739,6 +4726,7 @@
                 "type": "null"
               }
             ],
+            "description": "When it ended: its owner ended it, or lost the workspace.",
             "title": "Revoked At"
           }
         },
@@ -4747,7 +4735,6 @@
           "audience",
           "note",
           "created_at",
-          "expires_at",
           "revoked_at",
           "active"
         ],
@@ -39503,7 +39490,7 @@
         ]
       },
       "post": {
-        "description": "Let the organization's admins, or the deployment's operator, read what one of your sessions was about.\n\nA session's content is private to its own user. A share lets its audience read\nit until it expires or you end it, and each read through it is recorded for you.\nOnly the session's own user can share it.",
+        "description": "Let the organization's admins, or the deployment's operator, read what one of your sessions was about.\n\nA session's content is private to its own user. A share lets its audience read\nit until you end it or lose the workspace, and each read through it is recorded for you.\nOnly the session's own user can share it.",
         "operationId": "organization-traces-share_trace_content",
         "parameters": [
           {

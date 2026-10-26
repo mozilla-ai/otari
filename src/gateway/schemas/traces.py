@@ -1,7 +1,7 @@
 """Response models for the trace read API, and their mapping from the traces service's views."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -12,8 +12,6 @@ from gateway.types.traces import (
     BREAK_GLASS_REASON_MAX_LENGTH,
     BREAK_GLASS_REASON_MIN_LENGTH,
     BREAK_GLASS_REFERENCE_MAX_LENGTH,
-    SHARE_DEFAULT_DAYS,
-    SHARE_MAX_DAYS,
     SHARE_NOTE_MAX_LENGTH,
     BreakGlassKind,
     BreakGlassRead,
@@ -205,8 +203,7 @@ class ContentSharePublic(BaseModel):
     )
     note: str | None = Field(description="Why it was shared, in its owner's words.")
     created_at: datetime
-    expires_at: datetime
-    revoked_at: datetime | None
+    revoked_at: datetime | None = Field(description="When it ended: its owner ended it, or lost the workspace.")
     active: bool = Field(description="Whether it still lets its audience read.")
     reads: list[ContentReadPublic] = Field(
         default_factory=list,
@@ -233,7 +230,6 @@ class ContentShareCreate(BaseModel):
 
     audience: ShareAudience
     note: str | None = Field(default=None, max_length=SHARE_NOTE_MAX_LENGTH)
-    days: int = Field(default=SHARE_DEFAULT_DAYS, ge=1, le=SHARE_MAX_DAYS, description="How long the share lasts.")
 
 
 class BreakGlassCreate(BaseModel):
@@ -403,15 +399,14 @@ def _turn_public(turn: TurnView) -> TurnPublic:
     )
 
 
-def share_public(share: ContentShare, *, now: datetime | None = None) -> ContentSharePublic:
+def share_public(share: ContentShare) -> ContentSharePublic:
     return ContentSharePublic(
         id=share.id,
         audience=share.audience,
         note=share.note,
         created_at=share.created_at,
-        expires_at=share.expires_at,
         revoked_at=share.revoked_at,
-        active=share.active(now or datetime.now(UTC)),
+        active=share.active,
         reads=[read_public(read) for read in share.reads],
         read_count=share.read_count,
     )

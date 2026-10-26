@@ -5,7 +5,7 @@ from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import and_, case, func, select, update
+from sqlalchemy import case, func, select, update
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import TraceContentRead, TraceContentShare
@@ -26,7 +26,6 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
         audience: str,
         note: str | None,
         shared_by_user_id: uuid.UUID,
-        expires_at: datetime,
     ) -> TraceContentShare:
         """Stage a new share."""
         share = TraceContentShare(
@@ -35,21 +34,20 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
             audience=audience,
             note=note,
             shared_by_user_id=shared_by_user_id,
-            expires_at=expires_at,
         )
         self.db.add(share)
         await self.db.flush()
         return share
 
     async def for_trace(
-        self, workspace_id: uuid.UUID, trace_id: str, *, now: datetime, limit: int, offset: int = 0
+        self, workspace_id: uuid.UUID, trace_id: str, *, limit: int, offset: int = 0
     ) -> Sequence[TraceContentShare]:
         """A page of the shares the session has had: the running ones first, then the rest, newest first in each.
 
         Running first, so however many ended shares a session gathers, the ones that
         still let someone read are on the first page.
         """
-        running = and_(TraceContentShare.revoked_at.is_(None), TraceContentShare.expires_at > now)
+        running = TraceContentShare.revoked_at.is_(None)
         result = await self.db.execute(
             select(TraceContentShare)
             .where(TraceContentShare.workspace_id == workspace_id, TraceContentShare.trace_id == trace_id)
@@ -60,9 +58,9 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
         return result.scalars().all()
 
     async def active(
-        self, workspace_id: uuid.UUID, trace_id: str, audiences: Collection[str], now: datetime
+        self, workspace_id: uuid.UUID, trace_id: str, audiences: Collection[str]
     ) -> TraceContentShare | None:
-        """The newest share of the session to any of ``audiences`` that has neither expired nor been revoked."""
+        """The newest share of the session to any of ``audiences`` that has not ended."""
         result = await self.db.execute(
             select(TraceContentShare)
             .where(
@@ -70,7 +68,6 @@ class ContentShareRepository(BaseRepository[TraceContentShare, Never, Never]):
                 TraceContentShare.trace_id == trace_id,
                 TraceContentShare.audience.in_(list(audiences)),
                 TraceContentShare.revoked_at.is_(None),
-                TraceContentShare.expires_at > now,
             )
             .order_by(TraceContentShare.created_at.desc())
             .limit(1)

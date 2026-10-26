@@ -303,13 +303,11 @@ async def share_trace_content(
     """Let the organization's admins, or the deployment's operator, read what one of your sessions was about.
 
     A session's content is private to its own user. A share lets its audience read
-    it until it expires or you end it, and each read through it is recorded for you.
+    it until you end it or lose the workspace, and each read through it is recorded for you.
     Only the session's own user can share it.
     """
     return share_public(
-        await traces.share_content(
-            scope, trace_id, audience=body.audience, note=body.note, days=body.days, workspace_id=workspace_id
-        )
+        await traces.share_content(scope, trace_id, audience=body.audience, note=body.note, workspace_id=workspace_id)
     )
 
 

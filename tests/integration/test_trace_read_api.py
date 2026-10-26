@@ -667,9 +667,7 @@ def test_a_share_lets_its_audience_read_until_its_owner_ends_it_and_records_each
 
     refused = _as(client, world["admin"], "POST", path, json={"audience": "organization_admins"})
     assert refused.status_code == status.HTTP_403_FORBIDDEN
-    created = _as(
-        client, world["member"], "POST", path, json={"audience": "organization_admins", "note": "flaky test", "days": 7}
-    )
+    created = _as(client, world["member"], "POST", path, json={"audience": "organization_admins", "note": "flaky test"})
     assert created.status_code == status.HTTP_201_CREATED, created.text
     share = created.json()
     assert (share["audience"], share["note"], share["active"]) == ("organization_admins", "flaky test", True)
@@ -720,7 +718,7 @@ def test_a_share_with_the_operator_opens_for_the_operator(
     assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
 
 
-def test_an_expired_share_opens_nothing(
+def test_a_share_lasts_until_it_is_ended(
     client: TestClient,
     world: dict[str, str],
     db_session_factory: Callable[[], Session],
@@ -739,10 +737,10 @@ def test_an_expired_share_opens_nothing(
     with db_session_factory() as session:
         share = session.get(TraceContentShare, uuid.UUID(created.json()["id"]))
         assert share is not None
-        share.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        share.created_at = datetime.now(UTC) - timedelta(days=365)
         session.commit()
 
-    assert _tool_call(_detail(client, world["admin"]))["content_private"] is True
+    assert _tool_call(_detail(client, world["admin"]))["content"] == {"command": "pytest -x"}
 
 
 def _workspace_id(db_session_factory: Callable[[], Session], name: str) -> uuid.UUID:
@@ -927,7 +925,6 @@ def test_a_running_share_is_on_the_first_page_however_many_ended_ones_follow_it(
                 audience="organization_admins",
                 shared_by_user_id=owner.id,
                 created_at=now + timedelta(minutes=n + 1),
-                expires_at=now + timedelta(days=1),
                 revoked_at=now,
             )
             for n in range(25)
