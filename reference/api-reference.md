@@ -6,14 +6,37 @@ docs at `/api/v1/docs` by default. The repository also commits the generated
 [Postman collection](https://github.com/mozilla-ai/otari/blob/main/docs/public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
-The API is mounted at `/api/v1` under the base URL, whose values for otari.ai
-and for your own gateway (`http://localhost:8000` by default) are in
-[Connect to Otari](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/connect), with the form each SDK expects. A request under
-the old `/v1` root (a base URL of `http://localhost:8000/v1`, for example) is not
-served: it gets a 404 whose detail names the same path under `/api/v1`. OTLP
-ingest is a sibling at `/otlp`:
-point `OTEL_EXPORTER_OTLP_ENDPOINT` at `http://localhost:8000/otlp` and the
-exporter appends `/v1/traces`, `/v1/logs` and `/v1/metrics`.
+## Base URL
+
+| Where Otari runs | Base URL |
+| --- | --- |
+| otari.ai, an account in the United States | `https://api.otari.ai/api` |
+| otari.ai, an account in the European Union | `https://eu.api.otari.ai/api` |
+| Your own gateway | `https://<your-otari-host>/api`, or `http://localhost:8000/api` on your own machine |
+
+Every endpoint lives under the base URL, at `/v1/...`: an OpenAI-style request
+goes to `<base URL>/v1/chat/completions`, an Anthropic-style one to
+`<base URL>/v1/messages`. SDKs append their own paths, so each takes the base
+URL in the form it expects:
+
+| Client | Base URL setting |
+| --- | --- |
+| OpenAI SDKs and OpenAI-compatible tools | the base URL plus `/v1`, for example `https://api.otari.ai/api/v1` |
+| Anthropic SDKs and Claude Code | the base URL itself, for example `https://api.otari.ai/api`, since they append `/v1/messages` |
+
+Leaving `/api` off is the most common mistake. On otari.ai, a request to
+`https://api.otari.ai/v1/...` never reaches Otari: a small one answers `404 Not
+Found`, and a large one, such as any Claude Code request, answers `403
+Forbidden`, which Claude Code reports as "Failed to authenticate". Your own
+gateway answers a request under `/v1` with a 404 whose detail names the same
+path under `/api/v1`.
+
+An otari.ai key belongs to one region. Sent to the other region's URL, it
+answers `421` naming the host it belongs to.
+
+OTLP ingest is a sibling of the API at `/otlp`: point
+`OTEL_EXPORTER_OTLP_ENDPOINT` at `http://localhost:8000/otlp` and the exporter
+appends `/v1/traces`, `/v1/logs` and `/v1/metrics`.
 
 ## Authentication
 

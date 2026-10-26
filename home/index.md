@@ -31,8 +31,7 @@ own gateway.
 ## Where to go next
 
 - **Home**: the [Quickstart](quickstart.md) sends a first request through
-  otari.ai in a few minutes, and [Connect to Otari](connect.md) gives the base
-  URLs.
+  otari.ai, from curl and from your code, in a few minutes.
 - **Guides**: how to do one thing with Otari, such as give each end user their
   own budget, add guardrails, or read agent traces.
 - **Self-Hosting**: running your own gateway, starting with the

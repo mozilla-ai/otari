@@ -8,7 +8,7 @@ What a key can carry, and who may manage which keys, is in
 Send the key as a bearer token (`Authorization: Bearer <key>`); the other
 accepted headers are in [Authentication](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference#authentication). The
 base URL to send it to, and the form each SDK expects, are in
-[Connect to Otari](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/connect).
+[Base URL](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference#base-url).
 
 ## Create a key
 
