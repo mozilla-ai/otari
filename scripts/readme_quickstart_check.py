@@ -31,6 +31,8 @@ DOCKER_TIMEOUT_SECONDS = 60
 
 _FENCE = re.compile(r"^```bash\n(.*?)^```", re.DOTALL | re.MULTILINE)
 _BOOTSTRAP_KEY = re.compile(r"Save this key now:\s*\n(tk-\S+)\s*$", re.MULTILINE)
+# The first run prints a generated master key and an API key, one per line.
+_PRINTED_SECRET = re.compile(r"\b(?:otari-mk-|tk-)\S+")
 
 
 class QuickstartFailure(Exception):
@@ -106,23 +108,38 @@ def _await_key(log_path: Path) -> str:
             time.sleep(0.5)
 
 
-def _remove_containers(image: str) -> None:
+def redact(log: str) -> str:
+    """Hide the keys the first run printed, so a failure's output carries none."""
+    return _PRINTED_SECRET.sub("[redacted]", log)
+
+
+def _containers_of(image: str) -> set[str]:
     listed = subprocess.run(
-        ["docker", "ps", "--quiet", "--filter", f"ancestor={image}"],
+        ["docker", "ps", "--all", "--quiet", "--no-trunc", "--filter", f"ancestor={image}"],
         capture_output=True,
         check=False,
         text=True,
         timeout=DOCKER_TIMEOUT_SECONDS,
     )
-    ids = listed.stdout.split()
-    if ids:
-        subprocess.run(["docker", "rm", "--force", *ids], capture_output=True, check=False, timeout=DOCKER_TIMEOUT_SECONDS)
+    return set(listed.stdout.split())
+
+
+def _remove(containers: set[str]) -> None:
+    if containers:
+        subprocess.run(
+            ["docker", "rm", "--force", *sorted(containers)],
+            capture_output=True,
+            check=False,
+            timeout=DOCKER_TIMEOUT_SECONDS,
+        )
 
 
 def check(image: str, log_path: Path) -> None:
     """Run the quickstart against ``image`` and walk the first run it describes."""
     command = for_image(quickstart_command(README.read_text(encoding="utf-8")), image)
     print(f"Running the README quickstart against {image}:\n{command}", flush=True)
+    # The command names no container, so the one it starts is the one that was not there before it.
+    already_there = _containers_of(image)
     with log_path.open("wb") as log_file:
         process = subprocess.Popen(["bash", "-c", command], stdout=log_file, stderr=subprocess.STDOUT)  # noqa: S603, S607
         try:
@@ -133,7 +150,7 @@ def check(image: str, log_path: Path) -> None:
             if (status := _status("/api/v1/models", key)) != 200:
                 raise QuickstartFailure(f"/api/v1/models answered {status} with the bootstrap key, expected 200")
         finally:
-            _remove_containers(image)
+            _remove(_containers_of(image) - already_there)
             try:
                 process.wait(timeout=DOCKER_TIMEOUT_SECONDS)
             except subprocess.TimeoutExpired:
@@ -149,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             check(args.image, log_path)
         except QuickstartFailure as exc:
-            log = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+            log = redact(log_path.read_text(encoding="utf-8", errors="replace")) if log_path.exists() else ""
             print(f"README quickstart check failed: {exc}\n=== quickstart output ===\n{log}", file=sys.stderr)
             return 1
     print("The README quickstart starts and serves its first run.")

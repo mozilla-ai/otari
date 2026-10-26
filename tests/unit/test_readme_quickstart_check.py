@@ -73,3 +73,13 @@ def test_it_reads_the_bootstrap_key_off_its_own_line() -> None:
 def test_no_bootstrap_key_is_a_failure() -> None:
     with pytest.raises(check.QuickstartFailure, match="no bootstrap API key"):
         check.bootstrap_key("INFO:     Application startup complete.\n")
+
+
+def test_a_failure_prints_no_key() -> None:
+    log = "Your master key:\notari-mk-abc_DEF\nSave this key now:\ntk-abc_DEF-123\nApplication startup complete.\n"
+
+    redacted = check.redact(log)
+
+    assert "otari-mk-abc" not in redacted
+    assert "tk-abc" not in redacted
+    assert "Application startup complete." in redacted
