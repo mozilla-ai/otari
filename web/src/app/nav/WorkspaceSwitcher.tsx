@@ -118,6 +118,7 @@ export function WorkspaceSwitcher({
   workspaceLanding = "/",
   organizationLanding,
   deploymentLanding,
+  onScopeChange,
 }: {
   isCollapsed: boolean
   /** Which rail is showing, so the trigger and the checks name it. */
@@ -128,6 +129,8 @@ export function WorkspaceSwitcher({
   organizationLanding?: NavPath
   /** Where the deployment row goes, absent for a caller who does not operate it. */
   deploymentLanding?: NavPath
+  /** Called with the destination when a row moves the shell to another rail. */
+  onScopeChange?: (to: NavPath) => void
   /**
    * Called when a row in the menu takes the caller to another page, so the
    * shell can close the mobile drawer the switcher sits in.
@@ -216,6 +219,7 @@ export function WorkspaceSwitcher({
         : organizationName
   const goTo = (to: NavPath) => {
     setOpen(false)
+    onScopeChange?.(to)
     onNavigate?.()
     void navigate({ to })
   }

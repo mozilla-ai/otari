@@ -13,6 +13,7 @@ import type {
   TraceSummary,
 } from "@/client"
 import { apiFetch, retryUnlessNotFound } from "@/shared/api/client"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { TRACES, workspaceMeta } from "@/shared/api/queryKeys"
 import type { ChartBucket } from "@/shared/helpers/timeRange"
 import { useIsDeploymentScope } from "@/shared/hooks/DeploymentScope"
@@ -34,9 +35,13 @@ export interface TraceFilters {
 // (`useUsageScope`). The server derives the scope; this only picks the route.
 export function useTraceScope(): { base: string; isReady: boolean } {
   const isDeploymentWide = useIsDeploymentScope()
+  // Outside the deployment's pages, held until the organization context has
+  // answered: the shell's selected workspace resolves from it, and a read sent
+  // before it would go out unfiltered across every workspace (otari-ai#2087).
+  const organization = useOrganizationContext()
   return {
     base: isDeploymentWide ? "/traces" : "/organizations/me/traces",
-    isReady: true,
+    isReady: isDeploymentWide || !organization.isPending,
   }
 }
 

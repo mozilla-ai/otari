@@ -11,6 +11,7 @@ import type {
   UsageSummary,
 } from "@/client"
 import { ApiError, apiFetch } from "@/shared/api/client"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { USAGE, workspaceMeta } from "@/shared/api/queryKeys"
 import { isoAgo } from "@/shared/helpers/timeRange"
 import { useIsDeploymentScope } from "@/shared/hooks/DeploymentScope"
@@ -91,9 +92,14 @@ export function useUsageScope(scope: UsageScope = "caller"): {
   isDeploymentWide: boolean
 } {
   const isDeploymentWide = useIsDeploymentScope() && scope === "caller"
+  // Outside the deployment's pages, held until the organization context has
+  // answered: the shell's selected workspace resolves from it, and a read sent
+  // before it would go out unfiltered across every workspace (otari-ai#2087).
+  const organization = useOrganizationContext()
   return {
     base: isDeploymentWide ? "/usage" : "/organizations/me/usage",
-    isReady: true,
+    isReady:
+      scope === "organization" || isDeploymentWide || !organization.isPending,
     isDeploymentWide,
   }
 }

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 
-import { login, table, tableRows, tileValue } from "./helpers"
+import { gotoRoute, login, table, tableRows, tileValue } from "./helpers"
 import { COUNTS, PARITY } from "./parity-data"
 
 // The seeded fixture is shared, and nothing here mutates it, but the suite runs
@@ -14,6 +14,9 @@ test.describe("overview", () => {
     page,
   }) => {
     await login(page)
+    // The deployment's overview, which counts every workspace on the gateway;
+    // the "/" the operator lands on reports their organization.
+    await gotoRoute(page, "/deployment")
     await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible()
 
     // Onboarding is an empty-gateway state. With providers configured and usage

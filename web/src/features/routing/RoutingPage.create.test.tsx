@@ -12,8 +12,8 @@ import {
   MEMBERS,
   mockApi,
   policyWrites,
+  renderDeploymentPage,
   renderInWorkspace,
-  renderPage,
 } from "@/tests/routing"
 
 // Creating a policy: what it is for first, then a short form for that alone.
@@ -104,7 +104,7 @@ describe("Creating a routing policy", () => {
   it("asks what the policy is for first, one line per choice", async () => {
     mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await user.click(await createTrigger())
     expect(screen.getByRole("dialog")).toHaveAccessibleName("New policy")
@@ -127,7 +127,7 @@ describe("Creating a routing policy", () => {
   it("opens a fallback with its own fields and nothing else", async () => {
     mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user)
     expect(screen.getByRole("dialog")).toHaveAccessibleName("New fallback")
@@ -155,7 +155,7 @@ describe("Creating a routing policy", () => {
   it("goes back to the choice, keeping the name typed", async () => {
     mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user)
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "cheap")
@@ -172,7 +172,7 @@ describe("Creating a routing policy", () => {
   it("guards a half-built policy against a stray Escape", async () => {
     mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user)
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "cheap")
@@ -188,7 +188,7 @@ describe("Creating a routing policy", () => {
   it("creates a fallback from a name, a main model and a backup", async () => {
     const { calls } = mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user)
     await nameAndServe(user, "cheap")
@@ -212,7 +212,7 @@ describe("Creating a routing policy", () => {
   it("writes exactly one unscoped policy for every caller", async () => {
     const { calls } = mockApi([], null, [], { members: MEMBERS })
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user)
     await fillFallback(user, "cheap")
@@ -227,7 +227,7 @@ describe("Creating a routing policy", () => {
     // A policy's key is its name plus its user, so N people are N rows.
     const { calls } = mockApi([], null, [], { members: MEMBERS })
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user)
     await fillFallback(user, "cheap")
@@ -245,7 +245,7 @@ describe("Creating a routing policy", () => {
   it("shows the chosen people by name, not as bare owner ids", async () => {
     mockApi([], null, [], { members: MEMBERS })
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user)
     await fillFallback(user, "cheap")
@@ -259,7 +259,7 @@ describe("Creating a routing policy", () => {
   it("will not submit a scoped policy with nobody chosen", async () => {
     const { calls } = mockApi([], null, [], { members: MEMBERS })
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user)
     await fillFallback(user, "cheap")
@@ -279,7 +279,7 @@ describe("Creating a routing policy", () => {
       refuseFirstWriteFor: ["u-carol"],
     })
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user)
     await fillFallback(user, "cheap")
@@ -308,7 +308,7 @@ describe("Creating a routing policy", () => {
       refuseFirstWriteFor: ["u-carol"],
     })
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user)
     await fillFallback(user, "cheap")
@@ -331,7 +331,7 @@ describe("Creating a routing policy", () => {
       refuseFirstWriteFor: ["u-carol"],
     })
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user)
     await fillFallback(user, "cheap")
@@ -355,7 +355,7 @@ describe("Creating a routing policy", () => {
   it("refuses a policy name that would shadow a real model selector", async () => {
     mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user)
     await fillFallback(user, "openai:gpt-4o")
@@ -369,7 +369,7 @@ describe("Creating a routing policy", () => {
   it("creates a budget tier-down from a main model and a cheaper one", async () => {
     const { calls } = mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user, "Tier down on budget")
     expect(screen.getByRole("dialog")).toHaveAccessibleName(
@@ -390,7 +390,7 @@ describe("Creating a routing policy", () => {
   it("refuses a tier-down threshold that could never fire", async () => {
     mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user, "Tier down on budget")
     await nameAndServe(user, "thrifty", "openai:gpt-5-mini")
@@ -411,7 +411,7 @@ describe("Creating a routing policy", () => {
   it("creates a weighted split", async () => {
     const { calls } = mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user, "Split traffic")
     await user.type(
@@ -448,7 +448,7 @@ describe("Creating a routing policy", () => {
   it("creates a spill-over policy in the order the operator sets", async () => {
     const { calls } = mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user, "Spill over at rate limits")
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "spill")
@@ -475,7 +475,7 @@ describe("Creating a routing policy", () => {
   it("creates a smart router with the marked model as its default", async () => {
     const { calls } = mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user, "Smart router")
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "smart")
@@ -497,7 +497,7 @@ describe("Creating a routing policy", () => {
   it("will not save a pool of one, which is not a routing decision", async () => {
     const { calls } = mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user, "Smart router")
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "smart")
@@ -512,7 +512,7 @@ describe("Creating a routing policy", () => {
   it("will not author a pool past the server's model cap", async () => {
     const { calls } = mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user, "Smart router")
     // Seeded with two; three more reach the cap of 5.
@@ -532,7 +532,7 @@ describe("Creating a routing policy", () => {
       saveBody: { status: 400, detail: "cheap already names an alias" },
     })
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user)
     await fillFallback(user, "cheap")
@@ -549,7 +549,7 @@ describe("Creating a routing policy", () => {
     // animates out, so the page keys the dialog on an open counter.
     mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await startCreate(user)
     await user.type(
@@ -567,7 +567,7 @@ describe("Creating a routing policy", () => {
     // The dialog stays mounted while closed so its frame can play its exit.
     const { calls } = mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await screen.findByText("No routing policies yet")
     const rosterReads = () =>
@@ -588,7 +588,7 @@ describe("Creating from the empty state", () => {
   it("opens a fallback directly, and the other kinds one press away", async () => {
     mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await user.click(
       within(await emptyState()).getByRole("button", {
@@ -616,7 +616,7 @@ describe("Creating from the empty state", () => {
     // the heading's action rather than on the body.
     mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     await user.click(
       within(await emptyState()).getByRole("button", {
@@ -632,7 +632,10 @@ describe("Creating from the empty state", () => {
 
   it("opens a fallback on a deep link naming its main model", async () => {
     mockApi([], null, [], { context: organizationContext() })
-    renderPage(<RoutingPage />, "/routing?target=openai:gpt-4o")
+    renderDeploymentPage(
+      <RoutingPage />,
+      "/deployment/routing?target=openai:gpt-4o",
+    )
 
     expect(await screen.findByRole("dialog")).toHaveAccessibleName(
       "New fallback",
@@ -649,10 +652,14 @@ describe("Creating in a workspace", () => {
     })
   }
 
-  it("lands an operator's create in the workspace they are looking at", async () => {
+  it("lands a create on the deployment's page in the selected workspace", async () => {
+    // The deployment's page lists every workspace, but a new row still needs
+    // one to live in, and the switcher's is the one the caller is looking at.
     const { calls } = mockApi([], null, [], { context: operatorInWorkspace() })
     const user = userEvent.setup()
-    renderInWorkspace(<RoutingPage />)
+    renderInWorkspace(<RoutingPage />, "/deployment/routing", [], {
+      deployment: true,
+    })
 
     await startCreate(user)
     await fillFallback(user, "scoped", "openai:gpt-5-mini")
@@ -662,6 +669,32 @@ describe("Creating in a workspace", () => {
       name: "scoped",
       workspace_id: ADMIN_WORKSPACE,
     })
+  })
+
+  it("writes an operator's policy on a workspace's page through the tenant-scoped router", async () => {
+    // The page decides the surface, not the role: outside the deployment's
+    // page an operator writes the way any organization admin does.
+    const { calls } = mockApi([], null, [], {
+      context: operatorInWorkspace(),
+      memberPolicies: [],
+    })
+    const user = userEvent.setup()
+    renderInWorkspace(<RoutingPage />)
+
+    await startCreate(user)
+    await fillFallback(user, "tenant-fast", "openai:gpt-5-mini")
+    await submitDialog(user)
+
+    const written = calls.find(
+      (call) =>
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/organizations/me/routing-policies`),
+    )
+    expect(written?.body).toMatchObject({
+      name: "tenant-fast",
+      workspace_id: ADMIN_WORKSPACE,
+    })
+    expect(policyWrites(calls)).toHaveLength(0)
   })
 
   it("writes an admin's policy through the tenant-scoped router", async () => {

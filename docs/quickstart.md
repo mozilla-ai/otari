@@ -58,8 +58,8 @@ from the dashboard at `http://localhost:8000/`.
 
 1. Open the dashboard at `http://localhost:8000/` and sign in with the master
    key.
-2. Open the account menu, choose **Deployment**, then **Hosted providers**
-   (`http://localhost:8000/admin/hosted-providers`).
+2. Open the switcher at the top of the sidebar, choose **Deployment**, then
+   **Hosted providers** (`http://localhost:8000/deployment/hosted-providers`).
 3. Choose **Add provider**, pick the provider (for example OpenAI), paste its
    API key, and save. Otari lists the models the key reaches.
 4. Check that each model you want to serve is switched on and priced.

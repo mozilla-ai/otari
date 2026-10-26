@@ -43,7 +43,7 @@ const PAGES = [
       ).toBeVisible(),
   },
   {
-    route: "/settings",
+    route: "/deployment/settings",
     heading: "Settings",
     ready: (page: Page) =>
       expect(page.getByRole("textbox").first()).toBeVisible(),

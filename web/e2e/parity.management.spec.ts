@@ -7,9 +7,7 @@ import {
   gotoRoute,
   login,
   nav,
-  openAccountMenu,
-  openNested,
-  openOrganization,
+  openDeployment,
   pageHeading,
   tableRows,
 } from "./helpers"
@@ -78,10 +76,9 @@ test.describe("hosted provider setup", () => {
     page,
   }) => {
     await login(page)
-    // The deployment's own rail, entered from the account menu as an operator
-    // reaches it.
-    const menu = await openAccountMenu(page)
-    await menu.getByRole("link", { name: "Deployment" }).click()
+    // The deployment's own rail, entered from the scope switcher as an
+    // operator reaches it.
+    await openDeployment(page)
     await openPage(page, "Hosted providers", "Hosted providers")
 
     await page.getByRole("button", { name: "Add provider" }).first().click()
@@ -159,6 +156,9 @@ test.describe("api keys", () => {
     page,
   }) => {
     await login(page)
+    // The deployment's key page, which issues a key to a user the caller names;
+    // a workspace's issues the caller's own.
+    await openDeployment(page)
     await openPage(page, "API keys", "API keys")
 
     await page.getByRole("button", { name: "Create key" }).click()
@@ -236,8 +236,9 @@ test.describe("budgets", () => {
     page,
   }) => {
     await login(page)
-    await openOrganization(page)
-    await openPage(page, "Spend & budgets", "Budgets")
+    // Per-user budgets are the deployment's, on its own rail.
+    await openDeployment(page)
+    await openPage(page, "Budgets", "Budgets")
 
     await page.getByRole("button", { name: "Create budget" }).click()
     // Scoped: the heading's trigger and the dialog's submit both say "Create
@@ -302,8 +303,11 @@ test.describe("budgets", () => {
 test.describe("fallback routing", () => {
   test("grows and shrinks a policy's failure chain", async ({ page }) => {
     await login(page)
-    await openNested(page, "Routing", "Policies")
-    await expect(pageHeading(page, "Routing")).toBeVisible()
+    // The deployment's policies: a workspace's Routing page writes the
+    // organization's, which refuse a target it has no provider key for, and
+    // this suite serves its models from no real provider.
+    await openDeployment(page)
+    await openPage(page, "Routing", "Routing")
 
     // `.first()` is the heading's action. An empty routing list also offers
     // the same words from its empty state, and a press has to name which.
@@ -383,5 +387,19 @@ test.describe("legacy routes", () => {
     // so it lands on the overview rather than a dead end.
     await gotoRoute(page, "/no-such-page")
     await expect(page).toHaveURL(/#\/$/)
+
+    // The deployment's own pages moved under /deployment, and each old path
+    // still lands on the page it named.
+    for (const [from, to] of [
+      ["/settings", "/deployment/settings"],
+      ["/health-checks", "/deployment/health"],
+      ["/admin/accounts", "/deployment/accounts"],
+      ["/admin/hosted-providers", "/deployment/hosted-providers"],
+      ["/admin/web-search", "/deployment/web-search-pricing"],
+      ["/admin/code-execution", "/deployment/code-execution-pricing"],
+    ]) {
+      await gotoRoute(page, from)
+      await expect(page).toHaveURL(new RegExp(`#${to}$`))
+    }
   })
 })

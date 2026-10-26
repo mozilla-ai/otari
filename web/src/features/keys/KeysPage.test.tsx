@@ -20,6 +20,7 @@ import type {
 } from "@/client"
 import { KeysPage } from "@/features/keys/KeysPage"
 import { API_ROOT } from "@/shared/api/client"
+import { DeploymentScope } from "@/shared/hooks/DeploymentScope"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   apiKey,
@@ -290,15 +291,33 @@ function mockApi(
     })
 }
 
-function renderPage(ui: ReactElement, deployment = bootstrap()) {
+/**
+ * Render the page as the router mounts it.
+ *
+ * `deploymentScope` is where it is mounted: under /deployment it acts on every
+ * key on the deployment, anywhere else on the caller's organization's. These
+ * suites default to the deployment's page, and the member cases render the
+ * organization's.
+ */
+function renderPage(
+  ui: ReactElement,
+  {
+    deployment = bootstrap(),
+    deploymentScope = true,
+  }: {
+    deployment?: ReturnType<typeof bootstrap>
+    deploymentScope?: boolean
+  } = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
+  const page = deploymentScope ? <DeploymentScope>{ui}</DeploymentScope> : ui
   // The page links to the pages that own a key's budget, so it needs a router
   // around it.
   return renderWithRouter(
     <QueryClientProvider client={client}>
-      <DeploymentProvider value={deployment}>{ui}</DeploymentProvider>
+      <DeploymentProvider value={deployment}>{page}</DeploymentProvider>
     </QueryClientProvider>,
   )
 }
@@ -820,10 +839,12 @@ describe("KeysPage", () => {
         role,
       })
       const user = userEvent.setup()
-      renderPage(
-        <KeysPage />,
-        bootstrap({ federation_member_rules: federationMemberRules }),
-      )
+      renderPage(<KeysPage />, {
+        deployment: bootstrap({
+          federation_member_rules: federationMemberRules,
+        }),
+        deploymentScope: false,
+      })
 
       const row = (await screen.findByText("ci-bot")).closest("tr")!
       await user.click(
@@ -849,7 +870,10 @@ describe("KeysPage", () => {
         role,
       })
       const user = userEvent.setup()
-      renderPage(<KeysPage />, bootstrap({ federation_member_rules: true }))
+      renderPage(<KeysPage />, {
+        deployment: bootstrap({ federation_member_rules: true }),
+        deploymentScope: deploymentOperator,
+      })
 
       const row = (await screen.findByText("ci-bot")).closest("tr")!
       await chooseAction(user, row, "Workload identity")
@@ -1252,7 +1276,7 @@ describe("KeysPage", () => {
         ],
       })
       const user = userEvent.setup()
-      renderPage(<KeysPage />)
+      renderPage(<KeysPage />, { deploymentScope: false })
 
       await createWithBudget(user, false)
       await submitTheCreateDialog(user)
@@ -2166,6 +2190,30 @@ describe("KeysPage", () => {
     expect(within(row).getByText("ci-bot")).toBeInTheDocument()
   })
 
+  // The page's scope decides the surface, not the caller's role: an operator on
+  // their organization's Keys page sees that organization's keys, as anyone
+  // else there does, and reaches every key from the deployment's page instead.
+  it("reads the organization's keys for an operator outside the deployment's pages", async () => {
+    const fetchMock = mockApi({
+      deploymentOperator: true,
+      keys: [apiKey({ id: "key-1", key_name: "mine" })],
+    })
+    renderPage(<KeysPage />, { deploymentScope: false })
+
+    await screen.findByText("mine")
+
+    const listCalls = fetchMock.mock.calls
+      .map(([u]) => String(u))
+      .filter((u) => KEYS_URL.test(u))
+    expect(listCalls.length).toBeGreaterThan(0)
+    for (const u of listCalls) {
+      expect(u).toContain(`${API_ROOT}/organizations/me/keys`)
+    }
+    expect(
+      screen.queryByRole("columnheader", { name: "Owner" }),
+    ).not.toBeInTheDocument()
+  })
+
   // The member's view of the same page (otari-ai#1941): every hook reads and
   // writes /api/v1/organizations/me/keys, and the operator-only affordances (the
   // owner picker, the budget exemption, the Owner column, the links to pages a
@@ -2176,7 +2224,7 @@ describe("KeysPage", () => {
         deploymentOperator: false,
         keys: [apiKey({ id: "key-1", key_name: "mine" })],
       })
-      renderPage(<KeysPage />)
+      renderPage(<KeysPage />, { deploymentScope: false })
 
       const row = (await screen.findByText("mine")).closest("tr")!
       expect(within(row).getByText("Active")).toBeInTheDocument()
@@ -2203,7 +2251,7 @@ describe("KeysPage", () => {
     it("creates a key with no owner picker and no budget exemption", async () => {
       const fetchMock = mockApi({ deploymentOperator: false, keys: [] })
       const usr = userEvent.setup()
-      renderPage(<KeysPage />)
+      renderPage(<KeysPage />, { deploymentScope: false })
 
       await screen.findByText("No API keys yet")
       await usr.click(
@@ -2255,7 +2303,7 @@ describe("KeysPage", () => {
         keys: [apiKey({ id: "key-1", key_name: "mine" })],
       })
       const usr = userEvent.setup()
-      renderPage(<KeysPage />)
+      renderPage(<KeysPage />, { deploymentScope: false })
 
       const row = (await screen.findByText("mine")).closest("tr")!
       await chooseAction(usr, row, "Edit")

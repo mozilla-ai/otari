@@ -18,6 +18,7 @@ import {
   MEMBERS,
   mockApi,
   policy,
+  renderDeploymentPage,
   renderInWorkspace,
   renderPage,
   WEIGHTED,
@@ -53,12 +54,15 @@ function PolicyProbe() {
   )
 }
 
-const POLICY_PAGE = [{ path: "/routing/$name", element: <PolicyProbe /> }]
+// The deployment's page links to the deployment's policy pages, not a workspace's.
+const POLICY_PAGE = [
+  { path: "/deployment/routing/$name", element: <PolicyProbe /> },
+]
 
 describe("RoutingPage", () => {
   it("lists each policy's main model, its backups and who it applies to", async () => {
     mockApi()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const fastRow = (await screen.findByText("fast")).closest("tr")!
     // By model and provider rather than as a selector, read off the selector
@@ -75,7 +79,7 @@ describe("RoutingPage", () => {
 
   it("says a policy has no backups rather than leaving the cell empty", async () => {
     mockApi([policy("solo", { select: [{ default: "openai:gpt-5" }] })])
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("solo")).closest("tr")!
     expect(within(row).getByText("None")).toBeInTheDocument()
@@ -86,7 +90,7 @@ describe("RoutingPage", () => {
 
   it("marks a policy that decides per request, since it has no single target", async () => {
     mockApi()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const autoRow = (await screen.findByText("auto")).closest("tr")!
     expect(within(autoRow).getByText("DYNAMIC")).toBeInTheDocument()
@@ -99,7 +103,7 @@ describe("RoutingPage", () => {
 
   it("does not offer to edit or delete a policy that lives in config.yml", async () => {
     mockApi()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const autoRow = (await screen.findByText("auto")).closest("tr")!
     expect(within(autoRow).getByText("set in config.yml")).toBeInTheDocument()
@@ -121,7 +125,7 @@ describe("RoutingPage", () => {
     // heading's action away mid-task for no reason.
     mockApi([])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const trigger = await createTrigger()
     await user.click(trigger)
@@ -139,7 +143,7 @@ describe("RoutingPage", () => {
       [],
       { members: MEMBERS },
     )
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     // Two rows under one name: the scope is half the row's identity, so they do
     // not collapse into one.
@@ -151,7 +155,7 @@ describe("RoutingPage", () => {
   it("opens a policy's own page from Edit", async () => {
     mockApi([policy("fast", CHAIN)])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />, "/routing", POLICY_PAGE)
+    renderDeploymentPage(<RoutingPage />, undefined, POLICY_PAGE)
 
     const row = (await screen.findByText("fast")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
@@ -163,7 +167,7 @@ describe("RoutingPage", () => {
       members: MEMBERS,
     })
     const user = userEvent.setup()
-    renderPage(<RoutingPage />, "/routing", POLICY_PAGE)
+    renderDeploymentPage(<RoutingPage />, undefined, POLICY_PAGE)
 
     const row = (await screen.findByText("cheap")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
@@ -184,7 +188,7 @@ describe("RoutingPage", () => {
         ],
       }),
     ])
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("api-authored")).closest("tr")!
     expect(
@@ -210,7 +214,7 @@ describe("RoutingPage", () => {
         user_id: null,
       },
     ])
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("legacy")).closest("tr")!
     expect(within(row).getByText("gpt-4o-mini")).toBeInTheDocument()
@@ -227,7 +231,7 @@ describe("RoutingPage", () => {
     // backdrop, so the name on the row is no longer the operator's reference.
     const { calls } = mockApi([policy("fast", CHAIN)])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("fast")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Delete" }))
@@ -249,7 +253,7 @@ describe("RoutingPage", () => {
   it("deletes nothing when the confirm dialog is cancelled", async () => {
     const { calls } = mockApi([policy("fast", CHAIN)])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("fast")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Delete" }))
@@ -267,7 +271,7 @@ describe("RoutingPage", () => {
       deleteBody: { status: 409, detail: "fast is referenced by an alias" },
     })
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("fast")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Delete" }))
@@ -293,7 +297,7 @@ describe("RoutingPage", () => {
       deleteBody: { status: 409, detail: "fast is referenced by an alias" },
     })
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const fast = (await screen.findByText("fast")).closest("tr")!
     await user.click(within(fast).getByRole("button", { name: "Delete" }))
@@ -322,7 +326,7 @@ describe("RoutingPage", () => {
       },
     ])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("legacy")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Delete" }))
@@ -344,7 +348,7 @@ describe("RoutingPage", () => {
     // see here is that a router picks between named models, and which one serves
     // when it declines.
     mockApi([policy("smart", LEARNED, { is_dynamic: true })])
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("smart")).closest("tr")!
     expect(
@@ -358,7 +362,7 @@ describe("RoutingPage", () => {
     // Two provider:model strings do not fit the cell, and the shares are what tells
     // one weighted policy from another at a glance.
     mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })])
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("balanced")).closest("tr")!
     expect(within(row).getByText("WEIGHTED")).toBeInTheDocument()
@@ -381,7 +385,7 @@ describe("RoutingPage", () => {
         ],
       }),
     ])
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("future")).closest("tr")!
     expect(within(row).getByText("ROUTED")).toBeInTheDocument()
@@ -390,7 +394,7 @@ describe("RoutingPage", () => {
 
   it("does not offer the examples panel for a weighted policy, which learns nothing", async () => {
     mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })])
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("balanced")).closest("tr")!
     expect(
@@ -415,7 +419,7 @@ describe("RoutingPage", () => {
         ],
       }),
     ])
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("legacy")).closest("tr")!
     expect(
@@ -435,7 +439,7 @@ describe("RoutingPage", () => {
         ],
       }),
     ])
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("future")).closest("tr")!
     expect(
@@ -450,7 +454,7 @@ describe("RoutingPage", () => {
       policy("smart", LEARNED, { is_dynamic: true }),
       policy("fast", CHAIN),
     ])
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const learnedRow = (await screen.findByText("smart")).closest("tr")!
     const plainRow = (await screen.findByText("fast")).closest("tr")!
@@ -468,7 +472,7 @@ describe("RoutingPage", () => {
     // Reading readiness is safe for a policy this page cannot change, and without it
     // a config-defined learned policy would be entirely opaque here.
     mockApi([policy("smart", LEARNED, { is_dynamic: true, source: "config" })])
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("smart")).closest("tr")!
     expect(
@@ -483,7 +487,7 @@ describe("RoutingPage", () => {
   it("names the pool and what serves when the router declines", async () => {
     mockApi([policy("smart", LEARNED, { is_dynamic: true })])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("smart")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Examples" }))
@@ -499,7 +503,7 @@ describe("RoutingPage", () => {
   it("reports each pool's warmth for the chosen user, since memory is per user", async () => {
     mockApi([policy("smart", LEARNED, { is_dynamic: true })])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("smart")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Examples" }))
@@ -522,7 +526,7 @@ describe("RoutingPage", () => {
     // an operator reads "0 examples" as a bug with no next step.
     mockApi([policy("smart", LEARNED, { is_dynamic: true })])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("smart")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Examples" }))
@@ -545,7 +549,7 @@ describe("RoutingPage", () => {
     // be a question with one answer, and a wrong answer would be accepted.
     mockApi([policy("smart", LEARNED, { is_dynamic: true, user_id: "alice" })])
     const user = userEvent.setup()
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("smart")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Examples" }))
@@ -571,7 +575,7 @@ describe("RoutingPage", () => {
         ],
       }),
     ])
-    renderPage(<RoutingPage />)
+    renderDeploymentPage(<RoutingPage />)
 
     const row = (await screen.findByText("api-authored")).closest("tr")!
     expect(
@@ -617,10 +621,9 @@ describe("RoutingPage", () => {
   })
 
   it("keeps cached operator rows out of a member's table", async () => {
-    // A disabled query still serves whatever sits under its key, so a caller
-    // demoted mid-session would otherwise keep seeing the deployment-wide
-    // policies and aliases they fetched as an operator. The pre-seeded client
-    // stands in for that cache.
+    // A query serves whatever sits under its key, so a workspace page sharing a
+    // key with the deployment's would show the deployment-wide policies and
+    // aliases fetched there. The pre-seeded client stands in for that cache.
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
@@ -719,10 +722,9 @@ describe("RoutingPage", () => {
   })
 })
 
-// otari-ai#2087: the page showed an operator every tenant's stored rows and an
-// admin every workspace of their organization's, while resolution is scoped to
-// one workspace. Both reads and both writes name the selected workspace now,
-// and the surface they land on is still the caller's role.
+// otari-ai#2087: resolution is scoped to one workspace, so a workspace's page
+// reads and writes the selected workspace. The deployment's own page lists
+// every workspace's rows, and the page, not the caller's role, decides which.
 describe("RoutingPage scoped to the selected workspace", () => {
   const OPERATOR_WORKSPACE = ADMIN_WORKSPACE
 
@@ -734,32 +736,17 @@ describe("RoutingPage scoped to the selected workspace", () => {
     })
   }
 
-  it("names the selected workspace on the operator's list read", async () => {
-    const { calls } = mockApi([policy("fast", CHAIN)], null, [], {
+  it("reads the organization's routes for an operator outside the deployment's page", async () => {
+    // Operating the deployment no longer swaps a workspace's page for the
+    // deployment-wide one: that view lives under /deployment.
+    const { calls } = mockApi([policy("deployment-only", CHAIN)], null, [], {
       context: operatorInWorkspace(),
-    })
-    renderInWorkspace(<RoutingPage />)
-
-    await screen.findByText("fast")
-    const listed = calls.filter(
-      (call) =>
-        call.method === "GET" &&
-        call.url.includes(`${API_ROOT}/routing/policies`),
-    )
-    expect(listed.length).toBeGreaterThan(0)
-    for (const call of listed) {
-      expect(call.url).toContain(`workspace_id=${OPERATOR_WORKSPACE}`)
-    }
-  })
-
-  it("names the selected workspace on an admin's list read", async () => {
-    const { calls } = mockApi([], null, [], {
-      context: adminContext(),
       memberPolicies: [policy("tenant-fast", CHAIN)],
     })
     renderInWorkspace(<RoutingPage />)
 
-    await screen.findByText("tenant-fast")
+    expect(await screen.findByText("tenant-fast")).toBeInTheDocument()
+    expect(screen.queryByText("deployment-only")).not.toBeInTheDocument()
     const listed = calls.filter(
       (call) =>
         call.method === "GET" &&
@@ -767,7 +754,66 @@ describe("RoutingPage scoped to the selected workspace", () => {
     )
     expect(listed.length).toBeGreaterThan(0)
     for (const call of listed) {
-      expect(call.url).toContain(`workspace_id=${ADMIN_WORKSPACE}`)
+      expect(call.url).toContain(`workspace_id=${OPERATOR_WORKSPACE}`)
+    }
+    const urls = calls.map((call) => call.url)
+    expect(
+      urls.some((url) => url.includes(`${API_ROOT}/routing/policies`)),
+    ).toBe(false)
+    expect(urls.some((url) => url.includes(`${API_ROOT}/aliases`))).toBe(false)
+    expect(
+      urls.some((url) => url.includes(`${API_ROOT}/organizations/me/aliases`)),
+    ).toBe(true)
+  })
+
+  it("offers an operator on a workspace's page the workspace's controls, not the deployment's", async () => {
+    // The readiness panel reads the deployment-wide /routing/status, so it is
+    // the deployment page's alone, and the intro says the edits reach the
+    // selected workspace.
+    mockApi([], null, [], {
+      context: operatorInWorkspace(),
+      memberPolicies: [policy("smart", LEARNED, { is_dynamic: true })],
+    })
+    renderInWorkspace(<RoutingPage />)
+
+    const row = (await screen.findByText("smart")).closest("tr")!
+    expect(
+      within(row).queryByRole("button", { name: "Examples" }),
+    ).not.toBeInTheDocument()
+    expect(
+      within(row).getByRole("button", { name: "Edit" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/applies in the selected workspace/),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/Every policy on this deployment/),
+    ).not.toBeInTheDocument()
+  })
+
+  it("reads every workspace's rows on the deployment's page", async () => {
+    const { calls } = mockApi([policy("fast", CHAIN)], null, [], {
+      context: operatorInWorkspace(),
+    })
+    renderInWorkspace(<RoutingPage />, "/deployment/routing", [], {
+      deployment: true,
+    })
+
+    await screen.findByText("fast")
+    expect(
+      screen.getByText(
+        /Every policy on this deployment, across all organizations and workspaces/,
+      ),
+    ).toBeInTheDocument()
+    const listed = calls.filter(
+      (call) =>
+        call.method === "GET" &&
+        (call.url.includes(`${API_ROOT}/routing/policies`) ||
+          call.url.includes(`${API_ROOT}/aliases`)),
+    )
+    expect(listed.length).toBeGreaterThan(1)
+    for (const call of listed) {
+      expect(call.url).not.toContain("workspace_id=")
     }
   })
 
@@ -780,7 +826,9 @@ describe("RoutingPage scoped to the selected workspace", () => {
       { context: operatorInWorkspace() },
     )
     const user = userEvent.setup()
-    renderInWorkspace(<RoutingPage />)
+    renderInWorkspace(<RoutingPage />, "/deployment/routing", [], {
+      deployment: true,
+    })
 
     await screen.findByText("doomed")
     await user.click(screen.getByRole("button", { name: "Delete" }))
@@ -798,7 +846,7 @@ describe("RoutingPage scoped to the selected workspace", () => {
 
 // otari-ai#1969: the Build pages are Edit for admins. An organization admin
 // writes the tenant-scoped routers, which name the workspace and take no user
-// scope; an operator keeps the deployment-wide ones, unchanged above.
+// scope; the deployment's page keeps the deployment-wide ones, above.
 describe("RoutingPage for an organization admin", () => {
   it("deletes through the tenant-scoped router, naming the workspace", async () => {
     const { calls } = mockApi([], null, [], {

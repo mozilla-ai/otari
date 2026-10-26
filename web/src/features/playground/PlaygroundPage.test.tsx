@@ -453,7 +453,7 @@ describe("the Playground before the first question", () => {
     ).toBeInTheDocument()
     expect(
       await screen.findByRole("link", { name: "Hosted providers" }),
-    ).toHaveAttribute("href", "/admin/hosted-providers")
+    ).toHaveAttribute("href", "/deployment/hosted-providers")
   })
 
   it("points a caller who does not operate the deployment at the organization's providers", async () => {

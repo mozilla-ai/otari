@@ -12,6 +12,7 @@ import type {
   RoutingPolicyResponse,
 } from "@/client"
 import { API_ROOT } from "@/shared/api/client"
+import { DeploymentScope } from "@/shared/hooks/DeploymentScope"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
@@ -113,9 +114,9 @@ export function mockApi(
     user_id: string | null
   }[] = [],
   opts: {
-    // The caller's membership context, an operator's by default: the page picks
-    // its list read off `deployment_operator`, and most tests here are about
-    // the management view.
+    // The caller's membership context, an operator's by default, since most
+    // tests here are about the deployment's own page. Which list the page reads
+    // is the page's scope, not this; see `RenderOptions`.
     context?: OrganizationContext
     // What /api/v1/organizations/me/routing-policies answers, for member tests.
     memberPolicies?: RoutingPolicyResponse[]
@@ -371,6 +372,18 @@ export function mockApi(
   return { spy, calls }
 }
 
+export interface RenderOptions {
+  /**
+   * Render the page as the deployment's own, as the `/deployment` layout
+   * does: it then reads the deployment-wide routes, unfiltered by workspace.
+   * Without it the page is a workspace's, whoever the caller is.
+   */
+  deployment?: boolean
+}
+
+const inScope = (ui: ReactElement, { deployment }: RenderOptions) =>
+  deployment ? <DeploymentScope>{ui}</DeploymentScope> : ui
+
 // The user picker asks the organization roster what to call each owner, and that
 // read is gated on the `organizations` surface, so these pages need the
 // deployment context the shell always gives them.
@@ -378,16 +391,28 @@ export function renderPage(
   ui: ReactElement,
   url = "/",
   routes: TestRouterOptions["routes"] = [],
+  options: RenderOptions = {},
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <DeploymentProvider value={bootstrap()}>
-      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+      <QueryClientProvider client={client}>
+        {inScope(ui, options)}
+      </QueryClientProvider>
     </DeploymentProvider>,
     { wrapper: withRouter({ url, routes }) },
   )
+}
+
+/** {@link renderPage} on the deployment's own page, `/deployment/routing`. */
+export function renderDeploymentPage(
+  ui: ReactElement,
+  url = "/deployment/routing",
+  routes: TestRouterOptions["routes"] = [],
+) {
+  return renderPage(ui, url, routes, { deployment: true })
 }
 
 // The workspace a tenant admin's write is scoped to comes from the shell's
@@ -400,6 +425,7 @@ export function renderInWorkspace(
   ui: ReactElement,
   url = "/",
   routes: TestRouterOptions["routes"] = [],
+  options: RenderOptions = {},
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -407,7 +433,9 @@ export function renderInWorkspace(
   return render(
     <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>
-        <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
+        <SelectedWorkspaceProvider>
+          {inScope(ui, options)}
+        </SelectedWorkspaceProvider>
       </QueryClientProvider>
     </DeploymentProvider>,
     { wrapper: withRouter({ url, routes }) },

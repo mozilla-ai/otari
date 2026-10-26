@@ -6,7 +6,9 @@ import { vi } from "vitest"
 import type {
   DeploymentBootstrap,
   InFlightResponse,
+  MembershipRole,
   OrganizationMember,
+  OrganizationSpendCeiling,
   ScopedBudget,
   TraceDetail,
   TraceSummary,
@@ -62,7 +64,7 @@ export function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-// Usage hooks wait for organization context before choosing their route scope.
+// The organization context as an owner who also operates the deployment reads it.
 export function operatorContext(): Response {
   return jsonResponse({
     organization_member_id: "om-1",
@@ -98,14 +100,19 @@ export function mockApi(
     inFlight?: InFlightResponse | (() => InFlightResponse)
     workspace?: string
     deploymentOperator?: boolean
+    // The caller's role in the organization; an owner unless a case says otherwise.
+    role?: MembershipRole
     members?: OrganizationMember[]
     // The trace explorer's reads: one page of sessions, and the one that opens.
     traces?: TraceSummary[]
     traceDetail?: TraceDetail
     // The session a request was traced into; without one, the lookup is a 404.
     requestTrace?: TraceSummary
-    // The deployment's spend ceilings, which the session panel reads per key.
+    // The deployment's spend ceilings, which the session panel reads per key on
+    // the deployment's pages.
     ceilings?: ScopedBudget[]
+    // The organization's spend ceilings, which it reads on its own pages instead.
+    organizationCeilings?: OrganizationSpendCeiling[]
   } = {},
 ) {
   const rows = opts.rows ?? []
@@ -236,6 +243,10 @@ export function mockApi(
           ),
         )
       }
+      if (url.includes(`${API_ROOT}/organizations/me/spend-ceilings`)) {
+        const ceilings = opts.organizationCeilings ?? []
+        return jsonResponse({ data: ceilings, count: ceilings.length })
+      }
       if (url.includes(`${API_ROOT}/organizations/me/members`)) {
         const members = opts.members ?? []
         return jsonResponse({ data: members, total: members.length })
@@ -243,7 +254,7 @@ export function mockApi(
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse({
           organization_member_id: "om-1",
-          role: "owner",
+          role: opts.role ?? "owner",
           status: "active",
           organization: {
             id: "org-1",

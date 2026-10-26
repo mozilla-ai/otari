@@ -10,6 +10,7 @@ import type {
   UpdateOwnKeyRequest,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { fetchAllRows } from "@/shared/api/paging"
 import { FEDERATION_RULES, KEYS, workspaceMeta } from "@/shared/api/queryKeys"
 import { useIsDeploymentScope } from "@/shared/hooks/DeploymentScope"
@@ -27,9 +28,13 @@ export function useKeysScope(): {
   isDeploymentWide: boolean
 } {
   const isDeploymentWide = useIsDeploymentScope()
+  // Outside the deployment's pages, held until the organization context has
+  // answered: the shell's selected workspace resolves from it, and a read sent
+  // before it would go out unfiltered across every workspace (otari-ai#2087).
+  const organization = useOrganizationContext()
   return {
     base: isDeploymentWide ? "/keys" : "/organizations/me/keys",
-    isReady: true,
+    isReady: isDeploymentWide || !organization.isPending,
     isDeploymentWide,
   }
 }

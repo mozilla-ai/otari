@@ -213,9 +213,7 @@ function mockApi(
         return jsonResponse(answer)
       }
     }
-    // The shell reads this before it paints, and the usage hooks wait for it: it
-    // is what tells them whether this caller reads the deployment-wide routes or
-    // the organization-scoped ones (otari#837). After `extra`, so a test that
+    // The shell reads this before it paints. After `extra`, so a test that
     // supplies its own context still wins, and on an exact match so it cannot
     // shadow /v1/organizations/me/usage.
     // The roster the breakdowns name people from. Answered by default and
@@ -363,7 +361,7 @@ describe("UsagePage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([url]) =>
-          String(url).includes(`${API_ROOT}/usage/summary`) &&
+          String(url).includes(`${API_ROOT}/organizations/me/usage/summary`) &&
           String(url).includes("workspace_id=ws-1"),
       ),
     ).toBe(true)
@@ -465,7 +463,7 @@ describe("UsagePage", () => {
 
     const summaryCalls = fetchMock.mock.calls
       .map(([u]) => String(u))
-      .filter((u) => u.includes(`${API_ROOT}/usage/summary`))
+      .filter((u) => u.includes(`${API_ROOT}/organizations/me/usage/summary`))
     expect(summaryCalls.some((u) => u.includes("api_key_id=key-1"))).toBe(true)
   })
 
@@ -539,7 +537,7 @@ describe("UsagePage", () => {
     await vi.waitFor(() => {
       const summaryCalls = fetchMock.mock.calls
         .map(([u]) => String(u))
-        .filter((u) => u.includes(`${API_ROOT}/usage/summary`))
+        .filter((u) => u.includes(`${API_ROOT}/organizations/me/usage/summary`))
       // The sub-day extent buckets hourly (both the context histogram and the tiles).
       expect(summaryCalls.some((u) => u.includes("bucket=hour"))).toBe(true)
     })
@@ -633,7 +631,7 @@ describe("UsagePage", () => {
     expect(
       calls.some(
         (u) =>
-          u.includes(`${API_ROOT}/usage/series`) &&
+          u.includes(`${API_ROOT}/organizations/me/usage/series`) &&
           u.includes("group_by=model"),
       ),
     ).toBe(true)
@@ -647,17 +645,14 @@ describe("UsagePage", () => {
     const user = userEvent.setup()
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      // The shell reads this before it paints, and the usage hooks wait for it:
-      // it is what tells them whether this caller reads the deployment-wide
-      // routes or the organization-scoped ones (otari#837). Answered first, and
-      // on an exact match, so it cannot shadow /v1/organizations/me/usage.
+      // The shell reads this before it paints. Answered first, and on an exact
+      // match, so it cannot shadow /v1/organizations/me/usage.
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(organizationContext())
       }
-      if (url.includes(`${API_ROOT}/usage/series`))
+      if (url.includes("/usage/series"))
         return jsonResponse({ detail: "Not Found" }, 404)
-      if (url.includes(`${API_ROOT}/usage/summary`))
-        return jsonResponse(summary())
+      if (url.includes("/usage/summary")) return jsonResponse(summary())
       return jsonResponse([])
     })
     renderPage(<UsagePage />)
@@ -989,7 +984,7 @@ describe("UsagePage", () => {
 
     const summaryCalls = fetchMock.mock.calls
       .map(([u]) => String(u))
-      .filter((u) => u.includes(`${API_ROOT}/usage/summary`))
+      .filter((u) => u.includes(`${API_ROOT}/organizations/me/usage/summary`))
     const main = summaryCalls.find(
       (u) => u.includes("dimensions=model") && u.includes("dimensions=user"),
     )
@@ -1280,7 +1275,7 @@ describe("UsagePage", () => {
     await vi.waitFor(() => {
       const last = fetchMock.mock.calls
         .map(([u]) => String(u))
-        .filter((u) => u.includes(`${API_ROOT}/usage/summary`))
+        .filter((u) => u.includes(`${API_ROOT}/organizations/me/usage/summary`))
         .at(-1)
       expect(last).toContain("model=gpt-5.6")
       expect(last).toContain("model=claude-sonnet-5")

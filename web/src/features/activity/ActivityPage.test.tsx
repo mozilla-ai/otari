@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { InFlightRequest, InFlightResponse } from "@/client"
 import { ActivityPage } from "@/features/activity/ActivityPage"
 import { API_ROOT } from "@/shared/api/client"
+import { DeploymentScope } from "@/shared/hooks/DeploymentScope"
 import {
   countCalls,
   entry,
@@ -17,6 +18,17 @@ import {
 import { organizationMember } from "@/tests/fixtures"
 import { pickOption, selectTrigger } from "@/tests/select"
 
+// The page as /deployment/activity mounts it, reading every tenant's log. These
+// suites are the operator's view of it; the tenant cases below render it bare,
+// as the organization's own Activity page does.
+function DeploymentActivityPage() {
+  return (
+    <DeploymentScope>
+      <ActivityPage />
+    </DeploymentScope>
+  )
+}
+
 describe("ActivityPage", () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -26,7 +38,7 @@ describe("ActivityPage", () => {
     mockApi({
       rows: [entry({ total_tokens: 1500, latency_ms: 842, cost: 0.0123 })],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
     expect(within(row).getByText("1,200")).toBeInTheDocument()
@@ -49,7 +61,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const row = (await screen.findByText("gpt-4o-mini")).closest("tr")!
     expect(within(row).getByText("Skipped")).toBeInTheDocument()
@@ -63,7 +75,7 @@ describe("ActivityPage", () => {
         entry({ id: "x", model: "imported-model", api_key_id: null }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const importedRow = (await screen.findByText("imported-model")).closest(
       "tr",
@@ -73,7 +85,7 @@ describe("ActivityPage", () => {
 
   it("sends the api key filter to the API", async () => {
     const { calls } = mockApi({ rows: [entry({ api_key_id: "key-1" })] })
-    renderPage(<ActivityPage />, "/activity?api_key_id=key-1")
+    renderPage(<DeploymentActivityPage />, "/activity?api_key_id=key-1")
 
     await screen.findByText("gpt-4o")
     expect(
@@ -87,7 +99,7 @@ describe("ActivityPage", () => {
     // window has any gateway-run tool calls to offer). Each breakdown is a separate
     // GROUP BY over the window server-side, so neither may request the full set.
     const { calls } = mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     await screen.findByText("gpt-4o")
     const summaryCalls = calls
@@ -113,7 +125,7 @@ describe("ActivityPage", () => {
     // list would disagree, and the scoping would be invisible.
     const { calls } = mockApi({ rows: [entry({ status: "error" })] })
     renderPage(
-      <ActivityPage />,
+      <DeploymentActivityPage />,
       "/activity?status=error&range=1h&source=gateway",
     )
 
@@ -136,7 +148,7 @@ describe("ActivityPage", () => {
     const { calls } = mockApi({
       rows: [entry({ source: "claude_code", source_label: "sess-1" })],
     })
-    renderPage(<ActivityPage />, "/activity?source_label=sess-1")
+    renderPage(<DeploymentActivityPage />, "/activity?source_label=sess-1")
 
     await screen.findByText("gpt-4o")
     expect(
@@ -153,7 +165,7 @@ describe("ActivityPage", () => {
   it("honors endpoint and provider drill-downs", async () => {
     const { calls } = mockApi({ rows: [entry()] })
     renderPage(
-      <ActivityPage />,
+      <DeploymentActivityPage />,
       "/activity?endpoint=%2Fv1%2Fmessages&provider=anthropic",
     )
 
@@ -172,7 +184,7 @@ describe("ActivityPage", () => {
         entry({ id: "b", model: "batch-model", latency_ms: null }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const slow = (await screen.findByText("slow-model")).closest("tr")!
     expect(within(slow).getByText("1.42 s")).toBeInTheDocument()
@@ -191,7 +203,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
     expect(within(row).getByText("Error")).toBeInTheDocument()
@@ -216,7 +228,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
     await user.click(row)
@@ -238,7 +250,7 @@ describe("ActivityPage", () => {
     // mistyped character makes it useless.
     const user = userEvent.setup()
     mockApi({ rows: [entry({ id: "3ba12b77-8841-42a5-b776-a0a1aacb347f" })] })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     await user.click((await screen.findByText("gpt-4o")).closest("tr")!)
     await user.click(screen.getByRole("button", { name: "Copy request id" }))
@@ -255,7 +267,7 @@ describe("ActivityPage", () => {
     mockApi({
       rows: [entry({ id: "r1" }), entry({ id: "r2", model: "gpt-4o-mini" })],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
     await user.click(row)
@@ -276,7 +288,7 @@ describe("ActivityPage", () => {
     mockApi({
       rows: [entry({ provider: "groq", provider_latency_ms: 156 })],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     await user.click((await screen.findByText("gpt-4o")).closest("tr")!)
 
@@ -289,7 +301,7 @@ describe("ActivityPage", () => {
   it("sends the status filter to the API", async () => {
     const { calls } = mockApi({ rows: [entry()] })
     const user = userEvent.setup()
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     await screen.findByText("gpt-4o")
     await pickOption(user, "Status", "Error")
@@ -306,7 +318,7 @@ describe("ActivityPage", () => {
     // applied; the control carries the value as its own option instead, so the
     // bar says what is actually filtering.
     mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />, "/activity?status=bogus")
+    renderPage(<DeploymentActivityPage />, "/activity?status=bogus")
 
     await waitFor(() =>
       expect(selectTrigger("Status")).toHaveTextContent("bogus"),
@@ -317,7 +329,7 @@ describe("ActivityPage", () => {
   it("sends the priced filter to the API", async () => {
     const { calls } = mockApi({ rows: [entry()] })
     const user = userEvent.setup()
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     await screen.findByText("gpt-4o")
     await pickOption(user, "Priced?", "Unpriced")
@@ -340,7 +352,7 @@ describe("ActivityPage", () => {
       ],
     })
     const user = userEvent.setup()
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
     await screen.findByText("gpt-4o")
 
     // Options come from the log itself (the summary's provenance breakdown), with
@@ -359,7 +371,7 @@ describe("ActivityPage", () => {
     // The select must show the filter that is actually applied, or the operator
     // sees a chip they cannot find in the picker.
     mockApi({ rows: [entry({ source: "gateway" })] })
-    renderPage(<ActivityPage />, "/activity?source=codex")
+    renderPage(<DeploymentActivityPage />, "/activity?source=codex")
     await screen.findByText("gpt-4o")
 
     const select = selectTrigger("Source")
@@ -386,7 +398,7 @@ describe("ActivityPage", () => {
       if (url.includes(`${API_ROOT}/usage`)) return jsonResponse([entry()])
       return jsonResponse([])
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
     await screen.findByText("gpt-4o")
 
     expect(await screen.findByText(/summary exploded/)).toBeInTheDocument()
@@ -396,7 +408,7 @@ describe("ActivityPage", () => {
     // Most gateways only ever see their own traffic; a provenance select with a
     // single option is noise, so it only appears once a second source shows up.
     mockApi({ rows: [entry(), entry({ id: "b" })] })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
     await screen.findAllByText("gpt-4o")
 
     await waitFor(() =>
@@ -428,7 +440,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
     expect(within(row).getByText("100,000")).toHaveAttribute(
@@ -462,7 +474,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
     await user.click(row)
@@ -501,7 +513,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const unpriced = (await screen.findByText("unpriced-model")).closest("tr")!
     expect(within(unpriced).getByText("1,000")).toHaveAttribute(
@@ -529,7 +541,7 @@ describe("ActivityPage", () => {
       rows: Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })),
       total: 500,
     })
-    renderPage(<ActivityPage />, "/activity?page=2")
+    renderPage(<DeploymentActivityPage />, "/activity?page=2")
 
     await screen.findAllByText("gpt-4o")
     expect(await screen.findByText("101–150 of 500")).toBeInTheDocument()
@@ -544,7 +556,7 @@ describe("ActivityPage", () => {
       total: 500,
     })
     const user = userEvent.setup()
-    renderPage(<ActivityPage />, "/activity?page=2")
+    renderPage(<DeploymentActivityPage />, "/activity?page=2")
     await screen.findAllByText("gpt-4o")
     expect(await screen.findByText("101–150 of 500")).toBeInTheDocument()
 
@@ -578,7 +590,7 @@ describe("ActivityPage", () => {
     // gesture that advances a rolling range to "now".
     const { calls } = mockApi({ rows: [entry()] })
     const user = userEvent.setup()
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
     await screen.findByText("gpt-4o")
 
     const startOf = (url: string): string | null =>
@@ -596,7 +608,7 @@ describe("ActivityPage", () => {
   it("distinguishes filtered-empty from never-used", async () => {
     const user = userEvent.setup()
     mockApi({ rows: [], total: 0 })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     // The default 24h preset is not itself a filter (mirroring UsagePage), so an
     // empty result on a brand-new gateway reads as "never used", not "filtered".
@@ -644,7 +656,7 @@ describe("ActivityPage", () => {
       }
       return jsonResponse([])
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     await screen.findAllByText("gpt-4o")
     expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled()
@@ -655,7 +667,7 @@ describe("ActivityPage", () => {
   it("seeds filters from the drill-down query string", async () => {
     const { calls } = mockApi({ rows: [entry()] })
     renderPage(
-      <ActivityPage />,
+      <DeploymentActivityPage />,
       "/activity?model=gpt-4o&user_id=alice&status=error",
     )
 
@@ -674,7 +686,7 @@ describe("ActivityPage", () => {
     // silently show a narrower slice than the chart the operator clicked.
     const { calls } = mockApi({ rows: [entry()] })
     renderPage(
-      <ActivityPage />,
+      <DeploymentActivityPage />,
       "/activity?user_id=alice&user_id=bob&model=gpt-4o",
     )
 
@@ -696,7 +708,7 @@ describe("ActivityPage", () => {
   it("adds a second value to a filter from the picker", async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />, "/activity?user_id=alice")
+    renderPage(<DeploymentActivityPage />, "/activity?user_id=alice")
     await screen.findByText("gpt-4o")
 
     const userInput = screen.getByRole("combobox", { name: "User" })
@@ -716,7 +728,7 @@ describe("ActivityPage", () => {
     // options-only. Enter commits whatever was typed.
     const user = userEvent.setup()
     const { calls } = mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
     await screen.findByText("gpt-4o")
 
     const modelInput = screen.getByRole("combobox", { name: "Model" })
@@ -733,13 +745,13 @@ describe("ActivityPage", () => {
     // An old size=500 bookmark must not resurrect second-long selection
     // clicks, and a hand-edited size=-5 must not reach the API as a bad limit.
     const { calls } = mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />, "/activity?size=500")
+    renderPage(<DeploymentActivityPage />, "/activity?size=500")
 
     await screen.findByText("gpt-4o")
     expect(listCalls(calls).at(-1)).toContain("limit=100")
 
     const { calls: negativeCalls } = mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />, "/activity?size=-5")
+    renderPage(<DeploymentActivityPage />, "/activity?size=-5")
     await waitFor(() =>
       expect(listCalls(negativeCalls).length).toBeGreaterThan(0),
     )
@@ -751,7 +763,7 @@ describe("ActivityPage", () => {
       rows: Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })),
       total: 120,
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     expect(await screen.findByText("1–50 of 120")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled()
@@ -763,7 +775,7 @@ describe("ActivityPage", () => {
       rows: [entry({ counts_toward_budget: false, source: "claude_code" })],
       deploymentOperator: true,
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     await screen.findByText("gpt-4o")
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
@@ -787,7 +799,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const row = (await screen.findByText("mistral-small")).closest("tr")!
     await user.click(row)
@@ -834,7 +846,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const row = (await screen.findByText("rerank-v3.5")).closest("tr")!
     await user.click(row)
@@ -875,7 +887,7 @@ describe("ActivityPage", () => {
         entry({ id: "paid", model: "gpt-4o", provider: "openai", cost: 0.5 }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
     await user.click(row)
@@ -900,7 +912,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const row = (await screen.findByText("mistral-small")).closest("tr")!
     await user.click(row)
@@ -925,7 +937,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const row = (await screen.findByText("vllm:mistral-small")).closest("tr")!
     await user.click(row)
@@ -940,7 +952,7 @@ describe("ActivityPage", () => {
   it("keeps the filter pickers behind an 'Add filter' toggle", async () => {
     mockApi({ rows: [entry()] })
     const user = userEvent.setup()
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
     await screen.findByText("gpt-4o")
 
     // The picker row is collapsed until the operator opts to add a filter. jsdom
@@ -966,7 +978,10 @@ describe("ActivityPage", () => {
   it("shows active filters as removable chips and clears one on ✕", async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />, "/activity?model=gpt-4o&status=error")
+    renderPage(
+      <DeploymentActivityPage />,
+      "/activity?model=gpt-4o&status=error",
+    )
     await screen.findByText("gpt-4o")
 
     // A chip per active entity filter (model + status); the time range is not a chip.
@@ -992,7 +1007,7 @@ describe("ActivityPage", () => {
   it("queries an unbounded window for the truthful 'All' preset", async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
     await screen.findByText("gpt-4o")
 
     await user.click(screen.getByRole("button", { name: "All" }))
@@ -1024,7 +1039,7 @@ describe("ActivityPage", () => {
     // to the default window either way; the point here is that the address bar
     // stops claiming ninety days over a list showing one, which the preset row
     // reads back: no tab is pressed while the bogus key stands.
-    renderPage(<ActivityPage />, "/activity?range=90d")
+    renderPage(<DeploymentActivityPage />, "/activity?range=90d")
     await screen.findByText("gpt-4o")
 
     await waitFor(() =>
@@ -1040,7 +1055,7 @@ describe("ActivityPage", () => {
     // A drill-down carries its own window, so the range is not being read and
     // is not lying about anything. Rewriting it here would fight the bounds.
     renderPage(
-      <ActivityPage />,
+      <DeploymentActivityPage />,
       "/activity?range=90d&start_date=2026-08-01T00:00:00.000Z",
     )
     await screen.findByText("gpt-4o")
@@ -1054,7 +1069,7 @@ describe("ActivityPage", () => {
     const { calls } = mockApi({ rows: [entry()] })
     // `?range=custom` has no rolling window of its own, so without an explicit
     // extent the summary would fall back to the server's hidden 30-day default.
-    renderPage(<ActivityPage />, "/activity?range=custom")
+    renderPage(<DeploymentActivityPage />, "/activity?range=custom")
     await screen.findByText("gpt-4o")
 
     await waitFor(() =>
@@ -1074,7 +1089,7 @@ describe("ActivityPage", () => {
     // 24h default. The timeline must frame the drilled window (daily buckets over
     // its bounds), not the unrelated 24h extent.
     renderPage(
-      <ActivityPage />,
+      <DeploymentActivityPage />,
       "/activity?start_date=2020-07-01T00:00:00.000Z&end_date=2020-07-15T00:00:00.000Z",
     )
     await screen.findByText("gpt-4o")
@@ -1104,7 +1119,7 @@ describe("ActivityPage", () => {
 
   it("buckets the timeline histogram by the active preset's extent", async () => {
     const { calls } = mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />) // default 24h
+    renderPage(<DeploymentActivityPage />) // default 24h
     await screen.findByText("gpt-4o")
 
     // The 24h extent buckets hourly, so the timeline's context summary is fetched
@@ -1132,7 +1147,7 @@ describe("ActivityPage", () => {
     vi.spyOn(Date, "now").mockImplementation(() => ++now)
 
     const { calls } = mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />) // default 24h
+    renderPage(<DeploymentActivityPage />) // default 24h
     await screen.findByText("gpt-4o")
 
     await waitFor(() =>
@@ -1186,7 +1201,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     expect(
       await screen.findByText("attempt 1 of 2 failed, served by openai:gpt-4o"),
@@ -1228,7 +1243,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />, "/activity?status=absorbed")
+    renderPage(<DeploymentActivityPage />, "/activity?status=absorbed")
 
     expect(
       await screen.findByText("attempt 1 of 2 failed, served by openai:gpt-4o"),
@@ -1255,7 +1270,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     expect(
       await screen.findByText(
@@ -1296,7 +1311,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     expect(
       await screen.findByText(
@@ -1319,7 +1334,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     expect(
       await screen.findByText("the policy's default target"),
@@ -1337,7 +1352,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     expect(
       await screen.findByText("matched on user_id, budget_remaining"),
@@ -1393,7 +1408,7 @@ describe("ActivityPage", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     await userEvent.click(await screen.findByText("deepseek"))
     expect(
@@ -1424,7 +1439,7 @@ describe("ActivityPage gateway-run tools", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
     // 3 billed + 1 failed = 4 calls, and the detail is on the accessible name.
@@ -1458,7 +1473,7 @@ describe("ActivityPage gateway-run tools", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     await userEvent.click(await screen.findByText("gpt-4o"))
     await screen.findByText("Billed meters")
@@ -1488,7 +1503,7 @@ describe("ActivityPage gateway-run tools", () => {
       // The guard checks the shape it promises rather than the discriminator, so
       // both fall to the untyped branch instead of rendering "NaN each".
       mockApi({ rows: [entry({ cost: 1, pricing_breakdown: [line] })] })
-      renderPage(<ActivityPage />)
+      renderPage(<DeploymentActivityPage />)
 
       await userEvent.click(await screen.findByText("gpt-4o"))
       const rendered = (await screen.findByText(String(line.meter))).closest(
@@ -1517,7 +1532,7 @@ describe("ActivityPage gateway-run tools", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     await userEvent.click(await screen.findByText("gpt-4o"))
     expect(await screen.findByText("Tools")).toBeInTheDocument()
@@ -1544,7 +1559,7 @@ describe("ActivityPage gateway-run tools", () => {
     "shows the billed tool cost for $name",
     async ({ tools, expectedCost }) => {
       mockApi({ rows: [entry({ billing_meters: { tools } })] })
-      renderPage(<ActivityPage />)
+      renderPage(<DeploymentActivityPage />)
 
       await userEvent.click(await screen.findByText("gpt-4o"))
       const costField = (await screen.findByText("Tool cost")).closest("div")!
@@ -1567,7 +1582,7 @@ describe("ActivityPage gateway-run tools", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     await userEvent.click(await screen.findByText("gpt-4o"))
     expect(await screen.findByText("unpriced")).toBeInTheDocument()
@@ -1583,7 +1598,7 @@ describe("ActivityPage gateway-run tools", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
     await userEvent.click(await screen.findByText("gpt-4o"))
     expect(await screen.findByText("Tool cost")).toBeInTheDocument()
@@ -1601,7 +1616,7 @@ describe("ActivityPage table-scan avoidance", () => {
     const { calls } = mockApi({
       rows: [entry({ api_key_id: "key-1", api_key_name: "ci-bot" })],
     })
-    renderPage(<ActivityPage />, "/activity?range=24h")
+    renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
     await screen.findByText("gpt-4o")
     const requested = calls.map((c) => c.url)
@@ -1617,7 +1632,7 @@ describe("ActivityPage table-scan avoidance", () => {
     const { calls } = mockApi({
       rows: [entry({ api_key_id: "key-1", api_key_name: "ci-bot" })],
     })
-    renderPage(<ActivityPage />, "/activity?range=24h")
+    renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
     expect(await screen.findByText("ci-bot")).toBeInTheDocument()
     expect(
@@ -1634,7 +1649,7 @@ describe("ActivityPage table-scan avoidance", () => {
       mockApi({
         rows: [entry({ api_key_id: "abcdef123456", api_key_name: name })],
       })
-      renderPage(<ActivityPage />, "/activity?range=24h")
+      renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
       // Shortened in the cell, whole on hover.
       expect(await screen.findByText("abcdef12…")).toHaveAttribute(
@@ -1655,7 +1670,7 @@ describe("ActivityPage user naming", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />, "/activity?range=24h")
+    renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
     expect(await screen.findByText("Alice Example")).toBeInTheDocument()
     expect(
@@ -1678,7 +1693,7 @@ describe("ActivityPage user naming", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />, "/activity?range=24h")
+    renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
     expect(await screen.findByText("Alice Example")).toBeInTheDocument()
     expect(screen.queryByText("svc-alice")).not.toBeInTheDocument()
@@ -1690,7 +1705,7 @@ describe("ActivityPage user naming", () => {
     mockApi({
       rows: [entry({ user_id: "ci-bot", user_alias: "ci-bot" })],
     })
-    renderPage(<ActivityPage />, "/activity?range=24h")
+    renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
     expect(await screen.findByText("ci-bot")).toBeInTheDocument()
   })
@@ -1705,7 +1720,7 @@ describe("ActivityPage user naming", () => {
         }),
       ],
     })
-    renderPage(<ActivityPage />, "/activity?range=24h")
+    renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
     await user.click(row)
@@ -1731,7 +1746,7 @@ describe("ActivityPage suggestion scoping", () => {
     // it can only ever offer the user already selected.
     const { calls } = mockApi({ rows: [entry()] })
     renderPage(
-      <ActivityPage />,
+      <DeploymentActivityPage />,
       "/activity?model=gpt-4o&user_id=alice&range=24h",
     )
 
@@ -1803,7 +1818,7 @@ describe("ActivityPage live traffic", () => {
       rows: [entry()],
       inFlight: { requests: [inFlightRequest()], total: 1 },
     })
-    renderPage(<ActivityPage />, "/activity?range=24h")
+    renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
     await waitFor(() => expect(liveControl()).toBeInTheDocument())
     expect(liveControl()).toHaveAccessibleName(/1 in flight/)
@@ -1826,7 +1841,7 @@ describe("ActivityPage live traffic", () => {
         total: 1,
       },
     })
-    renderPage(<ActivityPage />, "/activity?range=24h")
+    renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
     await waitFor(() => expect(liveControl()).toBeInTheDocument())
     await user.click(liveControl()!)
@@ -1846,7 +1861,7 @@ describe("ActivityPage live traffic", () => {
     // reading the list length as the total would under-report live traffic.
     const user = userEvent.setup()
     mockApi({ rows: [], inFlight: { requests: [inFlightRequest()], total: 7 } })
-    renderPage(<ActivityPage />, "/activity?range=24h")
+    renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
     await waitFor(() =>
       expect(liveControl()).toHaveAccessibleName(/7 in flight/),
@@ -1870,7 +1885,7 @@ describe("ActivityPage live traffic", () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       let live: InFlightResponse = { requests: [inFlightRequest()], total: 1 }
       mockApi({ rows: [], inFlight: () => live })
-      renderPage(<ActivityPage />, "/activity?range=24h")
+      renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
       await waitFor(() => expect(liveControl()).toBeInTheDocument())
       // Held as a node: react-aria marks the rest of the page `aria-hidden` while
@@ -1897,7 +1912,7 @@ describe("ActivityPage live traffic", () => {
 
   it("shows no live control while the gateway is idle", async () => {
     mockApi({ rows: [entry()], inFlight: { requests: [], total: 0 } })
-    renderPage(<ActivityPage />, "/activity?range=24h")
+    renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
     await screen.findByText("gpt-4o")
     expect(liveControl()).not.toBeInTheDocument()
@@ -1942,7 +1957,7 @@ describe("ActivityPage live traffic", () => {
     // above were sized to survive it.
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
-      renderPage(<ActivityPage />, "/activity?range=24h")
+      renderPage(<DeploymentActivityPage />, "/activity?range=24h")
       await waitFor(() => expect(liveControl()).toBeInTheDocument())
 
       failing = true
@@ -1967,7 +1982,10 @@ describe("ActivityPage live traffic", () => {
       rows: [],
       inFlight: { requests: [inFlightRequest()], total: 1 },
     })
-    renderPage(<ActivityPage />, "/activity?range=7d&status=error&model=gpt-4o")
+    renderPage(
+      <DeploymentActivityPage />,
+      "/activity?range=7d&status=error&model=gpt-4o",
+    )
 
     await screen.findByText("No requests match these filters.")
     await waitFor(() => expect(liveControl()).toBeInTheDocument())
@@ -1989,7 +2007,7 @@ describe("ActivityPage live traffic", () => {
       total: 1,
       inFlight: { requests: [inFlightRequest()], total: 1 },
     })
-    renderPage(<ActivityPage />, "/activity?range=24h")
+    renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
     await waitFor(() => expect(liveControl()).toBeInTheDocument())
     expect(screen.getByText(/1\s*[–-]\s*1 of 1/)).toBeInTheDocument()
@@ -2004,7 +2022,7 @@ describe("ActivityPage live traffic", () => {
     try {
       let live: InFlightResponse = { requests: [inFlightRequest()], total: 1 }
       const { calls } = mockApi({ rows: [entry()], inFlight: () => live })
-      renderPage(<ActivityPage />, "/activity?range=24h")
+      renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
       await waitFor(() => expect(liveControl()).toBeInTheDocument())
       const before = listCalls(calls).length
@@ -2034,7 +2052,7 @@ describe("ActivityPage live traffic", () => {
         rows: [entry({ id: "settled-1" })],
         inFlight: { requests: [inFlightRequest()], total: 1 },
       })
-      renderPage(<ActivityPage />, "/activity?range=24h")
+      renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
       const row = (await screen.findByText("gpt-4o")).closest("tr")!
       await user.click(row)
@@ -2068,7 +2086,7 @@ describe("ActivityPage live traffic", () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       let serverTotal = 4
       const { calls } = mockApi({ rows: [entry()], total: () => serverTotal })
-      renderPage(<ActivityPage />, "/activity?range=24h")
+      renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
       await screen.findByText("gpt-4o")
       expect(
@@ -2110,7 +2128,7 @@ describe("ActivityPage live traffic", () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       let serverTotal = 100
       mockApi({ rows: [entry()], total: () => serverTotal })
-      renderPage(<ActivityPage />, "/activity?range=24h&size=50")
+      renderPage(<DeploymentActivityPage />, "/activity?range=24h&size=50")
 
       await screen.findByText("gpt-4o")
       await waitFor(() =>
@@ -2161,7 +2179,7 @@ describe("ActivityPage live traffic", () => {
       return jsonResponse([entry()])
     })
 
-    renderPage(<ActivityPage />, "/activity?range=24h")
+    renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
     await screen.findByText("gpt-4o")
     await waitFor(() =>
@@ -2179,7 +2197,7 @@ describe("ActivityPage live traffic", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
       const { calls } = mockApi({ rows: [entry()], total: 500 })
-      renderPage(<ActivityPage />, "/activity?range=24h&page=2")
+      renderPage(<DeploymentActivityPage />, "/activity?range=24h&page=2")
 
       await screen.findByText("gpt-4o")
       const before = countCalls(calls).length
@@ -2204,7 +2222,7 @@ describe("ActivityPage live traffic", () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       let serverTotal = 100
       mockApi({ rows: [entry()], total: () => serverTotal })
-      renderPage(<ActivityPage />, "/activity?range=24h")
+      renderPage(<DeploymentActivityPage />, "/activity?range=24h")
 
       await screen.findByText("gpt-4o")
       serverTotal = 120
@@ -2228,7 +2246,7 @@ describe("ActivityPage live traffic", () => {
     try {
       const { calls } = mockApi({ rows: [entry()], total: 1 })
       renderPage(
-        <ActivityPage />,
+        <DeploymentActivityPage />,
         "/activity?start_date=2026-01-01T00:00:00Z&end_date=2026-01-02T00:00:00Z",
       )
 
@@ -2243,7 +2261,7 @@ describe("ActivityPage live traffic", () => {
   })
 })
 
-describe("ActivityPage for a tenant who does not operate the deployment", () => {
+describe("ActivityPage outside the deployment's pages", () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
@@ -2265,6 +2283,23 @@ describe("ActivityPage for a tenant who does not operate the deployment", () => 
     }
   })
 
+  // The page's scope decides, not the caller's role: an operator on their
+  // organization's Activity page reads that organization, as anyone there does.
+  it("reads the organization-scoped routes for an operator too", async () => {
+    const { calls } = mockApi({ rows: [entry()], deploymentOperator: true })
+    renderPage(<ActivityPage />)
+
+    await screen.findByText("gpt-4o")
+    const reads = calls.filter(
+      (c) => c.method === "GET" && c.url.includes("/usage"),
+    )
+    expect(reads).not.toHaveLength(0)
+    for (const call of reads) {
+      expect(call.url).toContain(`${API_ROOT}/organizations/me/usage`)
+    }
+    expect(calls.some((c) => c.url.includes("/usage/in-flight"))).toBe(false)
+  })
+
   it("does not poll the in-flight strip, which stays deployment-wide", async () => {
     // Its registry entries carry no workspace, so there is nothing in them to
     // scope. Polling it would be a 403 every few seconds.
@@ -2282,10 +2317,10 @@ describe("ActivityPage when the organization context fails", () => {
   })
 
   it("still asks for usage, and reports the refusal rather than painting an empty log", async () => {
-    // The usage hooks wait on `GET /api/v1/organizations/me` to learn which surface
-    // this caller may read. An errored context must not read as "keep waiting":
-    // that issues no request at all, and the page then states, with no banner,
-    // that a gateway serving traffic has none (otari#837).
+    // The page's scope picks the surface, so the usage reads do not wait on
+    // `GET /api/v1/organizations/me`. Were they to, an errored context would read
+    // as "keep waiting": no request at all, and the page would state, with no
+    // banner, that a gateway serving traffic has none (otari#837).
     const calls: string[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
@@ -2301,11 +2336,10 @@ describe("ActivityPage when the organization context fails", () => {
       }
       return jsonResponse([])
     })
-    renderPage(<ActivityPage />)
+    renderPage(<DeploymentActivityPage />)
 
-    // Takes the deployment-wide surface, as every operator gate does on a
-    // failed read (otari#876): an operator keeps their log, and the server
-    // refuses anyone else, so nothing crosses a tenant.
+    // The deployment's page reads the deployment-wide surface whatever the
+    // context says, and the server refuses anyone who does not operate it.
     await waitFor(() =>
       expect(calls.some((url) => url.startsWith(`${API_ROOT}/usage`))).toBe(
         true,

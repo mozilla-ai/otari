@@ -50,6 +50,7 @@ import {
   isNoOrganizationError,
   useOrganizationContext,
 } from "@/shared/api/organizations"
+import { DeploymentScope } from "@/shared/hooks/DeploymentScope"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useDocumentTitle } from "@/shared/hooks/useDocumentTitle"
 import { useEntitlements } from "@/shared/hooks/useEntitlements"
@@ -462,6 +463,7 @@ function AppShellChrome() {
   // decides visibility from the deployment and the entitlements,
   // rather than each page asking what it is running against.
   const isVisible = useNavVisibility()
+  const recordNavigation = useRecordNavigation()
   const { pathname } = useLocation()
   const navigate = useNavigate()
   useDocumentTitle(pageLabelForPath(pathname))
@@ -670,8 +672,12 @@ function AppShellChrome() {
       <TelemetryIdentity />
       <AutoUpdate />
       <ConnectionStatus />
-      <PricingWarning />
-      <UnpricedUsageWarning />
+      {/* The operator's alarms over the whole deployment's traffic, whichever
+          rail is showing, so they read the deployment-wide routes. */}
+      <DeploymentScope>
+        <PricingWarning />
+        <UnpricedUsageWarning />
+      </DeploymentScope>
       {/* `relative` so the mobile drawer can be offset from *this row* rather
           than from the viewport. The row's top edge is the header's top edge,
           and the pricing alarm above it is a band in flow, so a
@@ -762,6 +768,9 @@ function AppShellChrome() {
               workspaceLanding={workspaceLanding}
               organizationLanding={organizationLanding}
               deploymentLanding={deploymentLanding}
+              // A move between rails is a sidebar move like any other; it just
+              // does not go through `NavRowLink`.
+              onScopeChange={(to) => recordNavigation(to, pathname === to)}
             />
           </div>
           {/* No bottom padding: the account band closes the rail, so it sits on

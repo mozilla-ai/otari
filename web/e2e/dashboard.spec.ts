@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, type Page, test } from "@playwright/test"
 import { API_ROOT } from "@/shared/api/client"
 import {
   dismissComboBoxInDialog,
@@ -7,14 +7,25 @@ import {
   login,
   MASTER_KEY,
   nav,
-  openAccountMenu,
+  openDeployment,
   openNested,
   openOrganization,
+  openScopeSwitcher,
   pageHeading,
 } from "./helpers"
 
 // One shared gateway + DB, so the flows build on each other and must run in order.
 test.describe.configure({ mode: "serial" })
+
+// Deployment-wide policies, whose targets are not checked against what one
+// organization has keys for. A workspace's Routing page writes the
+// organization's policies, which refuse a target it cannot serve, and this suite
+// has no real provider behind its models.
+async function openDeploymentRouting(page: Page): Promise<void> {
+  await openDeployment(page)
+  await nav(page).getByRole("link", { name: "Routing", exact: true }).click()
+  await expect(pageHeading(page, "Routing")).toBeVisible()
+}
 
 test.describe("dashboard core flows", () => {
   test("first-run overview guides the operator to provider setup", async ({
@@ -29,6 +40,9 @@ test.describe("dashboard core flows", () => {
     page,
   }) => {
     await login(page)
+    // The deployment's own overview, which is where its providers are set up:
+    // the organization overview "/" lands on offers an organization key instead.
+    await openDeployment(page)
     await page.getByRole("button", { name: "Add your first provider" }).click()
     await expect(page.getByText("Welcome to Otari")).toBeVisible()
 
@@ -62,6 +76,9 @@ test.describe("dashboard core flows", () => {
         response.ok(),
     )
     await login(page)
+    // The deployment's overview, which offers the guide once a provider exists;
+    // the organization's waits for a model it can serve.
+    await gotoRoute(page, "/deployment")
     const { key: fullKey } = await (await mintedKey).json()
 
     // A sheet over the Overview, not a panel on it: a workspace with no traffic
@@ -154,11 +171,11 @@ test.describe("dashboard core flows", () => {
     await expect(page).not.toHaveURL(/model=/)
 
     // The deployment's own rail, which neither loop above reaches: it is entered
-    // from the account menu rather than from a row, and the menu closes on the
-    // way, so the rail is what carries you between its pages once you are
-    // in. Exact, because the organization rail also carries "Org settings".
-    const menu = await openAccountMenu(page)
-    await menu.getByRole("link", { name: "Deployment" }).click()
+    // from the scope switcher rather than from a row, and the rail is what
+    // carries you between its pages once you are in. Exact, because the
+    // organization rail also carries "Org settings".
+    await openDeployment(page)
+    await nav(page).getByRole("link", { name: "Settings", exact: true }).click()
     await expect(pageHeading(page, "Settings")).toBeVisible()
     await nav(page).getByRole("link", { name: "Accounts", exact: true }).click()
     await expect(pageHeading(page, "Accounts")).toBeVisible()
@@ -166,16 +183,24 @@ test.describe("dashboard core flows", () => {
       .getByRole("link", { name: "Hosted providers", exact: true })
       .click()
     await expect(pageHeading(page, "Hosted providers")).toBeVisible()
-    // The way out names where it goes. Queried on the page rather than inside
-    // the Sidebar landmark: the back row is in the scope band above the nav, the
-    // same place the workspace switcher sits on the other rail.
-    await expect(page.getByRole("link", { name: /^Back to / })).toBeVisible()
+    // The way out is the same switcher, which names the scope it is on and
+    // takes you back to a workspace.
+    await expect(
+      page.getByRole("button", { name: "Switch scope, currently Deployment" }),
+    ).toBeVisible()
+    const menu = await openScopeSwitcher(page)
+    await menu.getByRole("button", { name: "Default workspace" }).click()
+    await expect(
+      page.getByRole("button", { name: /^Switch workspace, currently / }),
+    ).toBeVisible()
   })
 
   test("create a budget", async ({ page }) => {
     await login(page)
-    await openOrganization(page)
-    await nav(page).getByRole("link", { name: "Spend & budgets" }).click()
+    // Per-user budgets are the deployment's: the organization's Spend & budgets
+    // holds the organization's own.
+    await openDeployment(page)
+    await nav(page).getByRole("link", { name: "Budgets", exact: true }).click()
     await page.getByRole("button", { name: "Create your first budget" }).click()
     // Scoped: the heading's trigger and the dialog's submit both say "Create
     // budget", so an unscoped press is ambiguous.
@@ -209,8 +234,10 @@ test.describe("dashboard core flows", () => {
     expect(created.ok() || created.status() === 409).toBeTruthy()
 
     await login(page)
-    await openOrganization(page)
-    await nav(page).getByRole("link", { name: "Spend & budgets" }).click()
+    // Per-user budgets are the deployment's: the organization's Spend & budgets
+    // holds the organization's own.
+    await openDeployment(page)
+    await nav(page).getByRole("link", { name: "Budgets", exact: true }).click()
     const budgetRow = page.getByRole("row", { name: /e2e-budget/ })
     await budgetRow.getByRole("button", { name: "Edit" }).click()
     // The field's visible label is its accessible name now: the picker used to
@@ -238,6 +265,9 @@ test.describe("dashboard core flows", () => {
 
   test("create an API key owned by a chosen user", async ({ page }) => {
     await login(page)
+    // A key owned by a user the caller names is the deployment's to issue: a
+    // workspace's key page issues the caller's own.
+    await openDeployment(page)
     await nav(page).getByRole("link", { name: "API keys" }).click()
     // A bootstrap key already exists, so use the header action, not onboarding.
     await page.getByRole("button", { name: "Create key" }).click()
@@ -276,6 +306,8 @@ test.describe("dashboard core flows", () => {
     // inside the pane: at 1440 `max-w-3xl` dominates and the bug is invisible.
     await page.setViewportSize({ width: 1024, height: 800 })
     await login(page)
+    // The deployment's key page, which is where the key above was issued.
+    await openDeployment(page)
     await nav(page).getByRole("link", { name: "API keys" }).click()
 
     const rows = page.getByRole("row", { name: /ci-bot/ })
@@ -317,7 +349,7 @@ test.describe("dashboard core flows", () => {
 
   test("create a routing policy", async ({ page }) => {
     await login(page)
-    await openNested(page, "Routing", "Policies")
+    await openDeploymentRouting(page)
     // `.first()` is the heading's action. An empty routing list also offers
     // the same words from its empty state, and a press has to name which.
     await page.getByRole("button", { name: "Create policy" }).first().click()
@@ -346,7 +378,7 @@ test.describe("dashboard core flows", () => {
 
   test("grows a policy a fallback chain", async ({ page }) => {
     await login(page)
-    await openNested(page, "Routing", "Policies")
+    await openDeploymentRouting(page)
     // `.first()` is the heading's action. An empty routing list also offers
     // the same words from its empty state, and a press has to name which.
     await page.getByRole("button", { name: "Create policy" }).first().click()
@@ -393,7 +425,7 @@ test.describe("dashboard core flows", () => {
     expect([204, 404]).toContain(dropped.status())
 
     await login(page)
-    await openNested(page, "Routing", "Policies")
+    await openDeploymentRouting(page)
 
     const chained = page
       .getByRole("row")

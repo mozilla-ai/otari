@@ -68,6 +68,8 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   // The selected workspace's roster, which is not the organization one below:
   // this page is on the workspace rail and stops at the workspace it names.
   { route: "/members", name: "members", heading: /members/i },
+  // The organization's own budgets, which is what the route is for whoever is
+  // signed in; the deployment's per-user budgets are under /deployment below.
   { route: "/budgets", name: "budgets", heading: /budgets/i },
   // The member roster now carries what the users page used to: model access,
   // blocking, and per-person spend. It is on the organization rail, which this
@@ -110,29 +112,50 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "tools-mcp-servers",
     heading: /mcp servers/i,
   },
-  // The deployment's own pages, reached from the account menu rather than
-  // from a rail, and covered here all the same for the reason /account below
-  // is: this matrix is about how a page renders, not about which control opens
-  // it. Accounts is not the members roster above, which stops at this
-  // organization's boundary.
-  { route: "/settings", name: "settings", heading: /settings/i },
+  // The deployment's own rail, entered from the scope switcher. Its first five
+  // are the deployment-wide versions of the workspace pages above, the same
+  // components reading every tenant, so they are captured beside them. Accounts
+  // is not the members roster above, which stops at this organization's
+  // boundary.
   {
-    route: "/admin/accounts",
+    route: "/deployment",
+    name: "deployment-overview",
+    heading: /overview/i,
+  },
+  {
+    route: "/deployment/activity",
+    name: "deployment-activity",
+    heading: /activity/i,
+  },
+  { route: "/deployment/keys", name: "deployment-keys", heading: /keys/i },
+  {
+    route: "/deployment/budgets",
+    name: "deployment-budgets",
+    heading: /budgets/i,
+  },
+  {
+    route: "/deployment/routing",
+    name: "deployment-routing",
+    heading: /routing/i,
+  },
+  { route: "/deployment/settings", name: "settings", heading: /settings/i },
+  {
+    route: "/deployment/accounts",
     name: "admin-accounts",
     heading: /accounts/i,
   },
   {
-    route: "/admin/hosted-providers",
+    route: "/deployment/hosted-providers",
     name: "admin-hosted-providers",
     heading: /hosted providers/i,
   },
   {
-    route: "/admin/web-search",
+    route: "/deployment/web-search-pricing",
     name: "admin-web-search-pricing",
     heading: /web search pricing/i,
   },
   {
-    route: "/admin/code-execution",
+    route: "/deployment/code-execution-pricing",
     name: "admin-code-execution-pricing",
     heading: /code execution pricing/i,
   },
@@ -173,10 +196,10 @@ test.describe("workspace rail", () => {
 test.describe("organization rail", () => {
   test("organization general", async ({ page }) => {
     await login(page)
-    // Reached by URL like everything else in this file, not through the
-    // sidebar's footer link: on the mobile viewport that link lives inside the
-    // closed drawer, so clicking it times out and the page is never captured at
-    // the size most worth looking at.
+    // Reached by URL like everything else in this file, not through the scope
+    // switcher: on the mobile viewport it lives inside the closed drawer, so
+    // pressing it times out and the page is never captured at the size most
+    // worth looking at.
     await gotoRoute(page, "/organization")
     await expect(
       page.getByRole("heading", { name: /organization/i }).first(),
@@ -252,13 +275,11 @@ test.describe("organization rail", () => {
 })
 
 /**
- * The organization-admin view of Spend & budgets.
+ * The organization-admin view of Spend & budgets, populated.
  *
- * `/budgets` above captures the deployment-operator page, because `login`
- * exchanges the master key and that session is the bootstrap operator, so
- * `deployment_operator` is true and the route resolves to the other page every
- * time. Nothing else in this suite renders the admin page, which the frontend
- * standards owe a screenshot for.
+ * `/budgets` above captures the same page as the bootstrap operator, who is an
+ * owner, over whatever the seeded deployment holds, which is no organization
+ * budget. This is the page with rows in it, as an admin sees it.
  *
  * A seeded admin identity with a password would be the faithful way in, and this
  * harness has no password login: `login` is the only auth path and it is
@@ -535,7 +556,9 @@ test.describe("a routing policy's page", () => {
     })
     await expectOk(written, "create routing policy")
     await login(page)
-    await gotoRoute(page, "/routing/screenshot-mixed")
+    // The deployment's copy of the page: the policy is written through the
+    // deployment-wide route, which is what that page reads.
+    await gotoRoute(page, "/deployment/routing/screenshot-mixed")
     await expect(
       page.getByRole("heading", { name: "screenshot-mixed" }),
     ).toBeVisible()
@@ -544,9 +567,10 @@ test.describe("a routing policy's page", () => {
 })
 
 test.describe("the budget dialog", () => {
+  // The deployment's per-user budget form, the one with an assignee picker.
   test("the create dialog", async ({ page }) => {
     await login(page)
-    await gotoRoute(page, "/budgets")
+    await gotoRoute(page, "/deployment/budgets")
     await expect(
       page.getByRole("heading", { name: /budgets/i }).first(),
     ).toBeVisible()
@@ -574,7 +598,7 @@ test.describe("the workspace dialogs", () => {
 test.describe("the hosted provider dialog", () => {
   test("the add dialog, empty", async ({ page }) => {
     await login(page)
-    await gotoRoute(page, "/admin/hosted-providers")
+    await gotoRoute(page, "/deployment/hosted-providers")
     await expect(
       page.getByRole("heading", { name: /hosted providers/i }).first(),
     ).toBeVisible()
@@ -588,7 +612,7 @@ test.describe("the hosted provider dialog", () => {
 
   test("the add dialog, on a custom endpoint", async ({ page }) => {
     await login(page)
-    await gotoRoute(page, "/admin/hosted-providers")
+    await gotoRoute(page, "/deployment/hosted-providers")
     await expect(
       page.getByRole("heading", { name: /hosted providers/i }).first(),
     ).toBeVisible()

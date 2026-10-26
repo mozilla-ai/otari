@@ -78,6 +78,16 @@ created. Set `activation_guide: false` to disable the flow for the deployment.
 
 ## Navigation
 
+The dashboard has three views: a workspace, its organization, and the
+deployment. The switcher at the top of the sidebar moves between them: it lists
+**Deployment** for the deployment's operators, the organization with **Manage
+organization** for its owners and admins, and the workspaces you belong to. The
+view you are in decides what a page shows, and your role decides which views
+you get and what you may change in them, so a page means the same thing to
+everyone who sees it. Spend & budgets in the organization view, for example, is
+the organization's own budgets for its admins and for the deployment's operator
+alike.
+
 The workspace view contains day-to-day gateway operations:
 
 - Overview, Activity, and Usage
@@ -109,9 +119,14 @@ The organization view contains tenant-wide administration:
   credentials, served to every organization, are managed on Hosted providers
   in the deployment view, or in `config.yml`.
 
-The deployment view, opened from the account menu, holds what belongs to the
-gateway process rather than to any organization on it:
+The deployment view, opened from the switcher, holds what belongs to the
+gateway process rather than to any organization on it, and the deployment-wide
+versions of pages the other views scope to one organization or workspace:
 
+- Overview, Activity, API keys, Budgets and Routing across every organization
+  and workspace on the deployment. Budgets here are the per-user budgets and
+  workspace member defaults; an organization's own budgets are its Spend &
+  budgets page.
 - Settings, the running configuration.
 - Accounts, every account on the deployment.
 - Hosted providers, the keys the deployment serves inference on for a request
