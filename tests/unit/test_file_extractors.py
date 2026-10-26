@@ -175,6 +175,29 @@ def test_xlsx_ignores_a_column_past_the_last_one() -> None:
     assert file_extractors._extract_sync(_xlsx(sheet), ".xlsx").text == "## Sales\n| 1 |\n| --- |"
 
 
+def test_xlsx_keeps_no_empty_rows() -> None:
+    """An empty row adds no text, so keeping it would cost memory no ceiling counts."""
+    archive = file_extractors._Archive(_xlsx("<row/>" * 1000 + '<row r="1001"><c r="A1001"><v>1</v></c></row>'))
+    book = file_extractors._Workbook(shared=[], date_styles=frozenset(), date1904=False)
+
+    assert file_extractors._sheet_rows(archive, "xl/worksheets/sheet1.xml", book) == [["1"]]
+
+
+def test_xlsx_rows_count_their_memory_against_the_text_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(file_extractors, "_MAX_TEXT_BYTES", 10 * file_extractors._HELD_OBJECT_BYTES)
+    archive = file_extractors._Archive(_xlsx('<row><c r="A1"><v>1</v></c></row>' * 100))
+    book = file_extractors._Workbook(shared=[], date_styles=frozenset(), date1904=False)
+
+    assert len(file_extractors._sheet_rows(archive, "xl/worksheets/sheet1.xml", book)) <= 10
+
+
+def test_the_shared_string_table_stops_at_the_text_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(file_extractors, "_MAX_TEXT_BYTES", 3 * (file_extractors._HELD_OBJECT_BYTES + 1))
+    data = _zip({"sst.xml": f"<sst {_S}>" + "<si><t>a</t></si>" * 100 + "</sst>"})
+
+    assert file_extractors._shared_strings(file_extractors._Archive(data), "sst.xml") == ["a", "a", "a"]
+
+
 def test_an_office_file_inflating_past_its_budget_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(file_extractors, "_MAX_ARCHIVE_XML_BYTES", 4096)
     # Kilobytes of markup that compress to almost nothing and hold no text.
@@ -276,13 +299,16 @@ line 2</pre></body></html>"""
     assert result.text == "T\n## Heading\nOne paragraph\n- Item\n| A | B |\n| 1 | 2 |\nline 1\nline 2"
 
 
-def _pdf(text: str | None) -> bytes:
+def _pdf(*pages: str | None) -> bytes:
+    """A PDF of one page per argument, holding that text, or none for ``None``."""
     import pypdfium2 as pdfium
     import pypdfium2.raw as raw
 
     pdf = pdfium.PdfDocument.new()
-    page = pdf.new_page(300, 300)
-    if text is not None:
+    for text in pages:
+        page = pdf.new_page(300, 300)
+        if text is None:
+            continue
         obj = raw.FPDFPageObj_NewTextObj(pdf.raw, b"Helvetica", 12.0)
         encoded = (text + "\x00").encode("utf-16-le")
         buffer = ctypes.create_string_buffer(encoded, len(encoded))
@@ -301,6 +327,21 @@ def test_pdf_text_is_extracted() -> None:
 
     assert result.ok is True
     assert result.text == "Invoice total 42"
+
+
+def test_an_uploaded_pdf_past_the_page_cap_is_read_for_its_first_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(file_extractors, "_MAX_PDF_PAGES", 2)
+
+    result = file_extractors._extract_sync(_pdf("One", "Two", "Three"), ".pdf")
+
+    assert result.text == "One\n\nTwo"
+    assert result.detail == "truncated"
+
+
+def test_the_web_fetch_reader_still_refuses_a_pdf_past_its_page_cap() -> None:
+    result = file_extractors.extract_bounded_pdf_text_sync(_pdf("One", "Two"), max_pages=1, max_text_bytes=1024)
+
+    assert result.ok is False
 
 
 def test_a_pdf_without_text_reports_none_so_the_caller_can_rasterize() -> None:

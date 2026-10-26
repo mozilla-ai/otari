@@ -482,6 +482,7 @@ avoiding AGPL PDF libraries since Otari is a network service. Word, PowerPoint a
 Excel files (`.docx`, `.pptx`, `.xlsx`) are read with the Python standard library and
 come out as Markdown: headings, list items and tables are kept, formatting is not.
 HTML, Markdown, CSV, JSON and other text files are read as text. A legacy binary Office
-file (`.doc`, `.ppt`, `.xls`) is not extracted. Extracted text stops at 16 MiB, and an
-Office file whose XML inflates past 256 MiB is not extracted. OCR is optional; install the
+file (`.doc`, `.ppt`, `.xls`) is not extracted. Extracted text stops at 16 MiB, a PDF is
+read for its first 1,000 pages, and an Office file whose XML inflates past 256 MiB is not
+extracted. OCR is optional; install the
 `ocr` extra (`uv sync --extra ocr` in a checkout) to enable it.

@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import IO
+from typing import IO, Literal
 from xml.etree import ElementTree
 
 from gateway.log_config import logger
@@ -46,6 +46,12 @@ _MAX_ARCHIVE_XML_BYTES = 256 * 1024 * 1024
 # outright, one paragraph or row when it is streamed. Bytes alone do not bound
 # memory, since each tiny element costs far more parsed than it does as text.
 _MAX_HELD_ELEMENTS = 1_000_000
+# What one kept string or row costs in memory beyond its text, counted against
+# ``_MAX_TEXT_BYTES`` so that millions of tiny ones cannot pass for little.
+_HELD_OBJECT_BYTES = 64
+# The most pages an uploaded PDF is read for. Every PDFium call in the process
+# shares one lock, so this bounds how long one upload holds up every other.
+_MAX_PDF_PAGES = 1_000
 # Column XFD, the last one a spreadsheet may address.
 _MAX_SHEET_COLUMNS = 16_384
 
@@ -397,6 +403,20 @@ def _column_index(reference: str | None, default: int) -> int:
     return index - 1
 
 
+def _shared_strings(archive: _Archive, member: str) -> list[str]:
+    """The workbook's string table, up to ``_MAX_TEXT_BYTES``; a cell naming an index past it reads as empty."""
+    shared: list[str] = []
+    size = 0
+    # sst > si
+    for item in archive.iter_at_depth(member, 1):
+        text = _inline_text(item)
+        size += _HELD_OBJECT_BYTES + len(text)
+        if size > _MAX_TEXT_BYTES:
+            break
+        shared.append(text)
+    return shared
+
+
 def _sheet_rows(archive: _Archive, member: str, book: _Workbook) -> list[list[str]]:
     rows: list[list[str]] = []
     size = 0
@@ -415,8 +435,12 @@ def _sheet_rows(archive: _Archive, member: str, book: _Workbook) -> list[list[st
             if column >= len(cells):
                 cells.extend([""] * (column - len(cells) + 1))
             cells[column] = value
+        # An empty row renders as nothing, and keeping it would cost memory the
+        # size check below never sees.
+        if not cells:
+            continue
         rows.append(cells)
-        size += sum(len(cell) + 3 for cell in cells)
+        size += _HELD_OBJECT_BYTES + sum(len(cell) + 3 for cell in cells)
         if size > _MAX_TEXT_BYTES:
             break
     return rows
@@ -431,10 +455,7 @@ def _xlsx_text(archive: _Archive, sink: _TextSink) -> None:
     root = archive.parse(workbook)
     properties = next((e for e in root if _local(e.tag) == "workbookPr"), None)
     book = _Workbook(
-        # sst > si
-        shared=[_inline_text(item) for item in archive.iter_at_depth(strings, 1)]
-        if strings and archive.has(strings)
-        else [],
+        shared=_shared_strings(archive, strings) if strings and archive.has(strings) else [],
         date_styles=_date_styles(archive, parts.get("styles")),
         date1904=properties is not None and properties.get("date1904") in ("1", "true"),
     )
@@ -536,10 +557,14 @@ def _decode_text(data: bytes, *, lenient: bool) -> str | None:
 
 def _extract_sync(data: bytes, extension: str) -> ExtractionResult:
     sink = _TextSink()
+    truncated = False
     try:
         if extension == ".pdf":
-            pdf = extract_bounded_pdf_text_sync(data, max_pages=None, max_text_bytes=_MAX_TEXT_BYTES)
+            pdf = extract_bounded_pdf_text_sync(
+                data, max_pages=_MAX_PDF_PAGES, max_text_bytes=_MAX_TEXT_BYTES, past_max_pages="truncate"
+            )
             sink.add(pdf.text.replace("\r\n", "\n"))
+            truncated = pdf.truncated
         elif reader := _OFFICE_READERS.get(extension):
             reader(_Archive(data), sink)
         else:
@@ -561,7 +586,7 @@ def _extract_sync(data: bytes, extension: str) -> ExtractionResult:
     text = sink.text()
     if not text:
         return ExtractionResult("", False, "no extractable text")
-    return ExtractionResult(text, True, "truncated" if sink.full else "ok")
+    return ExtractionResult(text, True, "truncated" if truncated or sink.full else "ok")
 
 
 async def extract_text_from_file(data: bytes, mime_type: str, filename: str | None) -> ExtractionResult:
@@ -586,16 +611,17 @@ def _append_text_with_byte_limit(parts: list[str], value: str, remaining: int) -
 def extract_bounded_pdf_text_sync(
     data: bytes,
     *,
-    max_pages: int | None,
+    max_pages: int,
     max_text_bytes: int,
+    past_max_pages: Literal["refuse", "truncate"] = "refuse",
 ) -> BoundedPDFExtractionResult:
     """Extract PDF text up to fixed bounds, never rasterizing.
 
     A PDF of more than ``max_pages`` pages is refused before any page text is
-    read, and output stops at ``max_text_bytes`` of UTF-8. ``max_pages=None``
-    reads every page, for an upload already bounded by the files size limit.
+    read, or with ``past_max_pages="truncate"`` read for its first ``max_pages``
+    pages and reported truncated. Output stops at ``max_text_bytes`` of UTF-8.
     """
-    if (max_pages is not None and max_pages <= 0) or max_text_bytes <= 0:
+    if max_pages <= 0 or max_text_bytes <= 0:
         raise ValueError("PDF extraction limits must be positive")
 
     try:
@@ -606,13 +632,14 @@ def extract_bounded_pdf_text_sync(
     with _PDFIUM_LOCK:
         pdf = pdfium.PdfDocument(data)
         try:
-            if max_pages is not None and len(pdf) > max_pages:
+            if len(pdf) > max_pages and past_max_pages == "refuse":
                 return BoundedPDFExtractionResult("", False)
 
+            pages = min(len(pdf), max_pages)
             parts: list[str] = []
             remaining = max_text_bytes
-            truncated = False
-            for index in range(len(pdf)):
+            truncated = pages < len(pdf)
+            for index in range(pages):
                 page = pdf[index]
                 try:
                     text_page = page.get_textpage()
