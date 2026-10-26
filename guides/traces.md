@@ -6,8 +6,10 @@ LLM call, routing attempt, guardrail check, MCP connection and tool call, with
 their timing and cost. An LLM call is one kind of span among several, so a trace
 answers what an agent run did and cost, not only what one call did.
 
-No prompt, model output or tool content is recorded. A trace holds names, ids,
-timings, token counts, outcomes and costs.
+A trace holds names, ids, timings, token counts, outcomes and costs. No model
+output or tool output is recorded, and no prompt, command or file path either,
+unless the deployment opts in (see
+[Keeping what a span was about](#keeping-what-a-span-was-about)).
 
 An LLM call's input tokens are its whole prompt, cached tokens included,
 whichever way its provider reports them. Beside them the call keeps how many
@@ -26,13 +28,14 @@ Otari never guesses that two requests belong together from their content.
 | A `session_id` request tag | `"metadata": {"session_id": "chat-42"}` | `client` |
 | The agent harness's own session id | Claude Code's `x-claude-code-session-id`, sent on every request | `harness` |
 | The agent harness's own session id | Codex's `thread-id`, or `session-id` without one, on a request whose `originator` or `User-Agent` starts with `codex` | `harness` |
+| A Claude Code span's session | `session.id` on a span Claude Code exported | `otlp` |
 | An OTLP span's Claude session | `anthropic.session.id` on an exported span | `otlp` |
 | An OTLP span's conversation | `gen_ai.conversation.id` on an exported span | `otlp` |
 | An OTLP span's Otari label | `otari.session_label` on an exported span | `otlp` |
 
 A request that names no session is a trace of its own. To group a custom
 client's requests, send one of the signals above. An exported span that names
-none of the three OTLP attributes is grouped by its OTel trace instead, and when
+none of the OTLP attributes is grouped by its OTel trace instead, and when
 it names more than one, the first in the table wins.
 
 A session belongs to the user whose API key sent it: two people who choose the
@@ -104,7 +107,7 @@ without a name.
   are timed as they run.
 - **Tools the client runs** (a shell, a file read in a coding agent) are
   recorded from the request that carries their result: the tool's name, whether
-  it failed, and when the result arrived. Their start is when the step before
+  it returned an error, and when the result arrived. Their start is when the step before
   ended, so their duration is marked approximate.
 
 ## Sessions and failures
@@ -136,12 +139,119 @@ each of these spans with the `otel_trace_id` and `otel_span_id` it was exported
 with, in lowercase hex, so it can be joined back to the same trace in another
 backend. A span the gateway records itself has neither.
 
+### Claude Code without routing
+
+Claude Code can export its own spans, so a session is traced without sending
+its model traffic through Otari, guardrail checks included. The setup is in
+[Send Claude Code sessions to Otari](use-with-claude-code.md#send-claude-code-sessions-to-otari).
+
+Each prompt becomes a turn, with its model calls and the tools it ran. A tool
+call keeps a digest of its id, never the id itself, and records who allowed it
+or refused it: a tool a hook refused, such as an
+[agent guardrail](agent-guardrails.md), is `blocked` with the decision source
+`hook`. A blocked tool call is a guardrail doing its job, not an error, and does
+not count toward a session's errors. Nor does a tool call that returned an
+error, such as a command that exited non-zero: the agent reads that error like
+any other result, and `grep` finding nothing or a test failing on purpose
+returns one too. A tool the gateway runs itself (an MCP tool, web search, web
+fetch or code execution) still records an error result as an error, as
+[Sessions and failures](#sessions-and-failures) describes.
+
+A session's cost comes from its logs, not its spans: Otari prices each model
+request's `api_request` event at the deployment's rates, cache reads and writes
+included, and shows the cost on the request and its session, so a session
+whose logs are not exported has its tokens but no cost. The cost is
+what the requests are worth at API prices, so on a Claude subscription it is
+not what was charged.
+
+A session's header counts its tool calls and the gates its hooks ran, each
+broken down on hover: the calls by tool, and the gates by what they decided.
+**At a glance** opens a session with what it did and where its time and money
+went: its turns, model requests and tool calls, then one bar for its time and
+one for its cost, each with a row per part.
+
+- **Time** splits the session into model requests, hooks, running tools,
+  waiting for you to approve a call, and idle between turns. When idle is more
+  than half the session, the bar draws it shorter, marked `//`, and its row
+  keeps the true time and share. Running tools opens onto each tool's calls and
+  running time. A call that started a subagent runs until the subagent's last
+  span, so its time also counts as model time, and the panel says when parts
+  overlap like that. Tools that ran inside the request that called them, as a
+  gateway's built-in web search and code execution do, get a lane of their own
+  under the model's part. Each gate is timed by its own run, so a slow judge
+  gate shows on its own.
+- **Cost** is the session's total, split by meter (fresh input, output, cache
+  reads and cache writes) when the requests were priced by the token, with what
+  reading from the cache saved over paying for those tokens as fresh input.
+  Requests priced whole, as a gateway prices a routed request, are split by
+  model instead. A session with nothing priced says so rather than $0.00.
+
+A judge gate that [reports its model calls](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/agent-guardrails/agent-guardrails-reference#what-otari-hook-reports)
+is priced like a request and counted in the session's cost, though not in any
+turn's. Its check shows the model, the tokens and the cost, and **At a glance**
+says what the judge gates cost in all.
+
+A turn shows what its requests cost. A tool call shows an estimate, marked `≈`,
+because a provider bills requests, not tool calls. It is read off the requests
+either side of the call, in the context the call ran in (a subagent has its
+own):
+
+- **Calling it:** its share of the output of the request that called it.
+- **Adding its result:** how much the next request's context grew, at what that
+  request paid for new input, usually a cache write.
+- **Re-reading it:** the result again on every later request, at the cache-read
+  rate, or the cache-write rate once the cache expired, until the context is
+  compacted.
+
+Calls made together share these equally, since a request reports how much its
+context grew, not how much of that each result was. An `Agent` call also carries
+what its subagent's requests cost, which is exact. The estimate assumes one
+main model per context, so in a session that switches models with `/model`
+partway through, the calls around the switch get rougher estimates.
+
+**Cost by tool** adds the estimates up for the session: each tool's calls and
+cost, and its share of the session. A subagent's calls are listed under the
+call that ran it, with the models the subagent used and what its own reasoning
+and answers cost, and are counted there once. What judge gates cost is listed
+apart. What no tool call accounts for, such as the prompts and the answers, is
+listed last. It is where to look before
+moving a tool's work, or a subagent, to a smaller model.
+
+### Keeping what a span was about
+
+A trace keeps no prompt, command or file path. A deployment can keep them by
+setting `OTARI_TRACE_CONTENT_ENABLED=true`. They are stored encrypted with
+`OTARI_SECRET_KEY`, the key that encrypts stored provider credentials, and are
+not kept at all on a deployment without it. They are kept only when the agent
+sends them:
+
+- Claude Code sends the prompt that opened a turn with `OTEL_LOG_USER_PROMPTS=1`,
+  and each tool's command or file path with `OTEL_LOG_TOOL_DETAILS=1`. Otari
+  never keeps a tool's output, even when Claude Code exports it
+  (`OTEL_LOG_TOOL_CONTENT=1`).
+- `otari hook` sends the command or paths a gate checked, and the gate's own
+  detail, with `OTARI_HOOK_REPORT_CONTENT=1`.
+
+A span shows what it was about as its input, and a tool call is named for its
+command or file in the tree. A span's content is sealed for that span alone, and
+reads back empty once no configured key opens it, so keep a rotated-out key in
+`OTARI_SECRET_KEY` for as long as you keep traces. Only the deployment operator, an
+owner or admin of the organization, and the user a session belongs to read its
+content; any other member reads the session with every span's content empty.
+
 ## Reading traces
 
 | Endpoint | Who |
 | --- | --- |
 | `GET /api/v1/traces`, `/count`, `/series`, `/{trace_id}`, `/requests/{request_id}` | the deployment operator, every workspace of their active organization |
 | `GET /api/v1/organizations/me/traces`, and the same four | a signed-in member: an owner or admin reads every workspace of their active organization, anyone else the workspaces they belong to |
+
+`/series` counts the sessions active in each bucket of a window: a session is
+active from its start to its last activity, so a long one counts in every bucket
+it ran through. `bucket` is `1m`, `5m`, `30m`, `hour`, `6h` or `day`.
+Every read takes the window the same way: `start` and `end` keep the sessions
+active between them (last active at or after `start`, started before `end`), so a
+session still running past `end` is listed in the window it was counted in.
 
 A list read narrows to one workspace with `workspace_id`, inside the caller's
 scope and never beyond it. `q` matches any part of a session's trace id, name,
@@ -163,6 +273,7 @@ Deleting a user erases their traces, as it erases their telemetry.
 | `trace_capture_enabled` | `true` | Record traces and serve the read API. Requires restart. |
 | `trace_retention_days` | `30` | Delete a trace once it has had no activity for this long. |
 | `trace_session_max_age_days` | `90` | Delete a session's trace this long after it started, even while it is active, so a reused session id starts a new trace. |
+| `trace_content_enabled` | `false` | Keep what an instrumented agent says a span was about; see [Keeping what a span was about](#keeping-what-a-span-was-about). |
 
 Traces are written off the request path, within fixed limits: a trace never
 slows or fails a request, and when the writer cannot keep up it drops whole

@@ -19,39 +19,37 @@ cd otari
 
 Run every command that follows from this directory.
 
-## 2. Write the configuration file
+## 2. Create the settings
 
-Create `config.yml`. It tells Otari to keep its data in the PostgreSQL database
-that Compose starts, and to price common models with the prices bundled in
-Otari:
-
-```bash
-cat > config.yml <<'EOF'
-database_url: "postgresql://otari:otari@postgres:5432/otari"
-default_pricing: true
-EOF
-```
-
-## 3. Create the secrets
-
-Otari needs three secrets: a master key you manage the gateway with, a key that
-encrypts the provider credentials it stores, and a pepper for the copies of
-attached files it makes at providers. Generate all three into `.env`, which
-Compose reads:
+Otari runs here on environment variables alone, which Compose reads from
+`.env`. Generate the file:
 
 ```bash
 export OTARI_MASTER_KEY=$(openssl rand -hex 32)
 cat > .env <<EOF
+OTARI_CONFIG_PATH=/dev/null
+OTARI_DATABASE_URL=postgresql://otari:otari@postgres:5432/otari
+OTARI_DEFAULT_PRICING=true
 OTARI_MASTER_KEY=$OTARI_MASTER_KEY
 OTARI_SECRET_KEY=$(docker run --rm docker.io/mzdotai/otari:latest otari gen-secret-key)
 OTARI_PROVIDER_ACCOUNT_PEPPER=$(openssl rand -base64 32)
 EOF
 ```
 
-The first command also keeps the master key in your shell for steps 5 and 6. Git
-ignores both `config.yml` and `.env`.
+- `OTARI_CONFIG_PATH=/dev/null` tells Compose to start Otari with no
+  configuration file.
+- `OTARI_DATABASE_URL` keeps Otari's data in the PostgreSQL database that
+  Compose starts.
+- `OTARI_DEFAULT_PRICING` prices common models with the prices bundled in Otari.
+- `OTARI_MASTER_KEY` is the key you manage the gateway with.
+- `OTARI_SECRET_KEY` encrypts the provider credentials Otari stores.
+- `OTARI_PROVIDER_ACCOUNT_PEPPER` names the provider accounts that hold copies
+  of attached files. Compose requires it.
 
-## 4. Start Otari
+The first command also keeps the master key in your shell for steps 4 and 5. Git
+ignores `.env`.
+
+## 3. Start Otari
 
 ```bash
 docker compose pull
@@ -67,7 +65,7 @@ curl http://localhost:8000/api/v1/health
 The answer includes `"status":"healthy"`. If the connection is refused, wait a
 few more seconds and try again.
 
-## 5. Connect OpenAI
+## 4. Connect OpenAI
 
 Add OpenAI as a provider, replacing `sk-...` with your OpenAI API key:
 
@@ -82,7 +80,7 @@ Otari stores the key encrypted, asks OpenAI which models the key can use, and
 switches on every one it has a price for. The answer describes the new provider
 and shows only the last four characters of your key.
 
-## 6. Create an API key
+## 5. Create an API key
 
 Create the key an application calls Otari with:
 
@@ -95,9 +93,9 @@ curl -X POST http://localhost:8000/api/v1/keys \
 
 Copy the `tk-...` value of `key` from the answer. It is shown only this once.
 
-## 7. Send a request
+## 6. Send a request
 
-Replace `tk-...` with the key from step 6:
+Replace `tk-...` with the key from step 5:
 
 ```bash
 curl http://localhost:8000/api/v1/chat/completions \
@@ -112,11 +110,12 @@ curl http://localhost:8000/api/v1/chat/completions \
 The answer is an OpenAI-style chat completion, with the model's reply in
 `choices[0].message.content` and the tokens it used in `usage`.
 
-## 8. See it in the dashboard
+## 7. See it in the dashboard
 
 Open <http://localhost:8000/> and sign in with your master key (`echo
 $OTARI_MASTER_KEY` prints it). Open **Activity**: your request is listed with
-its model, its tokens and its cost.
+its model, its tokens and its cost. The OpenAI provider you added is listed
+under **Deployment**, **Hosted providers**, in the account menu.
 
 You now have a gateway that authenticates its callers, holds the provider
 credential for them, and records every request.
@@ -126,5 +125,6 @@ credential for them, and records every request.
 - [Admin dashboard](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/dashboard/dashboard): manage keys, users and providers in the browser.
 - [Access control](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides): give each application its own key and budget.
 - [Models](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/models): connect more providers and choose model names.
+- [Connect a llama.cpp server](providers/llamacpp.md): serve a model you run yourself.
 - [Routing](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/reference/gateway/routing): fall back to another model when one fails.
 - [Deployment](deployment.md): run Otari in production.

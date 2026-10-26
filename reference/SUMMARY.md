@@ -57,7 +57,6 @@
   * [Traces](api-endpoints/traces.md)
   * [Usage](api-endpoints/usage.md)
   * [Users](api-endpoints/users.md)
-  * [Web search](api-endpoints/web-search.md)
   * [Web search keys](api-endpoints/web-search-keys.md)
   * [Workspace activation](api-endpoints/workspace-activation.md)
   * [Workspace code execution policy](api-endpoints/workspace-code-execution-policy.md)

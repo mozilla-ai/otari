@@ -173,6 +173,34 @@ those counters, on the budget it was on, so deleting an end user cannot reset
 its budget. Its usage history stays too. When erasure fails the call answers
 5xx and deletes nothing, so it can be repeated.
 
+### Capping a key's end users
+
+Nothing caps how many end users a service key creates unless the key sets
+`max_end_users` (in `POST` or `PATCH /api/v1/keys`, or in config.yml). Set a
+rate limit on a deployment that issues service keys, and send a stable id per
+end user rather than a per-session or per-request value.
+
+With `max_end_users` set, a request that would create one more end user, or
+revive one that was deleted, is refused with 403 and the code
+`end_user_limit_reached`, and nothing is created; the end users the key already
+has keep working. Deleting end users makes room again. `null`, the default, is
+no cap, and `0` admits no new end user at all.
+
+The cap counts the end users of the key's user that are on a budget the key may
+assign (its `end_user_budget_ids`, or its default alone), or every end user of
+that user when the key assigns none. A key with a list and no default also
+counts the end users on no budget, which is where a request naming none starts
+one. So two service keys of one user, each with budgets of its own, such as one
+for signed-in users and one for guests, keep separate caps. For a key with
+budgets of its own, an end user moved to a budget outside its list stops
+counting toward it, and moving one onto the list from outside takes a place, so
+that move is refused with `end_user_limit_reached` when the key is full. A key
+that assigns no budget counts every end user wherever it is moved.
+
+Replicas admitting end users at once cannot exceed the cap: each new or revived
+end user is counted and created while the key's user is locked. Requests from
+live end users never take that lock.
+
 ## End-user routes
 
 | Request | Does |

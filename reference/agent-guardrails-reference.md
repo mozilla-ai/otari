@@ -785,10 +785,44 @@ stderr, and 0 otherwise, with any notice in `systemMessage`.
 | `--judge-cli` | `OTARI_HOOK_JUDGE_CLI` | the harness's own CLI | Comma-separated, ordered judge CLIs to try (`claude`, `codex`). A gate's `judge_cli` overrides it. |
 | `--judge-dry-run` | `OTARI_HOOK_JUDGE_DRY_RUN` | off | Skip the judge model calls and report what would have run. |
 | `--max-judges` | `OTARI_HOOK_MAX_JUDGES` | `5` | Judge gates evaluated per event, from 1 to 20. Any other value runs the default, with a notice. |
+| | `OTARI_URL`, `OTARI_API_KEY` | unset | The Otari server to report checks to, and the API key to send them with. See [What `otari hook` reports](#what-otari-hook-reports). |
+| | `OTARI_HOOK_REPORT_CONTENT` | off | `1` also reports the command or paths a check read, and each gate's own detail. |
+| | `OTARI_HOOK_REPORT` | on | `off` turns reporting off. |
 
 `--api-key`, `--url` and `--config` are accepted and ignored, so a hook
 registered by an older `otari hook setup` keeps working; re-running `setup`
 removes them.
+
+### What `otari hook` reports
+
+With `OTARI_URL` set, each check sends one span per gate that applied to the
+agent's session, by the session id the harness gives the hook. It names the
+gate, its type, whether it came from the repository or from `~/.otari/`, the
+outcome, whether it blocked, the moment it ran at, a fingerprint of the
+guardrail, and on a tool call the call's id. It never carries a gate's message
+or the paths and commands the gate read, unless `OTARI_HOOK_REPORT_CONTENT=1`.
+
+What each gate is and says goes separately, once per version of the guardrail,
+to the server `OTARI_URL` names: its id, type, enforcement, when it runs,
+whether it is yours or the repository's, and its `message`. The server keeps it.
+
+A gate's span covers the time it took. A judge or verifier gate is timed by its
+own run; any other gate, from when `otari hook` started, since what it waits on
+is the hook starting and reading the evidence. A judge gate run with `claude`
+also carries the model it ran on and the tokens it used. Otari books them as the
+session's usage, under the source `otari-hook`, and prices them like the
+session's own requests (see [Agent traces](https://mozilla-ai.gitbook.io/otari-preview/1IBsGVIwnr70CsAaCBAO/guides/observability/traces#claude-code-without-routing)).
+A judge run with Codex carries no usage yet.
+
+A report is written to `~/.otari/outbox/`, under the server and key it is for,
+and a separate process sends it with that same key. One the server cannot take
+yet, a rejected key included, waits there for the next check, for up to a day.
+The API key is read from the environment when it is sent and never written to
+the outbox.
+
+Without `OTARI_URL`, a harness's own OpenTelemetry trace export
+(`OTEL_TRACES_EXPORTER=otlp` with `OTEL_EXPORTER_OTLP_ENDPOINT` and its headers)
+is used instead.
 
 ### `otari hook setup`
 

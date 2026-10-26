@@ -55,6 +55,7 @@ The start asks each provider for its models, so the first start after the
 upgrade can take a little longer. It offers every model the provider lists
 switched on, priced or not, as the stored provider served it, on every path:
 completions, routing-policy fallbacks, the pass-through endpoints and batches.
+Those models stay switched on after a later **Update catalog**.
 A moved provider starts with "Serve models not on its list" off. A model it does
 not list is refused until you add it on the Hosted providers page, or turn that
 setting on.
