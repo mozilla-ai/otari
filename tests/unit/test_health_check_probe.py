@@ -118,6 +118,7 @@ def test_which_models_are_asked_for_a_chat_completion(model_id: str, output_moda
         ("Basic dXNlcjpwYXNzd29yZA== rejected", "[redacted] rejected"),
         ("body api_key: hunter2hunter2", "body [redacted]"),
         ("otari tk_abcdefghijklmnop", "otari [redacted]"),
+        ("Incorrect API key provided: key-abcdefgh12345678", "Incorrect API key provided: [redacted]"),
     ],
 )
 @pytest.mark.asyncio

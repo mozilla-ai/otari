@@ -2,6 +2,7 @@
 
 from gateway.exceptions import (
     TenancyConflictError,
+    TenancyError,
     TenancyForbiddenError,
     TenancyNotFoundError,
     TenancyValidationError,
@@ -201,6 +202,24 @@ class ProviderEndpointAlreadyExistsError(TenancyConflictError):
 
 class ProviderEndpointInvalidError(TenancyValidationError):
     """A name, provider, base URL or default field the endpoint cannot be saved with."""
+
+
+class HostedCatalogPricesChangedError(TenancyConflictError):
+    """The prices an operator reviewed are no longer the pending ones, or are pending no more.
+
+    Another update fetched or applied prices since the preview, so applying
+    would apply something nobody looked at. Nothing changes; preview again.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("The models.dev prices changed since they were previewed. Preview the update again.")
+
+
+class HostedCatalogPricesUnsavedError(TenancyError):
+    """The reviewed prices could not be applied. Its message is logged, never returned."""
+
+    def __init__(self) -> None:
+        super().__init__("Unable to apply the models.dev prices")
 
 
 class HostedCatalogEmptyError(TenancyConflictError):

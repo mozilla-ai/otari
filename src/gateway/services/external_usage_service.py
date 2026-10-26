@@ -162,7 +162,8 @@ _CLAUDE_SDK_SCOPE_PREFIX = "com.anthropic.sdk."
 _CLAUDE_PROVIDERS = {"aws.bedrock": "bedrock", "gcp.vertex_ai": "vertexaianthropic"}
 
 
-def _count(value: Any) -> int:
+def token_count(value: Any) -> int:
+    """A telemetry attribute as a token count: a non-negative integer, or 0 when it is not one."""
     try:
         return max(int(value), 0)
     except (TypeError, ValueError):
@@ -253,14 +254,14 @@ def claude_usage_events(
             _claude_event(
                 attrs,
                 event_id=str(response_id),
-                input_tokens=_count(attrs.get("gen_ai.usage.input_tokens")),
-                output_tokens=_count(attrs.get("gen_ai.usage.output_tokens")),
-                cache_read=_count(attrs.get("gen_ai.usage.cache_read.input_tokens")),
-                cache_write=_count(attrs.get("gen_ai.usage.cache_write.input_tokens")),
+                input_tokens=token_count(attrs.get("gen_ai.usage.input_tokens")),
+                output_tokens=token_count(attrs.get("gen_ai.usage.output_tokens")),
+                cache_read=token_count(attrs.get("gen_ai.usage.cache_read.input_tokens")),
+                cache_write=token_count(attrs.get("gen_ai.usage.cache_write.input_tokens")),
                 cache_write_1h=0
                 if partial_split
-                else _count(attrs.get("anthropic.usage.cache_creation.ephemeral_1h_input_tokens")),
-                reasoning=_count(attrs.get("gen_ai.usage.reasoning.output_tokens")),
+                else token_count(attrs.get("anthropic.usage.cache_creation.ephemeral_1h_input_tokens")),
+                reasoning=token_count(attrs.get("gen_ai.usage.reasoning.output_tokens")),
                 model=model,
                 timestamp=timestamp,
                 duration_ms=duration_ms,
@@ -273,8 +274,8 @@ def claude_usage_events(
             _claude_event(
                 attrs,
                 event_id=f"{response_id}:compaction",
-                input_tokens=_count(attrs.get("anthropic.usage.compaction.input_tokens")),
-                output_tokens=_count(attrs.get("anthropic.usage.compaction.output_tokens")),
+                input_tokens=token_count(attrs.get("anthropic.usage.compaction.input_tokens")),
+                output_tokens=token_count(attrs.get("anthropic.usage.compaction.output_tokens")),
                 model=model,
                 timestamp=timestamp,
                 duration_ms=None,
@@ -287,10 +288,10 @@ def claude_usage_events(
                 attrs,
                 event_id=span_key,
                 model=attrs.get("gen_ai.response.model") or attrs.get("gen_ai.request.model"),
-                input_tokens=_count(attrs.get("gen_ai.usage.input_tokens")),
-                output_tokens=_count(attrs.get("gen_ai.usage.output_tokens")),
-                cache_read=_count(attrs.get("gen_ai.usage.cache_read.input_tokens")),
-                cache_write=_count(attrs.get("gen_ai.usage.cache_write.input_tokens")),
+                input_tokens=token_count(attrs.get("gen_ai.usage.input_tokens")),
+                output_tokens=token_count(attrs.get("gen_ai.usage.output_tokens")),
+                cache_read=token_count(attrs.get("gen_ai.usage.cache_read.input_tokens")),
+                cache_write=token_count(attrs.get("gen_ai.usage.cache_write.input_tokens")),
                 timestamp=timestamp,
                 duration_ms=duration_ms,
                 failed=failed,

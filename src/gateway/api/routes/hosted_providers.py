@@ -27,14 +27,22 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, Query, status
 
-from gateway.api.deps import HostedProviderServiceDep, require_deployment_operator_or_absent, verify_master_key
+from gateway.api.deps import (
+    HostedCatalogUpdateDep,
+    HostedProviderServiceDep,
+    require_deployment_operator_or_absent,
+    verify_master_key,
+)
 from gateway.api.routes.organizations import Message
 from gateway.core.surface import Surface
 from gateway.schemas.providers import (
     DeploymentProviderMigrationPublic,
     DeploymentProviderMigrationRequest,
     HostedAvailableModelsPublic,
-    HostedCatalogRefreshPublic,
+    HostedCatalogUpdatePreviewPublic,
+    HostedCatalogUpdatePreviewRequest,
+    HostedCatalogUpdatePublic,
+    HostedCatalogUpdateRequest,
     HostedModelCreateRequest,
     HostedModelPublic,
     HostedModelsPublic,
@@ -149,32 +157,34 @@ async def discard_deployment_provider(instance: str, service: HostedProviderServ
     await service.discard_deployment_provider(instance)
 
 
-@router.get("/refresh/preview")
-async def preview_catalog_refresh(service: HostedProviderServiceDep) -> HostedCatalogRefreshPublic:
-    """What a catalog sweep would remove, without removing it.
+@router.post("/catalog-update/preview")
+async def preview_catalog_update(
+    catalog: HostedCatalogUpdateDep, body: HostedCatalogUpdatePreviewRequest
+) -> HostedCatalogUpdatePreviewPublic:
+    """What updating the catalog would do: the models.dev price changes, then what each provider newly lists.
 
-    A GET, and a truthful one: it writes nothing. It does dial every enabled
-    provider, as ``available-models`` does, because a model the provider still
-    lists would survive the sweep and previewing it as doomed would be a lie.
+    A POST, because it holds the fetched prices as pending for the apply to
+    name by their ``digest``; nothing else is written. It dials every enabled
+    provider. A price fetch that fails is reported in ``price_error`` and the
+    model lists are still previewed. With ``cleanup``, it also previews which
+    prices of models no provider serves would be removed.
     """
-    return await service.refresh_catalog(apply=False)
+    return await catalog.preview(cleanup=body.cleanup)
 
 
-@router.post("/refresh")
-async def refresh_catalog(service: HostedProviderServiceDep) -> HostedCatalogRefreshPublic:
-    """Re-ask every enabled provider what it lists, then take the rest off the catalog.
+@router.post("/catalog-update")
+async def update_catalog(
+    catalog: HostedCatalogUpdateDep, body: HostedCatalogUpdateRequest
+) -> HostedCatalogUpdatePublic:
+    """Apply the reviewed prices, then refresh every provider's models, then the cleanup if asked.
 
-    The whole deployment rather than one provider: a stored price is what puts a
-    model on a tenant's Models page, and a price under a provider nothing here
-    serves cannot be reached by a per-provider refresh. A model list whose
-    provider nothing defines any more, such as a removed ``config.yml`` entry,
-    goes too, and is named in ``orphaned_rosters``. Where no provider offers a
-    model, only those lists go and every price stays; with none of them either,
-    the sweep answers 409. Declared before the
-    ``/{provider}`` paths to read in the order the surface is used; no method
-    collides in any case.
+    The price step comes first, so the model step prices new models at the
+    prices it applied, and a model held for want of a price is served once it
+    has one. Without a ``digest`` no price changes. A ``digest`` that no longer
+    names the pending prices answers 409 and changes nothing. ``cleanup``
+    removes the prices of models no provider serves, with their history.
     """
-    return await service.refresh_catalog(apply=True)
+    return await catalog.apply(digest=body.digest, cleanup=body.cleanup)
 
 
 @router.patch("/{provider}")

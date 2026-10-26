@@ -52,7 +52,7 @@ from gateway.api.deps import (
 from gateway.api.request_id import set_request_id
 from gateway.api.routes._attempt_metrics import record_attempt
 from gateway.api.routes._attempts import classify_local_attempt_error
-from gateway.api.routes._helpers import resolve_user_id, with_retry_hint
+from gateway.api.routes._helpers import missing_credential_error, resolve_user_id, with_retry_hint
 from gateway.api.routes._pipeline import (
     FUNDS_CHECK_UNAVAILABLE_DETAIL,
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
@@ -554,6 +554,11 @@ async def run_passthrough(
                 hosted=model_provider_port_on(raw_request, db),
                 organization_id=organization_id,
             )
+            if unpriced.code == PRICING_REQUIRED:
+                logger.warning(
+                    "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on",
+                    model,
+                )
             # Record the rejection so dropped traffic is visible in the activity
             # log and countable as an error, rather than only reaching the
             # operator as a user complaint. cost stays null: nothing was spent.
@@ -636,6 +641,10 @@ async def run_passthrough(
                 and config.require_pricing
                 and not can_price(pricing, meter=billing.meter, reports_tokens=billing.reports_tokens)
             ):
+                logger.warning(
+                    "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on",
+                    f"{resolved.instance}:{resolved.model}",
+                )
                 raise await _refuse(
                     reservation,
                     resolved,
@@ -795,10 +804,7 @@ async def run_passthrough(
         missing = missing_credential(e)
         if missing is not None:
             logger.warning("No credential configured for %s:%s", resolved.provider, resolved.model)
-            public = missing.behind_alias(resolved.alias)
-            raise HTTPException(
-                status_code=public.status_code, detail=public.detail, headers=error_headers(public.code)
-            ) from e
+            raise missing_credential_error(missing.behind_alias(resolved.alias)) from e
 
         mapped = map_provider_error(e) if map_provider_error else None
         if mapped is not None:
@@ -1166,6 +1172,9 @@ async def run_decision(
     ):
         await refund_reservation(db, reservation)
         no_pricing_detail = no_pricing_error_detail(selector)
+        logger.warning(
+            "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on", selector
+        )
         await log_rejection(no_pricing_detail, row_model=model, row_provider=provider_name, status_code=402)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,

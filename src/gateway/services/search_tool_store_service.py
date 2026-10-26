@@ -24,7 +24,6 @@ warning rather than crashing the gateway.
 """
 
 import asyncio
-import time
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Final, cast
@@ -66,7 +65,6 @@ UNSET: Final = _Unset()
 # for a search row and a config.fetch_tools value for a fetch row
 _cache: dict[str, dict[str, Any]] = {}
 _fetch_cache: dict[str, dict[str, Any]] = {}
-_cached_at: float | None = None
 # Each row's kind and version as the last overlay saw it, so what the instance
 # rules say about a row is logged when it is new or has changed, not on every
 # refresh.
@@ -106,21 +104,13 @@ def _row_to_entry(row: SearchToolCredential) -> dict[str, Any]:
     return entry
 
 
-def cache_is_stale(ttl: float = SEARCH_TOOL_CACHE_TTL_SECONDS) -> bool:
-    """Whether the cache has never been loaded or has outlived ``ttl``."""
-    return _cached_at is None or (time.monotonic() - _cached_at) >= ttl
-
-
 def reset_search_tool_cache() -> None:
     """Drop the overlay cache so the next load starts clean (startup, tests)."""
-    global _cached_at  # noqa: PLW0603
-
     _cache.clear()
     _fetch_cache.clear()
     _seen_rows.clear()
     _reported_references.clear()
     _read_settings.clear()
-    _cached_at = None
 
 
 def config_file_search_tools(config: GatewayConfig) -> dict[str, dict[str, Any]]:
@@ -176,8 +166,6 @@ def _overlay_rows(config: GatewayConfig, rows: Sequence[SearchToolCredential], *
     it. Startup passes ``False``, because the lifespan's own check reports
     every instance once the runtime settings have loaded too.
     """
-    global _cached_at  # noqa: PLW0603
-
     overlays: dict[str, dict[str, dict[str, Any]]] = {"search": {}, "fetch": {}}
     seen: dict[str, tuple[str, datetime | None]] = {}
     changed: dict[str, list[str]] = {"search": [], "fetch": []}
@@ -203,7 +191,6 @@ def _overlay_rows(config: GatewayConfig, rows: Sequence[SearchToolCredential], *
     _cache.update(overlays["search"])
     _fetch_cache.clear()
     _fetch_cache.update(overlays["fetch"])
-    _cached_at = time.monotonic()
     shadowed = apply_to_config(config)
     if report_changes and (changed["search"] or changed["fetch"]):
         warn_about_instances(config, changed["search"], changed["fetch"])

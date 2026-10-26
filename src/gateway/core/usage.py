@@ -141,9 +141,18 @@ def cache_write_tokens_of(usage: CompletionUsage) -> int:
 
 
 def cache_write_1h_tokens_of(usage: CompletionUsage) -> int:
-    """Return the Anthropic 1-hour cache-write subset carried by ``usage``."""
+    """Return the 1-hour cache-write subset carried by ``usage``.
+
+    Handles both :class:`GatewayUsage` (explicit field) and a plain
+    ``CompletionUsage`` (falls back to
+    ``prompt_tokens_details.cache_creation_token_details.ephemeral_1h_input_tokens``,
+    which any-llm fills on Chat Completions for Anthropic and Gemini's context caches).
+    """
     if isinstance(usage, GatewayUsage):
         return usage.cache_write_1h_tokens
+    details = usage.prompt_tokens_details
+    if details is not None and details.cache_creation_token_details is not None:
+        return details.cache_creation_token_details.ephemeral_1h_input_tokens or 0
     return 0
 
 

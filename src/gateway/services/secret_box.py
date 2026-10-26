@@ -21,6 +21,7 @@ from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from gateway.core.env import otari_env
 
 SECRET_KEY_ENV = "SECRET_KEY"
+_GENERATE_HINT = "Generate one with `otari gen-secret-key`."
 
 
 class SecretBoxUnavailableError(RuntimeError):
@@ -75,7 +76,9 @@ def get_secret_box() -> MultiFernet:
     """
     keys = _load_keys()
     if not keys:
-        raise SecretBoxUnavailableError("OTARI_SECRET_KEY is not set; it is required to store provider credentials.")
+        raise SecretBoxUnavailableError(
+            f"OTARI_SECRET_KEY is not set or is empty; it is required to store provider credentials. {_GENERATE_HINT}"
+        )
     return _box_for(tuple(keys))
 
 
@@ -87,7 +90,7 @@ def _box_for(keys: tuple[str, ...]) -> MultiFernet:
         fernets = [Fernet(key.encode()) for key in keys]
     except (ValueError, TypeError):
         # Do not include the offending value: it is key material.
-        raise SecretBoxUnavailableError("OTARI_SECRET_KEY is not a valid Fernet key.") from None
+        raise SecretBoxUnavailableError(f"OTARI_SECRET_KEY is not a valid Fernet key. {_GENERATE_HINT}") from None
     return MultiFernet(fernets)
 
 

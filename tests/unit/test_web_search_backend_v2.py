@@ -595,6 +595,7 @@ async def test_the_search_and_its_enrichment_are_recorded_under_the_instance_wit
             unreported_calls=1,
             reported_cost=Decimal("0.005"),
             enrichment_cost=Decimal("0.004"),
+            deployment_paid=True,
         )
     ], "two hits enriched at 0.002; an enrichment fetcher that reports nothing adds nothing"
 

@@ -320,6 +320,8 @@ async def test_a_search_with_no_hits_is_billed_at_the_rate(
         "units": 1,
         "unit_rate": pytest.approx(_SEARCH_UNIT_COST),
         "cost": pytest.approx(_SEARCH_UNIT_COST),
+        # The legacy settings' search runs on the deployment's account.
+        "deployment_paid": True,
     }
 
 
@@ -506,13 +508,22 @@ async def test_a_reported_zero_settles_at_zero_beside_an_unreported_call_at_the_
 
     [row] = writer.logs
     assert row.pricing_breakdown == [
-        {"meter": "web_search_calls", "label": "exa:exa-search", "units": 1, "unit_rate": 0.0, "cost": 0.0},
+        {
+            "meter": "web_search_calls",
+            "label": "exa:exa-search",
+            "units": 1,
+            "unit_rate": 0.0,
+            "cost": 0.0,
+            "deployment_paid": True,
+        },
         {
             "meter": "web_search_calls",
             "label": "otari:web_search",
             "units": 1,
             "unit_rate": _SEARCH_UNIT_COST,
             "cost": _SEARCH_UNIT_COST,
+            # Recorded with no payer, so read off its label.
+            "deployment_paid": False,
         },
     ]
     meter = (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"]
@@ -908,6 +919,8 @@ async def test_searches_the_provider_ran_are_billed_at_its_list_price(async_db: 
         "units": 2,
         "unit_rate": 0.01,
         "cost": 0.02,
+        # The model call was not deployment-paid, so neither were its provider's searches.
+        "deployment_paid": False,
     }
     assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"]["billed"] == 2
     assert row.cost is not None

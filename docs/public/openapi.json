@@ -104,7 +104,7 @@
             "type": "string"
           },
           "accepted_by": {
-            "description": "`operator` for a dashboard confirm, `schedule` for the auto policy.",
+            "description": "`operator` for a catalog update an operator ran, `schedule` for the auto policy.",
             "title": "Accepted By",
             "type": "string"
           },
@@ -8701,6 +8701,94 @@
         "title": "HostedCatalogKeptGroupPublic",
         "type": "object"
       },
+      "HostedCatalogPriceChangePublic": {
+        "description": "One model whose models.dev price a catalog update adds, changes or removes.",
+        "properties": {
+          "change": {
+            "enum": [
+              "added",
+              "changed",
+              "removed"
+            ],
+            "title": "Change",
+            "type": "string"
+          },
+          "model_key": {
+            "title": "Model Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_key",
+          "change"
+        ],
+        "title": "HostedCatalogPriceChangePublic",
+        "type": "object"
+      },
+      "HostedCatalogPriceUpdatePublic": {
+        "description": "The models.dev price changes a catalog update would apply.\n\n``changes`` is a sample and the counts are the totals. ``digest`` names the\nfetched prices, so applying them applies what was reviewed. ``needs_review``\nis why the scheduled update would hold them for a person under ``auto``.",
+        "properties": {
+          "added_count": {
+            "title": "Added Count",
+            "type": "integer"
+          },
+          "changed_count": {
+            "title": "Changed Count",
+            "type": "integer"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/HostedCatalogPriceChangePublic"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "changes_truncated": {
+            "title": "Changes Truncated",
+            "type": "boolean"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "needs_review": {
+            "title": "Needs Review",
+            "type": "boolean"
+          },
+          "removed_count": {
+            "title": "Removed Count",
+            "type": "integer"
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Reason"
+          }
+        },
+        "required": [
+          "fetched_at",
+          "added_count",
+          "changed_count",
+          "removed_count",
+          "changes",
+          "changes_truncated",
+          "digest",
+          "needs_review"
+        ],
+        "title": "HostedCatalogPriceUpdatePublic",
+        "type": "object"
+      },
       "HostedCatalogProviderRefreshPublic": {
         "description": "What one hosted provider newly lists, as a catalog sweep found it.\n\nPer provider rather than one total, because a dial that failed is a fact\nabout that provider, and the operator has to be told which one went quiet\nrather than read a smaller number than they expected.",
         "properties": {
@@ -8813,6 +8901,97 @@
           "kept"
         ],
         "title": "HostedCatalogRefreshPublic",
+        "type": "object"
+      },
+      "HostedCatalogUpdatePreviewPublic": {
+        "description": "What a catalog update would do: its price changes, then what each provider newly lists.\n\n``prices`` is ``None`` when models.dev changed nothing, or when it could not\nbe fetched, which ``price_error`` then says. ``catalog`` carries the cleanup\nthe preview was asked for, and no removals otherwise.",
+        "properties": {
+          "catalog": {
+            "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
+          },
+          "price_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Error"
+          },
+          "prices": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HostedCatalogPriceUpdatePublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "prices",
+          "catalog"
+        ],
+        "title": "HostedCatalogUpdatePreviewPublic",
+        "type": "object"
+      },
+      "HostedCatalogUpdatePreviewRequest": {
+        "description": "What to preview: the update alone, or with the cleanup.",
+        "properties": {
+          "cleanup": {
+            "default": false,
+            "description": "Also preview removing the prices of models no hosted provider serves.",
+            "title": "Cleanup",
+            "type": "boolean"
+          }
+        },
+        "title": "HostedCatalogUpdatePreviewRequest",
+        "type": "object"
+      },
+      "HostedCatalogUpdatePublic": {
+        "description": "What a catalog update did.",
+        "properties": {
+          "catalog": {
+            "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
+          },
+          "prices_applied": {
+            "title": "Prices Applied",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "prices_applied",
+          "catalog"
+        ],
+        "title": "HostedCatalogUpdatePublic",
+        "type": "object"
+      },
+      "HostedCatalogUpdateRequest": {
+        "description": "What to apply, as the preview showed it.",
+        "properties": {
+          "cleanup": {
+            "default": false,
+            "description": "Also remove the prices of models no hosted provider serves, with their history.",
+            "title": "Cleanup",
+            "type": "boolean"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `digest` of the previewed prices, to apply them; 409 when the pending prices differ. Without it, no price changes.",
+            "title": "Digest"
+          }
+        },
+        "title": "HostedCatalogUpdateRequest",
         "type": "object"
       },
       "HostedModelCreateRequest": {
@@ -16141,18 +16320,6 @@
         "title": "PricingRefreshChangeResponse",
         "type": "object"
       },
-      "PricingRefreshConfirmationResponse": {
-        "description": "Result of activating a reviewed models.dev refresh.",
-        "properties": {
-          "applied": {
-            "default": true,
-            "title": "Applied",
-            "type": "boolean"
-          }
-        },
-        "title": "PricingRefreshConfirmationResponse",
-        "type": "object"
-      },
       "PricingRefreshPreviewResponse": {
         "description": "Reviewable summary of a pending models.dev refresh.",
         "properties": {
@@ -16177,7 +16344,7 @@
           },
           "digest": {
             "default": "",
-            "description": "Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.",
+            "description": "Identity of the pending snapshot, to act on exactly this one: send it as `digest` to `POST /hosted-providers/catalog-update` to apply it, or to `POST /pricing/refresh/reject` to discard it.",
             "title": "Digest",
             "type": "string"
           },
@@ -20662,7 +20829,7 @@
       },
       "ToolChargeLine": {
         "additionalProperties": true,
-        "description": "A gateway-run tool's charge line, one per tool and label.\n\nA subclass with ``label`` required, rather than a defaulted field on\n:class:`UnitChargeLine`, so the per-request, rerank and image lines, and a\nstored tool line without a label, serialize back without a\n``\"label\": null`` they never had.",
+        "description": "A gateway-run tool's charge line, one per tool, label and payer.\n\nA subclass with ``label`` required, rather than a defaulted field on\n:class:`UnitChargeLine`, so the per-request, rerank and image lines, and a\nstored tool line without a label, serialize back without a\n``\"label\": null`` they never had.\n\nA line written since tools are charged by whose account ran them also\ncarries ``deployment_paid``: true where the deployment's account ran the\ncalls, which charges the organization's funds where the deployment bills\nthem, and false where the organization's own key did. It is kept as an extra\nkey rather than declared, so an older line serializes back without it.",
         "properties": {
           "cost": {
             "description": "USD charged for this line.",
@@ -30819,6 +30986,106 @@
         ]
       }
     },
+    "/api/v1/hosted-providers/catalog-update": {
+      "post": {
+        "description": "Apply the reviewed prices, then refresh every provider's models, then the cleanup if asked.\n\nThe price step comes first, so the model step prices new models at the\nprices it applied, and a model held for want of a price is served once it\nhas one. Without a ``digest`` no price changes. A ``digest`` that no longer\nnames the pending prices answers 409 and changes nothing. ``cleanup``\nremoves the prices of models no provider serves, with their history.",
+        "operationId": "hosted-providers-update_catalog",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedCatalogUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedCatalogUpdatePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Catalog",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/catalog-update/preview": {
+      "post": {
+        "description": "What updating the catalog would do: the models.dev price changes, then what each provider newly lists.\n\nA POST, because it holds the fetched prices as pending for the apply to\nname by their ``digest``; nothing else is written. It dials every enabled\nprovider. A price fetch that fails is reported in ``price_error`` and the\nmodel lists are still previewed. With ``cleanup``, it also previews which\nprices of models no provider serves would be removed.",
+        "operationId": "hosted-providers-preview_catalog_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedCatalogUpdatePreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedCatalogUpdatePreviewPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Preview Catalog Update",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
     "/api/v1/hosted-providers/migration": {
       "get": {
         "description": "What moving the deployment providers the retired dashboard page stored onto hosted providers would do.\n\nThe gateway moves them at startup, so this lists the ones it could not\nmove, each with the reason. Writes nothing and dials nothing.",
@@ -30966,66 +31233,6 @@
           }
         ],
         "summary": "Reencrypt Hosted Providers",
-        "tags": [
-          "hosted-providers"
-        ]
-      }
-    },
-    "/api/v1/hosted-providers/refresh": {
-      "post": {
-        "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. A model list whose\nprovider nothing defines any more, such as a removed ``config.yml`` entry,\ngoes too, and is named in ``orphaned_rosters``. Where no provider offers a\nmodel, only those lists go and every price stays; with none of them either,\nthe sweep answers 409. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
-        "operationId": "hosted-providers-refresh_catalog",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Refresh Catalog",
-        "tags": [
-          "hosted-providers"
-        ]
-      }
-    },
-    "/api/v1/hosted-providers/refresh/preview": {
-      "get": {
-        "description": "What a catalog sweep would remove, without removing it.\n\nA GET, and a truthful one: it writes nothing. It does dial every enabled\nprovider, as ``available-models`` does, because a model the provider still\nlists would survive the sweep and previewing it as doomed would be a lie.",
-        "operationId": "hosted-providers-preview_catalog_refresh",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Preview Catalog Refresh",
         "tags": [
           "hosted-providers"
         ]
@@ -41833,96 +42040,6 @@
           }
         ],
         "summary": "List Pricing Drift",
-        "tags": [
-          "pricing"
-        ]
-      }
-    },
-    "/api/v1/pricing/refresh": {
-      "post": {
-        "description": "Fetch the latest defaults and hold them for operator review.",
-        "operationId": "pricing-preview_pricing_refresh",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PricingRefreshPreviewResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Preview Pricing Refresh",
-        "tags": [
-          "pricing"
-        ]
-      }
-    },
-    "/api/v1/pricing/refresh/confirm": {
-      "post": {
-        "description": "Activate the latest reviewed default-price snapshot.",
-        "operationId": "pricing-confirm_pricing_refresh",
-        "parameters": [
-          {
-            "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
-            "in": "query",
-            "name": "digest",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
-              "title": "Digest"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PricingRefreshConfirmationResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Confirm Pricing Refresh",
         "tags": [
           "pricing"
         ]

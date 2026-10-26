@@ -288,12 +288,15 @@ def _is_keyless(provider_type: str) -> bool:
 def hosted_provider_name_problem(name: str, provider: str) -> str | None:
     """Why ``name`` cannot name a hosted provider served by ``provider``, or None when it can.
 
-    The implementation's own name always may. Any other is the prefix of a
+    A reserved name never may, even an implementation's own (``otari``). The
+    implementation's own name otherwise always may. Any other is the prefix of a
     ``name:model`` selector, so it cannot hold the separators a selector splits
     on, and it follows the instance-name rules. Another implementation's name
     is refused, because a request for ``anthropic:...`` must not reach an
     OpenAI endpoint.
     """
+    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
+        return "is reserved; give the provider a name of its own"
     if name == provider:
         return None
     if not name or name != name.strip():
@@ -302,8 +305,6 @@ def hosted_provider_name_problem(name: str, provider: str) -> str | None:
         return "must be at most 64 characters"
     if ":" in name or "/" in name:
         return "must not contain ':' or '/'"
-    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
-        return "is reserved"
     if name in {member.value for member in LLMProvider} or name in PROVIDER_TYPE_ALIASES:
         return "names another provider"
     return None
@@ -1310,9 +1311,9 @@ class GatewayConfig(
         min_length=32,
         description=(
             "Key for the keyed digest that names the provider account a copy of an attached file "
-            "is in. Required while files_provider_upload_enabled is on, and must differ from "
-            "OTARI_SECRET_KEY and the master key. Rotating it only makes the next request copy "
-            "each file again."
+            "is in. Without it, provider copies are off whatever files_provider_upload_enabled "
+            "says. It must differ from OTARI_SECRET_KEY and the master key. Rotating it only "
+            "makes the next request copy each file again."
         ),
     )
     files_provider_upload_ttl_hours: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
@@ -2104,6 +2105,39 @@ class GatewayConfig(
             return providers
         return {instance: ({} if entry is None else entry) for instance, entry in providers.items()}
 
+    @field_validator("providers", mode="after")
+    @classmethod
+    def _check_request_fields(cls, providers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Refuse a ``request_fields`` entry that names anything the gateway sets itself.
+
+        ``request_fields`` lists the extra chat request fields a caller may send this
+        instance's provider. One that shapes the request (``model``, ``messages``,
+        ``stream``) or that the gateway resolves (a credential, the base URL) would
+        land in the provider body over the gateway's own value, and one the request
+        already declares (a completion parameter, ``safety_identifier``) never
+        reaches the extras at all, so either is refused at load.
+        """
+        from any_llm.types.completion import CompletionParams
+
+        from gateway.core.provider_params import CHAT_GATEWAY_FIELDS, FORBIDDEN_ENDPOINT_DEFAULTS
+
+        reserved = FORBIDDEN_ENDPOINT_DEFAULTS | CHAT_GATEWAY_FIELDS | set(CompletionParams.model_fields)
+        for instance, entry in providers.items():
+            fields = entry.get("request_fields")
+            if fields is None:
+                continue
+            if not isinstance(fields, list) or not all(isinstance(name, str) and name for name in fields):
+                msg = f"providers.{instance}.request_fields must be a list of field names"
+                raise ValueError(msg)
+            clashing = sorted(set(fields) & reserved)
+            if clashing:
+                msg = (
+                    f"providers.{instance}.request_fields names {', '.join(clashing)}, which the gateway "
+                    "sets itself or a request already carries"
+                )
+                raise ValueError(msg)
+        return providers
+
     def effective_code_executor(self) -> CodeExecutor:
         """The deployment's answer to who runs a provider-named code-execution tool.
 
@@ -2553,6 +2587,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     if structured_env_config:
         config_dict.update(structured_env_config)
     _apply_json_env_overrides(config_dict)
+    _warn_about_unknown_keys(config_dict)
 
     # Snapshot which bridged fields the YAML config set, before the env
     # overrides below inject OTARI_ values into the same dict: only YAML-set
@@ -2577,6 +2612,18 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.warn_about_half_configured_web_search()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
+
+
+def _warn_about_unknown_keys(config: dict[str, Any]) -> None:
+    """Warn about top-level config keys no setting reads.
+
+    ``GatewayConfig`` ignores extra input so an unrelated ``OTARI_*`` variable
+    cannot fail startup, which also lets a misspelled or misplaced key pass in
+    silence. Not fatal, so a key a newer version reads does not stop an older one.
+    """
+    unknown = sorted(str(key) for key in config if key not in GatewayConfig.model_fields)
+    if unknown:
+        logger.warning("Ignoring unknown config keys (no setting reads them): %s", ", ".join(unknown))
 
 
 def parse_bool_env(value: str) -> bool:

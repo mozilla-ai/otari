@@ -280,6 +280,7 @@ from gateway.services.provider_kwargs import (
     require_declared_credential,
     resolve_provider_selector,
     with_failover_retries,
+    with_request_fields,
 )
 from gateway.services.providers import (
     UnknownHostedUpstreamError,
@@ -345,6 +346,7 @@ from gateway.services.tools import (
     WorkspaceCodeExecutionPolicies,
     admit_mcp_servers,
     admit_web_access,
+    admitted_tools,
     build_web_search_backends,
     decide_candidate_tools,
     declare_code_execution,
@@ -358,8 +360,6 @@ from gateway.services.tools import (
     tools_to_price,
     unpriced_tool_detail,
     validate_web_declarations,
-    web_search_configured,
-    web_search_intercept_enabled,
 )
 from gateway.services.traces import RequestTrace, SessionRef, TurnFacts, harness_of, is_subagent, resolve_session
 from gateway.services.upstream_redaction import redact_upstream_message
@@ -1250,6 +1250,10 @@ class RequestContext:
         # Set once a deployment-paid request passes its funding gate, and ``None``
         # on every other request: settlement charges the organization through it.
         self.deployment_charge: DeploymentCharge | None = None
+        # Set once a request admitted to run a gateway tool on the deployment's
+        # account passes the same gate, whoever pays for its model call:
+        # settlement charges those calls through it when ``deployment_charge`` is unset.
+        self.tool_funding: DeploymentCharge | None = None
         # Whether the provider ``resolve_dispatch_provider`` returned is served on
         # a credential the deployment owns. A walk's candidates carry their own.
         self.deployment_paid = False
@@ -1259,6 +1263,9 @@ class RequestContext:
         # Monotonic clock reading taken as the first provider attempt is sent,
         # which splits ``Server-Timing`` into the gateway's time and the provider's.
         self.dispatched_at: float | None = None
+        # The request's fields beyond its schema's, forwarded only to a provider
+        # instance whose ``request_fields`` lists them (``with_request_fields``).
+        self.request_extras: dict[str, Any] = {}
         # The provider selector resolved once for the
         # pricing/budget gate in `resolve_request_context`. Route handlers
         # reuse this for dispatch instead of calling `resolve_provider_selector`
@@ -1635,21 +1642,8 @@ async def _admit_or_refuse(
             ctx.request_id,
         )
         detail = exc.public_message
-        await release_reservation(ctx)
-        await log_gateway_rejection(
-            db=ctx.db,
-            log_writer=ctx.log_writer,
-            api_key_id=ctx.api_key_id,
-            user_id=ctx.user_id,
-            model=resolved.model,
-            provider=resolved.instance,
-            endpoint=adapter.endpoint,
-            detail=detail,
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            started_at=ctx.started_at,
-            request_id=ctx.request_id,
-            tags=ctx.tags,
-            safety_identifier=ctx.upstream_user,
+        await _record_funding_refusal(
+            ctx, resolved, adapter=adapter, detail=detail, status_code=status.HTTP_402_PAYMENT_REQUIRED
         )
         raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)) from exc
     except Exception as exc:
@@ -1687,6 +1681,25 @@ async def _funding_unavailable(
     adapter: FormatAdapter[Any, Any],
 ) -> HTTPException:
     """Release the reservation, record the refusal, and return the 503 to raise."""
+    await _record_funding_refusal(
+        ctx,
+        resolved,
+        adapter=adapter,
+        detail=FUNDS_CHECK_UNAVAILABLE_DETAIL,
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
+    return adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API)
+
+
+async def _record_funding_refusal(
+    ctx: RequestContext,
+    resolved: ResolvedProvider,
+    *,
+    adapter: FormatAdapter[Any, Any],
+    detail: str,
+    status_code: int,
+) -> None:
+    """Release the reservation of a request its funding gate refused, and log the refusal."""
     await release_reservation(ctx)
     await log_gateway_rejection(
         db=ctx.db,
@@ -1696,14 +1709,13 @@ async def _funding_unavailable(
         model=resolved.model,
         provider=resolved.instance,
         endpoint=adapter.endpoint,
-        detail=FUNDS_CHECK_UNAVAILABLE_DETAIL,
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=detail,
+        status_code=status_code,
         started_at=ctx.started_at,
         request_id=ctx.request_id,
         tags=ctx.tags,
         safety_identifier=ctx.upstream_user,
     )
-    return adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API)
 
 
 async def _provider_not_configured(
@@ -2999,6 +3011,10 @@ async def resolve_request_context(
             hosted=model_provider,
             organization_id=organization_id,
         )
+        if refusal.code == PRICING_REQUIRED:
+            logger.warning(
+                "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on", model
+            )
         # Record the rejection after the refund, so an operator who flipped
         # require_pricing on can see that live traffic is being dropped.
         await log_gateway_rejection(
@@ -3440,43 +3456,6 @@ class ToolContext:
         )
 
     @property
-    def max_web_search_uses(self) -> int | None:
-        """The web-search use cap, when the caller supplied one.
-
-        Not gated on :meth:`native_tools`: the cap bounds what the request is billed
-        for, so it is honored on every declaration shape and in every wire format.
-        Only the *refusal* is format-specific, an Anthropic
-        ``max_uses_exceeded`` result block where the caller can read one and a plain
-        tool error everywhere else.
-
-        ``0`` is a cap of zero searches, not the absence of one. Reading it as
-        "uncapped" would answer a spend limit with unlimited spend, which is the one
-        direction this must not fail; a caller who meant "do not search" is better
-        served by every search being refused than by a bill.
-
-        Invalid values are rejected rather than treated as uncapped, so a malformed
-        spend control cannot fail open. Rejection belongs to ``prepare_gateway_tools``,
-        which is the one place that builds a ``ToolContext`` and the only one holding
-        the ``adapter`` that knows the caller's error envelope. This property is a
-        plain read of a value already validated there; the ``ValueError`` it would
-        raise on an unvalidated entry is a programming error, not a request one.
-        """
-        return read_web_search_max_uses(self.web_search_tool_entry)
-
-    @property
-    def intercepts_web_search(self) -> bool:
-        """Whether this deployment claims the provider-named web-search keywords.
-
-        The same two conditions :func:`prepare_gateway_tools` applies before it
-        extracts one: the opt-in, *and* a backend to intercept to. Both matter to a
-        caller of this property, because it is also the precondition for a
-        gateway-minted server-tool block existing at all: with the toggle on but no
-        backend, the keyword was forwarded and any block in the transcript came from
-        the provider that ran the search (see ``routes/messages.py``).
-        """
-        return web_search_intercept_enabled(self.config) and web_search_configured(self.config)
-
-    @property
     def use_web_search(self) -> bool:
         return self.web.search_tool_entry is not None
 
@@ -3553,7 +3532,11 @@ class SharedToolUse:
 
 
 def _tool_use_caps(search_entry: dict[str, Any] | None, fetch_entry: dict[str, Any] | None) -> dict[str, int]:
-    """The ``max_uses`` caps the caller's declarations set, by tool name."""
+    """The ``max_uses`` caps the caller's declarations set, by tool name.
+
+    A cap of ``0`` refuses every call; reading it as uncapped would answer a spend
+    limit with unlimited spend.
+    """
     caps = (
         (WEB_SEARCH_TOOL_NAME, read_web_search_max_uses(search_entry)),
         (WEB_FETCH_TOOL_NAME, read_web_fetch_max_uses(fetch_entry)),
@@ -3758,6 +3741,9 @@ class ToolBackends:
     ports: ToolPorts
     sandbox_containers: SandboxContainerRegistry | None = None
     sandbox_files: SandboxFileBridge | None = None
+    # Resolved on the request's session, as for the model's funding gate; ``None``
+    # where a test builds this by hand, and no tool is then gated on funds.
+    billing: BillingPort | None = None
 
 
 async def prepare_gateway_tools(
@@ -3814,10 +3800,13 @@ async def prepare_gateway_tools(
             await release_reservation(ctx)
         raise
 
+    admitted = {claimed: answer for claimed, answer in answers.items() if isinstance(answer, _AdmittedTools)}
+    if backends.billing is not None:
+        await _admit_tool_funding(adapter, ctx, backends.billing, admitted.values())
+
     # Gotcha: the connection must not be held across the provider call that follows.
     await release_session(ctx.db)
 
-    admitted = {claimed: answer for claimed, answer in answers.items() if isinstance(answer, _AdmittedTools)}
     caps: dict[str, int] = {}
     for answer in admitted.values():
         caps |= _tool_use_caps(answer.web_access.search_tool_entry, answer.web.fetch_tool_entry)
@@ -3975,6 +3964,100 @@ async def _declare_claims(
     except WebToolDeclarationError as exc:
         return _ToolRefusal(domain_error(adapter, exc))
     return _DeclaredClaims(code=admitted, web=web)
+
+
+async def _admit_tool_funding(
+    adapter: FormatAdapter[Any, Any],
+    ctx: RequestContext,
+    billing: BillingPort,
+    admitted: Iterable[_AdmittedTools],
+) -> None:
+    """Pass a request that may run a gateway tool on the deployment's account through the funding gate.
+
+    The model's gate (:func:`_admit_or_refuse`) only sees the model call, so a
+    request whose organization pays for its model would otherwise run searches
+    and sandboxes on the deployment's account with nothing paid in. The gate is
+    the same one, and so is the refusal. Sets ``ctx.tool_funding``, which
+    settlement charges those calls through.
+    """
+    paid = [
+        tool
+        for answer in admitted
+        for tool in admitted_tools(code_execution=answer.code.use_sandbox, web=answer.web_access)
+        if tool.deployment_paid
+    ]
+    if not paid:
+        return
+    tool_key = gateway_tool_pricing_key(paid[0].name)
+    try:
+        funding = await admit_deployment_paid(
+            billing,
+            deployment_paid=True,
+            organization_id=ctx.organization_id,
+            api_key_id=ctx.api_key_id,
+            user_id=ctx.user_id,
+            request_id=ctx.request_id,
+        )
+    except InsufficientFundsError as exc:
+        logger.info(
+            "Gateway tools refused for insufficient funds: organization=%s request_id=%s",
+            ctx.organization_id,
+            ctx.request_id,
+        )
+        await _refuse_tool_funding(ctx, adapter, tool_key, exc.public_message, status.HTTP_402_PAYMENT_REQUIRED)
+        raise adapter.error(
+            402, exc.public_message, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)
+        ) from exc
+    except Exception as exc:
+        logger.error(
+            "BillingPort failed to admit deployment-paid gateway tools: organization=%s request_id=%s: %s",
+            ctx.organization_id,
+            ctx.request_id,
+            describe_port_error(exc),
+        )
+        try:
+            await ctx.db.rollback()
+        except DATABASE_ERRORS as rollback_error:
+            logger.warning("Could not roll back a failed funding check: %s", describe_database_error(rollback_error))
+        await _refuse_tool_funding(
+            ctx, adapter, tool_key, FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+        raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API) from exc
+    # The commit also lands any credit admission granted, so a request whose
+    # admission did not commit is not served on it, as at the model's gate.
+    if funding is not None and not await release_session(ctx.db):
+        logger.error(
+            "Could not commit a deployment-paid tool admission: organization=%s request_id=%s",
+            ctx.organization_id,
+            ctx.request_id,
+        )
+        await _refuse_tool_funding(
+            ctx, adapter, tool_key, FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+        raise adapter.error(503, FUNDS_CHECK_UNAVAILABLE_DETAIL, ErrorKind.API)
+    ctx.tool_funding = funding
+
+
+async def _refuse_tool_funding(
+    ctx: RequestContext, adapter: FormatAdapter[Any, Any], tool_key: str, detail: str, status_code: int
+) -> None:
+    """Release the reservation and record a request the tools' funding gate refused."""
+    await release_reservation(ctx)
+    await log_gateway_rejection(
+        db=ctx.db,
+        log_writer=ctx.log_writer,
+        api_key_id=ctx.api_key_id,
+        user_id=ctx.user_id,
+        model=tool_key,
+        provider=GATEWAY_TOOL_PRICING_PROVIDER,
+        endpoint=adapter.endpoint,
+        detail=detail,
+        status_code=status_code,
+        started_at=ctx.started_at,
+        request_id=ctx.request_id,
+        tags=ctx.tags,
+        safety_identifier=ctx.upstream_user,
+    )
 
 
 async def _admit_claims(
@@ -4302,7 +4385,13 @@ async def _unpriced_tool(ctx: RequestContext, tools: Sequence[PricedTool]) -> Pr
     requests skip the check, is :func:`tools_to_price`'s to say.
     """
     for tool in tools:
-        rate = await resolve_tool_rate(ctx.db, tool.rate_keys, label=tool.label, organization_id=ctx.organization_id)
+        rate = await resolve_tool_rate(
+            ctx.db,
+            tool.rate_keys,
+            label=tool.label,
+            deployment_paid=tool.deployment_paid,
+            organization_id=ctx.organization_id,
+        )
         if rate is None:
             return tool
     return None
@@ -4394,10 +4483,17 @@ class LoggedUsage(NamedTuple):
     ``pricing_source`` is set only when the model's own tokens were priced, so a
     row whose cost is tool charges alone (an unpriced model that still ran a
     search) reports a cost with no source.
+
+    ``deployment_paid_cost`` is the part of ``cost`` the deployment's account
+    ran, which is what the organization's funds are charged: the model's cost
+    when the model call was deployment-paid, plus each gateway-run tool call the
+    deployment's account ran, whoever paid for the model call. ``None`` where
+    neither part has a cost.
     """
 
     cost: Decimal | None
     pricing_source: PriceSource | None
+    deployment_paid_cost: Decimal | None = None
 
 
 async def record_usage(
@@ -4613,9 +4709,13 @@ async def record_usage(
     # Gateway-run tool calls are a separate charge from the model's tokens, so they
     # are folded in last: after the token branch (which may not have run at all) and
     # after cost_override (which replaces the token cost, not the whole bill).
-    await _apply_tool_charges(db, usage_log, tool_tally)
+    model_cost = usage_log.cost if deployment_paid else None
+    tool_cost = await _apply_tool_charges(db, usage_log, tool_tally)
     if usage_log.cost is not None:
         usage_log.calculated_at = usage_log.timestamp
+    deployment_paid_cost = (
+        None if model_cost is None and tool_cost is None else (model_cost or Decimal(0)) + (tool_cost or Decimal(0))
+    )
 
     # Emitted once here rather than inside the pricing branch so the cost metric
     # tracks the row's total, including tool charges on an unpriced model. A priced
@@ -4638,7 +4738,7 @@ async def record_usage(
         )
 
     await log_writer.put(usage_log)
-    return LoggedUsage(usage_log.cost, pricing_source)
+    return LoggedUsage(usage_log.cost, pricing_source, deployment_paid_cost)
 
 
 async def bills_per_request(
@@ -4713,11 +4813,12 @@ async def _apply_tool_charges(
     db: AsyncSession,
     usage_log: UsageLog,
     tally: ToolUsageTally | None,
-) -> None:
-    """Fold a request's gateway-run tool calls onto its usage row.
+) -> Decimal | None:
+    """Fold a request's gateway-run tool calls onto its usage row, returning the part the deployment's account ran.
 
     Writes the counts under the reserved ``tools`` meter namespace, appends one
     charge line per tool and label, and adds their cost to the row's total.
+    ``None`` where the deployment's account ran nothing with a cost.
 
     Never raises. Settlement must not turn an accounting problem into a failed
     response; the precedent is :func:`log_gateway_rejection`. A pricing lookup that
@@ -4725,7 +4826,7 @@ async def _apply_tool_charges(
     it could not be priced.
     """
     if tally is None or tally.is_empty():
-        return
+        return None
 
     tool_meters = tally.meters()
     if tally.overflowed:
@@ -4743,7 +4844,7 @@ async def _apply_tool_charges(
     calls = tally.label_calls()
     if not calls:
         commit_meters()
-        return
+        return None
     try:
         charges = await price_tool_calls(
             db,
@@ -4756,7 +4857,7 @@ async def _apply_tool_charges(
             "Failed to price gateway tool calls; counts recorded without cost: %s", describe_database_error(exc)
         )
         commit_meters()
-        return
+        return None
 
     # The rate is stored per row, not just the cost, so per-tool spend stays
     # aggregatable in SQL (the row's own ``cost`` mixes tokens and tools) and a
@@ -4779,6 +4880,7 @@ async def _apply_tool_charges(
             unpriced.label,
             describe_rate_key(unpriced.rate_key),
         )
+    return charges.deployment_paid_total or None
 
 
 def _settled_tokens(usage: CompletionUsage | None) -> int:
@@ -4803,15 +4905,27 @@ async def charge_deployment_paid(
     provider: Any,
     model: str,
     expects_cost: bool,
+    tool_funding: DeploymentCharge | None = None,
 ) -> None:
-    """Settle a deployment-paid request's charge on ``db``, before its reservation settles.
+    """Settle what the deployment's account ran on ``db``, before the request's reservation settles.
 
-    One charge per settled request: a tool loop's rounds settle as one row, and so as one charge.
+    ``cost`` is the row's ``LoggedUsage.deployment_paid_cost``. ``charge`` is set
+    when the model call was deployment-paid, and ``tool_funding`` when a gateway
+    tool was admitted to run on the deployment's account; either charges it, so
+    tool calls are charged whoever paid for the model call. ``expects_cost``
+    speaks for the model alone, so a request whose model the organization pays for
+    is never reported as unpriced. One charge per settled request: a tool loop's
+    rounds settle as one row, and so as one charge.
     """
-    if charge is None:
+    funding = charge if charge is not None else tool_funding
+    if funding is None:
         return
-    await charge.settle(
-        cost, model=model, description=f"{provider}:{model}", expects_cost=expects_cost, savepoint=db.begin_nested
+    await funding.settle(
+        cost,
+        model=model,
+        description=f"{provider}:{model}",
+        expects_cost=expects_cost and charge is not None,
+        savepoint=db.begin_nested,
     )
 
 
@@ -4987,7 +5101,7 @@ async def _log_failure_and_refund(
     """
     if ctx.rate_limit_grant is not None:
         await ctx.rate_limit_grant.settle(0)
-    cost = await log_usage(
+    logged = await record_usage(
         db=ctx.db,
         log_writer=ctx.log_writer,
         api_key_id=ctx.api_key_id,
@@ -5009,9 +5123,15 @@ async def _log_failure_and_refund(
         deployment_paid=ctx.deployment_charge is not None,
     )
     if ctx.reservation is not None:
-        if cost:
+        if cost := logged.cost:
             await charge_deployment_paid(
-                ctx.deployment_charge, ctx.db, cost, provider=provider, model=model, expects_cost=False
+                ctx.deployment_charge,
+                ctx.db,
+                logged.deployment_paid_cost,
+                provider=provider,
+                model=model,
+                expects_cost=False,
+                tool_funding=ctx.tool_funding,
             )
             await reconcile_reservation(ctx.db, ctx.reservation, cost)
         else:
@@ -5342,6 +5462,7 @@ def build_streaming_response(
     prices: RequestPrices | None = None,
     tool_loop: bool = False,
     deployment_charge: DeploymentCharge | None = None,
+    tool_funding: DeploymentCharge | None = None,
     source_label: str | None = None,
     safety_identifier: str | None = None,
 ) -> StreamingResponse:
@@ -5376,13 +5497,21 @@ def build_streaming_response(
 
     ``deployment_charge`` charges a deployment-paid request's settled cost to
     its organization wherever a callback reconciles the reservation, and marks
-    every row a callback writes ``deployment_paid``.
+    every row a callback writes ``deployment_paid``. ``tool_funding`` charges the
+    gateway tool calls the deployment's account ran when the model call was not
+    deployment-paid (see :func:`charge_deployment_paid`).
     """
     deployment_paid = deployment_charge is not None
 
-    async def _charge(cost: Decimal | None, *, expects_cost: bool) -> None:
+    async def _charge(logged: LoggedUsage, *, expects_cost: bool) -> None:
         await charge_deployment_paid(
-            deployment_charge, db, cost, provider=provider, model=model, expects_cost=expects_cost
+            deployment_charge,
+            db,
+            logged.deployment_paid_cost,
+            provider=provider,
+            model=model,
+            expects_cost=expects_cost,
+            tool_funding=tool_funding,
         )
 
     # Provider-latency lookup is keyed by implementation, not instance name.
@@ -5431,7 +5560,7 @@ def build_streaming_response(
             deployment_paid=deployment_paid,
         )
         if reservation is not None:
-            await _charge(logged.cost, expects_cost=True)
+            await _charge(logged, expects_cost=True)
             await reconcile_reservation(
                 db, reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
             )
@@ -5475,12 +5604,12 @@ def build_streaming_response(
                 prices=prices,
                 deployment_paid=deployment_paid,
             )
-            await _charge(logged.cost, expects_cost=True)
+            await _charge(logged, expects_cost=True)
             await reconcile_reservation(db, reservation, logged.cost or Decimal(0), actual_tokens=0)
             return
         policy = config.stream_missing_usage_policy
         if policy == "allow_free":
-            tool_cost = await log_usage(
+            logged = await record_usage(
                 db=db,
                 log_writer=log_writer,
                 api_key_id=api_key_id,
@@ -5502,8 +5631,8 @@ def build_streaming_response(
             )
             # "Free" is about the tokens the provider never reported, not about
             # tool calls the gateway definitely ran and owes for.
-            if tool_cost:
-                await _charge(tool_cost, expects_cost=False)
+            if tool_cost := logged.cost:
+                await _charge(logged, expects_cost=False)
                 await reconcile_reservation(db, reservation, tool_cost)
             else:
                 await refund_reservation(db, reservation)
@@ -5512,7 +5641,7 @@ def build_streaming_response(
         # records the request as errored. status_code stays NULL: the stream
         # itself completed (the caller got a 200), so no HTTP status classifies
         # this, and stamping one would fake a rejection that never happened.
-        settled_cost = await log_usage(
+        logged = await record_usage(
             db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
@@ -5534,16 +5663,16 @@ def build_streaming_response(
             safety_identifier=safety_identifier,
             deployment_paid=deployment_paid,
         )
-        # The estimate covers the unreported tokens; log_usage adds any tool cost on
+        # The estimate covers the unreported tokens; record_usage adds any tool cost on
         # top of it, so reconcile against the row's total rather than the estimate.
         # The token axis settles at its estimate for the same reason: the provider
         # reported no count, and the alternative records zero tokens for a request
         # that certainly used some.
-        await _charge(settled_cost, expects_cost=False)
+        await _charge(logged, expects_cost=False)
         await reconcile_reservation(
             db,
             reservation,
-            settled_cost or reservation.estimate,
+            logged.cost or reservation.estimate,
             actual_tokens=reservation.token_estimate,
         )
 
@@ -5564,7 +5693,7 @@ def build_streaming_response(
             )
         if rate_limit_grant is not None:
             await rate_limit_grant.settle(_settled_tokens(reported_usage))
-        failed_cost = await log_usage(
+        logged = await record_usage(
             db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
@@ -5592,8 +5721,8 @@ def build_streaming_response(
             # owes for them, and a refund would release the hold without recording
             # that spend. This is also where the streaming tool-iteration cap
             # lands, since the cap is raised inside the generator.
-            await _charge(failed_cost, expects_cost=reported_usage is not None)
-            if failed_cost:
+            await _charge(logged, expects_cost=reported_usage is not None)
+            if failed_cost := logged.cost:
                 await reconcile_reservation(db, reservation, failed_cost, actual_tokens=_settled_tokens(reported_usage))
             else:
                 await refund_reservation(db, reservation)
@@ -5613,7 +5742,7 @@ def build_streaming_response(
             return
         has_tool_work = tool_tally is not None and not tool_tally.is_empty()
         if has_tool_work or reported_usage is not None:
-            abandoned_cost = await log_usage(
+            logged = await record_usage(
                 db=db,
                 log_writer=log_writer,
                 api_key_id=api_key_id,
@@ -5634,8 +5763,8 @@ def build_streaming_response(
                 safety_identifier=safety_identifier,
                 deployment_paid=deployment_paid,
             )
-            await _charge(abandoned_cost, expects_cost=reported_usage is not None)
-            if abandoned_cost:
+            await _charge(logged, expects_cost=reported_usage is not None)
+            if abandoned_cost := logged.cost:
                 await reconcile_reservation(
                     db, reservation, abandoned_cost, actual_tokens=_settled_tokens(reported_usage)
                 )
@@ -5749,6 +5878,7 @@ def _failover_kwargs(
     def _build(attempt: Attempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
         require_declared_credential(config, attempt.instance, attempt.provider, attempt.kwargs)
         fields = tool_ctx.request_fields_for(attempt.provider.value, attempt.model, base_request_fields)
+        fields = with_request_fields(config, attempt.instance, fields, ctx.request_extras)
         call_kwargs = with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
         refuse_container_on_deployment_credential(adapter, call_kwargs, deployment_paid=attempt.deployment_paid)
         return call_kwargs
@@ -5971,6 +6101,7 @@ async def run_single_attempt_stream(
         safety_identifier=ctx.upstream_user,
         tool_loop=served_tools.use_tool_loop,
         deployment_charge=ctx.deployment_charge,
+        tool_funding=ctx.tool_funding,
     )
 
 
@@ -6040,12 +6171,13 @@ async def log_exhausted_plan(
     produced an assistant message the plan locks to that provider (see
     ``_attempts``), so a failure inside the loop is terminal and this is the only
     row the request gets. The charge is recorded on ``ctx`` for the caller's single
-    release site to reconcile.
+    release site to reconcile; the part the deployment's account ran is charged to
+    the organization's funds here, and lands with that reconcile.
     """
     if ctx.plan is None:
         return
     last = stopped_on or ctx.plan.attempts[-1]
-    cost = await log_usage(
+    logged = await record_usage(
         db=ctx.db,
         log_writer=ctx.log_writer,
         api_key_id=ctx.api_key_id,
@@ -6064,7 +6196,17 @@ async def log_exhausted_plan(
         source_label=ctx.source_label,
         safety_identifier=ctx.upstream_user,
     )
-    ctx.tool_charge = cost or Decimal(0)
+    ctx.tool_charge = logged.cost or Decimal(0)
+    if ctx.reservation is not None:
+        await charge_deployment_paid(
+            None,
+            ctx.db,
+            logged.deployment_paid_cost,
+            provider=last.instance,
+            model=last.model,
+            expects_cost=False,
+            tool_funding=ctx.tool_funding,
+        )
 
 
 async def log_absorbed_attempt(
@@ -6327,7 +6469,13 @@ async def run_non_stream(
             )
         if ctx.reservation is not None:
             await charge_deployment_paid(
-                ctx.deployment_charge, ctx.db, logged.cost, provider=provider, model=model, expects_cost=True
+                ctx.deployment_charge,
+                ctx.db,
+                logged.deployment_paid_cost,
+                provider=provider,
+                model=model,
+                expects_cost=True,
+                tool_funding=ctx.tool_funding,
             )
             await reconcile_reservation(
                 ctx.db, ctx.reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)

@@ -117,6 +117,7 @@ from gateway.services.tools._search_tool_writes import (
 )
 from gateway.services.tools._tool_prices import (
     PricedTool,
+    admitted_tools,
     configured_tools_to_price,
     tools_to_price,
     unpriced_tool_detail,
@@ -215,6 +216,7 @@ __all__ = [
     "ToolUseBudget",
     "AdmittedWebTools",
     "PricedTool",
+    "admitted_tools",
     "configured_tools_to_price",
     "tools_to_price",
     "unpriced_tool_detail",

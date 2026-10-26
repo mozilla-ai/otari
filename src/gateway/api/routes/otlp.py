@@ -87,6 +87,7 @@ from gateway.services.external_usage_service import (
     claude_usage_events,
     ingest_external_events,
     is_reserved_source,
+    token_count,
 )
 from gateway.services.traces import (
     CLAUDE_CODE_USAGE_SOURCE,
@@ -245,13 +246,6 @@ def _attributes(kv_list: Any, *, arrays: bool = False) -> dict[str, Any]:
     return {kv.key: _any_value(kv.value, arrays=arrays) for kv in kv_list}
 
 
-def _int(value: Any) -> int:
-    try:
-        return max(int(value), 0)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _nanos_to_dt(nanos: int) -> datetime | None:
     if not nanos:
         return None
@@ -335,10 +329,10 @@ def _build_event(
         provider = "anthropic"
         model = attrs.get("model")
         event_id = attrs.get("request_id") or fallback_event_id
-        input_tokens = _int(attrs.get("input_tokens"))
-        output_tokens = _int(attrs.get("output_tokens"))
-        cache_read = _int(attrs.get("cache_read_tokens"))
-        cache_write = _int(attrs.get("cache_creation_tokens"))
+        input_tokens = token_count(attrs.get("input_tokens"))
+        output_tokens = token_count(attrs.get("output_tokens"))
+        cache_read = token_count(attrs.get("cache_read_tokens"))
+        cache_write = token_count(attrs.get("cache_creation_tokens"))
         session = attrs.get("session.id")
         duration = attrs.get("duration_ms", duration_ms)
         cache_tokens_in_prompt = False
@@ -352,16 +346,16 @@ def _build_event(
         provider = attrs.get("provider_name") or "openai"
         model = attrs.get("model")
         if event_name == "codex.sse_event":
-            input_tokens = _int(attrs.get("input_token_count"))
-            output_tokens = _int(attrs.get("output_token_count"))
-            cache_read = _int(attrs.get("cached_token_count"))
-            reasoning = _int(attrs.get("reasoning_token_count"))
+            input_tokens = token_count(attrs.get("input_token_count"))
+            output_tokens = token_count(attrs.get("output_token_count"))
+            cache_read = token_count(attrs.get("cached_token_count"))
+            reasoning = token_count(attrs.get("reasoning_token_count"))
             event_id = _codex_event_id(attrs, None)
             duration = duration_ms
         else:  # codex.api_request (HTTP /models path)
-            input_tokens = _int(attrs.get("gen_ai.usage.input_tokens"))
-            output_tokens = _int(attrs.get("gen_ai.usage.output_tokens"))
-            cache_read = _int(attrs.get("gen_ai.usage.cache_read.input_tokens"))
+            input_tokens = token_count(attrs.get("gen_ai.usage.input_tokens"))
+            output_tokens = token_count(attrs.get("gen_ai.usage.output_tokens"))
+            cache_read = token_count(attrs.get("gen_ai.usage.cache_read.input_tokens"))
             event_id = _codex_event_id(attrs, attrs.get("gen_ai.response.id"))
             duration = attrs.get("duration_ms", duration_ms)
         cache_write = 0
@@ -371,14 +365,14 @@ def _build_event(
         provider = attrs.get("gen_ai.provider.name") or attrs.get("gen_ai.system")
         model = attrs.get("gen_ai.request.model") or attrs.get("gen_ai.response.model")
         event_id = attrs.get("gen_ai.response.id") or fallback_event_id
-        input_tokens = _int(attrs.get("gen_ai.usage.input_tokens"))
-        output_tokens = _int(attrs.get("gen_ai.usage.output_tokens"))
-        cache_read = _int(
+        input_tokens = token_count(attrs.get("gen_ai.usage.input_tokens"))
+        output_tokens = token_count(attrs.get("gen_ai.usage.output_tokens"))
+        cache_read = token_count(
             attrs.get("gen_ai.usage.cache_read_tokens")
             or attrs.get("gen_ai.usage.cache_read.input_tokens")
             or attrs.get("gen_ai.usage.cached_tokens")
         )
-        cache_write = _int(attrs.get("gen_ai.usage.cache_write_tokens"))
+        cache_write = token_count(attrs.get("gen_ai.usage.cache_write_tokens"))
         client = attrs.get("otari.client_name")
         source = _sanitize_source(str(client)) if client else _DEFAULT_SOURCE
         session = attrs.get("otari.user_session_label") or attrs.get("otari.session_label")

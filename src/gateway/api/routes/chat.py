@@ -10,7 +10,7 @@ from any_llm.types.completion import (
     CompletionUsage,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import Field, field_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -53,7 +53,7 @@ from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.core.usage import GatewayUsage, reasoning_tokens_of
+from gateway.core.usage import GatewayUsage, cache_write_1h_tokens_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
@@ -80,7 +80,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
     reports_tool_activity,
 )
-from gateway.services.provider_kwargs import apply_endpoint_defaults
+from gateway.services.provider_kwargs import apply_endpoint_defaults, with_request_fields
 from gateway.services.providers import acompletion
 from gateway.services.tools import (
     CODE_EXECUTION_HEADER,
@@ -128,6 +128,12 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     unchanged to document it (``max_completion_tokens``), which is only worth
     doing where the wire contract is not guessable from the field itself.
     """
+
+    # A field beyond the ones below is set aside here rather than kept on the
+    # model, so ``model_dump`` still never carries one (a caller's ``api_key``
+    # would otherwise override the gateway's). It reaches the provider only when
+    # its instance lists it in ``request_fields``; see ``with_request_fields``.
+    _extra_fields: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     messages: list[dict[str, Any]] = Field(min_length=1)
     # any-llm types this as ``dict | type | None``; the wire body only ever
@@ -201,6 +207,19 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # OpenAI's chat field, absent from ``CompletionParams``: read for request tags
     # and never forwarded, since a provider other than OpenAI would reject it.
     metadata: RequestMetadata = None
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _set_extra_fields_aside(cls, data: Any, handler: Any) -> "ChatCompletionRequest":
+        request: ChatCompletionRequest = handler(data)
+        if isinstance(data, dict):
+            request._extra_fields = {name: value for name, value in data.items() if name not in cls.model_fields}
+        return request
+
+    @property
+    def extra_fields(self) -> dict[str, Any]:
+        """The fields the request carried beyond its schema's."""
+        return dict(self._extra_fields)
 
 
 def _every_choice_finishes() -> Callable[[ChatCompletionChunk], bool]:
@@ -311,6 +330,7 @@ class _ChatAdapter:
             prompt_tokens_details=details,
             cache_read_tokens=(details.cached_tokens or 0) if details is not None else 0,
             cache_write_tokens=(details.cache_write_tokens or 0) if details is not None else 0,
+            cache_write_1h_tokens=cache_write_1h_tokens_of(chunk.usage),
             reasoning_tokens=reasoning_tokens_of(chunk.usage),
         )
         return GatewayUsage(**fields)
@@ -627,6 +647,7 @@ async def run_chat_completion(
         )
     except IdempotentReplay as replay:
         return replay.response()
+    ctx.request_extras = request.extra_fields
 
     tool_ctx = await prepare_gateway_tools(
         adapter=adapter,
@@ -661,6 +682,7 @@ async def run_chat_completion(
                 workspace_id=ctx.workspace_id,
                 inputs=sandbox_inputs,
             ),
+            billing=billing,
         ),
     )
 
@@ -696,7 +718,14 @@ async def run_chat_completion(
             ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
         )
         call_kwargs = provider_attempt_kwargs(
-            apply_endpoint_defaults({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved)
+            apply_endpoint_defaults(
+                {
+                    **resolved.kwargs,
+                    **with_request_fields(config, resolved.instance, request_fields, ctx.request_extras),
+                    "model": resolved.dispatch_model,
+                },
+                resolved,
+            )
         )
         return await run_single_attempt_stream(
             adapter=adapter,
@@ -713,7 +742,14 @@ async def run_chat_completion(
         ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
     )
     call_kwargs = provider_attempt_kwargs(
-        apply_endpoint_defaults({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved)
+        apply_endpoint_defaults(
+            {
+                **resolved.kwargs,
+                **with_request_fields(config, resolved.instance, request_fields, ctx.request_extras),
+                "model": resolved.dispatch_model,
+            },
+            resolved,
+        )
     )
     result = await run_non_stream(
         adapter=adapter,

@@ -7,6 +7,7 @@ rejections (404/403) take precedence over the missing-pricing rejection (402),
 i.e. budget is reserved before the pricing gate is enforced.
 """
 
+import logging
 from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -17,6 +18,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.log_config import logger as gateway_logger
 from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, OrganizationModelPricing
 
 from .conftest import build_test_client
@@ -135,6 +137,45 @@ def test_passthrough_missing_pricing_rejection_is_recorded_too(strict_pricing_cl
     # use for every row they write (see the chat assertion above).
     assert rows[0]["model"] == "text-embedding-3-small"
     assert rows[0]["provider"] == "openai"
+
+
+@pytest.mark.parametrize(
+    ("path", "body", "model"),
+    [
+        ("chat/completions", {"model": "openai:gpt-4o", "messages": _MESSAGES}, "openai:gpt-4o"),
+        (
+            "embeddings",
+            {"model": "openai:text-embedding-3-small", "input": "hi"},
+            "openai:text-embedding-3-small",
+        ),
+    ],
+)
+def test_missing_pricing_rejection_is_logged_as_a_warning(
+    strict_pricing_client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    path: str,
+    body: dict[str, Any],
+    model: str,
+) -> None:
+    """A 402 for missing pricing reaches the console too, not only the usage log.
+
+    An operator reading the container's stdout otherwise sees nothing while
+    every request is refused.
+    """
+    c = strict_pricing_client
+    c.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        resp = c.post(f"{API_ROOT}/{path}", json={**body, "user": "priced-user"}, headers=_MASTER_HEADER)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+    assert resp.status_code == 402
+
+    [record] = [r for r in caplog.records if "require_pricing" in r.getMessage()]
+    assert record.levelno == logging.WARNING
+    assert f"'{model}'" in record.getMessage()
+    assert "test-master-key" not in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -445,15 +486,15 @@ def test_only_the_operators_override_prices_an_in_loop_search_on_an_instance(
     assert (resp.status_code != 402) is served, resp.text
 
 
-def test_an_organizations_override_still_prices_a_search_on_the_legacy_settings(
-    strict_pricing_client: TestClient, test_db: Session
+@pytest.mark.parametrize(("origin", "served"), [(API_ORIGIN, False), (OPERATOR_ORIGIN, True)])
+def test_only_the_operators_override_prices_a_search_on_the_legacy_settings(
+    strict_pricing_client: TestClient, test_db: Session, origin: str, served: bool
 ) -> None:
-    """The old backend records its calls with no label, so any organization override prices them."""
-    _override(strict_pricing_client, test_db, "otari:web_search", origin=API_ORIGIN)
+    """The deployment's own search backend runs on its account, so an organization's own rate does not price it."""
+    _override(strict_pricing_client, test_db, "otari:web_search", origin=origin)
     provider = AsyncMock(side_effect=RuntimeError("provider down"))
 
     with patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}):
         resp = _in_loop(strict_pricing_client, "otari_web_search", provider)
 
-    assert resp.status_code != 402, resp.text
-    provider.assert_awaited()
+    assert (resp.status_code != 402) is served, resp.text

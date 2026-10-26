@@ -1,6 +1,5 @@
 """Unit tests for the alias cache that keeps resolution synchronous."""
 
-import time
 import uuid
 from collections.abc import Iterator
 
@@ -10,7 +9,6 @@ from gateway.core.config import GatewayConfig
 from gateway.services import alias_service
 from gateway.services.alias_service import (
     all_alias_names,
-    cache_is_stale,
     cached_aliases,
     effective_aliases,
     reset_alias_cache,
@@ -45,14 +43,12 @@ def _prime(
     """Stand in for a database load without needing a session.
 
     Adds one workspace's layers, so calling it twice builds a two-workspace
-    cache. Stamped with monotonic(), which is process uptime rather than an
-    epoch: a literal 0.0 would read as loaded-at-boot and so already ancient.
+    cache.
     """
     alias_service._cache.setdefault(workspace_id, {}).update(aliases)
     for user_id, names in (per_user or {}).items():
         alias_service._user_cache.setdefault(workspace_id, {}).setdefault(user_id, {}).update(names)
     alias_service._default_workspace = default_workspace
-    alias_service._cached_at = time.monotonic()
 
 
 def test_config_aliases_resolve_without_any_stored_ones() -> None:
@@ -89,20 +85,10 @@ def test_empty_target_is_not_an_alias() -> None:
     assert resolve_effective_alias(CONFIG, "broken", workspace_id=DEFAULT) is None
 
 
-def test_cache_starts_stale_and_is_fresh_after_priming() -> None:
-    # Staleness is what drives the refresher; an unloaded cache must not look
-    # like an empty-but-current one, or a worker would never load aliases.
-    assert cache_is_stale()
-    _prime({"fast": "anthropic:claude-haiku-4"})
-    assert not cache_is_stale(ttl=3600)
-    assert cache_is_stale(ttl=0)
-
-
 def test_reset_clears_the_cache() -> None:
     _prime({"fast": "anthropic:claude-haiku-4"})
     reset_alias_cache()
     assert cached_aliases(workspace_id=DEFAULT) == {}
-    assert cache_is_stale()
 
 
 def test_cached_aliases_is_a_copy() -> None:

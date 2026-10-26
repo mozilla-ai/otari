@@ -26,6 +26,7 @@ from gateway.api.deps import (
     build_hosted_discovery,
     build_hosted_provider_service,
     build_inference_service,
+    build_scheduled_catalog_update,
     build_trace_service,
     get_api_key_service,
     get_membership_listener,
@@ -102,7 +103,6 @@ from gateway.services.pricing_init_service import (
 from gateway.services.pricing_refresh_service import (
     load_persisted_price_snapshot,
     run_price_snapshot_refresher,
-    run_price_update_poller,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
 from gateway.services.provider_kwargs import (
@@ -117,6 +117,7 @@ from gateway.services.providers import (
     refuse_unsafe_configured_endpoints,
     reset_hosted_name_index,
     reset_provider_endpoint_cache,
+    run_catalog_updater,
     run_hosted_name_refresher,
     run_provider_endpoint_refresher,
 )
@@ -487,7 +488,10 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker("price snapshot", lambda _config, _container: run_price_snapshot_refresher()),
     # Started whatever ``pricing_refresh`` says, because that policy is
     # runtime-settable and each tick re-reads it.
-    _LifespanWorker("price update poll", lambda config, _container: run_price_update_poller(config)),
+    _LifespanWorker(
+        "catalog update",
+        lambda config, _container: run_catalog_updater(config, build_scheduled_catalog_update(config)),
+    ),
     # Started whatever ``model_cache_ttl_seconds`` says, for the same reason.
     # Gating on it would strand the gateway: the TTL is runtime-settable, and
     # raising it from 0 flips every read onto a cache nothing then fills.
@@ -694,22 +698,25 @@ def _refuse_shared_secret(name: str, value: str, config: GatewayConfig) -> None:
 
 
 def _validate_provider_account_pepper(config: GatewayConfig) -> None:
-    """Refuse to start a deployment that makes provider copies without its own pepper.
+    """Turn provider copies off when no pepper is set, and refuse a pepper shared with another secret.
 
-    The pepper keys the digest that names a provider account, so it must be set
-    and must share no value with another secret. A shared value would let a leak
-    of one secret expose the other, and tie their rotations together.
+    The pepper keys the digest that names a provider account. A missing one only
+    warns, so a first run needs no secret invented for a feature it may never
+    use. A shared value would let a leak of one secret expose the other, and tie
+    their rotations together.
     """
     makes_copies = config.files_enabled and config.files_provider_upload_enabled
     if not makes_copies:
         return
     pepper = config.provider_account_pepper
     if pepper is None:
-        msg = (
-            "OTARI_PROVIDER_ACCOUNT_PEPPER must be set while files_provider_upload_enabled is on; "
-            "set it to a random value of at least 32 characters, or turn provider copies off"
+        logger.warning(
+            "OTARI_PROVIDER_ACCOUNT_PEPPER is unset, so provider copies of attached files are off: a request that "
+            "asks a provider's own code execution to run over an attached file is refused. Set it to a random "
+            "value of at least 32 characters (for example `otari gen-provider-account-pepper`) to turn them on."
         )
-        raise ValueError(msg)
+        config.files_provider_upload_enabled = False
+        return
     _refuse_shared_secret("OTARI_PROVIDER_ACCOUNT_PEPPER", pepper, config)
 
 
@@ -722,9 +729,9 @@ def _validate_provider_user_identifier_key(config: GatewayConfig) -> None:
     key = config.provider_user_identifier_key
     if key is None:
         logger.warning(
-            "OTARI_PROVIDER_USER_IDENTIFIER_KEY is unset, so the end-user identifier sent to providers is an "
-            "unkeyed digest: anyone who knows a workspace id can test a guessed user tag against it. Set the "
-            "key to a random value of at least 32 characters."
+            "OTARI_PROVIDER_USER_IDENTIFIER_KEY, which keys the opaque end-user id sent to providers so it cannot "
+            "be matched to a guessed user, is unset; set it to a random value of at least 32 characters (for "
+            "example `openssl rand -hex 32`), different from the master key and OTARI_SECRET_KEY."
         )
         return
     _refuse_shared_secret("OTARI_PROVIDER_USER_IDENTIFIER_KEY", key, config)
@@ -852,9 +859,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # Persisted dashboard overrides win over config/env; apply them
             # before pricing init so default-pricing behavior is consistent.
             await apply_overrides_from_db(config, session)
-            # Checked when serving starts rather than when the app is built,
-            # so a tool that only reads the schema needs no pepper, and after
-            # the overrides, so it sees the copy setting this process serves.
+            # After the overrides, so it sees the copy setting this process serves.
             _validate_provider_account_pepper(config)
             await load_persisted_price_snapshot(session)
             # Persisted tool/guardrail overrides (service URLs + web-search

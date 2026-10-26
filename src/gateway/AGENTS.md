@@ -390,7 +390,8 @@ the route's rework is tracked in #1699. See
 
 Use `gateway.log_config` with lazy `%s` formatting. Log opaque IDs, model,
 provider, status, and counts when needed. Never log credentials or user content,
-apart from the explicit local console-mail transport. The handler masks
-credential shapes (`secret_shapes.py`) in every record as a second line of
+apart from the explicit local console-mail transport. The gateway's handler, uvicorn's
+(`uvicorn_log_config`) and the last-resort handler a library logger falls to
+mask credential shapes (`secret_shapes.py`) in every record as a second line of
 defense, mostly for provider errors that echo the request; it is not a license
 to log one.

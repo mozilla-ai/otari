@@ -139,8 +139,7 @@ def normalize_name(name: str | None, implementation: str) -> str:
         HostedProviderInvalidNameError: the name cannot prefix a selector, is
             reserved, or is another implementation's.
     """
-    if name is None:
-        return implementation
+    name = implementation if name is None else name
     if (problem := hosted_provider_name_problem(name, implementation)) is not None:
         raise HostedProviderInvalidNameError(name, problem)
     return name

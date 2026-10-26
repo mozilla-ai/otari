@@ -361,6 +361,11 @@ export type HostedAvailableModels = Schemas["HostedAvailableModelsPublic"]
 export type HostedCatalogRefresh = Schemas["HostedCatalogRefreshPublic"]
 export type HostedCatalogProviderRefresh =
   Schemas["HostedCatalogProviderRefreshPublic"]
+export type HostedCatalogPriceUpdate = Schemas["HostedCatalogPriceUpdatePublic"]
+export type HostedCatalogUpdatePreview =
+  Schemas["HostedCatalogUpdatePreviewPublic"]
+export type HostedCatalogUpdateResult = Schemas["HostedCatalogUpdatePublic"]
+export type HostedCatalogUpdateRequest = Schemas["HostedCatalogUpdateRequest"]
 export type TestHostedProviderRequest = Schemas["HostedProviderTestRequest"]
 export type HostedProviderTestResult = Schemas["HostedProviderTestPublic"]
 export type ReencryptHostedProvidersResult =

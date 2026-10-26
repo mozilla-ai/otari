@@ -2973,6 +2973,75 @@
           }
         },
         {
+          "name": "Update Catalog",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"cleanup\": false\n}"
+            },
+            "description": "Apply the reviewed prices, then refresh every provider's models, then the cleanup if asked.\n\nThe price step comes first, so the model step prices new models at the\nprices it applied, and a model held for want of a price is served once it\nhas one. Without a ``digest`` no price changes. A ``digest`` that no longer\nnames the pending prices answers 409 and changes nothing. ``cleanup``\nremoves the prices of models no provider serves, with their history.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                "catalog-update"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/catalog-update"
+            }
+          }
+        },
+        {
+          "name": "Preview Catalog Update",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"cleanup\": false\n}"
+            },
+            "description": "What updating the catalog would do: the models.dev price changes, then what each provider newly lists.\n\nA POST, because it holds the fetched prices as pending for the apply to\nname by their ``digest``; nothing else is written. It dials every enabled\nprovider. A price fetch that fails is reported in ``price_error`` and the\nmodel lists are still previewed. With ``cleanup``, it also previews which\nprices of models no provider serves would be removed.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                "catalog-update",
+                "preview"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/catalog-update/preview"
+            }
+          }
+        },
+        {
           "name": "Preview Deployment Provider Migration",
           "request": {
             "description": "What moving the deployment providers the retired dashboard page stored onto hosted providers would do.\n\nThe gateway moves them at startup, so this lists the ones it could not\nmove, each with the reason. Writes nothing and dials nothing.",
@@ -3071,47 +3140,6 @@
                 "reencrypt"
               ],
               "raw": "{{baseUrl}}/api/v1/hosted-providers/reencrypt"
-            }
-          }
-        },
-        {
-          "name": "Refresh Catalog",
-          "request": {
-            "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. A model list whose\nprovider nothing defines any more, such as a removed ``config.yml`` entry,\ngoes too, and is named in ``orphaned_rosters``. Where no provider offers a\nmodel, only those lists go and every price stays; with none of them either,\nthe sweep answers 409. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
-            "header": [],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "hosted-providers",
-                "refresh"
-              ],
-              "raw": "{{baseUrl}}/api/v1/hosted-providers/refresh"
-            }
-          }
-        },
-        {
-          "name": "Preview Catalog Refresh",
-          "request": {
-            "description": "What a catalog sweep would remove, without removing it.\n\nA GET, and a truthful one: it writes nothing. It does dial every enabled\nprovider, as ``available-models`` does, because a model the provider still\nlists would survive the sweep and previewing it as doomed would be a lie.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "hosted-providers",
-                "refresh",
-                "preview"
-              ],
-              "raw": "{{baseUrl}}/api/v1/hosted-providers/refresh/preview"
             }
           }
         },
@@ -9384,55 +9412,6 @@
                 }
               ],
               "raw": "{{baseUrl}}/api/v1/pricing/drift?limit="
-            }
-          }
-        },
-        {
-          "name": "Preview Pricing Refresh",
-          "request": {
-            "description": "Fetch the latest defaults and hold them for operator review.",
-            "header": [],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "pricing",
-                "refresh"
-              ],
-              "raw": "{{baseUrl}}/api/v1/pricing/refresh"
-            }
-          }
-        },
-        {
-          "name": "Confirm Pricing Refresh",
-          "request": {
-            "description": "Activate the latest reviewed default-price snapshot.",
-            "header": [],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "pricing",
-                "refresh",
-                "confirm"
-              ],
-              "query": [
-                {
-                  "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
-                  "disabled": true,
-                  "key": "digest",
-                  "value": ""
-                }
-              ],
-              "raw": "{{baseUrl}}/api/v1/pricing/refresh/confirm?digest="
             }
           }
         },

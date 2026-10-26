@@ -833,6 +833,77 @@ class HostedCatalogRefreshPublic(SQLModel):
     orphaned_rosters: list[str] = Field(default_factory=list)
 
 
+class HostedCatalogPriceChangePublic(SQLModel):
+    """One model whose models.dev price a catalog update adds, changes or removes."""
+
+    model_key: str
+    change: Literal["added", "changed", "removed"]
+
+
+class HostedCatalogPriceUpdatePublic(SQLModel):
+    """The models.dev price changes a catalog update would apply.
+
+    ``changes`` is a sample and the counts are the totals. ``digest`` names the
+    fetched prices, so applying them applies what was reviewed. ``needs_review``
+    is why the scheduled update would hold them for a person under ``auto``.
+    """
+
+    fetched_at: datetime
+    added_count: int
+    changed_count: int
+    removed_count: int
+    changes: list[HostedCatalogPriceChangePublic]
+    changes_truncated: bool
+    digest: str
+    needs_review: bool
+    review_reason: str | None = None
+
+
+class HostedCatalogUpdatePreviewRequest(SQLModel):
+    """What to preview: the update alone, or with the cleanup."""
+
+    cleanup: bool = Field(
+        default=False,
+        description="Also preview removing the prices of models no hosted provider serves.",
+    )
+
+
+class HostedCatalogUpdateRequest(SQLModel):
+    """What to apply, as the preview showed it."""
+
+    digest: str | None = Field(
+        default=None,
+        description=(
+            "The `digest` of the previewed prices, to apply them; 409 when the pending prices differ. "
+            "Without it, no price changes."
+        ),
+    )
+    cleanup: bool = Field(
+        default=False,
+        description="Also remove the prices of models no hosted provider serves, with their history.",
+    )
+
+
+class HostedCatalogUpdatePreviewPublic(SQLModel):
+    """What a catalog update would do: its price changes, then what each provider newly lists.
+
+    ``prices`` is ``None`` when models.dev changed nothing, or when it could not
+    be fetched, which ``price_error`` then says. ``catalog`` carries the cleanup
+    the preview was asked for, and no removals otherwise.
+    """
+
+    prices: HostedCatalogPriceUpdatePublic | None
+    price_error: str | None = None
+    catalog: HostedCatalogRefreshPublic
+
+
+class HostedCatalogUpdatePublic(SQLModel):
+    """What a catalog update did."""
+
+    prices_applied: bool
+    catalog: HostedCatalogRefreshPublic
+
+
 class HostedAvailableModelsPublic(SQLModel):
     """What the provider says it serves on the stored credential.
 

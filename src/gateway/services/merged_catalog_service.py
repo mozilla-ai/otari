@@ -642,6 +642,7 @@ async def catalog_scope(
                     organization_key_providers = await OrgProviderKeyService(db).get_byo_providers(
                         organization_id=organization_id
                     )
+            deployment_key_models = _without(hosted_models, organization_key_providers)
             return CatalogScope(
                 allowlist=None,
                 reads_workspace_layer=True,
@@ -653,8 +654,8 @@ async def catalog_scope(
                 # key one workspace calls on leaves the deployment paying for
                 # the others, so only a key every workspace calls on takes a
                 # provider out.
-                deployment_key_models=_without(hosted_models, organization_key_providers),
-                hosted_keys=_listed_hosted_keys(_without(hosted_models, organization_key_providers)),
+                deployment_key_models=deployment_key_models,
+                hosted_keys=_listed_hosted_keys(deployment_key_models),
             )
         scope = await resolve_session_catalog_scope(db, config, user=session_identity, model_provider=model_provider)
         return CatalogScope(
@@ -687,6 +688,7 @@ async def catalog_scope(
     if (hosted_models or withhold_unserved) and include_offered:
         dispatch_workspace_id = await lookup_default_workspace_id(db) if is_master_key else workspace_id
         byo_providers = await resolve_workspace_byo_providers(db, dispatch_workspace_id)
+    deployment_key_models = _without(hosted_models, byo_providers)
     return CatalogScope(
         allowlist=None if is_master_key else await resolve_request_allowlist(db, api_key),
         reads_workspace_layer=True,
@@ -706,8 +708,8 @@ async def catalog_scope(
         byo_providers=byo_providers,
         withheld_providers=withheld_providers,
         withhold_unserved=withhold_unserved,
-        deployment_key_models=_without(hosted_models, byo_providers),
-        hosted_keys=_listed_hosted_keys(_without(hosted_models, byo_providers)),
+        deployment_key_models=deployment_key_models,
+        hosted_keys=_listed_hosted_keys(deployment_key_models),
     )
 
 

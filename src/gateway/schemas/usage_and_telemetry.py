@@ -64,12 +64,18 @@ class UnitChargeLine(_OpenShape):
 
 
 class ToolChargeLine(UnitChargeLine):
-    """A gateway-run tool's charge line, one per tool and label.
+    """A gateway-run tool's charge line, one per tool, label and payer.
 
     A subclass with ``label`` required, rather than a defaulted field on
     :class:`UnitChargeLine`, so the per-request, rerank and image lines, and a
     stored tool line without a label, serialize back without a
     ``"label": null`` they never had.
+
+    A line written since tools are charged by whose account ran them also
+    carries ``deployment_paid``: true where the deployment's account ran the
+    calls, which charges the organization's funds where the deployment bills
+    them, and false where the organization's own key did. It is kept as an extra
+    key rather than declared, so an older line serializes back without it.
     """
 
     label: str = Field(

@@ -33,9 +33,7 @@ from gateway.services.pricing_refresh_service import (
     PendingSnapshotChanged,
     PricingRefreshError,
     PricingRefreshPreview,
-    confirm_price_refresh,
     list_accepted_snapshots,
-    prepare_price_refresh,
     preview_pending_refresh,
     reject_price_refresh,
 )
@@ -229,7 +227,10 @@ class PricingRefreshPreviewResponse(BaseModel):
     changes_truncated: bool
     digest: str = Field(
         default="",
-        description="Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.",
+        description=(
+            "Identity of the pending snapshot, to act on exactly this one: send it as `digest` to "
+            "`POST /hosted-providers/catalog-update` to apply it, or to `POST /pricing/refresh/reject` to discard it."
+        ),
     )
     needs_review: bool = Field(
         default=False,
@@ -238,18 +239,14 @@ class PricingRefreshPreviewResponse(BaseModel):
     review_reason: str | None = Field(default=None, description="Why the update needs review.")
 
 
-class PricingRefreshConfirmationResponse(BaseModel):
-    """Result of activating a reviewed models.dev refresh."""
-
-    applied: bool = True
-
-
 class AcceptedSnapshotResponse(BaseModel):
     """One accepted models.dev snapshot in the history."""
 
     id: str
     accepted_at: datetime
-    accepted_by: str = Field(description="`operator` for a dashboard confirm, `schedule` for the auto policy.")
+    accepted_by: str = Field(
+        description="`operator` for a catalog update an operator ran, `schedule` for the auto policy."
+    )
     model_count: int
 
 
@@ -342,24 +339,6 @@ def _candidates(model_key: str, kind: PricingKind, withheld: frozenset[str] = fr
     return candidates
 
 
-@operator_router.post("/refresh", response_model=PricingRefreshPreviewResponse)
-async def preview_pricing_refresh(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> PricingRefreshPreviewResponse:
-    """Fetch the latest defaults and hold them for operator review."""
-
-    try:
-        preview = await prepare_price_refresh(db, config)
-    except PricingRefreshError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to fetch the latest models.dev data",
-        ) from None
-
-    return _preview_response(preview, await priced_model_count(db))
-
-
 @operator_router.get("/refresh/pending", response_model=PricingRefreshPreviewResponse)
 async def get_pending_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -436,30 +415,6 @@ async def list_pricing_drift(
             )
         )
     return rows
-
-
-@operator_router.post("/refresh/confirm", response_model=PricingRefreshConfirmationResponse)
-async def confirm_pricing_refresh(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    digest: Annotated[
-        str | None,
-        Query(description="The `digest` of the previewed snapshot; 409 when the pending one differs."),
-    ] = None,
-) -> PricingRefreshConfirmationResponse:
-    """Activate the latest reviewed default-price snapshot."""
-
-    try:
-        applied = await confirm_price_refresh(db, digest=digest)
-    except PendingSnapshotChanged:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_PENDING_CHANGED_DETAIL) from None
-    except PricingRefreshError:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to save the latest models.dev data",
-        ) from None
-    if not applied:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending models.dev refresh to apply")
-    return PricingRefreshConfirmationResponse()
 
 
 @operator_router.post("/refresh/reject", status_code=status.HTTP_204_NO_CONTENT)

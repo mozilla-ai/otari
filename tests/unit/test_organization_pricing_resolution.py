@@ -759,9 +759,30 @@ def test_each_label_gets_a_line_priced_by_its_first_rate_key_with_a_row() -> Non
         )
 
         assert charges.lines == [
-            {"meter": "web_fetch_calls", "label": "tabstack:tabstack", "units": 1, "unit_rate": 0.005, "cost": 0.005},
-            {"meter": "web_search_calls", "label": _EXA, "units": 2, "unit_rate": 0.02, "cost": 0.04},
-            {"meter": "web_search_calls", "label": "otari:web_search", "units": 3, "unit_rate": 0.01, "cost": 0.03},
+            {
+                "meter": "web_fetch_calls",
+                "label": "tabstack:tabstack",
+                "units": 1,
+                "unit_rate": 0.005,
+                "cost": 0.005,
+                "deployment_paid": True,
+            },
+            {
+                "meter": "web_search_calls",
+                "label": _EXA,
+                "units": 2,
+                "unit_rate": 0.02,
+                "cost": 0.04,
+                "deployment_paid": True,
+            },
+            {
+                "meter": "web_search_calls",
+                "label": "otari:web_search",
+                "units": 3,
+                "unit_rate": 0.01,
+                "cost": 0.03,
+                "deployment_paid": False,
+            },
         ]
         # 0.04 + 0.03 over five searches, so five times the rate is the tool's spend.
         assert charges.unit_rates == {"web_search": Decimal("0.014"), "web_fetch": Decimal("0.005")}
@@ -802,7 +823,14 @@ def test_a_reported_zero_is_billed_at_zero_although_a_rate_exists() -> None:
         )
 
         assert charges.lines == [
-            {"meter": "web_search_calls", "label": _EXA, "units": 1, "unit_rate": 0.0, "cost": 0.0}
+            {
+                "meter": "web_search_calls",
+                "label": _EXA,
+                "units": 1,
+                "unit_rate": 0.0,
+                "cost": 0.0,
+                "deployment_paid": True,
+            }
         ]
         assert charges.total == 0
         assert charges.unpriced == []
@@ -845,7 +873,14 @@ def test_a_label_with_no_row_and_no_reported_cost_keeps_a_zero_line_and_names_it
         )
 
         assert charges.lines == [
-            {"meter": "web_search_calls", "label": _EXA, "units": 2, "unit_rate": 0.0, "cost": 0.0}
+            {
+                "meter": "web_search_calls",
+                "label": _EXA,
+                "units": 2,
+                "unit_rate": 0.0,
+                "cost": 0.0,
+                "deployment_paid": True,
+            }
         ]
         assert charges.unpriced == [UnpricedToolLabel("web_search", _EXA, _EXA, 2)]
 
@@ -893,7 +928,14 @@ def test_an_organization_key_label_is_priced_under_the_fallback_row_and_never_lo
         )
 
         assert charges.lines == [
-            {"meter": "web_search_calls", "label": "org:tavily", "units": 1, "unit_rate": 0.01, "cost": 0.01}
+            {
+                "meter": "web_search_calls",
+                "label": "org:tavily",
+                "units": 1,
+                "unit_rate": 0.01,
+                "cost": 0.01,
+                "deployment_paid": False,
+            }
         ]
 
     _run(scenario)
@@ -908,7 +950,14 @@ def test_empty_rate_keys_price_nothing_and_warn_about_nothing() -> None:
         charges = await price_tool_calls(session, [_calls(rate_keys=())], as_of=_NOW)
 
         assert charges.lines == [
-            {"meter": "web_search_calls", "label": "otari:web_search", "units": 1, "unit_rate": 0.0, "cost": 0.0}
+            {
+                "meter": "web_search_calls",
+                "label": "otari:web_search",
+                "units": 1,
+                "unit_rate": 0.0,
+                "cost": 0.0,
+                "deployment_paid": False,
+            }
         ]
         assert charges.total == 0
         assert charges.unpriced == []
@@ -929,7 +978,14 @@ def test_two_records_of_one_label_settle_as_one_line() -> None:
         )
 
         assert charges.lines == [
-            {"meter": "web_search_calls", "label": "otari:web_search", "units": 3, "unit_rate": 0.01, "cost": 0.03}
+            {
+                "meter": "web_search_calls",
+                "label": "otari:web_search",
+                "units": 3,
+                "unit_rate": 0.01,
+                "cost": 0.03,
+                "deployment_paid": False,
+            }
         ]
 
     _run(scenario)

@@ -72,7 +72,7 @@ if TYPE_CHECKING:
 
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
-_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries", "messages_api")
+_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries", "messages_api", "request_fields")
 
 # How long a Bedrock client waits for the next byte of a response. botocore's
 # default of 60s fails a stream whose model goes quiet for a minute, which a model
@@ -1088,3 +1088,22 @@ def no_candidate_configured_detail(missing: Sequence[MissingCredential]) -> str:
         f"No credential is configured for any provider this request could use ({len(missing)} attempts: {names}). "
         f"{_CONFIGURE_A_CREDENTIAL}"
     )
+
+
+def with_request_fields(
+    config: GatewayConfig, instance: str, request_fields: dict[str, Any], extras: Mapping[str, Any]
+) -> dict[str, Any]:
+    """``request_fields`` plus the caller's extra fields this instance's ``request_fields`` lets through.
+
+    ``extras`` are the fields a request carried beyond the ones its schema declares,
+    which are otherwise dropped. Only the names the operator listed for this provider
+    instance in config.yml are forwarded, in ``extra_body``, which the OpenAI SDK and
+    the SDKs built the same way merge into the request body. An ``extra_body`` the
+    fields already carry keeps its entries. Another instance, or an instance listing
+    none, gets the request fields unchanged.
+    """
+    allowed = (config.providers.get(instance) or {}).get("request_fields") or ()
+    passed = {name: extras[name] for name in allowed if name in extras}
+    if not passed:
+        return request_fields
+    return {**request_fields, "extra_body": {**passed, **(request_fields.get("extra_body") or {})}}

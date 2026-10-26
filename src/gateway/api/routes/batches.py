@@ -24,7 +24,7 @@ from gateway.api.deps import (
     model_provider_port_on,
     verify_api_key_or_master_key,
 )
-from gateway.api.routes._helpers import resolve_user_id
+from gateway.api.routes._helpers import missing_credential_error, resolve_user_id
 from gateway.api.routes._pipeline import (
     FUNDS_CHECK_UNAVAILABLE_DETAIL,
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
@@ -256,7 +256,7 @@ async def _resolve_batch_provider(
     try:
         require_declared_credential(config, provider, impl, kwargs)
     except MissingApiKeyError as exc:
-        raise _not_configured(exc) from exc
+        raise missing_credential_error(MissingCredential.from_error(exc)) from exc
     return impl, kwargs, False
 
 
@@ -264,12 +264,6 @@ def _hosted_credential_unusable(provider: str, exc: Exception) -> HTTPException:
     """The 502 for a port that failed to resolve a credential, logged by class: its message may carry a row."""
     logger.error("ModelProviderPort failed to resolve a credential for %s: %s", provider, describe_port_error(exc))
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=HOSTED_CREDENTIAL_UNUSABLE_DETAIL)
-
-
-def _not_configured(exc: MissingApiKeyError) -> HTTPException:
-    """The 424 a ``MissingApiKeyError`` maps to."""
-    missing = MissingCredential.from_error(exc)
-    return HTTPException(status_code=missing.status_code, detail=missing.detail, headers=error_headers(missing.code))
 
 
 async def _lifecycle_workspace_id(db: AsyncSession, record: BatchRecord | None, api_key: APIKey | None) -> uuid.UUID:
@@ -555,7 +549,7 @@ async def create_batch(
     try:
         require_declared_credential(config, resolved.instance, provider, provider_kwargs)
     except MissingApiKeyError as exc:
-        raise _not_configured(exc) from exc
+        raise missing_credential_error(MissingCredential.from_error(exc)) from exc
 
     # A key flagged exclude_from_budget logs cost but is never reserved or folded
     # into users.spend, at create time and again when results are accounted.

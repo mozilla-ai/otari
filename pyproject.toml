@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=84.0.0", "wheel"]
+requires = ["setuptools>=84.2.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -14,7 +14,7 @@ version = "0.0.0"
 description = "otari, an OpenAI-compatible LLM gateway"
 requires-python = ">=3.13"
 dependencies = [
-    "any-llm-sdk[all]>=1.40.1",
+    "any-llm-sdk[all]>=1.40.2",
     # The web search and web fetch libraries, workspace members at any-search/
     # and any-fetch/. Each may not import the gateway back.
     "any-fetch",
@@ -54,7 +54,7 @@ dependencies = [
     # a claimed domain whose nameservers are gone takes the full timeout, and the
     # blocking resolver would hold the event loop for it.
     "dnspython>=2.9.0",
-    "fastapi>=0.152.0",
+    "fastapi>=0.153.0",
     # Direct dependency for gateway-managed HTTP clients and the public
     # transport API used by pinned web retrieval.
     "httpx>=0.28.1",
@@ -64,7 +64,6 @@ dependencies = [
     # is IDNA2003 and folds `faß.de` into `fass.de`, which would let a proof
     # taken on one domain admit addresses at another.
     "idna>=3.10",
-    "markitdown[docx,pptx,xlsx,pdf]>=0.1.8",
     # Pinned to one minor line, not just below the next major. The major
     # ceiling is #689: mcp 2.0 removed
     # `mcp.client.streamable_http.streamablehttp_client`, which
@@ -133,8 +132,8 @@ fsspec = [
 # is the line it was written against rather than the first release to carry the
 # names.
 e2b = [
-    "e2b>=2.56.0",
-    "e2b-code-interpreter>=2.11.0",
+    "e2b>=2.57.0",
+    "e2b-code-interpreter>=2.11.1",
 ]
 # A rate-limit store every gateway process shares (`rate_limit_store: redis`),
 # so a limit holds across replicas rather than per process. The adapter imports
@@ -194,13 +193,9 @@ loadtest = [
 
 [tool.uv]
 # Otari is deployed as a Linux server and developed on Linux / macOS; it is
-# never packaged for Windows. Pinning the resolution environments keeps the
-# universal lock from inheriting magika's win32-only `onnxruntime<=1.20.1`
-# cap, which otherwise forces an onnxruntime build with no cp314 wheels and
-# breaks the Python 3.14 Docker image. With win32 excluded, onnxruntime
-# resolves to a release that ships cp314 wheels for linux and macOS.
+# never packaged for Windows, so the lock resolves for those two platforms only.
 #
-# The lock also stops below Python 3.15. onnxruntime ships no cp315 wheel and
+# The lock also stops below Python 3.15. onnxruntime (the `ocr` extra) ships no cp315 wheel and
 # no sdist, so once an upgraded dependency forks the resolution at 3.15 (as
 # anyio, pandas and voyageai now do), that fork has no onnxruntime and uv
 # refuses the whole lock. Raise the bound when onnxruntime publishes cp315
@@ -224,7 +219,22 @@ environments = [
 # this tree does not have, and the advisory is in a transitive dependency whose
 # own maintainer sets the real floor. Revisit if Otari is ever published as a
 # wheel people pip-install directly.
-constraint-dependencies = ["authlib>=1.7.2"]
+constraint-dependencies = [
+    "authlib>=1.7.2",
+    # virtualenv clears its last advisory at 21.14.9. The override below lifts
+    # the cap that blocked that upgrade. It does not hold this floor, because an
+    # older virtualenv resolves against packaging 26.3 as well.
+    "virtualenv>=21.14.9",
+]
+# Every virtualenv from 21.14.6 on needs packaging>=26.3, and xai-sdk declares
+# packaging<26. xai-sdk arrives with any-llm-sdk[all], so that cap holds the
+# whole tree on an unpatched virtualenv. A constraint cannot loosen a declared
+# cap, so lifting it takes an override. xai-sdk reads packaging in one line, to
+# compare the major version of protobuf, so its cap guards a major rather than a
+# real incompatibility. An override replaces a declared specifier instead of
+# narrowing it, so the ceiling is named here. An open floor would strip a future
+# cap that does mean something. Remove this once xai-sdk allows packaging 26.
+override-dependencies = ["packaging>=26.3,<27"]
 
 [tool.uv.workspace]
 members = ["cli", "any-search", "any-fetch"]
@@ -316,10 +326,10 @@ module = ["e2b", "e2b.*", "e2b_code_interpreter", "e2b_code_interpreter.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# Optional/untyped extraction deps imported at the root (e.g. `import pypdfium2`,
-# `from markitdown import ...`). Bare root names are required — a `foo.*` pattern
-# alone does not match the top-level `foo` module these are imported as.
-module = ["markitdown", "pypdfium2", "rapidocr_onnxruntime", "numpy", "PIL"]
+# Optional/untyped extraction deps imported at the root (e.g. `import pypdfium2`).
+# Bare root names are required — a `foo.*` pattern alone does not match the
+# top-level `foo` module these are imported as.
+module = ["pypdfium2", "pypdfium2.*", "rapidocr_onnxruntime", "numpy", "PIL"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

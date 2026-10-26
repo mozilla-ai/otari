@@ -47,7 +47,6 @@ Run an ephemeral gateway with Docker:
 
 ```bash
 docker run --rm -p 8000:8000 \
-  -e OTARI_MASTER_KEY=SET_A_MASTER_KEY \
   -e OPENAI_API_KEY=YOUR_OPENAI_KEY \
   -e OTARI_CONFIG_YAML='
 default_pricing: true
@@ -101,7 +100,7 @@ git clone https://github.com/mozilla-ai/otari
 cd otari
 cp config.example.yml config.yml
 # Set a master key, provider credentials, and pricing in config.yml.
-# Provider copies of attached files need a pepper of their own. Compose reads .env.
+# Provider copies of attached files are off until they have a pepper of their own. Compose reads .env.
 grep -qs OTARI_PROVIDER_ACCOUNT_PEPPER .env || echo "OTARI_PROVIDER_ACCOUNT_PEPPER=$(openssl rand -base64 32)" >> .env
 docker compose pull
 docker compose up -d

@@ -184,7 +184,8 @@ request asked for code over that file:
   file ID of the caller's choosing from reaching the provider, whose files are
   scoped to the account rather than to the caller;
 - 400: a file with too little left for a copy to expire no later than it does;
-- 400: `files_provider_upload_enabled` set to `false`;
+- 400: `files_provider_upload_enabled` set to `false`, or
+  `OTARI_PROVIDER_ACCOUNT_PEPPER` unset;
 - 400: `file_understanding_enabled` set to `false`, because nothing then reads
   the block;
 - 400: a routing policy with no candidate whose provider can hold a copy;
@@ -303,7 +304,7 @@ For each file/image block it resolves the **target model's** capabilities, then:
 | Target model                                          | Documents                                  | Images                                                        |
 | ----------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------- |
 | **Natively capable** (e.g. Anthropic, OpenAI, GPT-4o) | forwarded unchanged                        | forwarded unchanged                                           |
-| **Text-only** (most local models)                     | extracted to text (markitdown) and inlined | captioned by a vision model / OCR, or dropped with a log line |
+| **Text-only** (most local models)                     | extracted to text and inlined              | captioned by a vision model / OCR, or dropped with a log line |
 
 
 A natively capable model is sent an uploaded document only when it is a PDF,
@@ -380,7 +381,8 @@ a copy of an attached file may be stored at the provider that runs a request's
 code, and how long that copy lives (see
 [A file the provider's own code execution reads](#a-file-the-providers-own-code-execution-reads)).
 - `OTARI_PROVIDER_ACCOUNT_PEPPER`: the key for the digest that names the provider
-account a copy is in. Required while `files_provider_upload_enabled` is on (see
+account a copy is in. Without it, provider copies are off whatever
+`files_provider_upload_enabled` says (see
 [Provider copies](configuration.md#provider-copies)).
 - `file_understanding_enabled`: master switch for content normalization.
 - `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:
@@ -474,8 +476,13 @@ Three things to know:
 
 ## Dependencies
 
-Text/office/PDF extraction uses [markitdown](https://github.com/microsoft/markitdown)
-(MIT); scanned-PDF rasterization uses [pypdfium2](https://github.com/pypdfium2-team/pypdfium2)
-(Apache-2.0). Both are permissively licensed, deliberately avoiding AGPL PDF
-libraries since Otari is a network service. OCR is optional; install the
+PDF text extraction and scanned-PDF rasterization use
+[pypdfium2](https://github.com/pypdfium2-team/pypdfium2) (Apache-2.0), deliberately
+avoiding AGPL PDF libraries since Otari is a network service. Word, PowerPoint and
+Excel files (`.docx`, `.pptx`, `.xlsx`) are read with the Python standard library and
+come out as Markdown: headings, list items and tables are kept, formatting is not.
+HTML, Markdown, CSV, JSON and other text files are read as text. A legacy binary Office
+file (`.doc`, `.ppt`, `.xls`) is not extracted. Extracted text stops at 16 MiB, a PDF is
+read for its first 1,000 pages, and an Office file whose XML inflates past 256 MiB is not
+extracted. OCR is optional; install the
 `ocr` extra (`uv sync --extra ocr` in a checkout) to enable it.

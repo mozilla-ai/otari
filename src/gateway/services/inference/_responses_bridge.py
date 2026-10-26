@@ -44,7 +44,7 @@ from openai.types.responses import (
     ResponseTextDeltaEvent,
     ResponseTextDoneEvent,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from gateway.log_config import logger
 from gateway.services.inference._upstream_user import chat_user_fields
@@ -211,7 +211,10 @@ async def call_responses(native: Callable[..., Awaitable[Any]], kwargs: dict[str
     if uses_chat_completions_bridge(kwargs.get("provider")):
         return await aresponses_via_chat_completions(**kwargs)
     try:
-        return await native(**kwargs)
+        result = await native(**kwargs)
+        if kwargs.get("stream") and _is_otari_provider(kwargs.get("provider")):
+            return _typed_stream_events(result)
+        return result
     except AnyLLMError as exc:
         if not _lacks_responses_route(kwargs, exc):
             raise
@@ -225,6 +228,32 @@ async def call_responses(native: Callable[..., Awaitable[Any]], kwargs: dict[str
             exc.status_code,
         )
         return await _run_chat_completion(*plan)
+
+
+def _is_otari_provider(provider: Any) -> bool:
+    try:
+        return LLMProvider(provider) is LLMProvider.OTARI
+    except ValueError:
+        return False
+
+
+_STREAM_EVENT_ADAPTER: TypeAdapter[ResponseStreamEvent] = TypeAdapter(ResponseStreamEvent)
+
+
+async def _typed_stream_events(stream: AsyncIterator[Any]) -> AsyncIterator[ResponseStreamEvent]:
+    """``stream`` with each raw event dict validated into its typed event.
+
+    Stopgap: any-llm's Otari provider streams Responses events as the plain dicts
+    its client parses, where every other provider yields typed events. Remove once
+    any-llm converts them, as it already does for that provider's Messages stream.
+    """
+    try:
+        async for event in stream:
+            yield _STREAM_EVENT_ADAPTER.validate_python(event) if isinstance(event, dict) else event
+    finally:
+        close = getattr(stream, "aclose", None)
+        if close is not None:
+            await close()
 
 
 def _plan_chat_completion(kwargs: dict[str, Any]) -> tuple[dict[str, Any], _ResponseEcho]:

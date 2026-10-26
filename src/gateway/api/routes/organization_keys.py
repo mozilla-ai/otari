@@ -79,7 +79,7 @@ from gateway.services.model_access import (
     validate_allowed_tools,
 )
 from gateway.services.organizations import AccessLists
-from gateway.services.tenancy import OrganizationService
+from gateway.services.tenancy import DeploymentUserService, OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
 from gateway.services.workspace_scope import organization_default_workspace_id
 
@@ -466,10 +466,10 @@ async def delete_own_key(
 async def _federation_rule_key(
     db: AsyncSession,
     organizations: OrganizationService,
+    deployment_users: DeploymentUserService,
     identity: TenancyUser,
     key_id: str,
     *,
-    operates: bool,
     adding: bool,
 ) -> APIKey:
     """The key a federation rule route acts on, or 404.
@@ -479,6 +479,7 @@ async def _federation_rule_key(
     rule decides which workloads may act as the key; listing and deleting do not, so a caller whose role was lowered
     can still see and take back what they set up.
     """
+    operates = await deployment_users.has_administration_access(identity)
     organization = await organizations.get_active_organization_for_user(identity)
     if operates:
         return await _load_key_in_organization(db, key_id, organization.id)
@@ -511,14 +512,7 @@ async def create_own_federation_rule(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This deployment does not let organizations manage federation rules.",
         )
-    key = await _federation_rule_key(
-        db,
-        organizations,
-        identity,
-        key_id,
-        operates=await deployment_users.has_administration_access(identity),
-        adding=True,
-    )
+    key = await _federation_rule_key(db, organizations, deployment_users, identity, key_id, adding=True)
     return await api_keys.add_federation_rule(key.id, request, allowed_issuers=(), member_managed=True)
 
 
@@ -536,14 +530,7 @@ async def list_own_federation_rules(
     The caller's own key, or for the deployment operator any key in their active organization. Includes any rule
     the operator gave the key on ``/api/v1/keys``, which ``member_managed`` tells apart.
     """
-    key = await _federation_rule_key(
-        db,
-        organizations,
-        identity,
-        key_id,
-        operates=await deployment_users.has_administration_access(identity),
-        adding=False,
-    )
+    key = await _federation_rule_key(db, organizations, deployment_users, identity, key_id, adding=False)
     return await api_keys.list_federation_rules(key.id)
 
 
@@ -562,13 +549,6 @@ async def delete_own_federation_rule(
     The caller's own key whatever their role, or for the deployment operator any key in their active organization.
     Works whether or not ``federation_member_rules`` is on, so a rule can always be taken back.
     """
-    key = await _federation_rule_key(
-        db,
-        organizations,
-        identity,
-        key_id,
-        operates=await deployment_users.has_administration_access(identity),
-        adding=False,
-    )
+    key = await _federation_rule_key(db, organizations, deployment_users, identity, key_id, adding=False)
     await api_keys.delete_federation_rule(key.id, rule_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

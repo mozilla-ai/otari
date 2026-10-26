@@ -227,6 +227,7 @@ class WebSearchBackend:
                 rate_keys=self._search.rate_keys,
                 cost=searched.cost,
                 enrichment_cost=searched.enrichment_cost,
+                deployment_paid=not self._search.on_credential,
             )
         self._record_span(started, ok=not is_tool_error(searched.text))
         return searched.text

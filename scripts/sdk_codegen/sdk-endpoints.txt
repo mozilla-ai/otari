@@ -131,8 +131,8 @@ DELETE /api/v1/provider-endpoints/{endpoint_id}     # not yet wrapped
 # Hosted providers (the deployment's own upstream credentials, operator-only)
 GET /api/v1/hosted-providers                        # dashboard-only
 POST /api/v1/hosted-providers                       # dashboard-only
-GET /api/v1/hosted-providers/refresh/preview        # dashboard-only
-POST /api/v1/hosted-providers/refresh               # dashboard-only
+POST /api/v1/hosted-providers/catalog-update/preview  # dashboard-only
+POST /api/v1/hosted-providers/catalog-update        # dashboard-only
 POST /api/v1/hosted-providers/test                  # dashboard-only
 POST /api/v1/hosted-providers/reencrypt             # dashboard-only
 GET /api/v1/hosted-providers/migration              # dashboard-only
@@ -285,8 +285,6 @@ POST /api/v1/routing/preferences/rank               # not yet wrapped
 GET /api/v1/routing/status                          # not yet wrapped
 POST /api/v1/routing/recommend                      # not yet wrapped
 # Pricing refresh workflow
-POST /api/v1/pricing/refresh                        # not yet wrapped
-POST /api/v1/pricing/refresh/confirm                # not yet wrapped
 POST /api/v1/pricing/refresh/reject                 # not yet wrapped
 GET /api/v1/pricing/refresh/pending                 # not yet wrapped
 GET /api/v1/pricing/snapshots                       # not yet wrapped

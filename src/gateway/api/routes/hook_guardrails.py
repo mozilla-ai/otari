@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from gateway.api.deps import TraceServiceDep, verify_api_key_or_master_key
 from gateway.models.api_keys import APIKey
 from gateway.schemas.traces import GuardrailDefinitionRequest, GuardrailDefinitionResponse
-from otari_agent.domain.definitions import GateDefinition
+from otari_agent.domain.definitions import gates_from_body
 
 router = APIRouter(prefix="/hooks", tags=["hooks"], dependencies=[Depends(verify_api_key_or_master_key)])
 
@@ -38,16 +38,6 @@ async def record_guardrail_definition(
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "A guardrail definition is stored with a budget-exempt API key's traces."
         )
-    gates = tuple(
-        GateDefinition(
-            gate_id=gate.gate_id,
-            gate_type=gate.gate_type,
-            enforcement=gate.enforcement,
-            origin=gate.origin,
-            runs=tuple(gate.runs),
-            message=gate.message,
-        )
-        for gate in request.gates
-    )
+    gates = gates_from_body(gate.model_dump() for gate in request.gates)
     digest = await traces.record_definition(api_key.workspace_id, gates, request.digest)
     return GuardrailDefinitionResponse(digest=digest)

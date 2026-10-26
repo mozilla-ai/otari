@@ -2196,12 +2196,16 @@ def _hook_report(
         session_id = payload.get("session_id")
         if not isinstance(session_id, str) or not session_id:
             return
+
+        def origin(gate_id: str) -> str:
+            return "user" if guardrail.origins.get(gate_id) is GuardrailOrigin.USER else "repo"
+
         definition = bounded(
             GateDefinition(
                 gate_id=gate.id,
                 gate_type=gate.type,
                 enforcement=gate.enforcement,
-                origin="user" if guardrail.origins.get(gate.id) is GuardrailOrigin.USER else "repo",
+                origin=origin(gate.id),
                 runs=tuple(gate.runs),
                 message=gate.message,
             )
@@ -2213,7 +2217,7 @@ def _hook_report(
             GateReport(
                 gate_id=result.gate_id,
                 gate_type=types.get(result.gate_id, "unknown"),
-                origin="user" if guardrail.origins.get(result.gate_id) is GuardrailOrigin.USER else "repo",
+                origin=origin(result.gate_id),
                 enforcement=result.enforcement,
                 outcome=result.outcome.value,
                 blocked=result.enforcement == "required" and result.outcome.is_blocking,

@@ -40,7 +40,6 @@ acting deployment-wide, and the default workspace is where its writes land too.
 """
 
 import asyncio
-import time
 import uuid
 
 from sqlalchemy import Select, select
@@ -66,7 +65,6 @@ _user_cache: dict[uuid.UUID, dict[str, dict[str, str]]] = {}
 # cannot disagree with them, and ``None`` on a deployment with no workspace at
 # all, where there are no stored aliases to resolve anyway.
 _default_workspace: uuid.UUID | None = None
-_cached_at: float | None = None
 
 
 async def list_stored_aliases(
@@ -98,11 +96,6 @@ def cached_aliases(user_id: str | None = None, *, workspace_id: uuid.UUID | None
     return dict(_user_cache.get(scope, {}).get(user_id, {}))
 
 
-def cache_is_stale(ttl: float = ALIAS_CACHE_TTL_SECONDS) -> bool:
-    """Whether the cache has never been loaded or has outlived ``ttl``."""
-    return _cached_at is None or (time.monotonic() - _cached_at) >= ttl
-
-
 async def refresh_alias_cache(db: AsyncSession) -> dict[uuid.UUID, dict[str, str]]:
     """Reload the alias cache from the database and return the workspace-wide layers.
 
@@ -111,7 +104,7 @@ async def refresh_alias_cache(db: AsyncSession) -> dict[uuid.UUID, dict[str, str
     in the middle, and clearing in place would leave a window where a request
     resolves against an empty map and 400s on a model that exists.
     """
-    global _cache, _user_cache, _default_workspace, _cached_at  # noqa: PLW0603
+    global _cache, _user_cache, _default_workspace  # noqa: PLW0603
 
     rows = (await db.execute(select(ModelAlias))).scalars().all()
     fresh_global: dict[uuid.UUID, dict[str, str]] = {}
@@ -125,7 +118,6 @@ async def refresh_alias_cache(db: AsyncSession) -> dict[uuid.UUID, dict[str, str
     default_workspace = await lookup_default_workspace_id(db)
 
     _cache, _user_cache, _default_workspace = fresh_global, fresh_scoped, default_workspace
-    _cached_at = time.monotonic()
     return {workspace: dict(names) for workspace, names in _cache.items()}
 
 
@@ -136,11 +128,10 @@ def reset_alias_cache() -> None:
     process-wide cache, and a worker restarting against a different database
     would answer from the old one until its first refresh.
     """
-    global _cache, _user_cache, _default_workspace, _cached_at  # noqa: PLW0603
+    global _cache, _user_cache, _default_workspace  # noqa: PLW0603
 
     _cache, _user_cache = {}, {}
     _default_workspace = None
-    _cached_at = None
 
 
 def effective_aliases(

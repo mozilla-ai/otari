@@ -8,7 +8,7 @@ from gateway.exceptions import TenancyError, TenancyValidationError
 
 
 class SecretBoxUnavailableTenancyError(TenancyError):
-    """`OTARI_SECRET_KEY` is not configured, so a secret cannot be stored.
+    """`OTARI_SECRET_KEY` is unset or empty, so a secret cannot be stored.
 
     Wraps `services.secret_box.SecretBoxUnavailableError` in the status-carrying
     family so the route stays thin: the underlying error carries no key
@@ -24,7 +24,10 @@ class SecretBoxUnavailableTenancyError(TenancyError):
     """
 
     def __init__(self, stored: str = "provider credentials") -> None:
-        super().__init__(f"OTARI_SECRET_KEY is not set; it is required to store {stored}")
+        super().__init__(
+            f"OTARI_SECRET_KEY is not set or is empty; it is required to store {stored}. "
+            "Generate one with `otari gen-secret-key`."
+        )
 
 
 class UnresolvedRedactionError(TenancyValidationError):
