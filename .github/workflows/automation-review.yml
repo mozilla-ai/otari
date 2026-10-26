@@ -14,11 +14,15 @@ on:
         description: "Path of the task's prompt file"
         required: true
         type: string
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
 
 jobs:
   review:
-    # Restricted to main. CLAUDE_CODE_OAUTH_TOKEN, shared with review-pr.yml,
-    # comes from this environment; callers pass no secret.
+    # Restricted to main. CLAUDE_CODE_OAUTH_TOKEN, shared with review-pr.yml, lives
+    # only in this environment. Callers still pass it by name: a reusable
+    # workflow resolves an environment secret the caller does not pass to "".
     environment: pr-review
     runs-on: ubuntu-latest
     timeout-minutes: 40
