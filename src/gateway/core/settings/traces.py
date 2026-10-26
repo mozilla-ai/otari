@@ -48,11 +48,11 @@ class TraceSettings(BaseModel):
         ),
     )
     trace_access_record_retention_days: Annotated[int, OMITTED] = Field(
-        default=365,
-        gt=0,
+        default=0,
+        ge=0,
         description=(
             "Delete the record of a read through a share, or of a break-glass opening, this many days after it, "
-            "whether or not the session is still kept."
+            "whether or not the session is still kept. 0, the default, keeps every record."
         ),
     )
     trace_content_key_backend: Annotated[Literal["secret_key", "aws_kms", "aws_kms_only"], OMITTED] = Field(

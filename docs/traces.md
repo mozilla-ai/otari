@@ -338,10 +338,10 @@ through a share are recorded, at most once an hour per reader so a page left ope
 is one read, and the user sees who read it and when: `GET .../shares` lists every
 share, running ones first and ended ones after, with its newest reads and how
 many it has had, and `GET .../shares/{share_id}/reads` pages through all of them.
-The record of each read outlives the share and the session: it is kept for
-`trace_access_record_retention_days` (365 by default), naming the workspace, the
-session and the audience it was read through, and erasing the session's user
-clears whose session it was.
+The record of each read outlives the share and the session: it is kept until
+`trace_access_record_retention_days` says otherwise (by default, for good), naming
+the workspace, the session and the audience it was read through, and erasing the
+session's user clears whose session it was.
 
 A share with the deployment's operator is read on the operator's trace routes,
 which cover the operator's own organization. On a deployment where the operator
@@ -384,7 +384,7 @@ Each opening:
   after `trace_session_max_age_days` from the move all of it is under KMS;
 - is not told to the session's owner.
 
-Records are kept for `trace_access_record_retention_days` (365 by default), apart
+Records are kept until `trace_access_record_retention_days` says otherwise (by default, for good), apart
 from the session and the organization: deleting an organization does not delete
 the record of the operator's access to it. Erasing a user clears their id from
 the records of openings of their sessions; the openings stay recorded, with the
@@ -575,7 +575,7 @@ Deleting a user erases their traces, as it erases their telemetry.
 | `trace_retention_days` | `30` | Delete a trace once it has had no activity for this long. |
 | `trace_session_max_age_days` | `90` | Delete a session's trace this long after it started, even while it is active, so a reused session id starts a new trace. |
 | `trace_platform_break_glass_enabled` | `false` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. |
-| `trace_access_record_retention_days` | `365` | Delete the record of a read through a share, or of a break-glass opening, this long after it, whether or not the session is still kept. |
+| `trace_access_record_retention_days` | `0` | Delete the record of a read through a share, or of a break-glass opening, this many days after it, whether or not the session is still kept. `0` keeps every record. |
 
 Retention runs whether or not traces are captured, so a deployment that stops
 capturing still deletes what it captured on this schedule. Erasing a user deletes

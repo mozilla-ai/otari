@@ -56,3 +56,28 @@ async def test_a_step_that_keeps_failing_does_not_hold_back_the_others(monkeypat
             await worker
 
     assert ran[:6] == ["traces", "access records", "erasures"] * 2
+
+
+@pytest.mark.asyncio
+async def test_access_records_are_kept_for_good_where_their_retention_is_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_retention, "create_unit_of_work", _no_unit_of_work)
+    ran: list[str] = []
+    worker = asyncio.create_task(
+        _retention.run_trace_retention(
+            lambda uow: cast(TraceService, _Service(ran)),
+            retention_days=30,
+            max_age_days=90,
+            access_record_retention_days=0,
+            interval=0,
+        )
+    )
+    try:
+        async with asyncio.timeout(5):
+            while ran.count("erasures") < 2:
+                await asyncio.sleep(0)
+    finally:
+        worker.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await worker
+
+    assert "access records" not in ran

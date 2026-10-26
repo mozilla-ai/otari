@@ -21,7 +21,7 @@ async def run_trace_retention(
     """Expire traces idle longer than ``retention_days`` or older than ``max_age_days``, once per ``interval``.
 
     The records of reads through a share and of break-glass openings go too,
-    ``access_record_retention_days`` after each,
+    ``access_record_retention_days`` after each (never, where it is 0),
     and the ids of erased users once they can no longer be needed. Each step runs on its
     own, so one that keeps failing never holds back the others.
     """
@@ -33,6 +33,8 @@ async def run_trace_retention(
         )
 
     async def access_records(service: TraceService) -> int:
+        if access_record_retention_days == 0:
+            return 0
         return await service.expire_access_records(
             before=datetime.now(UTC) - timedelta(days=access_record_retention_days)
         )
