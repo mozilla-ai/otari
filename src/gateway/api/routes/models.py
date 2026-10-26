@@ -26,7 +26,6 @@ from gateway.services.merged_catalog_service import (
     alias_model,
     apply_default_pricing,
     apply_organization_pricing,
-    build_merged_catalog,
     catalog_aliases,
     catalog_scope,
     created_timestamp,
@@ -54,7 +53,7 @@ from gateway.services.model_discovery_service import (
 )
 from gateway.services.pricing_service import latest_price_version
 from gateway.services.provider_kwargs import normalize_pricing_key
-from gateway.services.selector_index_service import models_by_identity
+from gateway.services.selector_index_service import find_listed_model, list_models_by_identity
 
 if TYPE_CHECKING:
     pass
@@ -204,26 +203,9 @@ async def list_models(
     `instance:model` selector still pins a request to one provider, and
     GET /api/v1/catalog/models/{model_id} lists the offerings of a model.
     """
-    return ModelListResponse(data=await _listing(db, config, auth, session_identity, model_provider, provider=provider))
-
-
-async def _listing(
-    db: AsyncSession,
-    config: GatewayConfig,
-    auth: tuple[APIKey | None, bool],
-    session_identity: TenancyUser | None,
-    model_provider: ModelProviderPort,
-    *,
-    provider: str | None = None,
-) -> list[ModelObject]:
-    """The caller's catalog, priced at their rate and folded into one row per model."""
-    catalog = await build_merged_catalog(
-        db, config, auth=auth, session_identity=session_identity, provider=provider, model_provider=model_provider
+    return ModelListResponse(
+        data=await list_models_by_identity(db, config, auth, session_identity, model_provider, provider=provider)
     )
-    models = list(catalog.models.values())
-    organization_id = await viewer_organization(db, auth, session_identity)
-    await apply_organization_pricing(db, config, models, catalog.aliases, organization_id)
-    return models_by_identity(config, catalog.models_dev, models, organization_id=organization_id)
 
 
 # Served before GET /models/{model_id:path}, which FastAPI would otherwise match
@@ -314,11 +296,9 @@ async def get_model(
     model_provider: RequestSessionModelProviderPortDep,
 ) -> ModelObject:
     """Get details for a specific model, by catalog id, alias or `instance:model` selector."""
-    if ":" not in model_id:
-        listed = await _listing(db, config, auth, session_identity, model_provider)
-        found = next((obj for obj in listed if obj.id == model_id), None)
-        if found is not None:
-            return found
+    listed = await find_listed_model(db, config, model_id, auth, session_identity, model_provider)
+    if listed is not None:
+        return listed
     obj, aliases = await _find_model(db, config, model_id, auth, session_identity, model_provider)
     organization_id = await viewer_organization(db, auth, session_identity)
     await apply_organization_pricing(db, config, [obj], aliases, organization_id)

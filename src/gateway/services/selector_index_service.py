@@ -14,7 +14,7 @@ import asyncio
 import uuid
 from collections.abc import Callable, Iterable
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,7 +36,9 @@ from gateway.services.merged_catalog_service import (
     ALIAS_OWNED_BY,
     MergedCatalog,
     ModelObject,
+    apply_organization_pricing,
     build_merged_catalog,
+    viewer_organization,
 )
 from gateway.services.model_catalog_service import ModelCatalogEntry
 from gateway.services.model_identity import ModelIdentity, OfferingSeed, group_offerings, vendor_slug
@@ -53,6 +55,10 @@ from gateway.services.tenancy.organization_model_access import (
     resolve_all_organizations_offered_keys,
     workspace_organizations,
 )
+
+if TYPE_CHECKING:
+    from gateway.models.api_keys import APIKey
+    from gateway.models.tenancy import User as TenancyUser
 
 
 def split_offering_selector(obj: ModelObject) -> tuple[str, str]:
@@ -97,6 +103,40 @@ def offering_seed(
     instance, model_id = split_offering_selector(obj)
     seed, metadata, provider_type = seed_for(config, catalog, obj.id, instance, model_id)
     return seed, metadata, instance, model_id, provider_type
+
+
+async def list_models_by_identity(
+    db: AsyncSession,
+    config: GatewayConfig,
+    auth: "tuple[APIKey | None, bool]",
+    session_identity: "TenancyUser | None",
+    model_provider: ModelProviderPort,
+    *,
+    provider: str | None = None,
+) -> list[ModelObject]:
+    """The caller's catalog, priced at their rate and folded into one row per model."""
+    catalog = await build_merged_catalog(
+        db, config, auth=auth, session_identity=session_identity, provider=provider, model_provider=model_provider
+    )
+    models = list(catalog.models.values())
+    organization_id = await viewer_organization(db, auth, session_identity)
+    await apply_organization_pricing(db, config, models, catalog.aliases, organization_id)
+    return models_by_identity(config, catalog.models_dev, models, organization_id=organization_id)
+
+
+async def find_listed_model(
+    db: AsyncSession,
+    config: GatewayConfig,
+    model_id: str,
+    auth: "tuple[APIKey | None, bool]",
+    session_identity: "TenancyUser | None",
+    model_provider: ModelProviderPort,
+) -> ModelObject | None:
+    """The caller's listing row for a catalog id, alias or policy; None for a selector or an id not listed."""
+    if ":" in model_id:
+        return None
+    listed = await list_models_by_identity(db, config, auth, session_identity, model_provider)
+    return next((obj for obj in listed if obj.id == model_id), None)
 
 
 def models_by_identity(
