@@ -10,6 +10,7 @@ from sqlalchemy import delete, select, update
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import TraceBreakGlassRead
 from gateway.repositories.base_repository import BaseRepository
+from gateway.types.traces import BreakGlass
 
 
 class BreakGlassRepository(BaseRepository[TraceBreakGlassRead, Never, Never]):
@@ -18,9 +19,21 @@ class BreakGlassRepository(BaseRepository[TraceBreakGlassRead, Never, Never]):
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, TraceBreakGlassRead)
 
-    async def record(self, **values: object) -> TraceBreakGlassRead:
-        """Stage one record."""
-        row = TraceBreakGlassRead(**values)
+    async def record(
+        self, opening: BreakGlass, *, workspace_id: uuid.UUID, trace_id: str, session_user_id: str | None
+    ) -> TraceBreakGlassRead:
+        """Stage one record: who opened content and why, and which session they opened."""
+        row = TraceBreakGlassRead(
+            kind=opening.kind,
+            organization_id=opening.organization_id,
+            workspace_id=workspace_id,
+            trace_id=trace_id,
+            session_user_id=session_user_id,
+            reader_user_id=opening.reader_user_id,
+            reader_email=opening.reader_email,
+            reason=opening.reason,
+            reference=opening.reference,
+        )
         self.db.add(row)
         await self.db.flush()
         return row
