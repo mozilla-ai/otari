@@ -80,10 +80,10 @@ and recorded as deployment-paid on its usage row, and no organization is
 charged.
 
 This covers every path that calls a provider: Chat Completions, Messages,
-Responses and the Playground, each candidate of a routing policy with fallbacks,
-the pass-through endpoints (embeddings, images, audio, rerank, moderations) and
-batches. A routing policy asks for each candidate as it reaches it, so the one
-that serves is the one that settles, and one the organization cannot fund is
-skipped. A batch is admitted when it is created and charged when its results
-are accounted.
+Responses and the Playground, each candidate of a routing policy or a catalog id
+with fallbacks, the pass-through endpoints (embeddings, images, audio, rerank,
+moderations) and batches. A routing policy or a catalog id asks for each
+candidate as it reaches it, so the one that serves is the one that settles, and
+one the organization cannot fund is skipped. A batch is admitted when it is
+created and charged when its results are accounted.
 

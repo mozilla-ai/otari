@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.core.error_codes import COUNTRY_NOT_SUPPORTED, ERROR_CODE_HEADER
 from gateway.models.routing import RoutingConfig
+from gateway.services.catalog import OfferingRow, build_selector_index, reset_selector_index, set_selector_index
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
 
@@ -107,6 +108,21 @@ def test_a_policy_falls_over_to_a_hosted_provider_that_serves_the_country(client
 
     assert resp.status_code == 200, resp.text
     assert _awaited_model(mock) == "openai:gpt-4o"
+    assert mock.await_args is not None
+    assert mock.await_args.kwargs["api_key"] == "sk-openai-eu"
+
+
+def test_a_catalog_id_falls_over_to_a_hosted_offering_that_serves_the_country(client: TestClient) -> None:
+    offerings = ("openai:gpt-4o", "openai-eu:gpt-4o")
+    rows = [OfferingRow(selector, selector.split(":")[0], "openai", 2.5) for selector in offerings]
+    set_selector_index(build_selector_index(rows, {"openai/gpt-4o": ("openai/gpt-4o", offerings)}))
+    try:
+        with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-4o"))) as mock:
+            resp = _chat(client, "openai/gpt-4o", "FR")
+    finally:
+        reset_selector_index()
+
+    assert resp.status_code == 200, resp.text
     assert mock.await_args is not None
     assert mock.await_args.kwargs["api_key"] == "sk-openai-eu"
 

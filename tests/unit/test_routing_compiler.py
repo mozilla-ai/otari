@@ -398,10 +398,10 @@ def test_an_alias_claims_its_name_before_the_catalog(catalog_config: GatewayConf
     assert compile_catalog_plan(catalog_config, _CATALOG_ID) is None
 
 
-def test_a_catalog_offering_with_no_stored_credential_leaves_the_plain_path(
+def test_a_catalog_offering_with_no_stored_credential_stays_in_the_plan(
     catalog_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The plain path asks the hosted-credential port for that offering, and a plan does not."""
+    """The walk asks the hosted-credential port for that offering when it reaches it."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     catalog_config.providers["anthropic"] = {}
     _install_catalog(
@@ -409,4 +409,10 @@ def test_a_catalog_offering_with_no_stored_credential_leaves_the_plain_path(
         OfferingRow("anthropic:m1-b", "anthropic", "anthropic", 2.0),
     )
 
-    assert compile_catalog_plan(catalog_config, _CATALOG_ID) is None
+    plan = compile_catalog_plan(catalog_config, _CATALOG_ID)
+
+    assert plan is not None
+    assert [(attempt.instance, attempt.model) for attempt in plan.attempts] == [
+        ("openai", "m1-a"),
+        ("anthropic", "m1-b"),
+    ]
