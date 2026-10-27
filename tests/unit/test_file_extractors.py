@@ -86,6 +86,37 @@ def test_docx_reads_one_alternate_content_branch() -> None:
     assert file_extractors._extract_sync(_docx(body), ".docx").text == "Boxed"
 
 
+def test_docx_keeps_tabs_breaks_titles_and_a_cell_of_several_paragraphs() -> None:
+    cell = "<w:tc><w:p><w:r><w:t>Line one</w:t></w:r></w:p><w:p><w:r><w:t>Line two</w:t></w:r></w:p></w:tc>"
+    body = (
+        "<w:p><w:r><w:t>Name</w:t><w:tab/><w:t>Value</w:t><w:br/><w:t>Next line</w:t></w:r></w:p>"
+        + _paragraph("Plan", "Title")
+        + _paragraph("Deep", "Heading9")
+        + f"<w:tbl><w:tr>{cell}</w:tr></w:tbl>"
+    )
+
+    result = file_extractors._extract_sync(_docx(body), ".docx")
+
+    assert result.text == "Name\tValue\nNext line\n# Plan\n###### Deep\n| Line one Line two |\n| --- |"
+
+
+def test_docx_stops_reading_once_the_text_ceiling_is_reached(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Markup past the ceiling is never parsed, so a broken tail far beyond it does not fail the extraction."""
+    monkeypatch.setattr(file_extractors, "_MAX_TEXT_BYTES", 30)
+    data = _zip(
+        {
+            "_rels/.rels": _rels(("rId1", "officeDocument", "word/document.xml")),
+            "word/document.xml": f"<w:document {_W}><w:body>{_paragraph('first paragraph') * 1000}<w:p>",
+        }
+    )
+
+    result = file_extractors._extract_sync(data, ".docx")
+
+    assert result.ok is True
+    assert result.detail == "truncated"
+    assert result.text == "first paragraph\nfirst paragrap"
+
+
 def test_pptx_follows_the_presentation_order_not_the_file_names() -> None:
     def slide(text: str) -> str:
         return (
@@ -167,6 +198,51 @@ def test_xlsx_dates_follow_the_1904_system() -> None:
     result = file_extractors._extract_sync(_xlsx(sheet, date1904=True), ".xlsx")
 
     assert result.text == "## Sales\n| 1904-01-01 |\n| --- |"
+
+
+def test_xlsx_shows_a_time_of_day_and_keeps_a_date_cell_that_is_not_a_number() -> None:
+    sheet = '<row r="1"><c r="A1" s="1"><v>0.75</v></c><c r="B1" s="1"><v>soon</v></c></row>'
+
+    result = file_extractors._extract_sync(_xlsx(sheet), ".xlsx")
+
+    assert result.text == "## Sales\n| 18:00:00 | soon |\n| --- | --- |"
+
+
+def test_xlsx_places_a_cell_without_a_reference_after_the_one_before_it() -> None:
+    sheet = '<row><c><v>1</v></c><c r="C1"><v>3</v></c><c><v>4</v></c></row>'
+
+    assert (
+        file_extractors._extract_sync(_xlsx(sheet), ".xlsx").text
+        == "## Sales\n| 1 |  | 3 | 4 |\n| --- | --- | --- | --- |"
+    )
+
+
+def test_xlsx_parses_no_sheet_past_the_text_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(file_extractors, "_MAX_TEXT_BYTES", 2000)
+    # One wide row pads every other row's rendering, so the table outgrows the
+    # ceiling while the rows held to build it stay within it.
+    rows = '<row><c r="A1"><v>1</v></c><c r="AX1"><v>2</v></c></row>' + "".join(
+        f'<row><c r="A{n}"><v>{n}</v></c></row>' for n in range(2, 41)
+    )
+    data = _zip(
+        {
+            "xl/workbook.xml": (
+                f'<workbook {_S} {_R}><sheets><sheet name="One" sheetId="1" r:id="rId1"/>'
+                '<sheet name="Two" sheetId="2" r:id="rId2"/></sheets></workbook>'
+            ),
+            "xl/_rels/workbook.xml.rels": _rels(
+                ("rId1", "worksheet", "worksheets/sheet1.xml"), ("rId2", "worksheet", "worksheets/sheet2.xml")
+            ),
+            "xl/worksheets/sheet1.xml": f"<worksheet {_S}><sheetData>{rows}</sheetData></worksheet>",
+            "xl/worksheets/sheet2.xml": "<worksheet",
+        }
+    )
+
+    result = file_extractors._extract_sync(data, ".xlsx")
+
+    assert result.detail == "truncated"
+    assert result.text.startswith("## One\n| 1 |")
+    assert "## Two" not in result.text
 
 
 def test_xlsx_ignores_a_column_past_the_last_one() -> None:
@@ -300,6 +376,49 @@ def test_a_slide_the_presentation_lists_but_does_not_hold_is_skipped() -> None:
     )
 
     assert file_extractors._extract_sync(data, ".pptx").text == "## Slide 1\nHere"
+
+
+def test_pptx_parses_no_slide_past_the_text_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(file_extractors, "_MAX_TEXT_BYTES", 20)
+    data = _zip(
+        {
+            "ppt/presentation.xml": (
+                f'<p:presentation {_P} {_R}><p:sldIdLst><p:sldId id="256" r:id="rId2"/>'
+                '<p:sldId id="257" r:id="rId3"/></p:sldIdLst></p:presentation>'
+            ),
+            "ppt/_rels/presentation.xml.rels": _rels(
+                ("rId2", "slide", "slides/slide1.xml"), ("rId3", "slide", "slides/slide2.xml")
+            ),
+            "ppt/slides/slide1.xml": f"<p:sld {_P} {_A}><a:p><a:r><a:t>{'x' * 50}</a:t></a:r></a:p></p:sld>",
+            "ppt/slides/slide2.xml": "<p:sld",
+        }
+    )
+
+    result = file_extractors._extract_sync(data, ".pptx")
+
+    assert result.detail == "truncated"
+    assert result.text == "## Slide 1\n" + "x" * 9
+
+
+def test_relationships_resolve_each_target_form_and_skip_external_ones() -> None:
+    rels = (
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        f'<Relationship Id="rId1" Type="{_REL}/worksheet" Target="worksheets/sheet1.xml"/>'
+        f'<Relationship Id="rId2" Type="{_REL}/styles" Target="/xl/styles.xml"/>'
+        f'<Relationship Id="rId3" Type="{_REL}/extended-properties" Target="../docProps/app.xml"/>'
+        f'<Relationship Id="rId4" Type="{_REL}/hyperlink" Target="https://example.com/x" TargetMode="External"/>'
+        f'<Relationship Id="rId5" Type="{_REL}/image" Target=""/>'
+        "</Relationships>"
+    )
+    archive = file_extractors._Archive(_zip({"xl/_rels/workbook.xml.rels": rels}))
+
+    found = file_extractors._relationships(archive, "xl/workbook.xml")
+
+    assert [(rid, member) for rid, _, member in found] == [
+        ("rId1", "xl/worksheets/sheet1.xml"),
+        ("rId2", "xl/styles.xml"),
+        ("rId3", "docProps/app.xml"),
+    ]
 
 
 def test_a_file_that_is_not_the_zip_its_name_claims_fails_cleanly() -> None:
@@ -439,6 +558,27 @@ def test_the_extension_comes_from_the_mime_type_when_there_is_no_filename() -> N
     result = asyncio.run(file_extractors.extract_text_from_file(data, mime, None))
 
     assert result.text == "## Sales\n| 7 |\n| --- |"
+
+
+@pytest.mark.parametrize(
+    ("mime", "filename", "expected"),
+    [
+        ("text/plain", "Report.PDF", ".pdf"),
+        ("application/pdf", "notes", ".pdf"),
+        ("text/plain; charset=utf-8", None, ".txt"),
+        ("image/png", None, ".png"),
+        ("application/x-otari-unknown", None, ".bin"),
+        ("", None, ".bin"),
+    ],
+)
+def test_the_filename_suffix_wins_over_the_mime_type(mime: str, filename: str | None, expected: str) -> None:
+    assert file_extractors._resolve_extension(mime, filename) == expected
+
+
+@pytest.mark.parametrize(("max_pages", "max_text_bytes"), [(0, 1024), (1, 0), (-1, 1024)])
+def test_bounded_pdf_refuses_a_limit_that_is_not_positive(max_pages: int, max_text_bytes: int) -> None:
+    with pytest.raises(ValueError, match="must be positive"):
+        file_extractors.extract_bounded_pdf_text_sync(b"%PDF", max_pages=max_pages, max_text_bytes=max_text_bytes)
 
 
 def test_bounded_pdf_rejects_page_count_before_extracting(monkeypatch: pytest.MonkeyPatch) -> None:
