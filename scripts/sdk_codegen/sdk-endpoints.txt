@@ -167,6 +167,9 @@ GET /api/v1/health-checks/settings                  # operator dashboard only
 PATCH /api/v1/health-checks/settings                # operator dashboard only
 GET /api/v1/settings/maintenance-mode               # not yet wrapped
 PATCH /api/v1/settings/maintenance-mode             # not yet wrapped
+GET /api/v1/settings/country-database               # operator dashboard only
+PUT /api/v1/settings/country-database               # operator dashboard only
+DELETE /api/v1/settings/country-database            # operator dashboard only
 # Model discovery / metadata
 GET /api/v1/models/discoverable                     # not yet wrapped
 GET /api/v1/models/metadata                         # not yet wrapped

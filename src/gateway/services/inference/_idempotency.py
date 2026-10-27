@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -33,7 +33,8 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.models.inference import IdempotencyRecord, IdempotencyState
 from gateway.repositories.inference import InferenceRepositories
-from gateway.schemas.inference import EmbeddingResponse, RerankResponse
+from gateway.schemas.inference import CountryDatabaseStatus, EmbeddingResponse, RerankResponse
+from gateway.services.inference._country_database import CountryDatabaseStore
 from gateway.services.inference._embeddings import embedding_provider_options
 from gateway.services.inference._passthrough_responses import embeddings_response, rerank_response
 from gateway.services.pricing_service import ResolvedPricing
@@ -171,7 +172,8 @@ class InferenceService:
     """The inference domain's service.
 
     It claims, replays and settles idempotency keys, one Unit of Work block per
-    step, and shapes what a pass-through endpoint sends and returns.
+    step, shapes what a pass-through endpoint sends and returns, and keeps the
+    country file an operator uploads.
     """
 
     def __init__(
@@ -183,6 +185,28 @@ class InferenceService:
         self._uow = uow
         self._keys = repositories.idempotency
         self._config = config
+        self._country_database = CountryDatabaseStore(uow, repositories.country_database, config)
+
+    async def country_database_status(self) -> CountryDatabaseStatus:
+        """The stored country file, and whether ``client_country_database`` is read instead."""
+        return await self._country_database.status()
+
+    async def store_country_database(self, chunks: AsyncIterator[bytes]) -> CountryDatabaseStatus:
+        """Store the uploaded country file in place of the one stored before.
+
+        Raises:
+            CountryDatabaseTooLargeError: the upload is larger than a country file can be.
+            CountryDatabaseInvalidError: the upload is no MaxMind DB country file.
+        """
+        return await self._country_database.store(chunks)
+
+    async def remove_country_database(self) -> None:
+        """Remove the stored country file.
+
+        Raises:
+            CountryDatabaseNotFoundError: no file is stored.
+        """
+        await self._country_database.remove()
 
     @staticmethod
     def embedding_provider_options(provider: LLMProvider, *, selector: str, input_type: str | None) -> dict[str, Any]:

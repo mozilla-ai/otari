@@ -991,6 +991,16 @@ def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
 MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_listener)]
 
 
+def get_inference_service(
+    uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]
+) -> InferenceService:
+    """Build the inference service on the request's unit of work."""
+    return build_inference_service(uow, config)
+
+
+InferenceServiceDep = Annotated[InferenceService, Depends(get_inference_service)]
+
+
 def get_workspace_code_execution_policy_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
@@ -2023,6 +2033,7 @@ __all__ = [
     "GrowthSignalPortDep",
     "IdentityProviderPortDep",
     "IdentityServiceDep",
+    "InferenceServiceDep",
     "ModelProviderPortDep",
     "HostedProviderServiceDep",
     "OrgProviderModelServiceDep",

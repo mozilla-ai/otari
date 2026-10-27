@@ -5658,6 +5658,37 @@ export interface paths {
         patch: operations["settings-update_settings"];
         trace?: never;
     };
+    "/api/v1/settings/country-database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Country Database
+         * @description Describe the stored country file, and say whether ``client_country_database`` is read instead.
+         */
+        get: operations["settings-get_country_database"];
+        /**
+         * Upload Country Database
+         * @description Store a country file in place of the one stored before.
+         *
+         *     A file larger than 32 MiB answers 413, and one that is no MaxMind DB
+         *     country file answers 400. Either way the file stored before stays.
+         */
+        put: operations["settings-upload_country_database"];
+        post?: never;
+        /**
+         * Delete Country Database
+         * @description Remove the stored country file. Answers 404 when none is stored.
+         */
+        delete: operations["settings-delete_country_database"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/mail": {
         parameters: {
             query?: never;
@@ -9205,6 +9236,19 @@ export interface components {
         CountTokensResponse: {
             /** Input Tokens */
             input_tokens: number;
+        };
+        /**
+         * CountryDatabaseStatus
+         * @description The country file a request's address is looked up in.
+         */
+        CountryDatabaseStatus: {
+            /**
+             * Client Country Database Set
+             * @description Whether `client_country_database` names a file. That file is read, and a stored one is not.
+             */
+            client_country_database_set: boolean;
+            /** @description The stored file, or null when none is stored. */
+            stored: components["schemas"]["StoredCountryDatabasePublic"] | null;
         };
         /** CreateBatchRequest */
         CreateBatchRequest: {
@@ -16831,6 +16875,35 @@ export interface components {
             tool_name: string | null;
             /** Tool Type */
             tool_type: string | null;
+        };
+        /**
+         * StoredCountryDatabasePublic
+         * @description The country file stored in the database, which every replica reads.
+         */
+        StoredCountryDatabasePublic: {
+            /**
+             * Built At
+             * Format: date-time
+             * @description When the file was built, from its metadata.
+             */
+            built_at: string;
+            /**
+             * Database Type
+             * @description The type the file's metadata names, such as `GeoLite2-Country` or `DBIP-Country-Lite`.
+             */
+            database_type: string;
+            /**
+             * Sha256
+             * @description The file's SHA-256, in hex.
+             */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Uploaded At
+             * Format: date-time
+             */
+            uploaded_at: string;
         };
         /**
          * StoredSearchToolSchema
@@ -28523,6 +28596,85 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    "settings-get_country_database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CountryDatabaseStatus"];
+                };
+            };
+        };
+    };
+    "settings-upload_country_database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** @description A MaxMind DB country file, such as GeoLite2 Country or DB-IP Lite Country. */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CountryDatabaseStatus"];
+                };
+            };
+            /** @description The file is larger than 32 MiB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body holds no file in the field ``file``. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "settings-delete_country_database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

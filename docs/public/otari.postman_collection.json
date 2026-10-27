@@ -10662,6 +10662,66 @@
           }
         },
         {
+          "name": "Get Country Database",
+          "request": {
+            "description": "Describe the stored country file, and say whether ``client_country_database`` is read instead.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "settings",
+                "country-database"
+              ],
+              "raw": "{{baseUrl}}/api/v1/settings/country-database"
+            }
+          }
+        },
+        {
+          "name": "Upload Country Database",
+          "request": {
+            "description": "Store a country file in place of the one stored before.\n\nA file larger than 32 MiB answers 413, and one that is no MaxMind DB\ncountry file answers 400. Either way the file stored before stays.",
+            "header": [],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "settings",
+                "country-database"
+              ],
+              "raw": "{{baseUrl}}/api/v1/settings/country-database"
+            }
+          }
+        },
+        {
+          "name": "Delete Country Database",
+          "request": {
+            "description": "Remove the stored country file. Answers 404 when none is stored.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "settings",
+                "country-database"
+              ],
+              "raw": "{{baseUrl}}/api/v1/settings/country-database"
+            }
+          }
+        },
+        {
           "name": "Get Mail Settings",
           "request": {
             "description": "Report the effective outgoing-mail configuration.",

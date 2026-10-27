@@ -4577,6 +4577,33 @@
         "title": "CountTokensResponse",
         "type": "object"
       },
+      "CountryDatabaseStatus": {
+        "description": "The country file a request's address is looked up in.",
+        "properties": {
+          "client_country_database_set": {
+            "description": "Whether `client_country_database` names a file. That file is read, and a stored one is not.",
+            "title": "Client Country Database Set",
+            "type": "boolean"
+          },
+          "stored": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StoredCountryDatabasePublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The stored file, or null when none is stored."
+          }
+        },
+        "required": [
+          "stored",
+          "client_country_database_set"
+        ],
+        "title": "CountryDatabaseStatus",
+        "type": "object"
+      },
       "CreateBatchRequest": {
         "properties": {
           "completion_window": {
@@ -20547,6 +20574,45 @@
           "content"
         ],
         "title": "SpanPublic",
+        "type": "object"
+      },
+      "StoredCountryDatabasePublic": {
+        "description": "The country file stored in the database, which every replica reads.",
+        "properties": {
+          "built_at": {
+            "description": "When the file was built, from its metadata.",
+            "format": "date-time",
+            "title": "Built At",
+            "type": "string"
+          },
+          "database_type": {
+            "description": "The type the file's metadata names, such as `GeoLite2-Country` or `DBIP-Country-Lite`.",
+            "title": "Database Type",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "The file's SHA-256, in hex.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "uploaded_at": {
+            "format": "date-time",
+            "title": "Uploaded At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "database_type",
+          "built_at",
+          "size_bytes",
+          "sha256",
+          "uploaded_at"
+        ],
+        "title": "StoredCountryDatabasePublic",
         "type": "object"
       },
       "StoredSearchToolSchema": {
@@ -44610,6 +44676,111 @@
           }
         ],
         "summary": "Update Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v1/settings/country-database": {
+      "delete": {
+        "description": "Remove the stored country file. Answers 404 when none is stored.",
+        "operationId": "settings-delete_country_database",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Country Database",
+        "tags": [
+          "settings"
+        ]
+      },
+      "get": {
+        "description": "Describe the stored country file, and say whether ``client_country_database`` is read instead.",
+        "operationId": "settings-get_country_database",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountryDatabaseStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Country Database",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "description": "Store a country file in place of the one stored before.\n\nA file larger than 32 MiB answers 413, and one that is no MaxMind DB\ncountry file answers 400. Either way the file stored before stays.",
+        "operationId": "settings-upload_country_database",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "contentMediaType": "application/octet-stream",
+                    "description": "A MaxMind DB country file, such as GeoLite2 Country or DB-IP Lite Country.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountryDatabaseStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "413": {
+            "description": "The file is larger than 32 MiB."
+          },
+          "422": {
+            "description": "The body holds no file in the field ``file``."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Upload Country Database",
         "tags": [
           "settings"
         ]

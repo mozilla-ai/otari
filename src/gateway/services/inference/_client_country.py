@@ -6,10 +6,14 @@ MaxMind-format file (``client_country_database``). The address is the one
 uvicorn resolved behind ``forwarded_allow_ips``.
 """
 
+import io
 import ipaddress
 import os
 import threading
 from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 from gateway.core.country_codes import COUNTRY_CODES
@@ -23,7 +27,15 @@ if TYPE_CHECKING:
 
 
 class CountryDatabaseError(ValueError):
-    """The ``client_country_database`` file cannot be read."""
+    """A country file cannot be read."""
+
+
+@dataclass(frozen=True)
+class CountryDatabaseFile:
+    """What a country file's metadata says it is."""
+
+    database_type: str
+    built_at: datetime
 
 
 def _country_code(value: object) -> str | None:
@@ -33,20 +45,46 @@ def _country_code(value: object) -> str | None:
     return code if code in COUNTRY_CODES else None
 
 
+def _maxminddb(needed_by: str) -> ModuleType:
+    try:
+        import maxminddb  # noqa: PLC0415 - the geoip extra, needed only when a country file is used
+    except ImportError as exc:
+        msg = f"{needed_by} needs maxminddb, which is not installed. Install it with: pip install gateway[geoip]"
+        raise CountryDatabaseError(msg) from exc
+    return maxminddb
+
+
 def open_country_database(path: str) -> "Reader":
     """Open the file at ``path``, or say why it cannot be used."""
+    maxminddb = _maxminddb("client_country_database")
     try:
-        import maxminddb  # noqa: PLC0415 - the geoip extra, needed only when the setting is on
-    except ImportError as exc:
-        msg = (
-            "client_country_database is set but maxminddb is not installed. Install it with: pip install gateway[geoip]"
-        )
-        raise CountryDatabaseError(msg) from exc
-    try:
-        return maxminddb.open_database(path)
+        reader: Reader = maxminddb.open_database(path)
     except (OSError, maxminddb.InvalidDatabaseError) as exc:
         msg = f"client_country_database {path!r} cannot be read as a MaxMind DB file: {type(exc).__name__}"
         raise CountryDatabaseError(msg) from exc
+    return reader
+
+
+def inspect_country_database(content: bytes) -> CountryDatabaseFile:
+    """What ``content`` is, when it is a MaxMind DB country file such as GeoLite2 Country or DB-IP Lite Country.
+
+    Raises:
+        CountryDatabaseError: ``content`` is no MaxMind DB file, or one that holds no countries.
+    """
+    maxminddb = _maxminddb("A country file")
+    try:
+        metadata = maxminddb.open_database(io.BytesIO(content), maxminddb.MODE_FD).metadata()
+        built_at = datetime.fromtimestamp(metadata.build_epoch, UTC)
+    # TypeError: metadata that lacks a field, or holds one of the wrong type.
+    except (ValueError, TypeError, OverflowError, OSError, maxminddb.InvalidDatabaseError) as exc:
+        msg = "The file cannot be read as a MaxMind DB file"
+        raise CountryDatabaseError(msg) from exc
+    database_type = str(metadata.database_type)
+    # A city file holds countries too, at five times the size; the gate reads only the country.
+    if "country" not in database_type.lower() or "city" in database_type.lower():
+        msg = f"The file is a {database_type!r} database, not a country database"
+        raise CountryDatabaseError(msg)
+    return CountryDatabaseFile(database_type=database_type, built_at=built_at)
 
 
 class _Database:
