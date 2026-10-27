@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 
 from gateway.core.config import GatewayConfig
+from gateway.models.tools import WebSearchCredential, WebToolCredentialSource
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tools import (
     NO_WEB_TOOLS,
@@ -12,6 +13,7 @@ from gateway.services.tools import (
     WEB_SEARCH_TOOL_NAME,
     AdmittedWebTools,
     PricedTool,
+    admitted_tools,
     builtin_fetch_resolved,
     configured_tools_to_price,
     resolve_fetch,
@@ -25,20 +27,25 @@ from gateway.types.tool_charges import instance_rate_key
 _INSTANCE = "fake-search"
 _FAKE_SEARCH = GatewayConfig(search_tools={_INSTANCE: {"provider": "fake"}})
 _SEARCH_ROWS = (instance_rate_key("search", _INSTANCE, "fake"), "otari:web_search")
-_SEARCH_ON_ITS_OWN_ROW = PricedTool(WEB_SEARCH_TOOL_NAME, None, ("otari:web_search",))
+_SEARCH_ON_ITS_OWN_ROW = PricedTool(WEB_SEARCH_TOOL_NAME, None, ("otari:web_search",), True)
 _BUILTIN_FETCH = PricedTool(
     WEB_FETCH_TOOL_NAME,
     "builtin:builtin_fetch",
     (instance_rate_key("fetch", "builtin_fetch", "builtin"), "otari:web_fetch"),
+    True,
 )
-_CODE = PricedTool("code_execution", None, ("otari:code_execution",))
+_CODE = PricedTool("code_execution", None, ("otari:code_execution",), True)
+_ORG_KEY = WebSearchCredential(provider="tavily", source=WebToolCredentialSource.ORG, api_key="tvly-test")
 
 
-def _web(*, search: bool = False, on_library: bool = True, fetch: bool = False) -> AdmittedWebTools:
+def _web(
+    *, search: bool = False, on_library: bool = True, fetch: bool = False, credential: WebSearchCredential | None = None
+) -> AdmittedWebTools:
     return AdmittedWebTools(
         search_tool_entry={"type": "otari_web_search"} if search else None,
         fetch_tool_entry={"type": "otari_web_fetch"} if fetch else None,
         fetch_policy=DomainPolicy(),
+        search_credential=credential,
         in_loop_search=resolve_in_loop_search(_FAKE_SEARCH, None) if search and on_library else None,
         fetch=builtin_fetch_resolved() if fetch else None,
     )
@@ -49,11 +56,33 @@ def _checked(web: AdmittedWebTools, *, code_execution: bool = False) -> list[Pri
 
 
 def test_a_search_on_an_instance_is_checked_under_its_label_and_rows() -> None:
-    assert _checked(_web(search=True)) == [PricedTool(WEB_SEARCH_TOOL_NAME, f"fake:{_INSTANCE}", _SEARCH_ROWS)]
+    assert _checked(_web(search=True)) == [PricedTool(WEB_SEARCH_TOOL_NAME, f"fake:{_INSTANCE}", _SEARCH_ROWS, True)]
 
 
 def test_a_search_the_old_backend_serves_is_checked_on_its_tools_own_row() -> None:
     assert _checked(_web(search=True, on_library=False)) == [_SEARCH_ON_ITS_OWN_ROW]
+
+
+def test_a_search_the_old_backend_serves_on_the_workspaces_own_key_is_not_deployment_paid() -> None:
+    assert _checked(_web(search=True, on_library=False, credential=_ORG_KEY)) == [
+        replace(_SEARCH_ON_ITS_OWN_ROW, deployment_paid=False)
+    ]
+
+
+def test_a_search_the_libraries_run_on_the_workspaces_own_key_is_not_deployment_paid() -> None:
+    web = _web(search=True)
+    assert web.in_loop_search is not None
+    on_key = replace(web.in_loop_search, search=replace(web.in_loop_search.search, on_credential=True))
+
+    [search] = _checked(replace(web, in_loop_search=on_key))
+
+    assert search.deployment_paid is False
+
+
+def test_every_admitted_tool_is_listed_whatever_require_pricing_says() -> None:
+    web = _web(search=True, on_library=False, fetch=True)
+
+    assert admitted_tools(code_execution=True, web=web) == [_SEARCH_ON_ITS_OWN_ROW, _BUILTIN_FETCH, _CODE]
 
 
 def test_the_fetch_tool_is_checked_on_the_instance_admission_resolved() -> None:
@@ -99,8 +128,8 @@ def test_the_deployments_search_and_fetch_are_checked_as_a_call_with_no_workspac
     fetch = resolve_fetch(config, None, requested=None, for_search=None)
 
     assert configured_tools_to_price(config) == [
-        PricedTool(WEB_SEARCH_TOOL_NAME, f"fake:{_INSTANCE}", _SEARCH_ROWS),
-        PricedTool(WEB_FETCH_TOOL_NAME, fetch.label, fetch.rate_keys),
+        PricedTool(WEB_SEARCH_TOOL_NAME, f"fake:{_INSTANCE}", _SEARCH_ROWS, True),
+        PricedTool(WEB_FETCH_TOOL_NAME, fetch.label, fetch.rate_keys, True),
     ]
     assert fetch.rate_keys == (instance_rate_key("fetch", "fake-fetch", "fake"), "otari:web_fetch")
 

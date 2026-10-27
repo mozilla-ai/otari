@@ -181,6 +181,7 @@ def _build_web_retrieval_backend(
     if credential is not None:
         kwargs["provider"] = credential.provider
         kwargs["provider_api_key"] = credential.api_key
+        kwargs["on_credential"] = True
     elif config is not None and config.web_search_provider_configured():
         kwargs["provider"] = config.web_search_provider
         kwargs["provider_api_key"] = config.web_search_provider_api_key

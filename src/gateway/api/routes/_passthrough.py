@@ -50,8 +50,15 @@ from gateway.api.deps import (
     model_provider_port_on,
 )
 from gateway.api.request_id import set_request_id
+from gateway.api.routes._attempt_metrics import record_attempt
 from gateway.api.routes._attempts import classify_local_attempt_error
-from gateway.api.routes._helpers import resolve_user_id, with_retry_hint
+from gateway.api.routes._helpers import (
+    country_gate_for,
+    country_not_supported,
+    missing_credential_error,
+    resolve_user_id,
+    with_retry_hint,
+)
 from gateway.api.routes._pipeline import (
     FUNDS_CHECK_UNAVAILABLE_DETAIL,
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
@@ -138,7 +145,13 @@ from gateway.services.provider_kwargs import (
     require_declared_credential,
     resolve_provider_selector,
 )
-from gateway.services.providers import serve_on_hosted_provider, unpriced_model_refusal
+from gateway.services.providers import (
+    CountryGate,
+    CountryNotServedError,
+    ensure_provider_country,
+    serve_on_hosted_provider,
+    unpriced_model_refusal,
+)
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
 ResultT = TypeVar("ResultT")
@@ -393,7 +406,7 @@ async def run_passthrough(
         return HTTPException(status_code=status_code, detail=detail, headers=headers or None)
 
     async def _serve_hosted(
-        resolved: ResolvedProvider, reservation: ReservationHandle
+        resolved: ResolvedProvider, reservation: ReservationHandle, country_gate: CountryGate
     ) -> tuple[ResolvedProvider, DeploymentCharge | None] | None:
         """Serve ``resolved`` on the deployment's own credential where nothing declared serves it.
 
@@ -404,7 +417,12 @@ async def run_passthrough(
         port = model_provider_port_on(raw_request, db)
         try:
             served = await serve_on_hosted_provider(
-                config, port, resolved, organization_id=organization_id, workspace_id=workspace_id
+                config,
+                port,
+                resolved,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                country_gate=country_gate,
             )
         except asyncio.CancelledError:
             await refund_reservation(db, reservation)
@@ -416,6 +434,11 @@ async def run_passthrough(
                 status.HTTP_403_FORBIDDEN,
                 model_not_allowed_detail(model),
                 **error_headers(MODEL_NOT_ALLOWED),
+            ) from exc
+        except CountryNotServedError as exc:
+            refused = country_not_supported(exc.gate, model)
+            raise await _refuse(
+                reservation, resolved, refused.status_code, str(refused.detail), **(refused.headers or {})
             ) from exc
         except Exception as exc:
             logger.error(
@@ -553,6 +576,11 @@ async def run_passthrough(
                 hosted=model_provider_port_on(raw_request, db),
                 organization_id=organization_id,
             )
+            if unpriced.code == PRICING_REQUIRED:
+                logger.warning(
+                    "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on",
+                    model,
+                )
             # Record the rejection so dropped traffic is visible in the activity
             # log and countable as an error, rather than only reaching the
             # operator as a user complaint. cost stays null: nothing was spent.
@@ -612,9 +640,23 @@ async def run_passthrough(
             headers=error_headers(refusal.code),
         )
 
+    country_gate = country_gate_for(config, raw_request)
+    try:
+        ensure_provider_country(config, country_gate, resolved.instance)
+    except CountryNotServedError as exc:
+        await refund_reservation(db, reservation)
+        refused = country_not_supported(exc.gate, model)
+        await _log_rejection(
+            str(refused.detail),
+            row_model=resolved.model,
+            row_provider=resolved.instance,
+            status_code=refused.status_code,
+        )
+        raise refused from exc
+
     # The last rung of the credential ladder, past every gate on the name the caller wrote.
     deployment_charge: DeploymentCharge | None = None
-    hosted = await _serve_hosted(resolved, reservation)
+    hosted = await _serve_hosted(resolved, reservation, country_gate)
     if hosted is not None:
         resolved, deployment_charge = hosted
         if lookup_pricing:
@@ -635,6 +677,10 @@ async def run_passthrough(
                 and config.require_pricing
                 and not can_price(pricing, meter=billing.meter, reports_tokens=billing.reports_tokens)
             ):
+                logger.warning(
+                    "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on",
+                    f"{resolved.instance}:{resolved.model}",
+                )
                 raise await _refuse(
                     reservation,
                     resolved,
@@ -710,9 +756,12 @@ async def run_passthrough(
         api_key_id=api_key_id,
     )
 
+    # Set once the provider has answered, so a later settlement failure is not counted as a failed attempt.
+    served = False
     try:
         require_declared_credential(config, resolved.instance, resolved.provider, resolved.kwargs)
         result = await call_provider(resolved)
+        served = True
 
         reported = billing.report(result)
         usage_log = _usage_row(
@@ -744,6 +793,15 @@ async def run_passthrough(
                 expects_cost=True,
                 savepoint=db.begin_nested,
             )
+        record_attempt(
+            resolved.instance,
+            resolved.model,
+            failed=False,
+            status_code=None,
+            fallback=False,
+            latency_ms=usage_log.latency_ms,
+            ttft_ms=None,
+        )
         await log_writer.put(usage_log)
         # The measured total, so a token ceiling counts this endpoint's traffic.
         # These paths hold no token estimate at admission (the estimate callback is
@@ -761,22 +819,28 @@ async def run_passthrough(
         raise
     except Exception as e:
         caller_params = frozenset(request_params) - SENSITIVE_PARAM_FIELDS
-        await log_writer.put(
-            _usage_row(
-                "error",
-                error_message=_stored_error_message(str(e)),
-                status_code=failure_status_code(e, request_params=caller_params),
-            )
+        failed_row = _usage_row(
+            "error",
+            error_message=_stored_error_message(str(e)),
+            status_code=failure_status_code(e, request_params=caller_params),
         )
+        if not served:
+            record_attempt(
+                resolved.instance,
+                resolved.model,
+                failed=True,
+                status_code=failed_row.status_code,
+                fallback=False,
+                latency_ms=failed_row.latency_ms,
+                ttft_ms=None,
+            )
+        await log_writer.put(failed_row)
         await refund_reservation(db, reservation)
 
         missing = missing_credential(e)
         if missing is not None:
             logger.warning("No credential configured for %s:%s", resolved.provider, resolved.model)
-            public = missing.behind_alias(resolved.alias)
-            raise HTTPException(
-                status_code=public.status_code, detail=public.detail, headers=error_headers(public.code)
-            ) from e
+            raise missing_credential_error(missing.behind_alias(resolved.alias)) from e
 
         mapped = map_provider_error(e) if map_provider_error else None
         if mapped is not None:
@@ -1092,6 +1156,12 @@ async def run_decision(
         not_allowed_detail = model_not_allowed_detail(selector)
         await log_rejection(not_allowed_detail, row_model=model, row_provider=provider_name, status_code=403)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
+    try:
+        ensure_provider_country(config, country_gate_for(config, raw_request), provider_name)
+    except CountryNotServedError as exc:
+        refused = country_not_supported(exc.gate, selector)
+        await log_rejection(str(refused.detail), row_model=model, row_provider=provider_name, status_code=403)
+        raise refused from exc
 
     pricing: ModelPricing | None = None
     if quote.charge is None:
@@ -1144,6 +1214,9 @@ async def run_decision(
     ):
         await refund_reservation(db, reservation)
         no_pricing_detail = no_pricing_error_detail(selector)
+        logger.warning(
+            "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on", selector
+        )
         await log_rejection(no_pricing_detail, row_model=model, row_provider=provider_name, status_code=402)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,

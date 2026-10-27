@@ -82,7 +82,7 @@ from gateway.services.tools import (
     Dialect,
     ToolUseBudget,
 )
-from gateway.services.traces import read_turn
+from gateway.services.traces import read_context, read_turn
 from gateway.streaming import RESPONSES_STREAM_FORMAT, RESPONSES_TERMINAL_EVENTS, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -480,6 +480,7 @@ async def create_response(
             instance=target.instance,
             workspace_id=target.file_workspace_id,
             upstream_user=target.upstream_user,
+            client_country=target.client_country,
             sandbox_requested=sandbox_requested(
                 request_body.tools,
                 config=config,
@@ -521,6 +522,12 @@ async def create_response(
             idempotency=None if bool(request_body.stream) else idempotency,
             tags=resolved_tags(tags_header, request_body.metadata),
             turn=read_turn("responses", request_body.input),
+            context=lambda: read_context(
+                "responses",
+                request_body.input,
+                tools=request_body.tools,
+                system=getattr(request_body, "instructions", None),
+            ),
             session_label=request_body.session_label,
         )
     except IdempotentReplay as replay:
@@ -577,6 +584,7 @@ async def create_response(
                 workspace_id=ctx.workspace_id,
                 inputs=sandbox_inputs,
             ),
+            billing=billing,
         ),
     )
 

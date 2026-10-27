@@ -313,6 +313,12 @@ class SignupRegistration:
     created: bool
 
 
+# Roles that may change a workspace's resources, such as minting their own key in
+# it: everything but "viewer", which is read-only.
+_CONTRIBUTOR_ROLES = frozenset({"owner", "admin", "member"})
+_READ_ONLY_DETAIL = "Viewers have read-only access to this workspace"
+
+
 class OrganizationService:
     """Business logic for the organization surface."""
 
@@ -405,6 +411,58 @@ class OrganizationService:
         membership = await self._require_active_membership(user, organization)
         self._enforce_management_role(membership)
         return membership
+
+    async def hold_workspace_write_access(
+        self,
+        *,
+        user: User,
+        organization_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        revoking: bool,
+    ) -> None:
+        """Refuse a write the caller's roles do not allow, holding the workspace's lock unless ``revoking``.
+
+        The lock lasts until the commit, so a removal from the workspace cannot
+        land between this check and the write. A commit before the write
+        releases it, so call this again after one. ``revoking`` (switching
+        something off or deleting it) needs no lock and no active membership.
+        """
+        if not revoking:
+            await self.lock_workspace(workspace_id)
+        await self.require_workspace_contributor_access(
+            user=user, organization_id=organization_id, workspace_id=workspace_id, membership_required=not revoking
+        )
+
+    async def require_workspace_contributor_access(
+        self,
+        *,
+        user: User,
+        organization_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        membership_required: bool = True,
+    ) -> None:
+        """Allow an organization owner/admin, or a caller who is a viewer neither of the organization nor here.
+
+        The more restrictive of the two roles wins. Invitations have given
+        organization viewers ``member`` in their workspaces, so letting the
+        workspace role override would leave those viewers writable.
+
+        ``membership_required`` also refuses a caller with no active membership
+        here. Pass ``False`` only where losing the workspace should not stop
+        the write, as when a removed member switches off or deletes their key.
+        """
+        organization_membership = await self.members.get_active_by_organization_and_user(organization_id, user.id)
+        if organization_membership is not None and organization_membership.role in MANAGEMENT_ROLES:
+            return
+        if organization_membership is None or organization_membership.role not in _CONTRIBUTOR_ROLES:
+            raise NotAuthorizedError(_READ_ONLY_DETAIL)
+        membership = await self.workspaces.get_active_by_workspace_and_user(workspace_id, user.id)
+        if membership is None:
+            if membership_required:
+                raise NotAuthorizedError("You are no longer a member of this workspace")
+            return
+        if membership.role not in _CONTRIBUTOR_ROLES:
+            raise NotAuthorizedError(_READ_ONLY_DETAIL)
 
     async def user_has_active_membership(self, *, organization_id: uuid.UUID, user_id: uuid.UUID) -> bool:
         """Whether an identity is an active member of an organization."""
@@ -2221,11 +2279,13 @@ class OrganizationService:
             organization_id=organization.id,
         )
 
-        updated = await self._update_membership(target, update_data)
-        target_user = await self.users.get(updated.user_id)
-        if target_user is None:
-            raise OrganizationMemberNotFoundError(organization_member_id)
-        await self.db.commit()
+        async with self._require_unit_of_work():
+            workspace_ids = await self.workspace_rows.lock_in_organization(organization.id)
+            updated = await self._update_membership(target, update_data)
+            target_user = await self.users.get(updated.user_id)
+            if target_user is None:
+                raise OrganizationMemberNotFoundError(organization_member_id)
+            await self._require_membership_listener().organization_member_changed(updated, workspace_ids)
 
         live = await live_attribution_user_ids(self.db, [str(target_user.id)])
         invitation = None
@@ -2265,8 +2325,10 @@ class OrganizationService:
             organization_id=organization.id,
         )
 
-        await self._update_membership(target, {"status": "suspended"})
-        await self.db.commit()
+        async with self._require_unit_of_work():
+            workspace_ids = await self.workspace_rows.lock_in_organization(organization.id)
+            updated = await self._update_membership(target, {"status": "suspended"})
+            await self._require_membership_listener().organization_member_changed(updated, workspace_ids)
 
     async def _validate_membership_update(
         self,

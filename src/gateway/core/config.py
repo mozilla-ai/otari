@@ -129,7 +129,7 @@ OTARI_CONFIG_B64_ENV = "OTARI_CONFIG_B64"
 # Mapping fields an OTARI_<FIELD> variable sets as a JSON object. The variable
 # replaces the file's block whole, as a top-level key of OTARI_CONFIG_YAML does,
 # rather than merging into it per entry.
-JSON_ENV_FIELDS = ("hosted_providers", "automatic_routing")
+JSON_ENV_FIELDS = ("hosted_providers", "provider_supported_countries", "automatic_routing")
 # GatewayConfig fields promoted from ad hoc otari_env() reads in route/service
 # code. The read sites still consult otari_env() (they have no config object in
 # scope), so load_config bridges values set in the YAML config into the process
@@ -289,12 +289,15 @@ def _is_keyless(provider_type: str) -> bool:
 def hosted_provider_name_problem(name: str, provider: str) -> str | None:
     """Why ``name`` cannot name a hosted provider served by ``provider``, or None when it can.
 
-    The implementation's own name always may. Any other is the prefix of a
+    A reserved name never may, even an implementation's own (``otari``). The
+    implementation's own name otherwise always may. Any other is the prefix of a
     ``name:model`` selector, so it cannot hold the separators a selector splits
     on, and it follows the instance-name rules. Another implementation's name
     is refused, because a request for ``anthropic:...`` must not reach an
     OpenAI endpoint.
     """
+    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
+        return "is reserved; give the provider a name of its own"
     if name == provider:
         return None
     if not name or name != name.strip():
@@ -303,8 +306,6 @@ def hosted_provider_name_problem(name: str, provider: str) -> str | None:
         return "must be at most 64 characters"
     if ":" in name or "/" in name:
         return "must not contain ':' or '/'"
-    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
-        return "is reserved"
     if name in {member.value for member in LLMProvider} or name in PROVIDER_TYPE_ALIASES:
         return "names another provider"
     return None
@@ -358,6 +359,14 @@ class RateLimitRule(BaseModel):
     call the model rather than at admission, so a routing policy skips a full
     model and tries its next candidate; a request with no candidate left is
     refused.
+
+    ``per: budget`` is one count for every user on the same budget, such as all
+    of a service key's end users on one feature's budget; ``budgets`` narrows it
+    to those budgets.
+
+    ``mode: report`` counts the same way and never refuses: a request over the
+    limit is served, and the response names the rule in
+    ``Otari-Rate-Limit-Exceeded``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -366,13 +375,28 @@ class RateLimitRule(BaseModel):
         pattern=r"^[A-Za-z0-9_.-]+$",
         description="Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.",
     )
-    per: Literal["deployment", "key", "user", "model"] = Field(description="What one count is shared by.")
+    per: Literal["deployment", "key", "user", "model", "budget"] = Field(description="What one count is shared by.")
     models: list[str] | None = Field(
         default=None,
         description=(
             "The models a `per: model` rule limits, each as instance:model (the provider instance the "
             "model is called through, then the model), each counted on its own. Required there and "
             "refused on any other rule."
+        ),
+    )
+    budgets: list[str] | None = Field(
+        default=None,
+        description=(
+            "The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. "
+            "Refused on any other rule."
+        ),
+    )
+    mode: Literal["enforce", "report"] = Field(
+        default="enforce",
+        description=(
+            "'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way "
+            "but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a "
+            "limit can be watched before it is enforced."
         ),
     )
     rpm: int | None = Field(default=None, ge=1, description="Requests per minute.")
@@ -408,6 +432,13 @@ class RateLimitRule(BaseModel):
     def _requires_a_limit(self) -> "RateLimitRule":
         if self.rpm is None and self.tpm is None and self.max_concurrent is None:
             msg = f"rate limit rule '{self.name}' sets none of rpm, tpm or max_concurrent"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _budgets_belong_to_per_budget(self) -> "RateLimitRule":
+        if self.budgets is not None and self.per != "budget":
+            msg = f"rate limit rule '{self.name}' sets budgets, which only a per: budget rule reads"
             raise ValueError(msg)
         return self
 
@@ -1210,6 +1241,17 @@ class GatewayConfig(
         ge=1,
         description="Maximum size in bytes for a single uploaded file.",
     )
+    files_gemini_inline_max_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=16 * 1024 * 1024,
+        ge=1,
+        description=(
+            "Most attachment bytes, counted as sent (base64), one request to a Gemini model carries inline. "
+            "Gemini caps a whole request at 20 MB, so the default leaves room for the rest of it. Past it, each "
+            "further attachment is uploaded to Gemini's file storage with the key the request is served with and "
+            "referenced by URI, and where Gemini refuses that upload the request is refused up front rather than "
+            "by Gemini. A request that may fall back to another provider is sent as it is."
+        ),
+    )
     files_output_max_files: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
         default=20,
         ge=0,
@@ -1271,9 +1313,9 @@ class GatewayConfig(
         min_length=32,
         description=(
             "Key for the keyed digest that names the provider account a copy of an attached file "
-            "is in. Required while files_provider_upload_enabled is on, and must differ from "
-            "OTARI_SECRET_KEY and the master key. Rotating it only makes the next request copy "
-            "each file again."
+            "is in. Without it, provider copies are off whatever files_provider_upload_enabled "
+            "says. It must differ from OTARI_SECRET_KEY and the master key. Rotating it only "
+            "makes the next request copy each file again."
         ),
     )
     files_provider_upload_ttl_hours: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
@@ -2065,6 +2107,39 @@ class GatewayConfig(
             return providers
         return {instance: ({} if entry is None else entry) for instance, entry in providers.items()}
 
+    @field_validator("providers", mode="after")
+    @classmethod
+    def _check_request_fields(cls, providers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Refuse a ``request_fields`` entry that names anything the gateway sets itself.
+
+        ``request_fields`` lists the extra chat request fields a caller may send this
+        instance's provider. One that shapes the request (``model``, ``messages``,
+        ``stream``) or that the gateway resolves (a credential, the base URL) would
+        land in the provider body over the gateway's own value, and one the request
+        already declares (a completion parameter, ``safety_identifier``) never
+        reaches the extras at all, so either is refused at load.
+        """
+        from any_llm.types.completion import CompletionParams
+
+        from gateway.core.provider_params import CHAT_GATEWAY_FIELDS, FORBIDDEN_ENDPOINT_DEFAULTS
+
+        reserved = FORBIDDEN_ENDPOINT_DEFAULTS | CHAT_GATEWAY_FIELDS | set(CompletionParams.model_fields)
+        for instance, entry in providers.items():
+            fields = entry.get("request_fields")
+            if fields is None:
+                continue
+            if not isinstance(fields, list) or not all(isinstance(name, str) and name for name in fields):
+                msg = f"providers.{instance}.request_fields must be a list of field names"
+                raise ValueError(msg)
+            clashing = sorted(set(fields) & reserved)
+            if clashing:
+                msg = (
+                    f"providers.{instance}.request_fields names {', '.join(clashing)}, which the gateway "
+                    "sets itself or a request already carries"
+                )
+                raise ValueError(msg)
+        return providers
+
     def effective_code_executor(self) -> CodeExecutor:
         """The deployment's answer to who runs a provider-named code-execution tool.
 
@@ -2514,6 +2589,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     if structured_env_config:
         config_dict.update(structured_env_config)
     _apply_json_env_overrides(config_dict)
+    _warn_about_unknown_keys(config_dict)
 
     # Snapshot which bridged fields the YAML config set, before the env
     # overrides below inject OTARI_ values into the same dict: only YAML-set
@@ -2538,6 +2614,18 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.warn_about_half_configured_web_search()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
+
+
+def _warn_about_unknown_keys(config: dict[str, Any]) -> None:
+    """Warn about top-level config keys no setting reads.
+
+    ``GatewayConfig`` ignores extra input so an unrelated ``OTARI_*`` variable
+    cannot fail startup, which also lets a misspelled or misplaced key pass in
+    silence. Not fatal, so a key a newer version reads does not stop an older one.
+    """
+    unknown = sorted(str(key) for key in config if key not in GatewayConfig.model_fields)
+    if unknown:
+        logger.warning("Ignoring unknown config keys (no setting reads them): %s", ", ".join(unknown))
 
 
 def parse_bool_env(value: str) -> bool:

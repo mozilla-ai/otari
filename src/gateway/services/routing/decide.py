@@ -26,7 +26,9 @@ from gateway.log_config import logger
 from gateway.models.routing import PolicySpec
 from gateway.services.model_access import is_model_allowed
 from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.services.providers import CountryGate
 from gateway.services.routing.backends import (
+    KNN_BACKEND,
     RoutingContext,
     backend_is_priority,
     backend_is_weighted,
@@ -81,6 +83,17 @@ class RoutingSignal:
     """The client sent ``Otari-Router: off`` for this request."""
 
 
+def _embedding_refused(config: GatewayConfig, backend_name: str, gate: CountryGate) -> bool:
+    if backend_name.strip().lower() != KNN_BACKEND:
+        return False
+    try:
+        resolved = resolve_provider_selector(config, config.router_embedding_model)
+    except (ValueError, AnyLLMError):
+        # The backend declines on its own when it cannot embed.
+        return False
+    return gate.refuses(config, resolved.instance)
+
+
 async def decide_ordering(
     config: GatewayConfig,
     spec: PolicySpec,
@@ -90,6 +103,7 @@ async def decide_ordering(
     allowlist: list[str] | None,
     signal: RoutingSignal | None,
     workspace_id: uuid.UUID | None = None,
+    country_gate: CountryGate | None = None,
 ) -> RouterOrdering | None:
     """Ask the policy's router to rank its candidates for this request.
 
@@ -99,7 +113,9 @@ async def decide_ordering(
     the unknown-backend case is logged, once per policy.
 
     Returns an *empty* :class:`RouterOrdering` when a router was asked and
-    declined, or when the caller opted out. That also serves the default target,
+    declined, when the caller opted out, or when ``country_gate`` closes the
+    kNN router's embedding provider to the request's country, since embedding
+    the prompt sends it there. That also serves the default target,
     but deliberately without the warning: a decline is normal operation.
     """
     backend_name = spec.router_backend
@@ -129,6 +145,8 @@ async def decide_ordering(
                 ", ".join(known_backends()),
             )
         return None
+    if country_gate is not None and _embedding_refused(config, backend_name, country_gate):
+        return RouterOrdering([], rationale="the router's embedding provider does not serve this request's country")
 
     pool = usable_candidates(
         config, spec.router_candidates, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id

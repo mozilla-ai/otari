@@ -1673,7 +1673,8 @@ export interface paths {
          *     `otari hook` sends this once per version, the first time it reports a check
          *     against it. The fingerprint is recomputed from the gates, and one that does
          *     not match the one sent is refused, so a version cannot be stored under
-         *     another's name. Sending a version again changes nothing. It is stored in the
+         *     another's name. Sending a version again changes nothing. A workspace keeps at
+         *     most 1,000 versions, and a new one past that is refused with a 409. It is stored in the
          *     API key's workspace, beside that key's traces, and takes the same key a trace
          *     export does: a budget-exempt API key, never the master key.
          */
@@ -1710,6 +1711,58 @@ export interface paths {
          *     then serves instead.
          */
         post: operations["hosted-providers-create_hosted_provider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/catalog-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update Catalog
+         * @description Apply the reviewed prices, then refresh every provider's models, then the cleanup if asked.
+         *
+         *     The price step comes first, so the model step prices new models at the
+         *     prices it applied, and a model held for want of a price is served once it
+         *     has one. Without a ``digest`` no price changes. A ``digest`` that no longer
+         *     names the pending prices answers 409 and changes nothing. ``cleanup``
+         *     removes the prices of models no provider serves, with their history.
+         */
+        post: operations["hosted-providers-update_catalog"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/catalog-update/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Catalog Update
+         * @description What updating the catalog would do: the models.dev price changes, then what each provider newly lists.
+         *
+         *     A POST, because it holds the fetched prices as pending for the apply to
+         *     name by their ``digest``; nothing else is written. It dials every enabled
+         *     provider. A price fetch that fails is reported in ``price_error`` and the
+         *     model lists are still previewed. With ``cleanup``, it also previews which
+         *     prices of models no provider serves would be removed.
+         */
+        post: operations["hosted-providers-preview_catalog_update"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1786,60 +1839,6 @@ export interface paths {
          *     A provider no configured key reads is left as it is, to be re-entered.
          */
         post: operations["hosted-providers-reencrypt_hosted_providers"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/hosted-providers/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Refresh Catalog
-         * @description Re-ask every enabled provider what it lists, then take the rest off the catalog.
-         *
-         *     The whole deployment rather than one provider: a stored price is what puts a
-         *     model on a tenant's Models page, and a price under a provider nothing here
-         *     serves cannot be reached by a per-provider refresh. A model list whose
-         *     provider nothing defines any more, such as a removed ``config.yml`` entry,
-         *     goes too, and is named in ``orphaned_rosters``. Where no provider offers a
-         *     model, only those lists go and every price stays; with none of them either,
-         *     the sweep answers 409. Declared before the
-         *     ``/{provider}`` paths to read in the order the surface is used; no method
-         *     collides in any case.
-         */
-        post: operations["hosted-providers-refresh_catalog"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/hosted-providers/refresh/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Preview Catalog Refresh
-         * @description What a catalog sweep would remove, without removing it.
-         *
-         *     A GET, and a truthful one: it writes nothing. It does dial every enabled
-         *     provider, as ``available-models`` does, because a model the provider still
-         *     lists would survive the sweep and previewing it as doomed would be a lie.
-         */
-        get: operations["hosted-providers-preview_catalog_refresh"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2563,9 +2562,10 @@ export interface paths {
          *
          *     The identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:
          *     one on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,
-         *     ``workspace_id`` and ``service_account_id``, where set, must be the UUIDs of the rule's key's organization and
-         *     workspace and the key's id. The access token authenticates as that key until ``expires_in`` runs out, the rule is
-         *     deleted or the key stops passing its checks.
+         *     where set, must be the UUID of the rule's key's organization. ``workspace_id`` and ``service_account_id`` are
+         *     accepted and ignored, so a client configured for Anthropic needs only its rule and organization changed. The
+         *     access token authenticates as that key until ``expires_in`` runs out, the rule is deleted or the key stops passing
+         *     its checks.
          *
          *     Every refusal of the identity token answers 401 ``invalid_grant`` with the same description.
          */
@@ -3103,7 +3103,8 @@ export interface paths {
          *     The member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the
          *     caller's own attribution user, the key is always budget-enforced, and the
          *     workspace must be visible to the caller (a member of it, or an organization
-         *     owner/admin, who see every workspace). The secret is returned once.
+         *     owner/admin, who see every workspace). A viewer of the workspace is refused
+         *     with 403. The secret is returned once.
          */
         post: operations["organization-keys-create_own_key"];
         delete?: never;
@@ -3639,6 +3640,10 @@ export interface paths {
         /**
          * Update Org Provider Key
          * @description Change a key's name, credential, base URL, or client args. Organization owners and admins only.
+         *
+         *     A new base URL on a key that holds a credential needs that credential in the
+         *     same request, `api_key` and any masked `client_args` entry, since the next call
+         *     sends it to the new host. Clearing the base URL needs neither.
          */
         patch: operations["provider-keys-update_org_provider_key"];
         trace?: never;
@@ -4058,11 +4063,14 @@ export interface paths {
         };
         /**
          * Trace Series
-         * @description Count sessions per bucket of their start, split by whether they failed.
+         * @description Count the sessions active in each bucket, split by whether they failed.
          *
-         *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
-         *     goes back to the model, an MCP tool's included, so a session whose only errors are tools'
-         *     counts as succeeded.
+         *     A session is active from its start to its last activity, so a long one counts in every bucket it ran
+         *     through. Here ``start`` and ``end`` bound the buckets: a session that began before
+         *     ``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are
+         *     aligned to their size in UTC and only the populated ones are returned. A session failed when it holds an
+         *     unrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so
+         *     a session whose only errors are tools' counts as succeeded.
          */
         get: operations["organization-traces-trace_series"];
         put?: never;
@@ -4245,7 +4253,10 @@ export interface paths {
          * Update Org Web Search Key
          * @description Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.
          *
-         *     Its kind and provider are fixed.
+         *     Its kind and provider are fixed. A new api_base on a key that holds a secret
+         *     needs that secret in the same request, `api_key` and any masked `options`
+         *     entry, since the next call sends it to the new host. Clearing api_base needs
+         *     neither.
          */
         patch: operations["web-search-keys-update_org_web_search_key"];
         trace?: never;
@@ -4736,46 +4747,6 @@ export interface paths {
         get: operations["pricing-list_pricing_drift"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pricing/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Preview Pricing Refresh
-         * @description Fetch the latest defaults and hold them for operator review.
-         */
-        post: operations["pricing-preview_pricing_refresh"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pricing/refresh/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Confirm Pricing Refresh
-         * @description Activate the latest reviewed default-price snapshot.
-         */
-        post: operations["pricing-confirm_pricing_refresh"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5689,6 +5660,42 @@ export interface paths {
         patch: operations["settings-update_settings"];
         trace?: never;
     };
+    "/api/v1/settings/country-database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Country Database
+         * @description Describe the stored country file, and say whether ``client_country_database`` is read instead.
+         */
+        get: operations["settings-get_country_database"];
+        /**
+         * Upload Country Database
+         * @description Store a country file in place of the one stored before.
+         *
+         *     A file larger than 32 MiB answers 413, and one that is no MaxMind DB
+         *     country file answers 400. Either way the file stored before stays. While
+         *     ``client_country_database`` is set, the stored file is kept but not read.
+         */
+        put: operations["settings-upload_country_database"];
+        post?: never;
+        /**
+         * Delete Country Database
+         * @description Remove the stored country file.
+         *
+         *     Answers 404 when none is stored, and 409 when it is the only country source
+         *     for ``provider_supported_countries`` or for the supported countries of an
+         *     enabled hosted provider.
+         */
+        delete: operations["settings-delete_country_database"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/mail": {
         parameters: {
             query?: never;
@@ -6094,11 +6101,14 @@ export interface paths {
         };
         /**
          * Trace Series
-         * @description Count sessions per bucket of their start, split by whether they failed.
+         * @description Count the sessions active in each bucket, split by whether they failed.
          *
-         *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
-         *     goes back to the model, an MCP tool's included, so a session whose only errors are tools'
-         *     counts as succeeded.
+         *     A session is active from its start to its last activity, so a long one counts in every bucket it ran
+         *     through. Here ``start`` and ``end`` bound the buckets: a session that began before
+         *     ``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are
+         *     aligned to their size in UTC and only the populated ones are returned. A session failed when it holds an
+         *     unrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so
+         *     a session whose only errors are tools' counts as succeeded.
          */
         get: operations["traces-trace_series"];
         put?: never;
@@ -7198,7 +7208,7 @@ export interface components {
             accepted_at: string;
             /**
              * Accepted By
-             * @description `operator` for a dashboard confirm, `schedule` for the auto policy.
+             * @description `operator` for a catalog update an operator ran, `schedule` for the auto policy.
              */
             accepted_by: string;
             /** Id */
@@ -7873,14 +7883,17 @@ export interface components {
             total_count: number;
             worst: components["schemas"]["WorstAllocationResponse"] | null;
         };
-        /** Annotations */
+        /**
+         * Annotations
+         * @description Optional annotations the client can use to inform how objects are used or displayed.
+         */
         Annotations: {
             /** Audience */
             audience?: ("user" | "assistant")[] | null;
+            /** Lastmodified */
+            lastModified?: string | null;
             /** Priority */
             priority?: number | null;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * AnthropicError
@@ -7972,7 +7985,7 @@ export interface components {
         };
         /**
          * AudioContent
-         * @description Audio content for a message.
+         * @description Audio provided to or from an LLM.
          */
         AudioContent: {
             /** Meta */
@@ -7986,11 +7999,10 @@ export interface components {
             mimeType: string;
             /**
              * Type
+             * @default audio
              * @constant
              */
             type: "audio";
-        } & {
-            [key: string]: unknown;
         };
         /**
          * AudioSpeechRequest
@@ -8155,13 +8167,8 @@ export interface components {
             blob: string;
             /** Mimetype */
             mimeType?: string | null;
-            /**
-             * Uri
-             * Format: uri
-             */
+            /** Uri */
             uri: string;
-        } & {
-            [key: string]: unknown;
         };
         /** Body_audio-create_transcription */
         "Body_audio-create_transcription": {
@@ -8403,6 +8410,11 @@ export interface components {
         /**
          * CallToolResult
          * @description The server's response to a tool call.
+         *
+         *     Errors that originate from the tool SHOULD be reported inside the result
+         *     with `is_error` set to true, not as an MCP protocol-level error, so the LLM
+         *     can see and self-correct. Errors in finding the tool, or any other
+         *     exceptional condition, should be reported as an MCP error response.
          */
         CallToolResult: {
             /** Meta */
@@ -8416,12 +8428,13 @@ export interface components {
              * @default false
              */
             isError: boolean;
+            /**
+             * Resulttype
+             * @default complete
+             */
+            resultType: ("complete" | "input_required") | string;
             /** Structuredcontent */
-            structuredContent?: {
-                [key: string]: unknown;
-            } | null;
-        } & {
-            [key: string]: unknown;
+            structuredContent?: unknown;
         };
         /**
          * CallerIdentityPublic
@@ -9230,6 +9243,19 @@ export interface components {
         CountTokensResponse: {
             /** Input Tokens */
             input_tokens: number;
+        };
+        /**
+         * CountryDatabaseStatus
+         * @description The country file a request's address is looked up in.
+         */
+        CountryDatabaseStatus: {
+            /**
+             * Client Country Database Set
+             * @description Whether `client_country_database` names a file. That file is read, and a stored one is not.
+             */
+            client_country_database_set: boolean;
+            /** @description The stored file, or null when none is stored. */
+            stored: components["schemas"]["StoredCountryDatabasePublic"] | null;
         };
         /** CreateBatchRequest */
         CreateBatchRequest: {
@@ -10170,11 +10196,10 @@ export interface components {
             resource: components["schemas"]["TextResourceContents"] | components["schemas"]["BlobResourceContents"];
             /**
              * Type
+             * @default resource
              * @constant
              */
             type: "resource";
-        } & {
-            [key: string]: unknown;
         };
         /**
          * EmbeddingData
@@ -10688,12 +10713,12 @@ export interface components {
             organization_id?: string | null;
             /**
              * Service Account Id
-             * @description When set, the id of the rule's key.
+             * @description Ignored. Accepted so that a client configured for Anthropic's service account id is not refused.
              */
             service_account_id?: string | null;
             /**
              * Workspace Id
-             * @description When set, the UUID of the rule's key's workspace.
+             * @description Ignored. Accepted so that a client configured for Anthropic's workspace id is not refused.
              */
             workspace_id?: string | null;
         };
@@ -10784,6 +10809,11 @@ export interface components {
              * @description What the gate says when it fails, from the guardrail's definition.
              */
             message: string | null;
+            /**
+             * Origin
+             * @description Whether the gate is the repository's (.otari/) or the user's own (~/.otari/).
+             */
+            origin: ("repo" | "user") | null;
             /** Passed */
             passed: number;
             /**
@@ -10791,6 +10821,11 @@ export interface components {
              * @description Checks where the gate could not decide and held the agent anyway.
              */
             refused: number;
+            /**
+             * Runs
+             * @description The moments the gate runs at (pre_tool_use.edit_target, stop.session, ...).
+             */
+            runs: string[];
             /**
              * Span Id
              * @description The check to open first: the earliest that did anything but pass. Null for a gate that never ran.
@@ -11199,6 +11234,50 @@ export interface components {
             reason: string;
         };
         /**
+         * HostedCatalogPriceChangePublic
+         * @description One model whose models.dev price a catalog update adds, changes or removes.
+         */
+        HostedCatalogPriceChangePublic: {
+            /**
+             * Change
+             * @enum {string}
+             */
+            change: "added" | "changed" | "removed";
+            /** Model Key */
+            model_key: string;
+        };
+        /**
+         * HostedCatalogPriceUpdatePublic
+         * @description The models.dev price changes a catalog update would apply.
+         *
+         *     ``changes`` is a sample and the counts are the totals. ``digest`` names the
+         *     fetched prices, so applying them applies what was reviewed. ``needs_review``
+         *     is why the scheduled update would hold them for a person under ``auto``.
+         */
+        HostedCatalogPriceUpdatePublic: {
+            /** Added Count */
+            added_count: number;
+            /** Changed Count */
+            changed_count: number;
+            /** Changes */
+            changes: components["schemas"]["HostedCatalogPriceChangePublic"][];
+            /** Changes Truncated */
+            changes_truncated: boolean;
+            /** Digest */
+            digest: string;
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Needs Review */
+            needs_review: boolean;
+            /** Removed Count */
+            removed_count: number;
+            /** Review Reason */
+            review_reason?: string | null;
+        };
+        /**
          * HostedCatalogProviderRefreshPublic
          * @description What one hosted provider newly lists, as a catalog sweep found it.
          *
@@ -11257,6 +11336,58 @@ export interface components {
             removed_override_rows: number;
             /** Removed Price Rows */
             removed_price_rows: number;
+        };
+        /**
+         * HostedCatalogUpdatePreviewPublic
+         * @description What a catalog update would do: its price changes, then what each provider newly lists.
+         *
+         *     ``prices`` is ``None`` when models.dev changed nothing, or when it could not
+         *     be fetched, which ``price_error`` then says. ``catalog`` carries the cleanup
+         *     the preview was asked for, and no removals otherwise.
+         */
+        HostedCatalogUpdatePreviewPublic: {
+            catalog: components["schemas"]["HostedCatalogRefreshPublic"];
+            /** Price Error */
+            price_error?: string | null;
+            prices: components["schemas"]["HostedCatalogPriceUpdatePublic"] | null;
+        };
+        /**
+         * HostedCatalogUpdatePreviewRequest
+         * @description What to preview: the update alone, or with the cleanup.
+         */
+        HostedCatalogUpdatePreviewRequest: {
+            /**
+             * Cleanup
+             * @description Also preview removing the prices of models no hosted provider serves.
+             * @default false
+             */
+            cleanup: boolean;
+        };
+        /**
+         * HostedCatalogUpdatePublic
+         * @description What a catalog update did.
+         */
+        HostedCatalogUpdatePublic: {
+            catalog: components["schemas"]["HostedCatalogRefreshPublic"];
+            /** Prices Applied */
+            prices_applied: boolean;
+        };
+        /**
+         * HostedCatalogUpdateRequest
+         * @description What to apply, as the preview showed it.
+         */
+        HostedCatalogUpdateRequest: {
+            /**
+             * Cleanup
+             * @description Also remove the prices of models no hosted provider serves, with their history.
+             * @default false
+             */
+            cleanup: boolean;
+            /**
+             * Digest
+             * @description The `digest` of the previewed prices, to apply them; 409 when the pending prices differ. Without it, no price changes.
+             */
+            digest?: string | null;
         };
         /**
          * HostedModelCreateRequest
@@ -11409,7 +11540,9 @@ export interface components {
          *     every other one is served as if it were not configured.
          *     ``serves_unlisted_models`` serves a model the roster does not list, as a
          *     ``config.yml`` instance does, and switches on every model it offers
-         *     whether or not something prices it.
+         *     whether or not something prices it. ``supported_countries`` keeps the
+         *     provider to requests from those ISO country codes, checked as well as
+         *     ``provider_supported_countries``; null serves every country.
          * @example {
          *       "api_key": "<your OpenAI API key>",
          *       "provider": "openai"
@@ -11440,6 +11573,8 @@ export interface components {
              * @default false
              */
             serves_unlisted_models: boolean;
+            /** Supported Countries */
+            supported_countries?: string[] | null;
         };
         /**
          * HostedProviderPublic
@@ -11461,7 +11596,8 @@ export interface components {
          *     and ``decryptable`` false for one whose key or extras no configured
          *     ``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.
          *     ``serves_unlisted_models`` is true for one that serves a model its roster
-         *     does not list.
+         *     does not list. ``supported_countries`` is null for one that serves every
+         *     country.
          */
         HostedProviderPublic: {
             /** Api Base */
@@ -11510,6 +11646,8 @@ export interface components {
              * @enum {string}
              */
             source: "database" | "config";
+            /** Supported Countries */
+            supported_countries?: string[] | null;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -11575,7 +11713,8 @@ export interface components {
          *     without one. ``client_args`` omitted is left alone; an explicit
          *     null clears it, and an entry echoed back as the mask keeps the stored value.
          *     ``restricted_to_organization_id`` reads the same way: omitted keeps the
-         *     restriction, null lifts it.
+         *     restriction, null lifts it, and so does ``supported_countries``, where an
+         *     empty list closes the provider to every country.
          * @example {
          *       "enabled": false
          *     }
@@ -11595,6 +11734,8 @@ export interface components {
             restricted_to_organization_id?: string | null;
             /** Serves Unlisted Models */
             serves_unlisted_models?: boolean | null;
+            /** Supported Countries */
+            supported_countries?: string[] | null;
         };
         /**
          * HostedProvidersPublic
@@ -11624,7 +11765,7 @@ export interface components {
         };
         /**
          * Icon
-         * @description An icon for display in user interfaces.
+         * @description An optionally-sized icon for display in a user interface (2025-11-25+).
          */
         Icon: {
             /** Mimetype */
@@ -11633,12 +11774,12 @@ export interface components {
             sizes?: string[] | null;
             /** Src */
             src: string;
-        } & {
-            [key: string]: unknown;
+            /** Theme */
+            theme?: ("light" | "dark") | null;
         };
         /**
          * ImageContent
-         * @description Image content for a message.
+         * @description An image provided to or from an LLM.
          */
         ImageContent: {
             /** Meta */
@@ -11652,11 +11793,10 @@ export interface components {
             mimeType: string;
             /**
              * Type
+             * @default image
              * @constant
              */
             type: "image";
-        } & {
-            [key: string]: unknown;
         };
         /**
          * ImageGenerationRequest
@@ -11899,6 +12039,11 @@ export interface components {
             metadata: {
                 [key: string]: unknown;
             };
+            /**
+             * Operator Disabled
+             * @default false
+             */
+            operator_disabled: boolean;
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
             /** User Id */
@@ -14847,17 +14992,6 @@ export interface components {
             model_key: string;
         };
         /**
-         * PricingRefreshConfirmationResponse
-         * @description Result of activating a reviewed models.dev refresh.
-         */
-        PricingRefreshConfirmationResponse: {
-            /**
-             * Applied
-             * @default true
-             */
-            applied: boolean;
-        };
-        /**
          * PricingRefreshPreviewResponse
          * @description Reviewable summary of a pending models.dev refresh.
          */
@@ -14872,7 +15006,7 @@ export interface components {
             changes_truncated: boolean;
             /**
              * Digest
-             * @description Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.
+             * @description Identity of the pending snapshot, to act on exactly this one: send it as `digest` to `POST /hosted-providers/catalog-update` to apply it, or to `POST /pricing/refresh/reject` to discard it.
              * @default
              */
             digest: string;
@@ -14926,6 +15060,11 @@ export interface components {
             origin: string | null;
             /** Output Price Per Million */
             output_price_per_million: number;
+            /**
+             * Price Per Request
+             * @description USD for each request, for a rate in requests; null for any other unit.
+             */
+            price_per_request?: number | null;
             /** Pricing Tiers */
             pricing_tiers: components["schemas"]["PricingTier"][];
             /**
@@ -15305,6 +15444,11 @@ export interface components {
          */
         RateLimitRuleCreate: {
             /**
+             * Budgets
+             * @description The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.
+             */
+            budgets?: string[] | null;
+            /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
              * @default 900
@@ -15315,6 +15459,13 @@ export interface components {
              * @description Requests in flight at once.
              */
             max_concurrent?: number | null;
+            /**
+             * Mode
+             * @description 'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a limit can be watched before it is enforced.
+             * @default enforce
+             * @enum {string}
+             */
+            mode: "enforce" | "report";
             /**
              * Models
              * @description The models a `per: model` rule limits, each as instance:model (the provider instance the model is called through, then the model), each counted on its own. Required there and refused on any other rule.
@@ -15330,7 +15481,7 @@ export interface components {
              * @description What one count is shared by.
              * @enum {string}
              */
-            per: "deployment" | "key" | "user" | "model";
+            per: "deployment" | "key" | "user" | "model" | "budget";
             /**
              * Rpm
              * @description Requests per minute.
@@ -15355,6 +15506,11 @@ export interface components {
          */
         RateLimitRulePublic: {
             /**
+             * Budgets
+             * @description The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.
+             */
+            budgets?: string[] | null;
+            /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
              * @default 900
@@ -15365,6 +15521,13 @@ export interface components {
              * @description Requests in flight at once.
              */
             max_concurrent?: number | null;
+            /**
+             * Mode
+             * @description 'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a limit can be watched before it is enforced.
+             * @default enforce
+             * @enum {string}
+             */
+            mode: "enforce" | "report";
             /**
              * Models
              * @description The models a `per: model` rule limits, each as instance:model (the provider instance the model is called through, then the model), each counted on its own. Required there and refused on any other rule.
@@ -15380,7 +15543,7 @@ export interface components {
              * @description What one count is shared by.
              * @enum {string}
              */
-            per: "deployment" | "key" | "user" | "model";
+            per: "deployment" | "key" | "user" | "model" | "budget";
             /**
              * Rpm
              * @description Requests per minute.
@@ -15421,6 +15584,11 @@ export interface components {
          */
         RateLimitRuleUpdate: {
             /**
+             * Budgets
+             * @description The budget IDs a per: budget rule counts; null for every budget, and on any other rule.
+             */
+            budgets?: string[] | null;
+            /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most.
              */
@@ -15431,6 +15599,11 @@ export interface components {
              */
             max_concurrent?: number | null;
             /**
+             * Mode
+             * @description 'enforce' refuses a request over the rule; 'report' serves it and names the rule.
+             */
+            mode?: ("enforce" | "report") | null;
+            /**
              * Models
              * @description The instance:model names a per: model rule limits; null for any other rule.
              */
@@ -15439,7 +15612,7 @@ export interface components {
              * Per
              * @description What one count is shared by.
              */
-            per?: ("deployment" | "key" | "user" | "model") | null;
+            per?: ("deployment" | "key" | "user" | "model" | "budget") | null;
             /**
              * Rpm
              * @description Requests per minute.
@@ -15759,16 +15932,12 @@ export interface components {
             title?: string | null;
             /**
              * Type
+             * @default resource_link
              * @constant
              */
             type: "resource_link";
-            /**
-             * Uri
-             * Format: uri
-             */
+            /** Uri */
             uri: string;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * ResponsesRequest
@@ -16547,7 +16716,7 @@ export interface components {
              * Input Price Per Million
              * @description Price per 1M of the rate's unit: input tokens, requests or images
              */
-            input_price_per_million: number;
+            input_price_per_million?: number;
             /**
              * Kind
              * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
@@ -16562,7 +16731,12 @@ export interface components {
              * Output Price Per Million
              * @description Price per 1M output tokens; unused by a rate in requests or images
              */
-            output_price_per_million: number;
+            output_price_per_million?: number;
+            /**
+             * Price Per Request
+             * @description USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not combined with token prices.
+             */
+            price_per_request?: number | null;
             /**
              * Pricing Tiers
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
@@ -16616,7 +16790,7 @@ export interface components {
         };
         /**
          * SpanPublic
-         * @description One span of a session. Content is never part of a span.
+         * @description One span of a session. Its content is empty unless the deployment keeps content.
          */
         SpanPublic: {
             /**
@@ -16638,6 +16812,18 @@ export interface components {
              * @description Input tokens written to the prompt cache.
              */
             cache_write_tokens: number | null;
+            /**
+             * Content
+             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the deployment keeps content and the agent sent it. Empty otherwise.
+             */
+            content: {
+                [key: string]: string;
+            };
+            /**
+             * Context Window
+             * @description The model's context window in tokens, where the catalog knows it. Null on a span that is not a model request, and for a model the catalog does not list.
+             */
+            context_window: number | null;
             /** Cost */
             cost: number | null;
             /** Duration Ms */
@@ -16706,6 +16892,35 @@ export interface components {
             tool_name: string | null;
             /** Tool Type */
             tool_type: string | null;
+        };
+        /**
+         * StoredCountryDatabasePublic
+         * @description The country file stored in the database, which every replica reads.
+         */
+        StoredCountryDatabasePublic: {
+            /**
+             * Built At
+             * Format: date-time
+             * @description When the file was built, from its metadata.
+             */
+            built_at: string;
+            /**
+             * Database Type
+             * @description The type the file's metadata names, such as `GeoLite2-Country` or `DBIP-Country-Lite`.
+             */
+            database_type: string;
+            /**
+             * Sha256
+             * @description The file's SHA-256, in hex.
+             */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Uploaded At
+             * Format: date-time
+             */
+            uploaded_at: string;
         };
         /**
          * StoredSearchToolSchema
@@ -16812,7 +17027,7 @@ export interface components {
         };
         /**
          * TextContent
-         * @description Text content for a message.
+         * @description Text provided to or from an LLM.
          */
         TextContent: {
             /** Meta */
@@ -16824,11 +17039,10 @@ export interface components {
             text: string;
             /**
              * Type
+             * @default text
              * @constant
              */
             type: "text";
-        } & {
-            [key: string]: unknown;
         };
         /**
          * TextResourceContents
@@ -16843,13 +17057,8 @@ export interface components {
             mimeType?: string | null;
             /** Text */
             text: string;
-            /**
-             * Uri
-             * Format: uri
-             */
+            /** Uri */
             uri: string;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * TokenChargeLine
@@ -16885,12 +17094,18 @@ export interface components {
         };
         /**
          * ToolChargeLine
-         * @description A gateway-run tool's charge line, one per tool and label.
+         * @description A gateway-run tool's charge line, one per tool, label and payer.
          *
          *     A subclass with ``label`` required, rather than a defaulted field on
          *     :class:`UnitChargeLine`, so the per-request, rerank and image lines, and a
          *     stored tool line without a label, serialize back without a
          *     ``"label": null`` they never had.
+         *
+         *     A line written since tools are charged by whose account ran them also
+         *     carries ``deployment_paid``: true where the deployment's account ran the
+         *     calls, which charges the organization's funds where the deployment bills
+         *     them, and false where the organization's own key did. It is kept as an extra
+         *     key rather than declared, so an older line serializes back without it.
          */
         ToolChargeLine: {
             /**
@@ -16920,6 +17135,56 @@ export interface components {
             units: number;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * ToolCostPublic
+         * @description An estimate of what one tool call cost, from the model requests either side of it.
+         */
+        ToolCostPublic: {
+            /**
+             * Calling
+             * @description Its share of the output of the request that called it.
+             */
+            calling: number;
+            /**
+             * Calls Sharing Request
+             * @description Tool calls the request that called it made, sharing its output.
+             */
+            calls_sharing_request: number;
+            /**
+             * Calls Sharing Result
+             * @description Tool calls whose results arrived together, sharing that growth.
+             */
+            calls_sharing_result: number;
+            /**
+             * Later Requests
+             * @description The later requests that read its result again.
+             */
+            later_requests: number;
+            /**
+             * Rereading
+             * @description Reading its result again in later requests, until the context was compacted.
+             */
+            rereading: number;
+            /**
+             * Result Tokens
+             * @description About how many tokens its result added to the context.
+             */
+            result_tokens: number;
+            /** Span Id */
+            span_id: string;
+            /**
+             * Subagent
+             * @description What a subagent the call ran cost, exactly.
+             */
+            subagent: number | null;
+            /** Total */
+            total: number;
+            /**
+             * Writing
+             * @description Writing its result into the context, on the next request.
+             */
+            writing: number;
         };
         /**
          * ToolMeter
@@ -16998,12 +17263,12 @@ export interface components {
             bucket: string;
             /**
              * Failed
-             * @description Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.
+             * @description Sessions active in the bucket that hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.
              */
             failed: number;
             /**
              * Succeeded
-             * @description Sessions that started in the bucket and did not fail.
+             * @description Sessions active in the bucket that did not fail.
              */
             succeeded: number;
         };
@@ -17028,6 +17293,11 @@ export interface components {
             state: "active" | "idle";
             summary: components["schemas"]["TraceSummaryPublic"];
             /**
+             * Tool Costs
+             * @description An estimate for each tool call between two priced model requests, in the order they were made.
+             */
+            tool_costs: components["schemas"]["ToolCostPublic"][];
+            /**
              * Truncated
              * @description True when the session holds more spans than one read returns.
              */
@@ -17048,7 +17318,7 @@ export interface components {
              * Bucket
              * @enum {string}
              */
-            bucket: "hour" | "day";
+            bucket: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
             /** Points */
             points: components["schemas"]["TraceBucketPublic"][];
         };
@@ -21366,6 +21636,13 @@ export interface operations {
                     "application/json": components["schemas"]["GuardrailDefinitionResponse"];
                 };
             };
+            /** @description The workspace already keeps the most guardrail versions it may, and this one is new. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -21429,6 +21706,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-update_catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedCatalogUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedCatalogUpdatePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-preview_catalog_update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedCatalogUpdatePreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedCatalogUpdatePreviewPublic"];
                 };
             };
             /** @description Validation Error */
@@ -21540,46 +21883,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostedProvidersReencryptPublic"];
-                };
-            };
-        };
-    };
-    "hosted-providers-refresh_catalog": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HostedCatalogRefreshPublic"];
-                };
-            };
-        };
-    };
-    "hosted-providers-preview_catalog_refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HostedCatalogRefreshPublic"];
                 };
             };
         };
@@ -25526,9 +25829,9 @@ export interface operations {
                 order?: "asc" | "desc";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -25574,9 +25877,9 @@ export interface operations {
             query?: {
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -25651,12 +25954,12 @@ export interface operations {
     "organization-traces-trace_series": {
         parameters: {
             query?: {
-                bucket?: "hour" | "day";
+                bucket?: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -26880,58 +27183,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PricingDriftRow"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "pricing-preview_pricing_refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PricingRefreshPreviewResponse"];
-                };
-            };
-        };
-    };
-    "pricing-confirm_pricing_refresh": {
-        parameters: {
-            query?: {
-                /** @description The `digest` of the previewed snapshot; 409 when the pending one differs. */
-                digest?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PricingRefreshConfirmationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -28365,6 +28616,85 @@ export interface operations {
             };
         };
     };
+    "settings-get_country_database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CountryDatabaseStatus"];
+                };
+            };
+        };
+    };
+    "settings-upload_country_database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** @description A MaxMind DB country file, such as GeoLite2 Country or DB-IP Lite Country. */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CountryDatabaseStatus"];
+                };
+            };
+            /** @description The file is larger than 32 MiB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body holds no file in the field ``file``. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "settings-delete_country_database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     "settings-get_mail_settings": {
         parameters: {
             query?: never;
@@ -28736,9 +29066,9 @@ export interface operations {
                 order?: "asc" | "desc";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -28784,9 +29114,9 @@ export interface operations {
             query?: {
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
@@ -28861,12 +29191,12 @@ export interface operations {
     "traces-trace_series": {
         parameters: {
             query?: {
-                bucket?: "hour" | "day";
+                bucket?: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;

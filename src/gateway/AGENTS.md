@@ -217,7 +217,10 @@ A workspace with no row gets `code_execution_workspace_default` and
 `web_search_workspace_default` (on unless an operator turns them off); the request path, the
 Playground menu and the policy endpoints' `default_enabled` all read them.
 An organization's own search or fetch key changes which account a workspace's
-calls bill to (`services/tools/_web_search_keys.py`). A search key also serves the
+calls bill to (`services/tools/_web_search_keys.py`). Its `api_base` is a
+tenant's, so it is held to public addresses and dialed through the
+owned-endpoint client (`web_provider_client_for`), whatever
+`provider_allow_private_hosts` says. A search key also serves the
 workspace's explicit `otari_web_search` declarations where the deployment has no
 search of its own; provider-native declarations, `GET /api/v1/tools` and the
 Playground follow the deployment's own search alone.
@@ -387,7 +390,8 @@ the route's rework is tracked in #1699. See
 
 Use `gateway.log_config` with lazy `%s` formatting. Log opaque IDs, model,
 provider, status, and counts when needed. Never log credentials or user content,
-apart from the explicit local console-mail transport. The handler masks
-credential shapes (`secret_shapes.py`) in every record as a second line of
+apart from the explicit local console-mail transport. The gateway's handler, uvicorn's
+(`uvicorn_log_config`) and the last-resort handler a library logger falls to
+mask credential shapes (`secret_shapes.py`) in every record as a second line of
 defense, mostly for provider errors that echo the request; it is not a license
 to log one.

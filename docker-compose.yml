@@ -13,9 +13,9 @@ services:
       - "${OTARI_PORT:-8000}:8000"
     volumes:
       # Default `./config.yml` matches the existing operator convention
-      # (gitignored, operator-supplied). The demo overrides this via
-      # OTARI_CONFIG_PATH=./demo/code-exec/otari-config.yml so the
-      # repo's main config.yml stays untouched.
+      # (gitignored, operator-supplied). OTARI_CONFIG_PATH overrides it: the
+      # demo sets ./demo/code-exec/otari-config.yml, and docs/quickstart.md
+      # sets /dev/null to run on environment variables alone.
       - ${OTARI_CONFIG_PATH:-./config.yml}:/app/config.yml
       - ./service_account.json:/app/service_account.json
     command: ["otari", "serve", "--config", "/app/config.yml"]
@@ -79,6 +79,9 @@ services:
       # Deployment-wide management credential; overrides `master_key` in
       # config.yml. Unset, Otari generates one on first boot and prints it once.
       - OTARI_MASTER_KEY=${OTARI_MASTER_KEY:-}
+      # Each overrides its config.yml setting when set, and is ignored when empty.
+      - OTARI_DATABASE_URL=${OTARI_DATABASE_URL:-}
+      - OTARI_DEFAULT_PRICING=${OTARI_DEFAULT_PRICING:-}
       # Fernet key that encrypts provider credentials added through the admin
       # dashboard. Needed only for the dashboard-first flow (add providers in
       # the browser); unset is fine when providers live in config.yml. Generate

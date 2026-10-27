@@ -2,6 +2,7 @@
 
 from gateway.exceptions import (
     TenancyConflictError,
+    TenancyError,
     TenancyForbiddenError,
     TenancyNotFoundError,
     TenancyValidationError,
@@ -58,6 +59,21 @@ class OrgProviderKeyUnsafeApiBaseError(TenancyValidationError):
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
+
+
+class OrgProviderKeyCredentialRequiredError(TenancyValidationError):
+    """A new ``api_base`` on a key that holds a credential, sent without the credential.
+
+    The next call would send the stored credential to the new host, and whoever
+    can edit a key only ever reads its ``last4``, so the move has to come from
+    someone who holds the credential.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Changing a key's API base URL sends its credentials to the new host: "
+            "send api_key, and any hidden client_args credential, again in the same request"
+        )
 
 
 class OrgProviderKeyAlreadyExistsError(TenancyConflictError):
@@ -201,6 +217,24 @@ class ProviderEndpointAlreadyExistsError(TenancyConflictError):
 
 class ProviderEndpointInvalidError(TenancyValidationError):
     """A name, provider, base URL or default field the endpoint cannot be saved with."""
+
+
+class HostedCatalogPricesChangedError(TenancyConflictError):
+    """The prices an operator reviewed are no longer the pending ones, or are pending no more.
+
+    Another update fetched or applied prices since the preview, so applying
+    would apply something nobody looked at. Nothing changes; preview again.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("The models.dev prices changed since they were previewed. Preview the update again.")
+
+
+class HostedCatalogPricesUnsavedError(TenancyError):
+    """The reviewed prices could not be applied. Its message is logged, never returned."""
+
+    def __init__(self) -> None:
+        super().__init__("Unable to apply the models.dev prices")
 
 
 class HostedCatalogEmptyError(TenancyConflictError):

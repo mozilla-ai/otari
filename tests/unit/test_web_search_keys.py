@@ -422,16 +422,18 @@ async def test_an_endpoint_takes_a_key_only_over_https() -> None:
     with pytest.raises(WebSearchKeySettingRefusedError, match="http or https"):
         await _web_search_keys._check_settings("search", "exa", has_key=True, api_base="exa.example", options=None)
 
-    await _web_search_keys._check_settings("search", "exa", has_key=True, api_base="https://exa.example", options=None)
+    await _web_search_keys._check_settings("search", "exa", has_key=True, api_base="https://1.1.1.1/exa", options=None)
 
 
 @pytest.mark.asyncio
-async def test_an_internal_endpoint_is_refused_where_the_deployment_gates_them(monkeypatch: pytest.MonkeyPatch) -> None:
-    internal = "https://10.0.0.7/exa"
-    await _web_search_keys._check_settings("search", "exa", has_key=True, api_base=internal, options=None)
-
-    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
-    with pytest.raises(WebSearchKeySettingRefusedError, match="api_base"):
+@pytest.mark.parametrize(
+    "internal", ["https://10.0.0.7/exa", "https://127.0.0.1/exa", "https://169.254.169.254/exa", "https://[::1]/exa"]
+)
+async def test_an_internal_endpoint_is_refused_whatever_the_deployment_allows(
+    monkeypatch: pytest.MonkeyPatch, internal: str
+) -> None:
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "true")
+    with pytest.raises(WebSearchKeySettingRefusedError, match="public address"):
         await _web_search_keys._check_settings("search", "exa", has_key=True, api_base=internal, options=None)
 
 

@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Collection, Sequence
 from typing import Never
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +29,36 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         """Return the IDs of the keys in these workspaces, in no particular order."""
         result = await self.db.execute(select(APIKey.id).where(APIKey.workspace_id.in_(workspace_ids)))
         return list(result.scalars().all())
+
+    async def reload_locked(self, key: APIKey) -> None:
+        """Re-read ``key`` from the database and lock its row until the commit."""
+        await self.db.refresh(key, with_for_update=True)
+
+    async def deactivate_owned_in_workspaces(
+        self,
+        user_id: str,
+        workspace_ids: Collection[uuid.UUID],
+        *,
+        self_service_only: bool,
+        by_operator: bool,
+    ) -> None:
+        """Switch off the keys billed to ``user_id`` in these workspaces.
+
+        ``self_service_only`` narrows it to keys the user minted for themselves;
+        ``by_operator`` marks them as not theirs to switch back on, including the
+        ones they had already switched off themselves.
+        """
+        if not workspace_ids:
+            return
+        statement = update(APIKey).where(APIKey.user_id == user_id, APIKey.workspace_id.in_(workspace_ids))
+        if not by_operator:
+            statement = statement.where(APIKey.is_active.is_(True))
+        if self_service_only:
+            statement = statement.where(APIKey.self_service.is_(True))
+        values: dict[str, bool] = {"is_active": False}
+        if by_operator:
+            values["operator_disabled"] = True
+        await self.db.execute(statement.values(**values))
 
     async def names_defaulting_end_users_to(self, budget_id: str) -> list[str]:
         """Name each key that starts its end users on ``budget_id`` by default, by its name or else its id."""

@@ -70,6 +70,13 @@ const FIELDS: ToolSettingField[] = [
     description: "Sandbox backend URL.",
   },
   {
+    key: "sandbox_session_image",
+    service: "sandbox",
+    type: "str",
+    value: null,
+    description: "Session image.",
+  },
+  {
     key: "sandbox_purpose_hint",
     service: "sandbox",
     type: "str",
@@ -235,14 +242,7 @@ function mockApi(opts: MockOpts = {}) {
 // it, which is what makes "Backend URL" unique on a page configuring three
 // services.
 const named = (label: string, key: string) => `${label} ${key}`
-const WEB_SEARCH_URL = named("Backend URL", "web_search_url")
-const ENGINES = named("Engines", "web_search_engines")
-const MAX_RESULTS = named(
-  "Default max results (all workspaces)",
-  "web_search_max_results",
-)
-const EXTRACT = named("Extract page content", "web_search_extract")
-const INTERCEPT = named("Intercept provider web search", "web_search_intercept")
+const SESSION_IMAGE = named("Session image", "sandbox_session_image")
 const SANDBOX_URL = named("Sandbox URL", "sandbox_url")
 const EXECUTOR = named(
   "Who runs provider code tools",
@@ -276,22 +276,18 @@ describe("ToolsGuardrailsPage", () => {
     mockApi()
     await renderWithClient(<ToolsGuardrailsPage />)
 
-    // The combined page names the service in each group heading, since three
+    // The combined page names the service in each group heading, since two
     // groups called "Backend" would not say which one they configure.
     expect(
-      await screen.findByRole("heading", {
-        name: "Web search · Search backend",
-      }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("heading", { name: "Code execution · Sandbox" }),
+      await screen.findByRole("heading", { name: "Code execution · Sandbox" }),
     ).toBeInTheDocument()
     expect(
       await screen.findByRole("heading", { name: "Guardrails · Backend" }),
     ).toBeInTheDocument()
-    expect(screen.getByLabelText(WEB_SEARCH_URL)).toHaveValue(
-      "http://searxng:8080",
-    )
+    // Web search's settings are on the deployment's Web search page.
+    expect(
+      screen.queryByRole("heading", { name: /Search backend/ }),
+    ).not.toBeInTheDocument()
     expect(screen.getByLabelText(GUARDRAILS_URL)).toHaveValue(
       "http://guardrails:8000",
     )
@@ -300,9 +296,9 @@ describe("ToolsGuardrailsPage", () => {
   it("leaves the page column to the shell rather than capping its own", async () => {
     mockApi()
     const { container } = await renderWithClient(
-      <ToolsGuardrailsPage only="web_search" />,
+      <ToolsGuardrailsPage only="sandbox" />,
     )
-    await screen.findByLabelText(WEB_SEARCH_URL)
+    await screen.findByLabelText(SANDBOX_URL)
 
     // `<main>` supplies the page column and centers it, so a cap here is not a
     // readable measure: it is the whole page pushed against the left edge with
@@ -315,16 +311,16 @@ describe("ToolsGuardrailsPage", () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
     await renderWithClient(<ToolsGuardrailsPage />)
-    await screen.findByLabelText(WEB_SEARCH_URL)
+    await screen.findByLabelText(GUARDRAILS_URL)
 
-    const input = screen.getByLabelText(WEB_SEARCH_URL)
+    const input = screen.getByLabelText(GUARDRAILS_URL)
     await user.clear(input)
-    await user.type(input, "http://new-searxng:9000")
+    await user.type(input, "http://guardrails:9000")
     await user.tab()
 
     await waitFor(() =>
       expect(lastPatch(fetchMock)).toEqual({
-        web_search_url: "http://new-searxng:9000",
+        guardrails_url: "http://guardrails:9000",
       }),
     )
     expect(screen.queryByRole("button", { name: /^Save/ })).toBeNull()
@@ -333,14 +329,15 @@ describe("ToolsGuardrailsPage", () => {
   it("commits a field on Enter without leaving it by hand", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
-    await renderWithClient(<ToolsGuardrailsPage />)
-    await screen.findByLabelText(ENGINES)
+    await renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
+    await screen.findByLabelText(SANDBOX_URL)
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
 
-    await user.type(screen.getByLabelText(ENGINES), "google,bing{Enter}")
+    await user.type(screen.getByLabelText(SESSION_IMAGE), "py:3.13{Enter}")
 
     await waitFor(() =>
       expect(lastPatch(fetchMock)).toEqual({
-        web_search_engines: "google,bing",
+        sandbox_session_image: "py:3.13",
       }),
     )
   })
@@ -349,9 +346,9 @@ describe("ToolsGuardrailsPage", () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
     await renderWithClient(<ToolsGuardrailsPage />)
-    await screen.findByLabelText(WEB_SEARCH_URL)
+    await screen.findByLabelText(GUARDRAILS_URL)
 
-    await user.click(screen.getByLabelText(WEB_SEARCH_URL))
+    await user.click(screen.getByLabelText(GUARDRAILS_URL))
     await user.tab()
 
     expect(lastPatch(fetchMock)).toBeUndefined()
@@ -361,54 +358,38 @@ describe("ToolsGuardrailsPage", () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
     await renderWithClient(<ToolsGuardrailsPage />)
-    await screen.findByLabelText(WEB_SEARCH_URL)
+    await screen.findByLabelText(GUARDRAILS_URL)
 
-    await user.clear(screen.getByLabelText(WEB_SEARCH_URL))
+    await user.clear(screen.getByLabelText(GUARDRAILS_URL))
     await user.tab()
 
     await waitFor(() =>
-      expect(lastPatch(fetchMock)).toEqual({ web_search_url: null }),
+      expect(lastPatch(fetchMock)).toEqual({ guardrails_url: null }),
     )
   })
 
   it("trims surrounding whitespace when saving a text field", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
-    await renderWithClient(<ToolsGuardrailsPage />)
-    await screen.findByLabelText(ENGINES)
+    await renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
+    await screen.findByLabelText(SANDBOX_URL)
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
 
-    await user.type(screen.getByLabelText(ENGINES), "  google,bing  ")
+    await user.type(screen.getByLabelText(SESSION_IMAGE), "  py:3.13  ")
     await user.tab()
 
     await waitFor(() =>
       expect(lastPatch(fetchMock)).toEqual({
-        web_search_engines: "google,bing",
+        sandbox_session_image: "py:3.13",
       }),
     )
   })
 
-  it("refuses a ceiling that is not a whole number without asking the server", async () => {
-    const fetchMock = mockApi()
-    const user = userEvent.setup()
-    await renderWithClient(<ToolsGuardrailsPage />)
-    await screen.findByLabelText(MAX_RESULTS)
-
-    const input = screen.getByLabelText(MAX_RESULTS)
-    await user.clear(input)
-    await user.type(input, "1e1")
-    await user.tab()
-
-    expect(
-      await screen.findByText("A whole number, 1 or more."),
-    ).toBeInTheDocument()
-    expect(lastPatch(fetchMock)).toBeUndefined()
-  })
-
   it.each([
-    ["web_search", "/admin/web-search", "Web search pricing"],
+    ["web_search", "/admin/web-search", "Web search"],
     ["sandbox", "/admin/code-execution", "Code execution pricing"],
   ] as const)(
-    "sends an operator on %s to the deployment's pricing page rather than pricing here",
+    "sends an operator on %s to the deployment's own page rather than pricing here",
     async (only, href, name) => {
       const fetchMock = mockApi()
       await renderWithClient(<ToolsGuardrailsPage only={only} />)
@@ -430,9 +411,9 @@ describe("ToolsGuardrailsPage", () => {
     mockApi({ testBody: { ok: true, reason: "reachable (HTTP 200)" } })
     const user = userEvent.setup()
     await renderWithClient(<ToolsGuardrailsPage />)
-    await screen.findByLabelText(WEB_SEARCH_URL)
+    await screen.findByLabelText(GUARDRAILS_URL)
 
-    await user.click(screen.getByRole("button", { name: "Test web_search" }))
+    await user.click(screen.getByRole("button", { name: "Test guardrails" }))
     expect(await screen.findByText("reachable (HTTP 200)")).toBeInTheDocument()
   })
 
@@ -442,7 +423,7 @@ describe("ToolsGuardrailsPage", () => {
     // refetch re-seeds the input with no keystroke, so a result must be gated on
     // the URL it tested.
     const user = userEvent.setup()
-    let searxngUrl = "http://searxng:8080"
+    let guardrailsUrl = "http://guardrails:8000"
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
@@ -453,29 +434,29 @@ describe("ToolsGuardrailsPage", () => {
         return jsonResponse({ ok: true, reason: "reachable (HTTP 200)" })
       }
       if (url.includes(`${API_ROOT}/tool-settings`)) {
-        // Saving the engines field surfaces a server-changed web_search_url, so
-        // the next GET re-seeds the URL field without an operator keystroke.
-        if (method === "PATCH") searxngUrl = "http://searxng:9999"
+        // Saving the sandbox URL surfaces a server-changed guardrails_url, so
+        // the next GET re-seeds that field without an operator keystroke.
+        if (method === "PATCH") guardrailsUrl = "http://guardrails:9999"
         return jsonResponse({
           fields: FIELDS.map((f) =>
-            f.key === "web_search_url" ? { ...f, value: searxngUrl } : f,
+            f.key === "guardrails_url" ? { ...f, value: guardrailsUrl } : f,
           ),
         })
       }
       return jsonResponse([])
     })
     await renderWithClient(<ToolsGuardrailsPage />)
-    await screen.findByLabelText(WEB_SEARCH_URL)
+    await screen.findByLabelText(GUARDRAILS_URL)
 
-    await user.click(screen.getByRole("button", { name: "Test web_search" }))
+    await user.click(screen.getByRole("button", { name: "Test guardrails" }))
     expect(await screen.findByText("reachable (HTTP 200)")).toBeInTheDocument()
 
-    await user.type(screen.getByLabelText(ENGINES), "google")
+    await user.type(screen.getByLabelText(SANDBOX_URL), "http://sandbox:8080")
     await user.tab()
 
     await waitFor(() =>
-      expect(screen.getByLabelText(WEB_SEARCH_URL)).toHaveValue(
-        "http://searxng:9999",
+      expect(screen.getByLabelText(GUARDRAILS_URL)).toHaveValue(
+        "http://guardrails:9999",
       ),
     )
     expect(screen.queryByText("reachable (HTTP 200)")).not.toBeInTheDocument()
@@ -499,34 +480,6 @@ describe("ToolsGuardrailsPage", () => {
     ).toBeInTheDocument()
     expect(input).toHaveValue("ftp://bad")
     expect(input).toHaveAttribute("aria-invalid", "true")
-  })
-
-  it("sends web_search_extract=false when the tri-state select is set to Off", async () => {
-    const fetchMock = mockApi()
-    const user = userEvent.setup()
-    await renderWithClient(<ToolsGuardrailsPage only="web_search" />)
-    await screen.findByLabelText(WEB_SEARCH_URL)
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
-
-    await pickOption(user, EXTRACT, "Off")
-
-    await waitFor(() =>
-      expect(lastPatch(fetchMock)).toEqual({ web_search_extract: false }),
-    )
-  })
-
-  it("saves web_search_intercept from the tri-state select", async () => {
-    const fetchMock = mockApi()
-    const user = userEvent.setup()
-    await renderWithClient(<ToolsGuardrailsPage only="web_search" />)
-    await screen.findByLabelText(WEB_SEARCH_URL)
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
-
-    await pickOption(user, INTERCEPT, "On")
-
-    await waitFor(() =>
-      expect(lastPatch(fetchMock)).toEqual({ web_search_intercept: true }),
-    )
   })
 
   it("offers a closed-vocabulary setting as a select and saves the chosen value", async () => {
@@ -575,21 +528,6 @@ describe("ToolsGuardrailsPage", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("surfaces a failed boolean save inline (not silently)", async () => {
-    mockApi({
-      patchStatus: 422,
-      patchDetail: "web_search_extract must be a boolean.",
-    })
-    const user = userEvent.setup()
-    await renderWithClient(<ToolsGuardrailsPage only="web_search" />)
-    await screen.findByLabelText(WEB_SEARCH_URL)
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
-
-    await pickOption(user, EXTRACT, "Off")
-
-    expect(await screen.findByText(/must be a boolean/)).toBeInTheDocument()
-  })
-
   it("renders a backend field no group lists (fallback)", async () => {
     // A field the backend reports for a service that no group in SERVICES names
     // must still render, so a backend addition is not hidden.
@@ -597,8 +535,8 @@ describe("ToolsGuardrailsPage", () => {
       fields: [
         ...FIELDS,
         {
-          key: "web_search_timeout_s",
-          service: "web_search",
+          key: "sandbox_timeout_s",
+          service: "sandbox",
           type: "int",
           value: 30,
           description: "New knob.",
@@ -609,26 +547,8 @@ describe("ToolsGuardrailsPage", () => {
     await renderWithClient(<ToolsGuardrailsPage />)
 
     expect(
-      await screen.findByLabelText("web_search_timeout_s"),
+      await screen.findByLabelText("sandbox_timeout_s"),
     ).toBeInTheDocument()
-  })
-
-  it("folds the search backend's tuning under Advanced and leaves the purpose hint to the API", async () => {
-    mockApi()
-    const user = userEvent.setup()
-    await renderWithClient(<ToolsGuardrailsPage only="web_search" />)
-    await screen.findByLabelText(WEB_SEARCH_URL)
-
-    expect(screen.getByRole("button", { name: "Advanced" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    )
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
-    expect(screen.getByLabelText(ENGINES)).toBeInTheDocument()
-    expect(screen.getByLabelText(MAX_RESULTS)).toBeInTheDocument()
-    expect(
-      screen.queryByText("web_search_purpose_hint"),
-    ).not.toBeInTheDocument()
   })
 
   it("lays every row out with the label left and the control in a shared lane", async () => {
@@ -636,9 +556,9 @@ describe("ToolsGuardrailsPage", () => {
     // column down a group whether or not a row also carries a Test button.
     mockApi()
     await renderWithClient(<ToolsGuardrailsPage />)
-    await screen.findByLabelText(WEB_SEARCH_URL)
+    await screen.findByLabelText(GUARDRAILS_URL)
 
-    for (const label of [WEB_SEARCH_URL, ENGINES, MAX_RESULTS]) {
+    for (const label of [SANDBOX_URL, GUARDRAILS_URL]) {
       const field = screen.getByLabelText(label)
       // No field carries a width of its own: the lane owns the width, and a
       // second one at the call site is how the column got a different left
@@ -646,9 +566,6 @@ describe("ToolsGuardrailsPage", () => {
       expect(field.className).not.toMatch(/\b(md|lg):w-\[/)
       expect(field.closest(`div[class*="${CONTROL_LANE}"]`)).not.toBeNull()
     }
-    // The numeric field fills the lane like the rest and keeps its digits at
-    // the lane's trailing edge, which is what still reads it as a number.
-    expect(screen.getByLabelText(MAX_RESULTS).className).toContain("text-right")
   })
 })
 
@@ -824,40 +741,37 @@ describe("ToolsGuardrailsPage tool status", () => {
     // The status row is reference material; a failed discovery fetch must not
     // take the settings form down with it.
     mockApi({ toolsStatus: 500 })
-    await renderWithClient(<ToolsGuardrailsPage only="web_search" />)
+    await renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
 
-    expect(await screen.findByLabelText(WEB_SEARCH_URL)).toHaveValue(
-      "http://searxng:8080",
-    )
+    expect(await screen.findByLabelText(SANDBOX_URL)).toBeInTheDocument()
     await waitFor(() =>
       expect(
-        screen.queryByRole("button", { name: /otari_web_search/ }),
+        screen.queryByRole("button", { name: /otari_code_execution/ }),
       ).not.toBeInTheDocument(),
     )
   })
 
-  it("re-reads the search providers after the web-search URL is saved", async () => {
-    // A searxng search tool with no api_base inherits web_search_url, so the
-    // catalogue that tells the Search tools card what a blank box resolves to
-    // (and whether one is required at all) changes with this very PATCH.
-    const fetchMock = mockApi()
+  it("sends an operator with no search tool to the deployment's Web search page", async () => {
+    mockApi({
+      tools: {
+        object: "list",
+        data: TOOLS.data.map((tool) =>
+          tool.id === "otari_web_search" ? { ...tool, available: false } : tool,
+        ),
+      },
+    })
     const user = userEvent.setup()
-    await renderWithClient(<ToolsGuardrailsPage />)
-    await screen.findByLabelText(WEB_SEARCH_URL)
+    await renderWithClient(<ToolsGuardrailsPage only="web_search" />)
 
-    const providerFetches = () =>
-      fetchMock.mock.calls.filter(([url]) =>
-        String(url).includes(`${API_ROOT}/search-tools/providers`),
-      ).length
-    await waitFor(() => expect(providerFetches()).toBeGreaterThan(0))
-    const before = providerFetches()
+    const row = await screen.findByRole("button", {
+      name: /otari_web_search/,
+    })
+    expect(row).toHaveTextContent("Unavailable · no search tool")
+    await user.click(row)
 
-    const input = screen.getByLabelText(WEB_SEARCH_URL)
-    await user.clear(input)
-    await user.type(input, "http://new-searxng:9000")
-    await user.tab()
-
-    await waitFor(() => expect(providerFetches()).toBeGreaterThan(before))
+    expect(
+      screen.getByRole("link", { name: "Set up search tools →" }),
+    ).toHaveAttribute("href", "/admin/web-search")
   })
 
   it("carries the MCP servers section on the combined page and no narrowed one", async () => {
@@ -936,6 +850,7 @@ describe("ToolsGuardrailsPage by caller role", () => {
     ).not.toBeInTheDocument()
     expect(screen.queryByText("web_search_max_results")).not.toBeInTheDocument()
     expect(screen.queryByText("Price per call")).not.toBeInTheDocument()
+    expect(screen.queryByText("Search and fetch tools")).not.toBeInTheDocument()
   })
 
   it("keeps a narrowed service page working for a non-operator", async () => {
@@ -1010,10 +925,9 @@ describe("ToolsGuardrailsPage by caller role", () => {
     mockApi()
     await renderWithClient(<ToolsGuardrailsPage only="web_search" />)
 
-    expect(await screen.findByLabelText(WEB_SEARCH_URL)).toBeInTheDocument()
     expect(
-      screen.getByRole("heading", { name: "Search tools" }),
-    ).toBeInTheDocument()
+      await screen.findByRole("link", { name: "Web search" }),
+    ).toHaveAttribute("href", "/admin/web-search")
     expect(
       screen.getByText(/Per-workspace web access is set on a workspace/),
     ).toBeInTheDocument()

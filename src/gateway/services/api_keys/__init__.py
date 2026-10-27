@@ -5,12 +5,12 @@ from gateway.services.api_keys._access_tokens import (
     AccessTokenClaims,
     FederationGrantError,
     access_token_expiry,
-    grant_names_key,
+    grant_names_organization,
     is_access_token,
     mint_access_token,
     read_access_token,
 )
-from gateway.services.api_keys._admission import key_refusal
+from gateway.services.api_keys._admission import key_refusal, operator_set_active
 from gateway.services.api_keys._federation import (
     FederatedIdentity,
     FederatedTokenVerifier,
@@ -21,6 +21,7 @@ from gateway.services.api_keys._federation import (
     rule_matches,
     unverified_issuer,
 )
+from gateway.services.api_keys._membership import ApiKeyMembershipListener
 from gateway.services.api_keys._secrets import declared_secret_problem, refuse_unusable_declared_secrets
 from gateway.services.api_keys._service import ApiKeyService
 from gateway.services.api_keys._token_exchange import FederationTokenExchange, OrganizationOfWorkspace
@@ -28,6 +29,7 @@ from gateway.services.api_keys._token_exchange import FederationTokenExchange, O
 __all__ = [
     "JWT_BEARER_GRANT",
     "AccessTokenClaims",
+    "ApiKeyMembershipListener",
     "ApiKeyService",
     "FederatedIdentity",
     "FederatedTokenVerifier",
@@ -39,11 +41,12 @@ __all__ = [
     "OrganizationOfWorkspace",
     "access_token_expiry",
     "declared_secret_problem",
-    "grant_names_key",
+    "grant_names_organization",
     "is_access_token",
     "key_refusal",
     "match_federation_rules",
     "mint_access_token",
+    "operator_set_active",
     "read_access_token",
     "refuse_unusable_declared_secrets",
     "rule_matches",

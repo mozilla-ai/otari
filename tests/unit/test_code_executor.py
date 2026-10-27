@@ -35,8 +35,11 @@ from gateway.services.tools import (
     first_provider_code_execution_tool,
     native_code_execution_dialect,
     parse_code_execution_header,
+    provider_attempt_kwargs,
     provider_runs_code_natively,
     resolve_code_executor_preference,
+    with_native_code_execution_tool,
+    with_typed_code_execution_tool,
 )
 
 ANTHROPIC_DATED = {"type": "code_execution_20250825", "name": "code_execution"}
@@ -180,6 +183,86 @@ def test_everything_else_is_not_natively_served(
 
 def test_provider_name_is_matched_case_insensitively() -> None:
     assert provider_runs_code_natively(ANTHROPIC_DATED, provider="Anthropic", dialect=Dialect.MESSAGES) is True
+
+
+@pytest.mark.parametrize(
+    ("entry", "dialect"),
+    [(BARE, Dialect.CHAT), (BARE, Dialect.MESSAGES), (ANTHROPIC_DATED, Dialect.MESSAGES)],
+)
+def test_gemini_runs_code_natively_on_chat_and_messages(entry: dict[str, str], dialect: Dialect) -> None:
+    assert provider_runs_code_natively(entry, provider="gemini", dialect=dialect) is True
+
+
+def test_vertex_is_not_assumed_to_run_code_natively() -> None:
+    """Its provider serves Claude and Mistral models too, and the answer is per provider."""
+    assert provider_runs_code_natively(BARE, provider="vertexai", dialect=Dialect.CHAT) is False
+    assert provider_runs_code_natively(ANTHROPIC_DATED, provider="vertexai", dialect=Dialect.MESSAGES) is False
+    assert with_native_code_execution_tool([BARE], provider="vertexai") == [BARE]
+
+
+@pytest.mark.parametrize(
+    ("entry", "dialect"),
+    [
+        (ANTHROPIC_DATED, Dialect.CHAT),
+        (OPENAI_INTERPRETER, Dialect.CHAT),
+        (BARE, Dialect.RESPONSES),
+        (OPENAI_INTERPRETER, Dialect.RESPONSES),
+    ],
+)
+def test_gemini_does_not_serve_other_pairings(entry: dict[str, str], dialect: Dialect) -> None:
+    assert provider_runs_code_natively(entry, provider="gemini", dialect=dialect) is False
+
+
+def test_gemini_attempt_gets_the_keyword_in_geminis_own_form() -> None:
+    function: dict[str, Any] = {"type": "function", "function": {"name": "lookup", "parameters": {}}}
+    tools: list[dict[str, Any]] = [function, ANTHROPIC_DATED, BARE]
+
+    assert with_native_code_execution_tool(tools, provider="gemini") == [function, {"code_execution": {}}]
+    assert tools == [function, ANTHROPIC_DATED, BARE]
+
+
+def test_non_gemini_attempt_keeps_the_keyword_as_written() -> None:
+    tools = [ANTHROPIC_DATED]
+
+    assert with_native_code_execution_tool(tools, provider="anthropic") is tools
+
+
+def test_provider_attempt_kwargs_reads_the_provider_from_the_selector() -> None:
+    kwargs = {"model": "gemini:gemini-2.5-flash", "tools": [BARE]}
+
+    assert provider_attempt_kwargs(kwargs)["tools"] == [{"code_execution": {}}]
+    assert provider_attempt_kwargs(provider_attempt_kwargs(kwargs)) == provider_attempt_kwargs(kwargs)
+
+
+@pytest.mark.parametrize("model", ["openai:gpt-5", "not-a-provider:x", ""])
+def test_provider_attempt_kwargs_leaves_other_selectors_alone(model: str) -> None:
+    kwargs = {"model": model, "tools": [BARE]}
+
+    assert provider_attempt_kwargs(kwargs) is kwargs
+
+
+def test_geminis_own_declaration_is_admitted_as_the_bare_keyword() -> None:
+    """So a workspace pin, or a fallback with no native code execution, decides it like any keyword."""
+    function: dict[str, Any] = {"type": "function", "function": {"name": "lookup", "parameters": {}}}
+    google_search: dict[str, Any] = {"google_search": {}}
+
+    assert with_typed_code_execution_tool([{"code_execution": {}}, function, google_search]) == [
+        BARE,
+        function,
+        google_search,
+    ]
+    tools = [function, google_search]
+    assert with_typed_code_execution_tool(tools) is tools
+    assert with_typed_code_execution_tool(None) is None
+
+
+def test_geminis_own_declaration_is_claimed_where_the_executor_says_otari() -> None:
+    typed = with_typed_code_execution_tool([{"code_execution": {}}])
+
+    claimed, remaining = extract_code_execution_tool(typed, intercept=True)
+
+    assert claimed == BARE
+    assert remaining is None
 
 
 # --- which native result shape a caller expects back -----------------------------------
@@ -463,6 +546,18 @@ async def test_each_way_of_running_the_keyword_is_admitted_on_its_own() -> None:
     # The native attempt forwards the caller's own entry, so the sandbox's is a copy of it.
     assert sandboxed.tool_entry == ANTHROPIC_DATED
     assert sandboxed.tool_entry is not tools[0]
+
+
+@pytest.mark.asyncio
+async def test_a_sandboxed_attempt_forwards_no_second_keyword() -> None:
+    user_tool = {"type": "function", "function": {"name": "get_weather"}}
+    declared = await _declare([dict(ANTHROPIC_DATED), user_tool, dict(BARE)])
+
+    sandboxed = await declared.admit(claimed=True, beside_sandbox=True)
+
+    assert sandboxed.use_sandbox
+    # Left in place, the second keyword would reach a Gemini attempt as its native tool.
+    assert sandboxed.tools_after_sandbox == [user_tool]
 
 
 @pytest.mark.asyncio

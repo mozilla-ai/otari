@@ -30,6 +30,8 @@ import {
 
 import { movesToAnotherOrigin } from "./endpointOrigin"
 import { ServesUnlistedModelsField } from "./ServesUnlistedModelsField"
+import { SupportedCountriesField } from "./SupportedCountriesField"
+import { formatCountries, parseCountries } from "./supportedCountries"
 
 // The editor for one hosted provider. Its name and implementation are immutable
 // (the update body cannot change them), so they are named in the description.
@@ -49,6 +51,7 @@ interface EditDraft {
   /** Typed secrets already stored, so blank means "keep it", not "clear it". */
   redacted: string[]
   servesUnlistedModels: boolean
+  supportedCountries: string
 }
 
 function draftFrom(provider: HostedProvider): EditDraft {
@@ -63,6 +66,7 @@ function draftFrom(provider: HostedProvider): EditDraft {
     clientArgs: formatClientArgs(rest),
     redacted,
     servesUnlistedModels: provider.serves_unlisted_models,
+    supportedCountries: formatCountries(provider.supported_countries),
   }
 }
 
@@ -85,6 +89,13 @@ export function EditHostedProviderForm({
       ? provider.name
       : `${provider.name} (${provider.provider})`
   const parsedClientArgs = parseClientArgs(draft.clientArgs)
+  const countries = parseCountries(draft.supportedCountries)
+  // Compared as text, so a list the field cannot show (an empty one, set
+  // through the API) is not sent back as "every country" by a save that never
+  // touched it.
+  const countriesChanged =
+    draft.supportedCountries.trim() !==
+    formatCountries(provider.supported_countries)
   const credentialErrors = validateCredentialFields(
     credentialFieldsFor(provider.provider),
     draft.credentials,
@@ -98,6 +109,7 @@ export function EditHostedProviderForm({
     movesToAnotherOrigin(provider.api_base ?? "", draft.apiBase)
   const canSubmit =
     parsedClientArgs.ok &&
+    countries.ok &&
     Object.keys(credentialErrors).length === 0 &&
     !needsKey
 
@@ -120,7 +132,7 @@ export function EditHostedProviderForm({
   }
 
   const submit = () => {
-    if (!canSubmit || !parsedClientArgs.ok) return
+    if (!canSubmit || !parsedClientArgs.ok || !countries.ok) return
     // A stored secret the form was never shown rides back as the mask, which
     // the server reads as "keep what is stored". Omitted when the API showed
     // none and none was entered: null would clear arguments it could not read.
@@ -141,6 +153,7 @@ export function EditHostedProviderForm({
           ...(draft.servesUnlistedModels === provider.serves_unlisted_models
             ? {}
             : { serves_unlisted_models: draft.servesUnlistedModels }),
+          ...(countriesChanged ? { supported_countries: countries.value } : {}),
         },
       },
       { onSuccess: onClose },
@@ -192,6 +205,13 @@ export function EditHostedProviderForm({
         isSelected={draft.servesUnlistedModels}
         onChange={(servesUnlistedModels) =>
           setDraft({ ...draft, servesUnlistedModels })
+        }
+      />
+      <SupportedCountriesField
+        value={draft.supportedCountries}
+        parsed={countries}
+        onChange={(supportedCountries) =>
+          setDraft({ ...draft, supportedCountries })
         }
       />
       <ProviderCredentialFields

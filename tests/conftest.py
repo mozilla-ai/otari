@@ -283,12 +283,12 @@ class TaskGroupMcpTransport:
                     raise
 
     @contextlib.asynccontextmanager
-    async def __call__(self, *args: Any, **kwargs: Any) -> AsyncIterator[tuple[object, object, object]]:
+    async def __call__(self, *args: Any, **kwargs: Any) -> AsyncIterator[tuple[object, object]]:
         await self._pass(self.may_open)
         async with anyio.create_task_group():
             self.entered_in = asyncio.current_task()
             try:
-                yield object(), object(), object()
+                yield object(), object()
             except BaseException as exc:
                 self.exited_with.append(exc)
                 raise
@@ -303,7 +303,7 @@ class TaskGroupMcpTransport:
 def mcp_task_group_transport(monkeypatch: pytest.MonkeyPatch) -> TaskGroupMcpTransport:
     """Serve every MCP connection through one :class:`TaskGroupMcpTransport`."""
     transport = TaskGroupMcpTransport()
-    monkeypatch.setattr("gateway.services.mcp_client.streamablehttp_client", transport)
+    monkeypatch.setattr("gateway.services.mcp_client.streamable_http_client", transport)
     return transport
 
 

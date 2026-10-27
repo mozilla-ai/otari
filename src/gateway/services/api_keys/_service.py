@@ -1,5 +1,6 @@
 import uuid
-from collections.abc import Callable, Collection, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from typing import Any
 
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.api_keys import ApiKeyConfig, https_url_problem
@@ -10,6 +11,7 @@ from gateway.exceptions.api_keys_exceptions import (
     FederationRuleExistsError,
     FederationRuleLimitError,
     FederationRuleNotFoundError,
+    OperatorDisabledKeyError,
 )
 from gateway.log_config import logger
 from gateway.models.api_keys import MAX_FEDERATION_RULES_PER_KEY, APIKey
@@ -164,6 +166,35 @@ class ApiKeyService:
             if row is None:
                 raise FederationRuleNotFoundError(rule_id)
             await self._federation_rules.delete(row)
+
+    async def update_owned(
+        self, config: GatewayConfig, key: APIKey, changes: Mapping[str, Any], *, owner_id: str
+    ) -> None:
+        """Apply the owner's ``changes`` (column to new value; a column left out keeps its value) to their ``key``.
+
+        Re-reads the key under its row lock first, so a switch-off or a narrowing an
+        operator committed after the caller loaded it is decided on and kept rather
+        than written over. A changed access list must fit the owner's own.
+
+        Raises:
+            OperatorDisabledKeyError: the changes switch on a key an operator switched off.
+            ValueError: a changed access list names something unknown, or grants more than the owner's.
+        """
+        async with self._uow:
+            await self._keys.reload_locked(key)
+            if changes.get("is_active") is True and key.operator_disabled:
+                raise OperatorDisabledKeyError
+            stored = AccessLists(key.allowed_models, key.allowed_tools)
+            access = await self.check_access_lists(
+                config,
+                AccessLists(changes.get("allowed_models", stored.models), changes.get("allowed_tools", stored.tools)),
+                stored=stored,
+                owner_id=owner_id,
+            )
+            for column, value in changes.items():
+                setattr(key, column, value)
+            key.allowed_models = access.models
+            key.allowed_tools = access.tools
 
     async def check_access_lists(
         self, config: GatewayConfig, requested: AccessLists, *, stored: AccessLists, owner_id: str | None

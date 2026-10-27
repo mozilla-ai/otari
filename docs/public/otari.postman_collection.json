@@ -2879,7 +2879,7 @@
               },
               "raw": "{\n  \"digest\": \"string\",\n  \"gates\": [\n    {\n      \"gate_id\": \"string\",\n      \"gate_type\": \"command\",\n      \"enforcement\": \"required\",\n      \"origin\": \"repo\",\n      \"runs\": [\n        \"pre_tool_use.edit_target\"\n      ],\n      \"message\": \"string\"\n    }\n  ]\n}"
             },
-            "description": "Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.\n\n`otari hook` sends this once per version, the first time it reports a check\nagainst it. The fingerprint is recomputed from the gates, and one that does\nnot match the one sent is refused, so a version cannot be stored under\nanother's name. Sending a version again changes nothing. It is stored in the\nAPI key's workspace, beside that key's traces, and takes the same key a trace\nexport does: a budget-exempt API key, never the master key.",
+            "description": "Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.\n\n`otari hook` sends this once per version, the first time it reports a check\nagainst it. The fingerprint is recomputed from the gates, and one that does\nnot match the one sent is refused, so a version cannot be stored under\nanother's name. Sending a version again changes nothing. A workspace keeps at\nmost 1,000 versions, and a new one past that is refused with a 409. It is stored in the\nAPI key's workspace, beside that key's traces, and takes the same key a trace\nexport does: a budget-exempt API key, never the master key.",
             "header": [
               {
                 "key": "Content-Type",
@@ -2969,6 +2969,75 @@
                 "hosted-providers"
               ],
               "raw": "{{baseUrl}}/api/v1/hosted-providers"
+            }
+          }
+        },
+        {
+          "name": "Update Catalog",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"cleanup\": false\n}"
+            },
+            "description": "Apply the reviewed prices, then refresh every provider's models, then the cleanup if asked.\n\nThe price step comes first, so the model step prices new models at the\nprices it applied, and a model held for want of a price is served once it\nhas one. Without a ``digest`` no price changes. A ``digest`` that no longer\nnames the pending prices answers 409 and changes nothing. ``cleanup``\nremoves the prices of models no provider serves, with their history.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                "catalog-update"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/catalog-update"
+            }
+          }
+        },
+        {
+          "name": "Preview Catalog Update",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"cleanup\": false\n}"
+            },
+            "description": "What updating the catalog would do: the models.dev price changes, then what each provider newly lists.\n\nA POST, because it holds the fetched prices as pending for the apply to\nname by their ``digest``; nothing else is written. It dials every enabled\nprovider. A price fetch that fails is reported in ``price_error`` and the\nmodel lists are still previewed. With ``cleanup``, it also previews which\nprices of models no provider serves would be removed.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                "catalog-update",
+                "preview"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/catalog-update/preview"
             }
           }
         },
@@ -3071,47 +3140,6 @@
                 "reencrypt"
               ],
               "raw": "{{baseUrl}}/api/v1/hosted-providers/reencrypt"
-            }
-          }
-        },
-        {
-          "name": "Refresh Catalog",
-          "request": {
-            "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. A model list whose\nprovider nothing defines any more, such as a removed ``config.yml`` entry,\ngoes too, and is named in ``orphaned_rosters``. Where no provider offers a\nmodel, only those lists go and every price stays; with none of them either,\nthe sweep answers 409. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
-            "header": [],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "hosted-providers",
-                "refresh"
-              ],
-              "raw": "{{baseUrl}}/api/v1/hosted-providers/refresh"
-            }
-          }
-        },
-        {
-          "name": "Preview Catalog Refresh",
-          "request": {
-            "description": "What a catalog sweep would remove, without removing it.\n\nA GET, and a truthful one: it writes nothing. It does dial every enabled\nprovider, as ``available-models`` does, because a model the provider still\nlists would survive the sweep and previewing it as doomed would be a lie.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "hosted-providers",
-                "refresh",
-                "preview"
-              ],
-              "raw": "{{baseUrl}}/api/v1/hosted-providers/refresh/preview"
             }
           }
         },
@@ -4462,7 +4490,7 @@
               },
               "raw": "{\n  \"assertion\": \"<identity token>\",\n  \"federation_rule_id\": \"7d0c7a52-9a2e-4b55-8f3a-2f1f6c0d2a11\",\n  \"grant_type\": \"urn:ietf:params:oauth:grant-type:jwt-bearer\",\n  \"organization_id\": \"5b3f8e0e-1c2d-4e7f-9a8b-0c1d2e3f4a5b\"\n}"
             },
-            "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:\none on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,\n``workspace_id`` and ``service_account_id``, where set, must be the UUIDs of the rule's key's organization and\nworkspace and the key's id. The access token authenticates as that key until ``expires_in`` runs out, the rule is\ndeleted or the key stops passing its checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
+            "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:\none on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,\nwhere set, must be the UUID of the rule's key's organization. ``workspace_id`` and ``service_account_id`` are\naccepted and ignored, so a client configured for Anthropic needs only its rule and organization changed. The\naccess token authenticates as that key until ``expires_in`` runs out, the rule is deleted or the key stops passing\nits checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
             "header": [
               {
                 "key": "Content-Type",
@@ -6301,7 +6329,7 @@
               },
               "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"allowed_tools\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
-            "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). The secret is returned once.",
+            "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). A viewer of the workspace is refused\nwith 403. The secret is returned once.",
             "header": [
               {
                 "key": "Content-Type",
@@ -6788,7 +6816,7 @@
               },
               "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"client_args\": {},\n  \"name\": \"string\"\n}"
             },
-            "description": "Change a key's name, credential, base URL, or client args. Organization owners and admins only.",
+            "description": "Change a key's name, credential, base URL, or client args. Organization owners and admins only.\n\nA new base URL on a key that holds a credential needs that credential in the\nsame request, `api_key` and any masked `client_args` entry, since the next call\nsends it to the new host. Clearing the base URL needs neither.",
             "header": [
               {
                 "key": "Content-Type",
@@ -7523,13 +7551,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -7601,13 +7629,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -7686,7 +7714,7 @@
         {
           "name": "Trace Series",
           "request": {
-            "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+            "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7715,13 +7743,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -8435,7 +8463,7 @@
               },
               "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"name\": \"string\",\n  \"options\": {}\n}"
             },
-            "description": "Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.\n\nIts kind and provider are fixed.",
+            "description": "Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.\n\nIts kind and provider are fixed. A new api_base on a key that holds a secret\nneeds that secret in the same request, `api_key` and any masked `options`\nentry, since the next call sends it to the new host. Clearing api_base needs\nneither.",
             "header": [
               {
                 "key": "Content-Type",
@@ -9302,7 +9330,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"model_key\": \"string\",\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0\n}"
+              "raw": "{\n  \"model_key\": \"string\"\n}"
             },
             "description": "Set or update pricing for a model.\n\nRejects an alias or a routing policy: pricing, budgets, and usage all key on\nthe model a request resolves to, so a row stored under either name would\nnever be read.",
             "header": [
@@ -9384,55 +9412,6 @@
                 }
               ],
               "raw": "{{baseUrl}}/api/v1/pricing/drift?limit="
-            }
-          }
-        },
-        {
-          "name": "Preview Pricing Refresh",
-          "request": {
-            "description": "Fetch the latest defaults and hold them for operator review.",
-            "header": [],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "pricing",
-                "refresh"
-              ],
-              "raw": "{{baseUrl}}/api/v1/pricing/refresh"
-            }
-          }
-        },
-        {
-          "name": "Confirm Pricing Refresh",
-          "request": {
-            "description": "Activate the latest reviewed default-price snapshot.",
-            "header": [],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "pricing",
-                "refresh",
-                "confirm"
-              ],
-              "query": [
-                {
-                  "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
-                  "disabled": true,
-                  "key": "digest",
-                  "value": ""
-                }
-              ],
-              "raw": "{{baseUrl}}/api/v1/pricing/refresh/confirm?digest="
             }
           }
         },
@@ -10683,6 +10662,66 @@
           }
         },
         {
+          "name": "Get Country Database",
+          "request": {
+            "description": "Describe the stored country file, and say whether ``client_country_database`` is read instead.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "settings",
+                "country-database"
+              ],
+              "raw": "{{baseUrl}}/api/v1/settings/country-database"
+            }
+          }
+        },
+        {
+          "name": "Upload Country Database",
+          "request": {
+            "description": "Store a country file in place of the one stored before.\n\nA file larger than 32 MiB answers 413, and one that is no MaxMind DB\ncountry file answers 400. Either way the file stored before stays. While\n``client_country_database`` is set, the stored file is kept but not read.",
+            "header": [],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "settings",
+                "country-database"
+              ],
+              "raw": "{{baseUrl}}/api/v1/settings/country-database"
+            }
+          }
+        },
+        {
+          "name": "Delete Country Database",
+          "request": {
+            "description": "Remove the stored country file.\n\nAnswers 404 when none is stored, and 409 when it is the only country source\nfor ``provider_supported_countries`` or for the supported countries of an\nenabled hosted provider.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "settings",
+                "country-database"
+              ],
+              "raw": "{{baseUrl}}/api/v1/settings/country-database"
+            }
+          }
+        },
+        {
           "name": "Get Mail Settings",
           "request": {
             "description": "Report the effective outgoing-mail configuration.",
@@ -11085,13 +11124,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -11161,13 +11200,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""
@@ -11244,7 +11283,7 @@
         {
           "name": "Trace Series",
           "request": {
-            "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+            "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
             "header": [],
             "method": "GET",
             "url": {
@@ -11271,13 +11310,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "description": "Sessions active at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
                   "value": ""
                 },
                 {
-                  "description": "Last activity before this instant (ISO 8601).",
+                  "description": "Sessions started before this instant (ISO 8601).",
                   "disabled": true,
                   "key": "end",
                   "value": ""

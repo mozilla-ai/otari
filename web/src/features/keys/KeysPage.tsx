@@ -47,6 +47,7 @@ import {
   useCurrentOwnerId,
   useMemberAttributionLabels,
 } from "@/features/organization/attribution"
+import { canContributeToWorkspace } from "@/features/organization/roles"
 import { ToolScopeControl } from "@/features/tools/ToolScopeControl"
 import { organizationUsers } from "@/features/users/organizationUsers"
 import { UserComboBox } from "@/features/users/UserComboBox"
@@ -1290,11 +1291,17 @@ export function KeysPage() {
 
   const [pendingRegenerate, setPendingRegenerate] = useState<ApiKey>()
   const [federating, setFederating] = useState<ApiKey>()
+  const organizationContext = useOrganizationContext().data
+  const role = organizationContext?.role
+  // A viewer of this workspace reads their keys and changes none: the server
+  // refuses them every write on the member surface.
+  const isReadOnly =
+    !isDeploymentWide &&
+    !canContributeToWorkspace(organizationContext, workspace?.role)
   // Organization owners and admins on their own keys, which are all this
   // surface lists to them, and the operator on any key in the organization.
   // The server enforces the same; this only keeps a member from being offered
   // a form that would answer 403.
-  const role = useOrganizationContext().data?.role
   const canFederate =
     useDeployment().federation_member_rules &&
     (isDeploymentWide || role === "owner" || role === "admin")
@@ -1370,6 +1377,8 @@ export function KeysPage() {
         onWorkloadIdentity={
           canFederate ? () => setFederating(apiKey) : undefined
         }
+        isReadOnly={isReadOnly}
+        isEnableLocked={!isDeploymentWide && apiKey.operator_disabled === true}
       />
     ),
     [
@@ -1382,6 +1391,7 @@ export function KeysPage() {
       rotateKey.isPending,
       setActive,
       canFederate,
+      isReadOnly,
     ],
   )
   // Memoized on what the cells read, so DataTable's per-row cache holds across
@@ -1566,18 +1576,20 @@ export function KeysPage() {
       <PageIntro
         title="API keys"
         action={
-          <Button
-            // Focus returns here when a dialog opened from a row action closes,
-            // so the control has to stay addressable. It also no longer hides
-            // while the create dialog is open: the dialog is over the page, and
-            // a heading that loses its action while you are using it is the
-            // inconsistency this page had.
-            ref={createButtonRef}
-            variant="primary"
-            onPress={openCreate}
-          >
-            Create key
-          </Button>
+          isReadOnly ? undefined : (
+            <Button
+              // Focus returns here when a dialog opened from a row action closes,
+              // so the control has to stay addressable. It also no longer hides
+              // while the create dialog is open: the dialog is over the page, and
+              // a heading that loses its action while you are using it is the
+              // inconsistency this page had.
+              ref={createButtonRef}
+              variant="primary"
+              onPress={openCreate}
+            >
+              Create key
+            </Button>
+          )
         }
       >
         {isDeploymentWide
@@ -1618,6 +1630,9 @@ export function KeysPage() {
         <p className="max-w-[38.75rem] pb-5 text-sm text-muted">
           These are your keys: requests on them are billed to you and spend
           against your budget.
+          {isReadOnly
+            ? " You are a viewer here, so your deployment operator issues and changes them."
+            : null}
         </p>
       )}
 
@@ -1646,9 +1661,13 @@ export function KeysPage() {
       {showOnboarding ? (
         <EmptyState
           title="No API keys yet"
-          description="An API key authenticates callers to this gateway. Create one to make your first request; the secret is shown once, so keep it somewhere safe."
-          actionLabel="Create your first key"
-          onAction={openCreate}
+          description={
+            isReadOnly
+              ? "An API key authenticates callers to this gateway. Ask your deployment operator to issue you one."
+              : "An API key authenticates callers to this gateway. Create one to make your first request; the secret is shown once, so keep it somewhere safe."
+          }
+          actionLabel={isReadOnly ? undefined : "Create your first key"}
+          onAction={isReadOnly ? undefined : openCreate}
         />
       ) : null}
 
@@ -1672,7 +1691,7 @@ export function KeysPage() {
         />
       ) : null}
 
-      {selectedIds.length > 0 ? (
+      {selectedIds.length > 0 && !isReadOnly ? (
         <BulkActionBar
           selectedCount={selectedIds.length}
           allMatching={false}
@@ -1735,18 +1754,22 @@ export function KeysPage() {
           className="otari-keys-list flex flex-col"
         >
           <div className="flex min-h-11 items-center gap-2 border-b border-border-subtle">
-            <Checkbox
-              hasTouchTarget
-              ariaLabel="Select all keys"
-              isSelected={rows.length > 0 && selectedIds.length === rows.length}
-              onChange={(checked) =>
-                selection.onSelectionChange(
-                  checked ? new Set(selectableKeys) : new Set(),
-                )
-              }
-            >
-              <span className="sr-only">Select all keys</span>
-            </Checkbox>
+            {isReadOnly ? null : (
+              <Checkbox
+                hasTouchTarget
+                ariaLabel="Select all keys"
+                isSelected={
+                  rows.length > 0 && selectedIds.length === rows.length
+                }
+                onChange={(checked) =>
+                  selection.onSelectionChange(
+                    checked ? new Set(selectableKeys) : new Set(),
+                  )
+                }
+              >
+                <span className="sr-only">Select all keys</span>
+              </Checkbox>
+            )}
             <span className="flex-1 text-caption">
               {rows.length} {rows.length === 1 ? "key" : "keys"}
             </span>
@@ -1767,21 +1790,23 @@ export function KeysPage() {
                 key={apiKey.id}
                 className={`flex items-start gap-2 border-b border-border-subtle py-3 ${selectedIds.includes(apiKey.id) ? "bg-primary-subtle" : ""}`}
               >
-                <div className="flex min-h-11 shrink-0 items-center">
-                  <Checkbox
-                    hasTouchTarget
-                    ariaLabel={`Select ${label(apiKey)}`}
-                    isSelected={selectedIds.includes(apiKey.id)}
-                    onChange={(checked) => {
-                      const next = new Set(selectedIds)
-                      if (checked) next.add(apiKey.id)
-                      else next.delete(apiKey.id)
-                      selection.onSelectionChange(next)
-                    }}
-                  >
-                    <span className="sr-only">Select {label(apiKey)}</span>
-                  </Checkbox>
-                </div>
+                {isReadOnly ? null : (
+                  <div className="flex min-h-11 shrink-0 items-center">
+                    <Checkbox
+                      hasTouchTarget
+                      ariaLabel={`Select ${label(apiKey)}`}
+                      isSelected={selectedIds.includes(apiKey.id)}
+                      onChange={(checked) => {
+                        const next = new Set(selectedIds)
+                        if (checked) next.add(apiKey.id)
+                        else next.delete(apiKey.id)
+                        selection.onSelectionChange(next)
+                      }}
+                    >
+                      <span className="sr-only">Select {label(apiKey)}</span>
+                    </Checkbox>
+                  </div>
+                )}
                 <div className="flex min-w-0 flex-1 flex-col gap-1 pt-2">
                   <span className="truncate text-base text-foreground">
                     {apiKey.key_name ?? "(unnamed)"}
@@ -1820,8 +1845,12 @@ export function KeysPage() {
             rows={rows}
             getRowKey={getKeyRowKey}
             isLoading={loading}
-            emptyContent="No API keys yet. Create one to authenticate a caller."
-            selectionMode="multiple"
+            emptyContent={
+              isReadOnly
+                ? "No API keys yet. Ask your deployment operator to issue you one."
+                : "No API keys yet. Create one to authenticate a caller."
+            }
+            selectionMode={isReadOnly ? "none" : "multiple"}
             selectedKeys={selection.selectedKeys}
             onSelectionChange={selection.onSelectionChange}
           />

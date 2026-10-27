@@ -18,18 +18,21 @@ import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
-
+import { CostCard } from "./CostCard"
+import { ExplainCard } from "./ExplainCard"
 import {
   formatDuration,
   formatRelativeTime,
   formatTraceTimestamp,
 } from "./format"
+import { GateCard, VERDICT } from "./GateCard"
 import { GatesView, stoppedBy } from "./GatesView"
 import { GatewayPanel } from "./GatewayPanel"
 import { type Format, IOBlock } from "./IOBlock"
 import { LogView } from "./LogView"
 import { NavHeader, type NavView } from "./NavHeader"
 import { TypeMark } from "./observationTypes"
+import type { SessionStats } from "./sessionStats"
 import { TraceTimelineView } from "./TraceTimelineView"
 import { TraceTreeView } from "./TraceTreeView"
 import { type Observation, summarizeTrace, type Trace } from "./types"
@@ -273,6 +276,64 @@ function Attributes({
   )
 }
 
+// The session's tool calls and gate runs, each with its breakdown on hover.
+function SessionCounts({ stats }: { stats: SessionStats }) {
+  const calls = stats.toolCalls
+  const runs = stats.gates.runs
+  return (
+    <>
+      {calls > 0 ? (
+        <Tooltip
+          content={
+            <Breakdown
+              rows={[
+                ...stats.tools.map((tally): [string, string] => [
+                  tally.tool,
+                  formatNumber(tally.calls),
+                ]),
+                ...(stats.inSubagents > 0
+                  ? [
+                      ["In subagents", formatNumber(stats.inSubagents)] as [
+                        string,
+                        string,
+                      ],
+                    ]
+                  : []),
+              ]}
+            />
+          }
+        >
+          {(props) => (
+            <button type="button" {...props} className={DOTTED}>
+              {formatNumber(calls)} tool call{calls === 1 ? "" : "s"}
+            </button>
+          )}
+        </Tooltip>
+      ) : null}
+      {runs > 0 ? (
+        <Tooltip
+          content={
+            <Breakdown
+              rows={Object.entries(stats.gates.verdicts).map(
+                ([verdict, count]): [string, string] => [
+                  VERDICT[verdict as keyof typeof VERDICT].word,
+                  formatNumber(count),
+                ],
+              )}
+            />
+          }
+        >
+          {(props) => (
+            <button type="button" {...props} className={DOTTED}>
+              {formatNumber(runs)} gate{runs === 1 ? "" : "s"} run
+            </button>
+          )}
+        </Tooltip>
+      ) : null}
+    </>
+  )
+}
+
 export function TracePeek({
   trace,
   error,
@@ -305,9 +366,9 @@ export function TracePeek({
   const [navView, setNavView] = useState<NavView>("tree")
   const [navCollapsed, setNavCollapsed] = useState(false)
   const [navQuery, setNavQuery] = useState("")
-  const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(
-    new Set(),
-  )
+  // The rows a person opened or closed, against the default below, so a tool
+  // call a live session adds later starts closed like the rest.
+  const [toggledIds, setToggledIds] = useState<ReadonlySet<string>>(new Set())
   const bodyRef = useRef<HTMLDivElement>(null)
   const bodyBox = useRef<DOMRect | null>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
@@ -362,6 +423,47 @@ export function TracePeek({
     ],
     [trace],
   )
+  // A tool call and a group of gates start closed: their row says enough until
+  // someone asks for more.
+  const defaultCollapsed = useMemo(() => {
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+    // Only a row whose children are all details of it, so a tool call another
+    // agent made with work of its own under it never hides that work.
+    const onlyDetails = new Map<string, boolean>()
+    for (const o of trace.observations) {
+      if (o.parentObservationId === null) continue
+      onlyDetails.set(
+        o.parentObservationId,
+        (onlyDetails.get(o.parentObservationId) ?? true) && o.detail === true,
+      )
+    }
+    return new Set(
+      parentIds.filter((id) => {
+        const row = byId.get(id)
+        return (
+          (row?.type === "TOOL" || row?.detail === true) &&
+          onlyDetails.get(id) === true
+        )
+      }),
+    )
+  }, [trace, parentIds])
+  const collapsedIds = useMemo(
+    () =>
+      new Set(
+        parentIds.filter(
+          (id) => defaultCollapsed.has(id) !== toggledIds.has(id),
+        ),
+      ),
+    [parentIds, defaultCollapsed, toggledIds],
+  )
+  const setCollapsedIds = (collapsed: ReadonlySet<string>) =>
+    setToggledIds(
+      new Set(
+        parentIds.filter(
+          (id) => defaultCollapsed.has(id) !== collapsed.has(id),
+        ),
+      ),
+    )
   const everythingCollapsed =
     parentIds.length > 0 && parentIds.every((id) => collapsedIds.has(id))
   // Opens a span from outside the tree (a gate, a gateway decision): selects it,
@@ -377,7 +479,7 @@ export function TracePeek({
       parent = byId.get(parent)?.parentObservationId ?? null
     }
     setCollapsedIds(
-      (current) => new Set([...current].filter((id) => !ancestors.has(id))),
+      new Set([...collapsedIds].filter((id) => !ancestors.has(id))),
     )
     setNavQuery("")
     setNavCollapsed(false)
@@ -393,7 +495,7 @@ export function TracePeek({
       ?.scrollIntoView({ block: "center" })
   })
   const toggleCollapsed = (id: string) =>
-    setCollapsedIds((current) => {
+    setToggledIds((current) => {
       const next = new Set(current)
       if (!next.delete(id)) next.add(id)
       return next
@@ -411,6 +513,7 @@ export function TracePeek({
         promptTokens: observation.promptTokens ?? 0,
         completionTokens: observation.completionTokens ?? 0,
         cachedTokens: observation.cachedTokens ?? 0,
+        cacheWriteTokens: observation.cacheWriteTokens ?? 0,
         totalTokens:
           (observation.promptTokens ?? 0) + (observation.completionTokens ?? 0),
         model: observation.model,
@@ -424,6 +527,7 @@ export function TracePeek({
         promptTokens: summary.promptTokens,
         completionTokens: summary.completionTokens,
         cachedTokens: summary.cachedTokens,
+        cacheWriteTokens: summary.cacheWriteTokens,
         totalTokens: summary.totalTokens,
         model: summary.models[0],
       }
@@ -449,15 +553,14 @@ export function TracePeek({
     }
   }, [])
 
-  // A panel opened on a span brings it into view once the spans arrive.
+  // A panel opened on a span opens the rows above it and brings it into view
+  // once the spans arrive, as picking it from the panel would.
   const isSpanUnseen = useRef(initialSpanId !== "")
   useEffect(() => {
-    if (!loaded || !isSpanUnseen.current) return
+    if (!loaded || !isSpanUnseen.current || !initialSpanId) return
     isSpanUnseen.current = false
-    navRef.current
-      ?.querySelector('[aria-current="true"]')
-      ?.scrollIntoView({ block: "nearest" })
-  }, [loaded])
+    reveal(initialSpanId)
+  })
 
   // The pane swap below md moves focus with it, as ListDetail does. Only on a
   // change, and a no-op from md up, where the Back control is not displayed.
@@ -642,6 +745,12 @@ export function TracePeek({
                         ? formatPct(shown.cachedTokens / shown.promptTokens)
                         : undefined,
                     ],
+                    [
+                      "Written to the cache",
+                      shown.cacheWriteTokens
+                        ? formatNumber(shown.cacheWriteTokens)
+                        : undefined,
+                    ],
                     ["Output", formatNumber(shown.completionTokens)],
                   ]}
                 />
@@ -655,6 +764,9 @@ export function TracePeek({
             </Tooltip>
           ) : null}
           {model ? <span>{model}</span> : null}
+          {!observation && trace.gateway ? (
+            <SessionCounts stats={trace.gateway.stats} />
+          ) : null}
         </div>
       </div>
 
@@ -786,14 +898,29 @@ export function TracePeek({
                   startedAt={trace.timestamp}
                   onSelect={reveal}
                 />
+              ) : observation?.gate ? (
+                <GateCard gate={observation.gate} />
               ) : observation ? (
-                <PreviewBody
-                  input={observation.input}
-                  output={observation.output}
-                  statusMessage={observation.statusMessage}
-                  level={observation.level}
-                  format={format}
-                />
+                <>
+                  {observation.explain ? (
+                    <ExplainCard explanation={observation.explain} />
+                  ) : null}
+                  {observation.estimate ? (
+                    <CostCard cost={observation.estimate} />
+                  ) : null}
+                  {observation.explain &&
+                  observation.input == null &&
+                  observation.output == null &&
+                  !observation.statusMessage ? null : (
+                    <PreviewBody
+                      input={observation.input}
+                      output={observation.output}
+                      statusMessage={observation.statusMessage}
+                      level={observation.level}
+                      format={format}
+                    />
+                  )}
+                </>
               ) : null}
             </div>
           </>

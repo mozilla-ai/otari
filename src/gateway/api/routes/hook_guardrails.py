@@ -13,12 +13,19 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from gateway.api.deps import TraceServiceDep, verify_api_key_or_master_key
 from gateway.models.api_keys import APIKey
 from gateway.schemas.traces import GuardrailDefinitionRequest, GuardrailDefinitionResponse
-from otari_agent.domain.definitions import GateDefinition
+from otari_agent.domain.definitions import gates_from_body
 
 router = APIRouter(prefix="/hooks", tags=["hooks"], dependencies=[Depends(verify_api_key_or_master_key)])
 
 
-@router.post("/guardrails")
+@router.post(
+    "/guardrails",
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "description": "The workspace already keeps the most guardrail versions it may, and this one is new."
+        }
+    },
+)
 async def record_guardrail_definition(
     request: GuardrailDefinitionRequest,
     auth: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
@@ -29,7 +36,8 @@ async def record_guardrail_definition(
     `otari hook` sends this once per version, the first time it reports a check
     against it. The fingerprint is recomputed from the gates, and one that does
     not match the one sent is refused, so a version cannot be stored under
-    another's name. Sending a version again changes nothing. It is stored in the
+    another's name. Sending a version again changes nothing. A workspace keeps at
+    most 1,000 versions, and a new one past that is refused with a 409. It is stored in the
     API key's workspace, beside that key's traces, and takes the same key a trace
     export does: a budget-exempt API key, never the master key.
     """
@@ -38,16 +46,6 @@ async def record_guardrail_definition(
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "A guardrail definition is stored with a budget-exempt API key's traces."
         )
-    gates = tuple(
-        GateDefinition(
-            gate_id=gate.gate_id,
-            gate_type=gate.gate_type,
-            enforcement=gate.enforcement,
-            origin=gate.origin,
-            runs=tuple(gate.runs),
-            message=gate.message,
-        )
-        for gate in request.gates
-    )
+    gates = gates_from_body(gate.model_dump() for gate in request.gates)
     digest = await traces.record_definition(api_key.workspace_id, gates, request.digest)
     return GuardrailDefinitionResponse(digest=digest)

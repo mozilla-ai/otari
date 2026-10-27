@@ -29,6 +29,7 @@ from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
+from gateway.services.api_keys import operator_set_active
 from gateway.services.budgets import BudgetService, check_path_external_id
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
@@ -204,6 +205,9 @@ class KeyInfo(BaseModel):
     last_used_at: str | None
     expires_at: str | None
     is_active: bool
+    # Off because an operator, or a removal from the workspace or organization,
+    # switched it off; only an operator may switch it back on.
+    operator_disabled: bool = False
     allowed_models: list[str] | None
     allowed_tools: list[str] | None
     exclude_from_budget: bool
@@ -234,6 +238,7 @@ class KeyInfo(BaseModel):
             last_used_at=key.last_used_at.isoformat() if key.last_used_at else None,
             expires_at=key.expires_at.isoformat() if key.expires_at else None,
             is_active=bool(key.is_active),
+            operator_disabled=bool(key.operator_disabled),
             allowed_models=list(key.allowed_models) if key.allowed_models is not None else None,
             allowed_tools=list(key.allowed_tools) if key.allowed_tools is not None else None,
             exclude_from_budget=bool(key.exclude_from_budget),
@@ -404,6 +409,7 @@ async def create_key(
         reject_user_mismatch=request.reject_user_mismatch,
         capture_agent_telemetry=request.capture_agent_telemetry,
         is_service_key=request.is_service_key,
+        self_service=False,
         end_user_budget_id=request.end_user_budget_id,
         end_user_budget_ids=end_user_budget_ids,
         max_end_users=request.max_end_users,
@@ -516,7 +522,7 @@ async def update_key(
     if "key_name" in request.model_fields_set:
         key.key_name = request.key_name
     if request.is_active is not None:
-        key.is_active = request.is_active
+        operator_set_active(key, request.is_active)
     if "expires_at" in request.model_fields_set:
         key.expires_at = request.expires_at
     if request.exclude_from_budget is not None:

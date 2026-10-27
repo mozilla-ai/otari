@@ -80,6 +80,31 @@ export function useSetPricing() {
   })
 }
 
+/**
+ * Deletes every version of one key's deployment price, of one kind.
+ *
+ * A 404 means nothing priced the key, which is what the caller asked for, so
+ * it resolves rather than fails.
+ */
+export function useDeletePricing() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ kind, modelKey }: PricedKey) =>
+      apiFetch<void>(
+        `/pricing/${encodeURIComponent(modelKey)}?kind=${encodeURIComponent(kind)}`,
+        { method: "DELETE" },
+      ).catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 404) return
+        throw error
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [PRICING] })
+      void queryClient.invalidateQueries({ queryKey: [MODELS] })
+      void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+    },
+  })
+}
+
 // The keys endpoint caps `limit` at 1000 server-side; page through it (capped like
 // pricing) so a gateway with many keys can't have rows silently vanish from the
 // table, and a backend that ignores `skip` can't spin an unbounded loop.

@@ -1,10 +1,11 @@
 from datetime import datetime
-from typing import Annotated, Literal
+from decimal import Decimal
+from typing import Annotated, Any, Literal
 
 from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -18,6 +19,7 @@ from gateway.api.deps import (
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
+from gateway.core.settings.pricing import PRICE_PER_REQUEST_DESCRIPTION, price_per_request_shorthand
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float, to_usd, to_usd_or_none
@@ -31,9 +33,7 @@ from gateway.services.pricing_refresh_service import (
     PendingSnapshotChanged,
     PricingRefreshError,
     PricingRefreshPreview,
-    confirm_price_refresh,
     list_accepted_snapshots,
-    prepare_price_refresh,
     preview_pending_refresh,
     reject_price_refresh,
 )
@@ -89,21 +89,35 @@ async def _withheld_providers(
 WithheldProviders = Annotated[frozenset[str], Depends(_withheld_providers)]
 
 
+def _pricing_not_found(model_key: str) -> HTTPException:
+    """The 404 for a key nothing prices, which a withheld provider's key answers too."""
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pricing for model '{model_key}' not found")
+
+
 def _refuse_if_withheld(model_key: str, candidates: list[str], withheld: frozenset[str]) -> None:
     """Answer a withheld provider's key as unknown, the way a key with no price answers."""
     for candidate in candidates:
         split = split_selector(candidate)
         if split is not None and provider_key(split[0]) in withheld:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=f"Pricing for model '{model_key}' not found"
-            )
+            raise _pricing_not_found(model_key)
 
 
 _PENDING_CHANGED_DETAIL = "The pending models.dev refresh changed since it was previewed"
 
 
+def _token_prices_not_required(schema: dict[str, Any]) -> None:
+    # The before-validator fills both from price_per_request; a body with neither is still refused.
+    schema["required"] = [
+        name
+        for name in schema.get("required", [])
+        if name not in ("input_price_per_million", "output_price_per_million")
+    ]
+
+
 class SetPricingRequest(PricedKind):
     """Create a versioned per-model price, with optional cache and context tiers."""
+
+    model_config = ConfigDict(json_schema_extra=_token_prices_not_required)
 
     model_key: str = Field(
         description="Model identifier in format 'provider:model', or a search or fetch instance's name for those kinds"
@@ -136,6 +150,14 @@ class SetPricingRequest(PricedKind):
             "'images' for image generation (USD per million images)."
         ),
     )
+    price_per_request: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False, description=PRICE_PER_REQUEST_DESCRIPTION
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _expand_price_per_request(cls, data: Any) -> Any:
+        return price_per_request_shorthand(data)
 
     @model_validator(mode="after")
     def validate_unique_tier_thresholds(self) -> "SetPricingRequest":
@@ -158,6 +180,9 @@ class PricingResponse(BaseModel):
     cache_write_price_per_million: float | None
     pricing_tiers: list[PricingTier]
     unit: str = Field(description="What the rates are per: tokens, requests, or images.")
+    price_per_request: float | None = Field(
+        default=None, description="USD for each request, for a rate in requests; null for any other unit."
+    )
     origin: str | None = Field(
         description="Which writer set this row: config, api, or migration. Null when recorded before origins were.",
     )
@@ -177,6 +202,9 @@ class PricingResponse(BaseModel):
             cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in pricing.pricing_tiers or []],
             unit=pricing.unit or "tokens",
+            price_per_request=(
+                float(Decimal(str(pricing.input_price_per_million)) / 1_000_000) if pricing.unit == "requests" else None
+            ),
             origin=pricing.origin,
             created_at=pricing.created_at.isoformat(),
             updated_at=pricing.updated_at.isoformat(),
@@ -202,7 +230,10 @@ class PricingRefreshPreviewResponse(BaseModel):
     changes_truncated: bool
     digest: str = Field(
         default="",
-        description="Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.",
+        description=(
+            "Identity of the pending snapshot, to act on exactly this one: send it as `digest` to "
+            "`POST /hosted-providers/catalog-update` to apply it, or to `POST /pricing/refresh/reject` to discard it."
+        ),
     )
     needs_review: bool = Field(
         default=False,
@@ -211,18 +242,14 @@ class PricingRefreshPreviewResponse(BaseModel):
     review_reason: str | None = Field(default=None, description="Why the update needs review.")
 
 
-class PricingRefreshConfirmationResponse(BaseModel):
-    """Result of activating a reviewed models.dev refresh."""
-
-    applied: bool = True
-
-
 class AcceptedSnapshotResponse(BaseModel):
     """One accepted models.dev snapshot in the history."""
 
     id: str
     accepted_at: datetime
-    accepted_by: str = Field(description="`operator` for a dashboard confirm, `schedule` for the auto policy.")
+    accepted_by: str = Field(
+        description="`operator` for a catalog update an operator ran, `schedule` for the auto policy."
+    )
     model_count: int
 
 
@@ -315,24 +342,6 @@ def _candidates(model_key: str, kind: PricingKind, withheld: frozenset[str] = fr
     return candidates
 
 
-@operator_router.post("/refresh", response_model=PricingRefreshPreviewResponse)
-async def preview_pricing_refresh(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> PricingRefreshPreviewResponse:
-    """Fetch the latest defaults and hold them for operator review."""
-
-    try:
-        preview = await prepare_price_refresh(db, config)
-    except PricingRefreshError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to fetch the latest models.dev data",
-        ) from None
-
-    return _preview_response(preview, await priced_model_count(db))
-
-
 @operator_router.get("/refresh/pending", response_model=PricingRefreshPreviewResponse)
 async def get_pending_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -409,30 +418,6 @@ async def list_pricing_drift(
             )
         )
     return rows
-
-
-@operator_router.post("/refresh/confirm", response_model=PricingRefreshConfirmationResponse)
-async def confirm_pricing_refresh(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    digest: Annotated[
-        str | None,
-        Query(description="The `digest` of the previewed snapshot; 409 when the pending one differs."),
-    ] = None,
-) -> PricingRefreshConfirmationResponse:
-    """Activate the latest reviewed default-price snapshot."""
-
-    try:
-        applied = await confirm_price_refresh(db, digest=digest)
-    except PendingSnapshotChanged:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_PENDING_CHANGED_DETAIL) from None
-    except PricingRefreshError:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to save the latest models.dev data",
-        ) from None
-    if not applied:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending models.dev refresh to apply")
-    return PricingRefreshConfirmationResponse()
 
 
 @operator_router.post("/refresh/reject", status_code=status.HTTP_204_NO_CONTENT)
@@ -665,10 +650,7 @@ async def get_pricing_history(
     candidates = _candidates(model_key, kind, withheld)
     pricings = await price_history(db, candidates, kind)
     if not pricings:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Pricing for model '{model_key}' not found",
-        )
+        raise _pricing_not_found(model_key)
 
     return [PricingResponse.from_model(pricing) for pricing in pricings]
 
@@ -698,10 +680,7 @@ async def get_pricing(
     pricing = await price_in_effect(db, candidates, normalize_effective_at(as_of), kind)
 
     if not pricing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Pricing for model '{model_key}' not found",
-        )
+        raise _pricing_not_found(model_key)
 
     return PricingResponse.from_model(pricing)
 
@@ -737,10 +716,7 @@ async def delete_pricing(
     else:
         targets = await price_history(db, candidates, kind)
         if not targets:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Pricing for model '{model_key}' not found",
-            )
+            raise _pricing_not_found(model_key)
 
     for pricing in targets:
         await db.delete(pricing)

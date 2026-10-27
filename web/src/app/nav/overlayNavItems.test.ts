@@ -67,7 +67,7 @@ describe("a build that replaces the nav-item module", () => {
       "Settings",
       "Accounts",
       "Hosted providers",
-      "Web search pricing",
+      "Web search",
       "Code execution pricing",
       "Health",
       "Credit grants",

@@ -1,5 +1,5 @@
 import { Button, buttonVariants } from "@heroui/react"
-import { Link } from "@tanstack/react-router"
+import { Link, useLocation } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
@@ -367,6 +367,22 @@ function offeringColumns({
   return columns
 }
 
+/** Back to the Models list, with its search and filters when it opened this page. */
+function CatalogBackLink() {
+  const search = useLocation({
+    select: (location) => location.state.catalogSearch,
+  })
+  return (
+    <Link
+      to="/models"
+      search={search ?? {}}
+      className="text-link hover:text-link-hover"
+    >
+      ← Models
+    </Link>
+  )
+}
+
 export function ModelDetailView({
   modelId,
   publicView = false,
@@ -460,12 +476,10 @@ export function ModelDetailView({
             href={publicCatalogHref()}
             className="text-link hover:text-link-hover"
           >
-            ← All models
+            ← Models
           </a>
         ) : (
-          <Link to="/models" className="text-link hover:text-link-hover">
-            ← All models
-          </Link>
+          <CatalogBackLink />
         )}
       </nav>
 

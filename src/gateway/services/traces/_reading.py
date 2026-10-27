@@ -14,16 +14,22 @@ of the answer as soon as it is stored and no stored state can disagree with it:
   A failed attempt a fallback recovered does not fail anything;
 - a gate an agent's hook reported hangs under the tool call it checked, by call
   id, or else under the step it ran in (a Stop gate checks no tool call).
-  It arrives on its own export, so this is the only place the two meet.
+  It arrives on its own export, so this is the only place the two meet;
+- what a model request or a judge gate's model calls cost, where the usage
+  ledger priced it afterwards, is folded onto it by its id, and the span that
+  carried it is not read.
 """
 
 from bisect import bisect_right
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from gateway.log_config import logger
+from gateway.services.traces._tool_costs import tool_costs
 from gateway.types.trace_views import GateSummary, TraceView, TurnState, TurnView
-from gateway.types.traces import GuardrailDefinition, SpanRecord, TraceDetail
+from gateway.types.traces import GATE_USAGE_SEPARATOR, USAGE_OPERATION, GuardrailDefinition, SpanRecord, TraceDetail
 
 # How long a session may be quiet and still count as in progress.
 IDLE_TIMEOUT = timedelta(minutes=10)
@@ -61,6 +67,38 @@ def _fill_client_tool_starts(spans: list[SpanRecord], steps: list[SpanRecord]) -
                 approximate.add(span.span_id)
         filled.append(span)
     return filled, approximate
+
+
+# A model request, or a judge gate, whose model calls the usage ledger prices.
+_PRICED_KINDS = frozenset({"llm", "guardrail"})
+
+
+def _price_requests(spans: list[SpanRecord]) -> list[SpanRecord]:
+    """Each model request and judge gate with what the usage ledger says it cost.
+
+    No span is left that only carried a cost.
+    """
+    priced: dict[str, SpanRecord] = {}
+    further: dict[str, Decimal] = {}
+    for span in spans:
+        if span.operation != USAGE_OPERATION or not span.request_id or span.cost_snapshot is None:
+            continue
+        gate, separator, _ = span.request_id.partition(GATE_USAGE_SEPARATOR)
+        if separator:
+            further[gate] = further.get(gate, Decimal(0)) + span.cost_snapshot
+        priced[span.request_id] = span
+    read: list[SpanRecord] = []
+    for span in spans:
+        if span.operation == USAGE_OPERATION:
+            continue
+        usage = priced.get(span.request_id or "") if span.kind in _PRICED_KINDS and span.cost_snapshot is None else None
+        if usage is not None and usage.cost_snapshot is not None:
+            cost = usage.cost_snapshot + (
+                further.get(span.request_id or "", Decimal(0)) if span.kind == "guardrail" else Decimal(0)
+            )
+            span = replace(span, cost_snapshot=cost, attributes={**span.attributes, **usage.attributes})
+        read.append(span)
+    return read
 
 
 def _settle_tools(spans: list[SpanRecord]) -> list[SpanRecord]:
@@ -173,6 +211,8 @@ def _gate_summaries(
             gate_type=declared[gate_id].gate_type if gate_id in declared else None,
             enforcement=declared[gate_id].enforcement if gate_id in declared else None,
             message=(declared[gate_id].message or None) if gate_id in declared else None,
+            runs=declared[gate_id].runs if gate_id in declared else (),
+            origin=declared[gate_id].origin if gate_id in declared else None,
             **counts.get(gate_id, dict.fromkeys(_VERDICTS, 0)),
         )
         for gate_id in {**counts, **declared}
@@ -235,18 +275,50 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
     return tuple(views)
 
 
-def trace_view(detail: TraceDetail, *, now: datetime) -> TraceView:
+ContextWindowOf = Callable[[str | None, str], int | None]
+
+
+def _context_windows(spans: Sequence[SpanRecord], window_of: ContextWindowOf) -> dict[str, int]:
+    """The context window of each model request's model, looked up once per distinct model.
+
+    A lookup that fails reads as an unknown window: this is metadata for the reader,
+    never a reason the session cannot be read.
+    """
+    known: dict[tuple[str | None, str], int | None] = {}
+    windows: dict[str, int] = {}
+    for span in spans:
+        if span.kind != "llm" or span.model is None:
+            continue
+        key = (span.provider, span.model)
+        if key not in known:
+            try:
+                known[key] = window_of(*key)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Context window not resolved (%s)", type(exc).__name__)
+                known[key] = None
+        window = known[key]
+        if window is not None:
+            windows[span.span_id] = window
+    return windows
+
+
+def trace_view(detail: TraceDetail, *, now: datetime, context_window_of: ContextWindowOf | None = None) -> TraceView:
     """One stored trace as a person reads it: its spans in order, grouped into turns."""
     steps = sorted((span for span in detail.spans if span.kind == "step"), key=_moment)
-    spans, approximate = _fill_client_tool_starts(_settle_tools(_attach_gates(list(detail.spans), steps)), steps)
+    priced = _price_requests(list(detail.spans))
+    spans, approximate = _fill_client_tool_starts(_settle_tools(_attach_gates(priced, steps)), steps)
     spans.sort(key=_moment)
     last_activity = detail.summary.last_activity_at
+    turns = _turns(spans, now=now, last_activity=last_activity)
+    costs = tool_costs(spans)
     return TraceView(
         summary=detail.summary,
         state="active" if now - last_activity < IDLE_TIMEOUT else "idle",
-        turns=_turns(spans, now=now, last_activity=last_activity),
+        turns=turns,
         spans=tuple(spans),
         approximate=frozenset(approximate),
         truncated=detail.truncated,
         gates=_gate_summaries(spans, detail.definitions),
+        tool_costs=costs,
+        context_windows=_context_windows(spans, context_window_of) if context_window_of is not None else {},
     )

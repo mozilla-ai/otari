@@ -1930,24 +1930,22 @@ main {
    17px at md where a primary puts it at 12 and 16. The padding gives the pixel
    back. Both sizes, because the rule is about the border rather than about
    which sizes happen to be in use today. Icon-only is excluded: it has no
-   label to inset and HeroUI zeroes its padding to keep it square. */
-.button--ghost.button--sm:not(.button--icon-only),
+   label to inset and HeroUI drops its padding to keep it square.
+
+   The rail is excluded too: its band controls set their own lane (`px-6`),
+   which this unlayered rule would outrank. `:where` keeps the specificity
+   unchanged. Do not hand the lane back with `revert-layer` instead: Safari 26
+   resolves a reverted `var()` logical shorthand to no padding (WebKit bug
+   310435). */
+.button--ghost.button--sm:not(.button--icon-only):where(:not(.otari-rail *)),
 .button--danger.button--sm:not(.button--icon-only) {
   padding-inline: 0.6875rem;
 }
-.button--ghost:not(.button--sm):not(.button--icon-only),
+.button--ghost:not(.button--sm):not(.button--icon-only):where(
+  :not(.otari-rail *)
+),
 .button--danger:not(.button--sm):not(.button--icon-only) {
   padding-inline: 0.9375rem;
-}
-
-/* The rail is the exception, and it has to be one: its two band controls set
-   their own lane so their mark and their label line up with the nav rows'
-   icon lane, which is a call-site decision this rule would otherwise outrank
-   (an unlayered rule beats `@layer utilities`, so `px-6` cannot win on its
-   own). `revert-layer` hands the value back to the utility rather than
-   restating the number here, so the lane stays declared in exactly one place. */
-.otari-rail .button--ghost:not(.button--icon-only) {
-  padding-inline: revert-layer;
 }
 
 /* =============================================================
@@ -2671,6 +2669,52 @@ main {
 /* The timeline bar of the span open in the panel. */
 .otari-trace-mark--selected {
   outline: 1px solid var(--color-text);
+}
+/* A tree row a live session adds while the panel is open: its contents, connectors
+   included, fade and rise into place while a wash fades from the row, so the eye
+   finds what just happened. The wash is a layer under the row's contents whose
+   opacity fades, so it stays on the compositor, and it outlasts the entrance
+   because it is what the eye follows. It starts lighter than the selected row's
+   fill so an arrival never reads as a selection. `backwards` holds both at their
+   start through the stagger delay. */
+.otari-trace-arrive {
+  position: relative;
+  isolation: isolate;
+}
+.otari-trace-arrive::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: color-mix(
+    in oklab,
+    var(--color-primary-subtle) 60%,
+    transparent
+  );
+  opacity: 0;
+  animation: otari-trace-wash 600ms ease-out var(--arrive-delay, 0ms) backwards;
+}
+.otari-trace-arrive > * {
+  animation: otari-trace-rise 250ms var(--ease-out-fluid)
+    var(--arrive-delay, 0ms) backwards;
+}
+@keyframes otari-trace-wash {
+  from {
+    opacity: 1;
+  }
+}
+@keyframes otari-trace-rise {
+  from {
+    opacity: 0;
+    translate: 0 0.25rem;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .otari-trace-arrive::before,
+  .otari-trace-arrive > * {
+    animation: none;
+  }
 }
 .otari-mcp-table .table__row .table__cell {
   height: 3.25rem;

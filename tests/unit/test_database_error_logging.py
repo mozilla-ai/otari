@@ -1,7 +1,9 @@
 """A failed database write is logged by what failed, never by the values it carried."""
 
 import asyncio
+import contextlib
 import logging
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,7 @@ import gateway
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import describe_database_error, engine_kwargs
+from gateway.services.inference import _country_database
 
 _SECRET = "sk-live-do-not-log"
 
@@ -84,3 +87,35 @@ def test_only_the_helper_answers_database_error() -> None:
         if 'detail="Database error"' in line
     ]
     assert built == ["api/routes/_helpers.py"]
+
+
+def test_the_stored_country_file_logs_a_database_error_without_its_values(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """At startup and on each refresh, a failed read of the stored file is logged by what failed."""
+    exc = _duplicate_key_error()
+    calls = 0
+
+    @contextlib.asynccontextmanager
+    async def no_unit_of_work() -> AsyncIterator[None]:
+        yield None
+
+    async def refresh(_: object) -> bool:
+        nonlocal calls
+        calls += 1
+        if calls > 2:
+            raise asyncio.CancelledError
+        raise exc
+
+    monkeypatch.setattr(_country_database, "create_unit_of_work", no_unit_of_work)
+    monkeypatch.setattr(_country_database, "refresh_stored_country_database", refresh)
+    caplog.set_level(logging.WARNING, logger="gateway")
+
+    asyncio.run(_country_database.load_stored_country_database_at_startup(GatewayConfig()))
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(_country_database.run_stored_country_database_refresher(interval=0))
+
+    records = [r for r in caplog.records if r.name == "gateway"]
+    assert [r.levelno for r in records] == [logging.ERROR, logging.WARNING]
+    assert all("IntegrityError" in r.getMessage() and r.exc_info is None for r in records)
+    assert _SECRET not in caplog.text

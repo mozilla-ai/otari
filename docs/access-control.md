@@ -89,7 +89,7 @@ Organization and workspace memberships use four roles:
 | Owner | Full management, including organization administration |
 | Admin | Manage most organization or workspace resources |
 | Member | Use the workspace and read permitted resources |
-| Viewer | Read-only access |
+| Viewer | Read-only: sees the API keys billed to them but cannot create, change, rotate or delete one, and cannot run Playground completions or uploads |
 
 The API key that authenticates a request determines its workspace. A caller
 cannot select another workspace with a header. Master-key inference uses the
@@ -177,13 +177,32 @@ usage import or other intentional observability-only traffic.
 A backend on Google Cloud, or behind another OpenID Connect issuer, can
 authenticate as a key with its platform identity token instead of the key's
 secret, once the operator trusts the issuer and gives the key a federation
-rule; see [Workload identity](workload-identity.md).
+rule. With `federation_member_rules` on, an organization owner or admin can give
+their own key one instead; see [Workload identity](workload-identity.md).
 
 `/api/v1/keys` manages every key in the caller's organization and requires the
 deployment operator's standing. A signed-in member without it manages their own
 keys at `/api/v1/organizations/me/keys`, which derives the owner rather than
 accepting one, mints only into a workspace the caller may see, and never issues
-a budget-exempt key.
+a budget-exempt key. A viewer may list their keys there and is refused (`403`)
+every write: creating, editing, rotating or deleting a key takes organization
+owner or admin, or a caller who is a viewer neither of the organization nor of
+the key's workspace. To give a viewer a key, an
+operator issues it on `/api/v1/keys` and owns its changes.
+
+A key records whether its owner minted it on the member surface or an operator
+issued it. Membership changes act on that:
+
+- Removing someone from a workspace, or from the organization, switches off every
+  key billed to them there. So does an operator switching a key off on
+  `/api/v1/keys`. Its owner may then delete it or keep it off, but only an
+  operator can switch it back on.
+- Making someone a viewer, of a workspace or of the organization, switches off
+  the keys they minted for themselves there, and leaves the keys an operator
+  issued them alone. Promoted again, they may switch their own keys back on.
+- A key minted before this was recorded has no origin on file and is left alone
+  by a demotion. An operator who demotes someone to viewer should check the keys
+  billed to them.
 
 ### Mismatched `user` fields
 
@@ -575,7 +594,9 @@ is a separate endpoint rather than a relaxation of that rule.
 `POST /api/v1/playground/chat/completions` resolves the caller's own attribution
 user and proves their membership of the workspace it will bill before the
 request reaches the pipeline, so the request is billed to the person who sent it
-in a workspace that is theirs. No credential is minted for the browser and none
+in a workspace that is theirs. A viewer of the organization or of that workspace
+is refused (`403`), because a completion spends as a key would; the same holds
+for a Playground file upload. No credential is minted for the browser and none
 is held there. The usage row it writes carries no `api_key_id` and its own
 endpoint label, which is what keeps in-product traffic separable from a
 customer's integration.

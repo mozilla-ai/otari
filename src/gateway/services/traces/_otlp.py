@@ -18,6 +18,11 @@ stopped is an error: only a gate that could not decide is. A judge whose calls
 ran on a second model reports that model's tokens on a child usage span, which
 the usage ledger prices and a trace leaves out.
 
+What a Claude Code model request cost is not on its span: the usage ledger
+prices it from the ``api_request`` event on the logs signal. That ingest hands
+each priced request back as a usage span, keyed by the request's id so a retried
+export counts once, and a read folds its cost onto the request it priced.
+
 Nothing is passed through verbatim. Each name and value is projected the way the
 gateway's own spans are, so text an agent put in a span name or attribute never
 reaches the store, and the original OTLP body is never kept. Numbers and times
@@ -29,16 +34,23 @@ import hashlib
 import itertools
 import uuid
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 from gateway.log_config import logger
+from gateway.services.secret_box import secret_box_configured
 from gateway.services.traces._collector import call_id_digest, identifier_or_none
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._writer import SPANS_DROPPED, TraceWriter
 from gateway.types.traces import (
+    GATE_USAGE_SEPARATOR,
+    ID_PATTERN,
     LIST_SEPARATOR,
+    RATE_METERS,
+    SPAN_CONTENT_MAX_LENGTH,
+    USAGE_OPERATION,
     SpanRecord,
     TraceWrite,
     is_gate_id,
@@ -61,6 +73,10 @@ _CLAUDE_CODE_EXECUTION = "tool.execution"
 
 HOOK_SCOPE = "otari.hook"
 _HOOK_USAGE_SPAN = "otari.gate.usage"
+# The usage sources a session's cost is imported from: Claude Code's model requests and a judge gate's.
+CLAUDE_CODE_USAGE_SOURCE = "claude_code"
+HOOK_USAGE_SOURCE = "otari-hook"
+_SESSION_USAGE_SOURCES = frozenset({CLAUDE_CODE_USAGE_SOURCE, HOOK_USAGE_SOURCE})
 # A gate that could not decide, which reads like a guardrail that could not run.
 _UNDECIDED_GATE = frozenset({"unknown", "error", "not_run"})
 _GATE_ATTRIBUTES = (
@@ -139,6 +155,16 @@ class _Window:
         if moment.tzinfo is None:
             moment = moment.replace(tzinfo=UTC)
         return min(max(moment, self.floor), self.ceiling)
+
+
+def _request_id(attributes: Mapping[str, Any]) -> str | None:
+    """A model request's provider id, which the usage ledger prices it by.
+
+    It is an id, so it is held to the id pattern rather than a name's: a name
+    refuses anything shaped like a credential, which a request id often is.
+    """
+    value = _str(attributes, "request_id")
+    return value if value is not None and ID_PATTERN.fullmatch(value) else None
 
 
 def _str(attributes: Mapping[str, Any], *keys: str) -> str | None:
@@ -248,10 +274,42 @@ def _first_int(attributes: Mapping[str, Any], *keys: str) -> int | None:
     return next((count for key in keys if (count := _int(attributes, key)) is not None), None)
 
 
-def _record(span: OtlpSpan, window: _Window, workspace_id: uuid.UUID, tool: _ToolFacts | None = None) -> SpanRecord:
+# Where content lives on the spans that carry it, by the key it is kept under.
+# Claude Code sends its keys only with OTEL_LOG_TOOL_DETAILS / OTEL_LOG_USER_PROMPTS,
+# and otari hook its own only with OTARI_HOOK_REPORT_CONTENT.
+_CLAUDE_CODE_CONTENT = {"prompt": "user_prompt", "command": "full_command", "file_path": "file_path"}
+_HOOK_CONTENT = {"gate.evidence": "otari.gate.evidence", "gate.detail": "otari.gate.detail"}
+_REDACTED = "<REDACTED>"
+
+
+def _content(span: OtlpSpan) -> dict[str, str]:
+    """What the span says it was about, cut to what the store keeps."""
+    if span.scope == HOOK_SCOPE:
+        sources = _HOOK_CONTENT
+    elif span.claude_code_type is not None:
+        sources = _CLAUDE_CODE_CONTENT
+    else:
+        return {}
+    content: dict[str, str] = {}
+    for key, source in sources.items():
+        value = span.attributes.get(source)
+        if isinstance(value, str) and value.strip() and value != _REDACTED:
+            content[key] = value[:SPAN_CONTENT_MAX_LENGTH]
+    return content
+
+
+def _record(
+    span: OtlpSpan,
+    window: _Window,
+    workspace_id: uuid.UUID,
+    tool: _ToolFacts | None = None,
+    *,
+    keep_content: bool = False,
+) -> SpanRecord:
     record = _projected(span, window, tool)
     call_id = call_id_digest(workspace_id, _str(span.attributes, "gen_ai.tool.call.id", "tool_use_id"))
-    return replace(record, tool_call_id=call_id) if call_id else record
+    content = _content(span) if keep_content else {}
+    return replace(record, tool_call_id=call_id or record.tool_call_id, content=content or record.content)
 
 
 def _projected(span: OtlpSpan, window: _Window, tool: _ToolFacts | None) -> SpanRecord:
@@ -344,6 +402,16 @@ def _claude_code_prompt(attributes: Mapping[str, Any]) -> tuple[int | None, int 
     return min(fresh + (cache_read or 0) + (cache_write or 0), _INT32_MAX), cache_read, cache_write
 
 
+def _llm_attributes(attributes: Mapping[str, Any]) -> dict[str, str | int]:
+    """What a Claude Code model request says about itself beyond its tokens: why it stopped and how fast."""
+    kept: dict[str, str | int] = {}
+    if reason := identifier_or_none(_str(attributes, "stop_reason")):
+        kept["gen_ai.response.finish_reasons"] = reason
+    if (ttft := _int(attributes, "ttft_ms")) is not None:
+        kept["otari.llm.ttft_ms"] = ttft
+    return kept
+
+
 def _claude_code_record(span: OtlpSpan, span_type: str, window: _Window, tool: _ToolFacts) -> SpanRecord:
     """Project one of Claude Code's own spans.
 
@@ -374,7 +442,10 @@ def _claude_code_record(span: OtlpSpan, span_type: str, window: _Window, tool: _
             source=identifier_or_none(_str(attributes, "source")),
         )
     )
-    extra: dict[str, str | bool] = {}
+    llm = kind == "llm"
+    extra: dict[str, str | int | bool] = {}
+    if llm:
+        extra.update(_llm_attributes(attributes))
     if span_type == _CLAUDE_CODE_EXECUTION:
         extra["otari.tool.succeeded"] = not span_failed
     elif returned_error:
@@ -384,7 +455,6 @@ def _claude_code_record(span: OtlpSpan, span_type: str, window: _Window, tool: _
         if decided.source:
             extra["otari.tool.decision_source"] = decided.source
     start, end, duration = _times(span, window)
-    llm = kind == "llm"
     prompt, cache_read, cache_write = _claude_code_prompt(attributes) if llm else (None, None, None)
     return SpanRecord(
         span_id=_span_id(span.trace_id, span.span_id),
@@ -401,6 +471,7 @@ def _claude_code_record(span: OtlpSpan, span_type: str, window: _Window, tool: _
         duration_ms=duration,
         model=identifier_or_none(_str(attributes, "gen_ai.request.model", "model")) if llm else None,
         provider=identifier_or_none(_str(attributes, "gen_ai.system")) if llm else None,
+        request_id=_request_id(attributes) if llm else None,
         input_tokens=prompt,
         output_tokens=_int(attributes, "output_tokens") if llm else None,
         cache_read_tokens=cache_read,
@@ -466,6 +537,8 @@ def _gate_record(span: OtlpSpan, window: _Window) -> SpanRecord:
         duration_ms=duration,
         model=model,
         provider=identifier_or_none(_str(attributes, "gen_ai.provider.name")) if model else None,
+        # The id its model calls were priced under, so a read can fold their cost onto it.
+        request_id=span.span_id if model and ID_PATTERN.fullmatch(span.span_id) else None,
         input_tokens=prompt,
         output_tokens=_int(attributes, "gen_ai.usage.output_tokens") if model else None,
         cache_read_tokens=cache_read,
@@ -494,6 +567,7 @@ def _project(
     api_key_id: str | None,
     window: _Window,
     max_traces: int,
+    keep_content: bool,
 ) -> OtlpProjection:
     by_session: dict[SessionRef, list[SpanRecord]] = {}
     harness: dict[SessionRef, str | None] = {}
@@ -510,7 +584,9 @@ def _project(
             if session not in by_session and len(by_session) >= max_traces:
                 over_cap += 1
                 continue
-            record = _record(span, window, workspace_id, tools.get((span.trace_id, span.span_id)))
+            record = _record(
+                span, window, workspace_id, tools.get((span.trace_id, span.span_id)), keep_content=keep_content
+            )
         except Exception as exc:  # noqa: BLE001 - one bad span is dropped, never the export
             # The class only: an exception's message may quote what the exporter sent.
             logger.debug("OTLP span not recorded: %s", type(exc).__name__)
@@ -546,6 +622,7 @@ def project_otlp_spans(
     retention: timedelta,
     now: datetime | None = None,
     max_traces: int = MAX_TRACES_PER_EXPORT,
+    keep_content: bool = False,
 ) -> OtlpProjection:
     """Group received spans by session and project each one, attributed to the exporting key.
 
@@ -563,6 +640,7 @@ def project_otlp_spans(
             api_key_id=api_key_id,
             window=window,
             max_traces=max_traces,
+            keep_content=keep_content,
         )
     except Exception as exc:  # noqa: BLE001 - recording spans never fails the export
         logger.warning("OTLP spans not recorded: %s", type(exc).__name__)
@@ -580,6 +658,7 @@ def record_otlp_export(
     user_id: str | None,
     api_key_id: str | None,
     retention: timedelta,
+    content_enabled: bool = False,
 ) -> None:
     """Hand one export's spans to the trace writer, attributed to the exporting key.
 
@@ -588,14 +667,20 @@ def record_otlp_export(
 
     Only a key that may import is traced (``budget_exempt``), the rule the usage
     import holds it to, whatever the export carries: an export of agent spans
-    alone never reaches that import's own check.
+    alone never reaches that import's own check. What a span was about is kept
+    only where the deployment enabled it and can store it encrypted.
     """
     if not budget_exempt:
         return
     try:
         kept = list(itertools.islice(spans, MAX_SPANS_PER_EXPORT))
         projection = project_otlp_spans(
-            kept, workspace_id=workspace_id, user_id=user_id, api_key_id=api_key_id, retention=retention
+            kept,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+            retention=retention,
+            keep_content=content_enabled and secret_box_configured(),
         )
         truncated = max(0, total - len(kept))
         for index, write in enumerate(projection.writes):
@@ -607,3 +692,89 @@ def record_otlp_export(
         return
     if projection.dropped:
         logger.info("OTLP spans: %d of %d not recorded", projection.dropped, total)
+
+
+@dataclass(frozen=True)
+class PricedRequest:
+    """A model request the usage ledger priced: its id, the session it names and what it cost."""
+
+    request_id: str
+    session_key: str
+    at: datetime
+    cost: Decimal
+    source: str
+    # USD per million tokens on each of :data:`RATE_METERS`, where the request was priced by the token.
+    rates: Mapping[str, Decimal] = field(default_factory=dict)
+
+
+def gate_usage_event_id(scope: str, name: str, span_id: str, parent_span_id: str) -> str | None:
+    """The ledger id a judge's further-model usage span is priced under, or None for any other span."""
+    if scope != HOOK_SCOPE or name != _HOOK_USAGE_SPAN or not parent_span_id:
+        return None
+    return f"{parent_span_id}{GATE_USAGE_SEPARATOR}{span_id}"
+
+
+def _usage_span(request: PricedRequest, window: _Window) -> SpanRecord:
+    at = window.clamp(request.at)
+    return SpanRecord(
+        span_id="usage-" + hashlib.sha256(request.request_id.encode()).hexdigest()[:40],
+        kind="llm",
+        origin="otlp",
+        name="claude_code.usage",
+        operation=USAGE_OPERATION,
+        outcome="ok",
+        start_time=at,
+        end_time=at,
+        request_id=request.request_id,
+        cost_snapshot=request.cost,
+        attributes={
+            f"otari.llm.rate.{meter}": format(request.rates[meter].normalize(), "f")
+            for meter in RATE_METERS
+            if meter in request.rates
+        },
+    )
+
+
+def record_priced_requests(
+    writer: TraceWriter,
+    requests: Iterable[PricedRequest],
+    *,
+    budget_exempt: bool,
+    workspace_id: uuid.UUID,
+    user_id: str | None,
+    api_key_id: str | None,
+    retention: timedelta,
+) -> None:
+    """Hand what each priced model request, Claude Code's or a judge gate's, cost to its session. Never raises.
+
+    Only for a key that may import (``budget_exempt``), as :func:`record_otlp_export` holds its spans to,
+    and only usage from a source whose sessions the trace store has.
+    """
+    if not budget_exempt:
+        return
+    now = datetime.now(UTC)
+    window = _Window(floor=now - retention, ceiling=now + _FUTURE_SKEW)
+    try:
+        by_session: dict[SessionRef, list[SpanRecord]] = {}
+        for request in itertools.islice(requests, MAX_SPANS_PER_EXPORT):
+            # A ledger id a span cannot carry could never fold onto one, and would fail the whole export.
+            if request.source not in _SESSION_USAGE_SOURCES or not ID_PATTERN.fullmatch(request.request_id):
+                continue
+            session = SessionRef(source="otlp", key=request.session_key)
+            if session not in by_session and len(by_session) >= MAX_TRACES_PER_EXPORT:
+                continue
+            by_session.setdefault(session, []).append(_usage_span(request, window))
+        for session, records in by_session.items():
+            writer.submit(
+                TraceWrite(
+                    workspace_id=workspace_id,
+                    trace_id=session.trace_id(workspace_id, user_id, api_key_id),
+                    user_id=user_id,
+                    api_key_id=api_key_id,
+                    session_source="otlp",
+                    harness=_CLAUDE_CODE_HARNESS,
+                    spans=tuple(records),
+                )
+            )
+    except Exception as exc:  # noqa: BLE001 - a session's cost never fails the export that priced it
+        logger.warning("OTLP request costs not recorded: %s", type(exc).__name__)

@@ -16,7 +16,8 @@ too, one of the deployment's **hosted providers** does.
 A hosted provider is a credential the deployment's operator configures for the
 deployment to serve requests on, under a name that defaults to its provider
 (a name of its own, such as `openai-eu`, lets two endpoints of one provider
-be served side by side), with a roster of the models offered on it and the rate
+be served side by side; `otari` and `hosted` are reserved, so an `otari`
+provider always takes a name of its own), with a roster of the models offered on it and the rate
 each is charged at on the deployment price list. A hosted provider named after its
 provider is reached by a bare `provider:model` request once neither a
 `providers:` instance nor the organization's own key answers. One with a name
@@ -70,16 +71,19 @@ with `402` (`insufficient_funds`) when it has no funds paid in. When the
 request settles, its cost, including the cost an abandoned or failed request
 still owes, is charged to the organization. No funds are held while the
 request runs, so concurrent requests can take an organization below zero. A
-request on any other credential never reaches either port. The core's billing
+request on any other credential never reaches either port, unless it may run a
+gateway tool on the deployment's account: that tool's calls are gated and
+charged the same way, and the model call is not
+([Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool)). The core's billing
 adapter does nothing, so with no overlay a hosted-provider request is served
 and recorded as deployment-paid on its usage row, and no organization is
 charged.
 
 This covers every path that calls a provider: Chat Completions, Messages,
-Responses and the Playground, each candidate of a routing policy with fallbacks,
-the pass-through endpoints (embeddings, images, audio, rerank, moderations) and
-batches. A routing policy asks for each candidate as it reaches it, so the one
-that serves is the one that settles, and one the organization cannot fund is
-skipped. A batch is admitted when it is created and charged when its results
-are accounted.
+Responses and the Playground, each candidate of a routing policy or a catalog id
+with fallbacks, the pass-through endpoints (embeddings, images, audio, rerank,
+moderations) and batches. A routing policy or a catalog id asks for each
+candidate as it reaches it, so the one that serves is the one that settles, and
+one the organization cannot fund is skipped. A batch is admitted when it is
+created and charged when its results are accounted.
 

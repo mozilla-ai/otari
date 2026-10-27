@@ -12,9 +12,11 @@ are written to an outbox under ``~/.otari/`` and a detached process sends them.
 The outbox holds span bodies and the endpoint only: the headers, which carry the
 credential, are read from the environment at send time and never written down.
 
-A span carries ids and outcomes, never a gate's message or the evidence it read.
-It spans the time its gate took, and a judge gate's span carries the tokens its
-model calls used, so the server can price them.
+A span carries ids and outcomes. The evidence a check read (the command, or the
+paths) and each gate's own detail go only with ``OTARI_HOOK_REPORT_CONTENT=1``,
+for a server whose operator keeps content. A span covers the time its gate took,
+and a judge gate's span carries the tokens its model calls used, so the server
+can price them.
 What each gate is and says goes once per version of the guardrail, as its
 definition, to the server ``OTARI_URL`` names; a check names that version by
 its fingerprint.
@@ -48,6 +50,8 @@ _SEND_TIMEOUT_S = 5.0
 # A lock file older than this is a dead sender's; and how often a sender looks again after releasing it.
 _STALE_LOCK_S = 120
 _SENDER_ROUNDS = 3
+# Content a span carries is cut here; the server keeps no more anyway.
+_MAX_CONTENT = 4_000
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,7 @@ class GateReport:
     ended_ns: int | None = None
     # One per model a judge's calls ran on, the most used first: its gate span carries that one.
     usage: tuple[ModelUsage, ...] = ()
+    detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +94,11 @@ class CheckReport:
     gates: tuple[GateReport, ...]
     tool_call_id: str | None = None
     tool_name: str | None = None
+    evidence: str | None = None
+
+
+def reports_content(env: Mapping[str, str]) -> bool:
+    return env.get("OTARI_HOOK_REPORT_CONTENT", "").strip().lower() in ("1", "true", "on")
 
 
 def endpoint(env: Mapping[str, str]) -> str | None:
@@ -172,8 +182,10 @@ def otlp_body(report: CheckReport, *, ended_ns: int) -> dict[str, Any]:
         shared.append(_attribute("gen_ai.tool.call.id", report.tool_call_id))
     if report.tool_name:
         shared.append(_attribute("gen_ai.tool.name", report.tool_name))
+    # One check read one body of evidence, so it travels once, on the first gate.
+    evidence = [_attribute("otari.gate.evidence", report.evidence[:_MAX_CONTENT])] if report.evidence else []
     spans: list[dict[str, Any]] = []
-    for gate in report.gates:
+    for index, gate in enumerate(report.gates):
         span_id = secrets.token_hex(8)
         window = {
             "kind": 1,
@@ -195,7 +207,9 @@ def otlp_body(report: CheckReport, *, ended_ns: int) -> dict[str, Any]:
                     _attribute("otari.gate.enforcement", gate.enforcement),
                     _attribute("otari.gate.outcome", gate.outcome),
                     _attribute("otari.gate.blocked", gate.blocked),
+                    *(evidence if index == 0 else []),
                     *_usage_attributes(main),
+                    *([_attribute("otari.gate.detail", gate.detail[:_MAX_CONTENT])] if gate.detail else []),
                 ],
             }
         )

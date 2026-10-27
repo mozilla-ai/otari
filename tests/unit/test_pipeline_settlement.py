@@ -291,6 +291,11 @@ class _Settlement:
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         async def fake_record_usage(**kwargs: Any) -> LoggedUsage:
             self.logged.append(kwargs)
+            logged = settled(kwargs)
+            # No tool ran, so a deployment-paid row is charged its whole cost, as record_usage reports it.
+            return logged._replace(deployment_paid_cost=logged.cost if kwargs.get("deployment_paid") else None)
+
+        def settled(kwargs: dict[str, Any]) -> LoggedUsage:
             usage = kwargs.get("usage_override")
             if kwargs.get("cost_override") is not None:
                 return LoggedUsage(Decimal(kwargs["cost_override"]), None)

@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import event, update
+from sqlalchemy import event, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -23,15 +23,23 @@ from sqlmodel import col
 from gateway.core.config import GatewayConfig
 from gateway.core.database import dispose_db, init_db
 from gateway.core.unit_of_work import create_unit_of_work
-from gateway.exceptions.traces_exceptions import TraceAmbiguousError
-from gateway.models.traces import TraceSpan
+from gateway.exceptions.traces_exceptions import GuardrailVersionLimitError, TraceAmbiguousError
+from gateway.models.traces import TraceGuardrailDefinition, TraceSpan
 from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
 from gateway.repositories.traces import TracesRepositories
+from gateway.repositories.traces.definition_repository import GuardrailDefinitionRepository
+from gateway.services.secret_box import generate_secret_key
 from gateway.services.traces import TraceService
 from gateway.services.traces import _service as trace_service_module
 from gateway.services.traces._collector import call_id_digest
 from gateway.types.traces import SpanRecord, TraceFilter, TraceScope, TraceWrite
+from otari_agent.domain.definitions import GateDefinition, definition_digest
+
+
+def _no_window(provider: str | None, model: str) -> int | None:
+    return None
+
 
 pytestmark = pytest.mark.asyncio
 
@@ -43,7 +51,7 @@ async def store(test_config: GatewayConfig, clean_database: None) -> AsyncIterat
     init_db(test_config)
     try:
         async with create_unit_of_work() as uow:
-            yield TraceService(uow, TracesRepositories.on(uow))
+            yield TraceService(uow, TracesRepositories.on(uow), _no_window)
     finally:
         await dispose_db()
 
@@ -153,6 +161,51 @@ async def test_a_replayed_write_is_counted_as_duplicate_and_adds_nothing(
     assert (detail.summary.span_count, detail.summary.input_tokens) == (2, 10)
 
 
+async def test_a_requests_cost_counts_once_on_its_session_and_is_not_a_span(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    priced = _write(
+        workspace,
+        "session-1",
+        _span("usage-1", kind="llm", operation="usage", request_id="req_1", cost_snapshot=Decimal("0.25")),
+        session_source="otlp",
+    )
+    await store.write((_write(workspace, "session-1", _span("llm-1", kind="llm", request_id="req_1")),))
+    await store.write((priced,))
+
+    replay = await store.write((priced,))
+
+    assert replay.duplicate == 1
+    detail = await store.get(TraceScope.deployment(), "session-1", span_limit=10)
+    assert detail is not None
+    assert (detail.summary.span_count, detail.summary.cost_snapshot) == (1, Decimal("0.25"))
+
+
+async def test_a_logs_only_export_creates_no_session_until_its_spans_arrive(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    priced = _write(
+        workspace,
+        "session-1",
+        _span("usage-1", kind="llm", operation="usage", request_id="req_1", cost_snapshot=Decimal("0.25")),
+        session_source="otlp",
+    )
+
+    await store.write((priced,))
+
+    scope = TraceScope.deployment()
+    assert await store.count(scope, TraceFilter()) == 0
+    assert (await store.search(scope, TraceFilter(), limit=10, offset=0)).items == ()
+    assert await store.series(scope, TraceFilter(), bucket="hour") == ()
+
+    await store.write((_write(workspace, "session-1", _span("llm-1", kind="llm", request_id="req_1")),))
+
+    [summary] = (await store.search(scope, TraceFilter(), limit=10, offset=0)).items
+    assert (summary.span_count, summary.cost_snapshot) == (1, Decimal("0.25"))
+
+
 async def test_a_span_repeated_inside_one_write_is_stored_once(
     store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
 ) -> None:
@@ -254,6 +307,26 @@ async def test_search_pages_newest_activity_first_and_filters(
     assert [item.trace_id for item in failing.items] == ["session-1"]
     assert [item.trace_id for item in by_search.items] == ["session-2"]
     assert windowed == 2
+
+
+async def test_a_window_lists_the_sessions_active_in_it_as_the_series_counts_them(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    """A session still running past the window's end is listed, as the chart counts it."""
+    workspace, _ = tenants
+    await store.write(
+        (
+            _write(workspace, "spanning", _span("start", minutes=0), _span("later", minutes=30)),
+            _write(workspace, "before", _span("only", minutes=5)),
+            _write(workspace, "after", _span("only", minutes=20)),
+        )
+    )
+    window = TraceFilter(start=_T0 + timedelta(minutes=10), end=_T0 + timedelta(minutes=20))
+
+    page = await store.search(TraceScope.deployment(), window, limit=10, offset=0)
+
+    assert [item.trace_id for item in page.items] == ["spanning"]
+    assert await store.count(TraceScope.deployment(), window) == 1
 
 
 async def test_a_search_finds_any_part_of_the_id_harness_or_user_in_any_case(
@@ -389,7 +462,7 @@ async def test_two_writers_sharing_traces_in_opposite_order_do_not_deadlock(
 
     async def write(order: list[str], tag: str) -> None:
         async with create_unit_of_work() as uow:
-            await TraceService(uow, TracesRepositories.on(uow)).write(
+            await TraceService(uow, TracesRepositories.on(uow), _no_window).write(
                 tuple(_write(workspace, trace_id, _span(f"{tag}-{trace_id}")) for trace_id in order)
             )
 
@@ -465,7 +538,37 @@ async def test_a_series_never_reads_traces_older_than_its_buckets_can_reach(
 
     assert [point.bucket for point in series] == ["2026-10-07T14:00:00Z", "2026-10-07T15:00:00Z"]
     [grouped] = statements
-    assert "started_at >=" in grouped
+    assert "last_activity_at >=" in grouped
+
+
+async def test_a_session_counts_in_every_bucket_it_was_active_in(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    await store.write(
+        (
+            _write(workspace, "long", _span("start", minutes=0), _span("later", minutes=35)),
+            _write(workspace, "short", _span("only", minutes=50, outcome="error")),
+        )
+    )
+
+    series = await store.series(TraceScope.deployment(), TraceFilter(), bucket="30m")
+
+    assert [(point.bucket, point.succeeded, point.failed) for point in series] == [
+        ("2026-10-07T12:00:00Z", 1, 0),
+        ("2026-10-07T12:30:00Z", 1, 1),
+    ]
+
+
+async def test_a_minute_series_is_aligned_to_the_minute(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    await store.write((_write(workspace, "s", _span("a", minutes=3), _span("b", minutes=5)),))
+
+    series = await store.series(TraceScope.deployment(), TraceFilter(), bucket="1m")
+
+    assert [point.bucket for point in series] == [f"2026-10-07T12:0{minute}:00Z" for minute in (3, 4, 5)]
 
 
 async def test_a_series_fails_a_session_for_its_own_errors_and_not_its_tools(
@@ -499,3 +602,90 @@ async def test_a_tool_call_id_an_older_version_stored_as_sent_reads_back_as_its_
 
     assert detail is not None
     assert detail.spans[0].tool_call_id == call_id_digest(workspace, legacy)
+
+
+async def test_what_a_span_was_about_is_stored_encrypted_and_reads_back(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    command = "cat ~/.aws/credentials"
+    await store.write(
+        (_write(workspace, "session-1", _span("tool-1", kind="tool", tool_name="Bash", content={"command": command})),)
+    )
+
+    sealed = (
+        await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.span_id) == "tool-1"))
+    ).scalar_one()
+    assert sealed is not None and "credentials" not in sealed
+    detail = await store.get(TraceScope.deployment(), "session-1", span_limit=10)
+    assert detail is not None
+    assert dict(detail.spans[0].content) == {"command": command}
+
+
+async def test_without_a_key_what_a_span_was_about_is_not_stored(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+    workspace, _ = tenants
+    await store.write(
+        (_write(workspace, "session-1", _span("tool-1", kind="tool", content={"command": "cat ~/.aws/credentials"})),)
+    )
+
+    sealed = (
+        await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.span_id) == "tool-1"))
+    ).scalar_one()
+    assert sealed is None
+
+
+async def test_concurrent_new_guardrail_versions_never_pass_the_workspace_cap(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(trace_service_module, "MAX_GUARDRAIL_VERSIONS_PER_WORKSPACE", 2)
+    workspace, _ = tenants
+
+    def gates(message: str) -> tuple[GateDefinition, ...]:
+        return (
+            GateDefinition(
+                gate_id="no-changelog",
+                gate_type="path",
+                enforcement="required",
+                origin="repo",
+                runs=("pre_tool_use.edit_target",),
+                message=message,
+            ),
+        )
+
+    first = gates("version 0")
+    await store.record_definition(workspace, first, definition_digest(first))
+
+    # Widen the window between the count and the insert, so writers that are not serialized all pass the count.
+    count_for_workspace = GuardrailDefinitionRepository.count_for_workspace
+
+    async def slow_count(self: GuardrailDefinitionRepository, workspace_id: uuid.UUID) -> int:
+        count = await count_for_workspace(self, workspace_id)
+        await asyncio.sleep(0.1)
+        return count
+
+    monkeypatch.setattr(GuardrailDefinitionRepository, "count_for_workspace", slow_count)
+
+    async def record(index: int) -> bool:
+        version = gates(f"version {index}")
+        async with create_unit_of_work() as uow:
+            try:
+                await TraceService(uow, TracesRepositories.on(uow), _no_window).record_definition(
+                    workspace, version, definition_digest(version)
+                )
+            except GuardrailVersionLimitError:
+                return False
+        return True
+
+    stored = await asyncio.gather(*(record(index) for index in range(1, 6)))
+
+    assert stored.count(True) == 1
+    digests = (
+        await async_db.execute(
+            select(TraceGuardrailDefinition.digest).where(col(TraceGuardrailDefinition.workspace_id) == workspace)
+        )
+    ).all()
+    assert len(digests) == 2

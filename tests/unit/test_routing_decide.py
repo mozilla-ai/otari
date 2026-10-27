@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.routing import PolicySpec
+from gateway.services.providers import CountryGate
 from gateway.services.routing.backends import (
     NoOpRouterBackend,
     RouterBackend,
@@ -390,3 +391,35 @@ async def test_the_request_headers_reach_the_backend(config: GatewayConfig, reco
     assert (seen.user_id, seen.trace_key, seen.task_id) == ("user-7", "conv-1", "summarize")
     assert (seen.has_tools, seen.is_trace_continuation) == (True, True)
     assert seen.default_model == "openai:gpt-5"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("country", "asked"), [("US", True), ("FR", False)])
+async def test_the_router_declines_where_its_embedding_provider_closes_to_the_country(
+    recorder: _Recorder, country: str, asked: bool
+) -> None:
+    # The kNN router embeds the prompt, which would send it to that provider.
+    config = GatewayConfig(
+        master_key="test-master-key",
+        model_discovery=False,
+        providers={"openai": {"api_key": "sk-openai"}, "anthropic": {"api_key": "sk-anthropic"}},
+        router_embedding_model="openai:text-embedding-3-small",
+        provider_supported_countries={"openai": ["US"]},
+        client_country_header="CF-IPCountry",
+    )
+
+    ordering = await decide_ordering(
+        config,
+        _spec("anthropic:claude-haiku-4-5", "anthropic:claude-sonnet-4-5", default="anthropic:claude-sonnet-4-5"),
+        policy_name="smart",
+        user_id="u",
+        allowlist=None,
+        signal=_signal(),
+        country_gate=CountryGate(country),
+    )
+
+    assert (recorder.seen is not None) is asked
+    if not asked:
+        assert ordering is not None
+        assert ordering.selectors == []
+        assert "country" in ordering.rationale

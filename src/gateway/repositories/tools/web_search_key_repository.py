@@ -248,7 +248,7 @@ class WorkspaceWebSearchKeyOverrideRepository:
 
     def _candidates(
         self, organization_id: uuid.UUID, workspace_id: uuid.UUID, kind: str | None = None
-    ) -> Select[tuple[OrgWebSearchKey, WorkspaceWebSearchKeyOverride]]:
+    ) -> Select[OrgWebSearchKey, WorkspaceWebSearchKeyOverride]:
         """The organization's live keys, of ``kind`` or every kind, each with this workspace's override or ``None``."""
         query = (
             select(OrgWebSearchKey, WorkspaceWebSearchKeyOverride)
@@ -270,7 +270,7 @@ class WorkspaceWebSearchKeyOverrideRepository:
                 WorkspaceWebSearchKeyOverride.is_default.is_(True) | OrgWebSearchKey.is_org_default.is_(True)
             )
         )
-        return [(key, override) for key, override in result.tuples()]
+        return [(key, override) for key, override in result.all()]
 
     async def candidate_page(
         self,
@@ -294,7 +294,7 @@ class WorkspaceWebSearchKeyOverrideRepository:
         result = await self.db.execute(
             query.order_by(OrgWebSearchKey.created_at, OrgWebSearchKey.id).offset(skip).limit(limit)
         )
-        return [(key, override) for key, override in result.tuples()]
+        return [(key, override) for key, override in result.all()]
 
     async def count_candidates(self, *, organization_id: uuid.UUID) -> int:
         """How many live keys the organization holds."""

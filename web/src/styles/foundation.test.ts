@@ -1765,6 +1765,71 @@ describe("buttons come in three variants", () => {
   })
 })
 
+// An unlayered rule outranks every `px-*` utility, so an unlayered ghost padding
+// rule that reaches the rail overrides the lane its band controls set with one.
+// The rail is left out of such rules rather than handed back its padding with
+// `revert-layer`: Safari 26 resolves that, on a `var()` logical shorthand, to
+// no padding (WebKit bug 310435).
+describe("the rail's band controls keep their own lane", () => {
+  /** The foundation with every `@layer` block taken out: those lose to utilities. */
+  function unlayered(source: string): string {
+    let out = ""
+    let at = 0
+    for (const layer of source.matchAll(/@layer[^{;]*\{/g)) {
+      const start = layer.index ?? 0
+      if (start < at) continue
+      out += source.slice(at, start)
+      let depth = 0
+      let i = start + layer[0].length - 1
+      for (; i < source.length; i += 1) {
+        if (source[i] === "{") depth += 1
+        else if (source[i] === "}" && --depth === 0) break
+      }
+      at = i + 1
+    }
+    return out + source.slice(at)
+  }
+
+  const PADDING =
+    /(^|;|\s)padding(-inline|-inline-start|-inline-end|-left|-right)?\s*:/
+
+  it("renders the rail with the class the stylesheet leaves out", () => {
+    const shell = stripComments(
+      readFileSync(join(WEB, "src", "app", "AppShell.tsx"), "utf8"),
+    )
+    expect(shell).toMatch(/["'`](?:[^"'`\n]*\s)?otari-rail(?=[\s"'`])/)
+  })
+
+  it("leaves the rail out of every unlayered ghost padding rule", () => {
+    const rules = [
+      ...unlayered(stripComments(CSS)).matchAll(/([^{}]+)\{([^{}]*)\}/g),
+    ]
+    const reachTheRail = rules.flatMap(([, selectors, body]) =>
+      PADDING.test(body)
+        ? selectors
+            .split(/,(?![^(]*\))/)
+            .map((selector) => selector.trim().replace(/\s+/g, " "))
+            .filter((selector) => selector.includes(".button--ghost"))
+            // Scoped to another place (`.otari-auth-actions .button--ghost`),
+            // it cannot reach the rail; scoped to the rail, it always does.
+            .filter((selector) => {
+              const scope = selector.slice(
+                0,
+                selector.indexOf(".button--ghost"),
+              )
+              return !/\S\s+$/.test(scope) || scope.includes(".otari-rail")
+            })
+            .filter((selector) => !selector.includes(":not(.otari-rail *)"))
+        : [],
+    )
+    expect(reachTheRail).toEqual([])
+  })
+
+  it("never hands padding back with revert-layer", () => {
+    expect(stripComments(CSS)).not.toMatch(/padding[\w-]*\s*:\s*revert-layer/)
+  })
+})
+
 // Every prop of every design-system component is passed by some story.
 //
 // The catalog's claim is that it shows a component's variants and options, and

@@ -15,7 +15,7 @@ A durable deployment should:
 - terminate TLS in front of the gateway
 - restrict database and management access
 - monitor `/api/v1/health/readiness` and, when enabled, `/metrics`
-- pin an image version and test migrations before upgrading
+- pin an image version, [verify it](#verify-the-image), and test migrations before upgrading
 
 The default SQLite database is intended for evaluation and single-node local use.
 
@@ -36,7 +36,9 @@ addresses or networks, comma-separated, so Otari reads the client address from
 `X-Forwarded-For`. Use `*` only where the proxy is the sole path to the
 container, as on Railway: any peer in the list can set its own client address.
 When it is unset, uvicorn's `FORWARDED_ALLOW_IPS` applies, and without that
-only `127.0.0.1` is trusted.
+only `127.0.0.1` is trusted. A country file
+([Supported countries](configuration.md#supported-countries)) looks up the same
+client address.
 
 ### Watch the connection pool
 
@@ -57,9 +59,42 @@ connections beyond it, so its capacity is the two added together. The `log`
 pool is sized by `db_log_pool_size` and has no overflow, so its capacity is
 that value.
 
+### Watch providers and refusals
+
+`/metrics` also reports each upstream attempt, labeled by the provider instance
+and the model a usage row names, so a dashboard can follow one provider's
+errors, latency and spend without reading the usage log:
+
+| Metric | Labels | Meaning |
+| --- | --- | --- |
+| `gateway_upstream_attempts_total` | `provider`, `model`, `outcome` (`success` or `error`), `status_code`, `fallback` | One per attempt on the completion, embedding, image, audio, moderation and rerank routes, including a routing policy's failed candidates. `status_code` is `200` for a success, the HTTP status that classified a failure (a timeout is `504`, an unclassified connection failure `502`), or `none` for a failure that carried no status, such as a stream that ended without reporting its usage. `fallback` is `true` for a candidate after the plan's first |
+| `gateway_attempt_duration_seconds` | `provider`, `model`, `outcome` | From the start of the request to the end of the attempt, observed for a plan's first candidate only, since a fallback's would include its predecessors' time |
+| `gateway_time_to_first_token_seconds` | `provider`, `model` | From the start of the request to a streamed attempt's first chunk, for a plan's first candidate only |
+| `gateway_tokens_total` | `provider`, `model`, `type` | Input and output tokens |
+| `gateway_request_cost_dollars` | `provider`, `model` | Each request's cost in USD |
+| `gateway_abandoned_attempts_total` | `provider`, `model`, `reason`, `position` | Attempts given up before their first chunk |
+| `gateway_refusals_total` | `code`, `budget_scope` | Responses refused with an [`Otari-Error-Code`](api-reference.md#error-codes), by that code and, for `budget_exceeded`, the scope that refused (`user`, `api_token`, ...; empty otherwise) |
+
+`model` is the model as the provider was sent it. A request that names its own
+`provider:model` adds a series per distinct model, so restrict keys to the
+models they may use where callers are not trusted to pick.
+
 Alert on checked-out connections approaching capacity for a sustained period.
 These metrics do not appear on SQLite, which opens a connection per use and
 keeps no pool.
+
+### Verify the image
+
+Each published image carries a signed build provenance attestation, which ties it
+to the `mozilla-ai/otari` repository and the workflow that built it. Check it with
+the GitHub CLI before you deploy a tag:
+
+```sh
+gh attestation verify oci://docker.io/mzdotai/otari:<tag> --repo mozilla-ai/otari
+```
+
+The command fails for an image that this repository's publishing workflow did not
+build, such as one pushed to Docker Hub with stolen credentials.
 
 ## Docker Compose
 
@@ -105,6 +140,43 @@ services are optional; requests that require an unconfigured backend fail
 without affecting ordinary inference.
 
 See [Built-in tools](tools.md) and [Guardrails](guardrails.md).
+
+## The country file
+
+A provider that serves only some countries needs the country each request comes
+from ([Supported countries](configuration.md#supported-countries)). Where no
+proxy sets a country header, Otari looks the client address up in a MaxMind DB
+country file, such as GeoLite2 Country or DB-IP Lite Country. The Docker image
+has the reader but not the file. Give it the file one of two ways.
+
+The simpler way is to upload it in the Country file card on the dashboard's
+Settings page. Otari stores the file in its database, so every replica reads
+it and nothing is mounted. Upload a new file each time its provider publishes
+one to keep it current: DB-IP Lite each month, GeoLite2 twice a week.
+
+### A mounted country file
+
+Where you control the containers, mount the folder that holds the file and name
+the file's path. Add this to the `otari` service in Compose, with the file saved
+as `./geoip/countries.mmdb`:
+
+```yaml
+    volumes:
+      - ./geoip:/app/geoip:ro
+    environment:
+      - OTARI_CLIENT_COUNTRY_DATABASE=/app/geoip/countries.mmdb
+```
+
+Otari reads a replaced file again without a restart, so a job that writes a
+new file on its provider's schedule, such as [geoipupdate](https://github.com/maxmind/geoipupdate)
+for GeoLite2, keeps it current. Replace the file in one step (write a new file,
+then rename it over the old one), so Otari never reads a half-written file. Mount
+the folder rather than the file: a mount of one file keeps the old file after a
+rename. Every replica needs its own copy. While `client_country_database` is set, a file
+uploaded on the dashboard is not read.
+
+DB-IP Lite is under CC BY 4.0, which asks you to credit DB-IP where your
+service names its data sources, for example with a link to `https://db-ip.com`.
 
 ## Configuration
 

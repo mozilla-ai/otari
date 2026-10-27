@@ -251,6 +251,20 @@ class WebSearchKeySettingRefusedError(TenancyValidationError):
         super().__init__(f"{field}: {problem}")
 
 
+class WebSearchKeyCredentialRequiredError(TenancyValidationError):
+    """A new ``api_base`` on a key that holds a credential, sent without the credential.
+
+    The next call would send the stored credential to the new host, and an
+    organization admin only ever reads a key's ``last4``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Changing a key's api_base sends its credentials to the new host: "
+            "send api_key, and any hidden options credential, again in the same request"
+        )
+
+
 class WebSearchKeyNameRequiredError(TenancyValidationError):
     def __init__(self) -> None:
         super().__init__("A web search key needs a name")

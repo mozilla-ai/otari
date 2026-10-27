@@ -2,12 +2,14 @@
 
 import pytest
 
+from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
     decrypt_secret,
     encrypt_secret,
     generate_secret_key,
+    get_secret_box,
     secret_box_configured,
     validate_secret_key,
 )
@@ -18,6 +20,14 @@ def test_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
     token = encrypt_secret("sk-super-secret")
     assert token != "sk-super-secret"
     assert decrypt_secret(token) == "sk-super-secret"
+
+
+def test_the_box_is_built_once_per_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    box = get_secret_box()
+    assert get_secret_box() is box
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    assert get_secret_box() is not box
 
 
 def test_unset_key_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -93,3 +103,24 @@ def test_keys_may_be_whitespace_or_comma_separated(monkeypatch: pytest.MonkeyPat
     token = encrypt_secret("sk-x")
     monkeypatch.setenv("OTARI_SECRET_KEY", f"  {b}\n{a} ")
     assert decrypt_secret(token) == "sk-x"
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_empty_key_is_treated_as_unset(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", value)
+    validate_secret_key()
+    with pytest.raises(SecretBoxUnavailableError, match="not set or is empty") as excinfo:
+        encrypt_secret("x")
+    assert "otari gen-secret-key" in str(excinfo.value)
+
+
+def test_invalid_key_error_names_the_generator(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", "not-a-valid-fernet-key")
+    with pytest.raises(SecretBoxUnavailableError, match="otari gen-secret-key"):
+        validate_secret_key()
+
+
+def test_the_api_error_says_unset_or_empty_and_names_the_generator() -> None:
+    message = SecretBoxUnavailableTenancyError().message
+    assert "not set or is empty" in message
+    assert "otari gen-secret-key" in message

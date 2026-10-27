@@ -22,8 +22,16 @@ describe("derivePlaygroundGate", () => {
     isLoading: false,
     isCatalogError: false,
     hasWorkspace: true,
+    canRun: true,
     modelCount: 3,
   }
+
+  it("reports a viewer as read-only, whatever the catalog holds", () => {
+    expect(derivePlaygroundGate({ ...ready, canRun: false })).toBe("readOnly")
+    expect(
+      derivePlaygroundGate({ ...ready, canRun: false, modelCount: 0 }),
+    ).toBe("readOnly")
+  })
 
   it("is ready when a workspace has models", () => {
     expect(derivePlaygroundGate(ready)).toBe("ready")
@@ -36,6 +44,7 @@ describe("derivePlaygroundGate", () => {
         isLoading: true,
         isCatalogError: true,
         hasWorkspace: false,
+        canRun: false,
         modelCount: 0,
       }),
     ).toBe("loading")

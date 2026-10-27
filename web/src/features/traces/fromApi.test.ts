@@ -43,6 +43,32 @@ describe("toTrace", () => {
     expect(byId.get("call-toolu_1")?.metadata?.Timing).toBe("Approximate")
   })
 
+  it("carries a model request's context window and the sizes the gateway kept of it", () => {
+    const detail = traceDetail()
+    const spans = detail.spans.map((span) =>
+      span.span_id === "llm-1"
+        ? {
+            ...span,
+            context_window: 200_000,
+            attributes: {
+              "otari.context.system_chars": 40,
+              "otari.context.user_chars": 60,
+              "otari.context.message_count": 2,
+            },
+          }
+        : span,
+    )
+    const trace = toTrace(traceSummary(), { ...detail, spans })
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("llm-1")).toMatchObject({
+      contextWindow: 200_000,
+      context: { system: 40, user: 60, messageCount: 2, tools: 0 },
+    })
+    expect(byId.get("llm-2")?.contextWindow).toBeUndefined()
+    expect(byId.get("llm-2")?.context).toBeUndefined()
+  })
+
   it("carries a call's cache and reasoning counts, and a turn's cached reads", () => {
     const detail = traceDetail()
     const spans = detail.spans.map((span) =>
@@ -159,6 +185,85 @@ describe("toTrace", () => {
     })
   })
 
+  it("totals a session's cache tokens and says a cost the agent reported is at API prices", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({
+            span_id: "llm-1",
+            kind: "llm",
+            origin: "otlp",
+            input_tokens: 8510,
+            output_tokens: 2,
+            cache_read_tokens: 8000,
+            cache_write_tokens: 500,
+            cost: 0.25,
+          }),
+        ],
+      }),
+    )
+
+    expect(summarizeTrace(trace)).toMatchObject({
+      promptTokens: 8510,
+      cachedTokens: 8000,
+      cacheWriteTokens: 500,
+      totalCost: 0.25,
+    })
+    expect(trace.gateway?.isAtApiPrices).toBe(true)
+  })
+
+  it("gives a turn its cost without counting it twice in the session's total", () => {
+    const detail = traceDetail()
+    const [first] = detail.turns
+    // Turns are drawn as rows once a session has more than one.
+    const trace = toTrace(traceSummary(), {
+      ...detail,
+      turns: [
+        { ...first, cost: 0.04 },
+        { ...first, index: 1, step_ids: [], cost: 0 },
+      ],
+    })
+
+    expect(trace.observations.find((o) => o.isRollup)?.cost).toBe(0.04)
+    expect(summarizeTrace(trace).totalCost).toBe(
+      detail.spans.reduce((sum, span) => sum + (span.cost ?? 0), 0),
+    )
+  })
+
+  it("does not say a session the gateway served is at API prices", () => {
+    const trace = toTrace(traceSummary(), traceDetail())
+
+    expect(trace.gateway?.isAtApiPrices).toBe(false)
+  })
+
+  it("marks a tool call that returned an error as a result the agent read, not an error", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1", origin: "otlp" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            origin: "otlp",
+            tool_name: "Bash",
+            attributes: { "otari.tool.succeeded": false },
+          }),
+        ],
+      }),
+    )
+
+    expect(trace.observations.find((o) => o.id === "tool-1")).toMatchObject({
+      level: "DEFAULT",
+      returnedError: true,
+      statusMessage: expect.stringMatching(
+        /^Returned an error, which the agent read/,
+      ),
+    })
+  })
+
   it("draws a gate that blocked a tool call as a warning that explains it, not an error", () => {
     const trace = toTrace(
       traceSummary(),
@@ -205,6 +310,7 @@ describe("toTrace", () => {
             attributes: {
               "otari.guardrail.profile": "docs-updated",
               "otari.guardrail.mode": "monitor",
+              "otari.gate.id": "docs-updated",
               "otari.gate.outcome": "fail",
               "otari.gate.blocked": false,
             },
@@ -216,11 +322,20 @@ describe("toTrace", () => {
 
     expect(byId.get("tool-1")).toMatchObject({
       level: "WARNING",
-      statusMessage: "Blocked by a hook before it ran.",
+      statusMessage:
+        "Blocked by no-changelog before it ran. CHANGELOG.md is generated.",
+    })
+    expect(byId.get("tool-1:gates")).toMatchObject({
+      name: "Gates · 1 blocked",
+      parentObservationId: "tool-1",
+      level: "WARNING",
+    })
+    expect(byId.get("req-1:gates")).toMatchObject({
+      name: "Gates · 1 flagged",
     })
     expect(byId.get("gate-1")).toMatchObject({
       name: "no-changelog",
-      parentObservationId: "tool-1",
+      parentObservationId: "tool-1:gates",
       level: "WARNING",
       statusMessage: "Blocked the agent's action. CHANGELOG.md is generated.",
     })
@@ -228,6 +343,285 @@ describe("toTrace", () => {
       level: "WARNING",
       statusMessage: "Flagged. The gate is advisory, so the agent went ahead.",
     })
+  })
+
+  it("gives a judge gate's check the model its calls ran on, their tokens and their cost", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({
+            span_id: "judge",
+            kind: "guardrail",
+            origin: "otlp",
+            model: "claude-haiku-4-5-20251001",
+            input_tokens: 6693,
+            output_tokens: 111,
+            cache_write_tokens: 6684,
+            cost: 0.0139,
+            attributes: {
+              "otari.gate.id": "writing-style",
+              "otari.gate.outcome": "pass",
+            },
+          }),
+          traceSpan({
+            span_id: "path",
+            kind: "guardrail",
+            origin: "otlp",
+            attributes: {
+              "otari.gate.id": "no-changelog",
+              "otari.gate.outcome": "pass",
+            },
+          }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("judge")?.gate?.judge).toEqual({
+      model: "claude-haiku-4-5-20251001",
+      inputTokens: 6693,
+      outputTokens: 111,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 6684,
+      cost: 0.0139,
+    })
+    expect(byId.get("path")?.gate?.judge).toBeNull()
+  })
+
+  it("shows what a span was about as its input, where content was kept", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1", content: { prompt: "Fix the test" } }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            tool_name: "Bash",
+            content: { command: "pytest -x" },
+          }),
+          traceSpan({
+            span_id: "gate-1",
+            parent_span_id: "tool-1",
+            kind: "guardrail",
+            content: { "gate.evidence": "pytest -x", "gate.detail": "ok" },
+          }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("req-1")?.input).toBe("Fix the test")
+    expect(byId.get("tool-1")).toMatchObject({
+      name: "Bash · pytest -x",
+      input: "pytest -x",
+    })
+    expect(byId.get("gate-1")?.input).toEqual({
+      "gate.evidence": "pytest -x",
+      "gate.detail": "ok",
+    })
+  })
+
+  it("gives every gate of a check what the check read, sent on one of them", () => {
+    const gate = (span_id: string, gateId: string, otel_trace_id: string) =>
+      traceSpan({
+        span_id,
+        parent_span_id: "tool-1",
+        kind: "guardrail",
+        origin: "otlp",
+        otel_trace_id,
+        attributes: {
+          "otari.gate.id": gateId,
+          "otari.gate.outcome": "pass",
+          "otari.gate.blocked": false,
+        },
+      })
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+          }),
+          {
+            ...gate("gate-1", "no-changelog", "check-a"),
+            content: { "gate.evidence": "CHANGELOG.md" },
+          },
+          gate("gate-2", "no-lockfile", "check-a"),
+          gate("gate-3", "no-changelog", "check-b"),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("gate-1")?.gate?.evidence).toBe("CHANGELOG.md")
+    expect(byId.get("gate-2")?.gate?.evidence).toBe("CHANGELOG.md")
+    expect(byId.get("gate-3")?.gate?.evidence).toBeNull()
+  })
+
+  it("says what a permission decision, a run and a model call were", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            tool_name: "Bash",
+            content: { command: "git push" },
+          }),
+          traceSpan({
+            span_id: "ask-1",
+            parent_span_id: "tool-1",
+            kind: "other",
+            operation: "tool.blocked_on_user",
+            duration_ms: 14_000,
+            attributes: {
+              "otari.tool.decision": "accept",
+              "otari.tool.decision_source": "user_temporary",
+            },
+          }),
+          traceSpan({
+            span_id: "run-1",
+            parent_span_id: "tool-1",
+            kind: "other",
+            operation: "tool.execution",
+            duration_ms: 96,
+          }),
+          traceSpan({
+            span_id: "llm-9",
+            parent_span_id: "req-1",
+            kind: "llm",
+            model: "claude-haiku-4-5",
+            attributes: { "gen_ai.response.finish_reasons": "tool_use" },
+          }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("ask-1")).toMatchObject({ name: "Permission · allowed" })
+    expect(byId.get("ask-1")?.explain?.sentence).toBe(
+      "Claude Code asked the user whether to run Bash on git push, and they allowed it after 14.00 s.",
+    )
+    expect(byId.get("run-1")).toMatchObject({ name: "Ran" })
+    expect(byId.get("run-1")?.explain?.sentence).toMatch(
+      /^Ran for .* and succeeded\.$/,
+    )
+    expect(byId.get("llm-9")?.explain?.facts).toContainEqual([
+      "Stopped because",
+      "It asked to use a tool",
+    ])
+  })
+
+  it("says a tool call that returned an error ran and returned one, not that it succeeded", () => {
+    const failed = { "otari.tool.succeeded": false }
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            tool_name: "Bash",
+            content: { command: "grep -r nothing" },
+            attributes: failed,
+          }),
+          traceSpan({
+            span_id: "run-1",
+            parent_span_id: "tool-1",
+            kind: "other",
+            operation: "tool.execution",
+            duration_ms: 96,
+            attributes: failed,
+          }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("run-1")?.explain?.sentence).toMatch(
+      /^Ran for .* and returned an error\.$/,
+    )
+    expect(byId.get("tool-1")?.explain?.sentence).toMatch(
+      /It ran and returned an error, which the agent read\.$/,
+    )
+  })
+
+  it("says a model call that errored failed rather than answered", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({
+            span_id: "llm-1",
+            parent_span_id: "req-1",
+            kind: "llm",
+            model: "claude-haiku-4-5",
+            outcome: "error",
+          }),
+        ],
+      }),
+    )
+    const llm = trace.observations.find((o) => o.id === "llm-1")
+
+    expect(llm?.explain?.sentence).toMatch(/^claude-haiku-4-5 failed/)
+  })
+
+  it("names a gate that could not decide but held a tool call as what blocked it", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            tool_name: "Edit",
+            outcome: "blocked",
+          }),
+          traceSpan({
+            span_id: "gate-1",
+            parent_span_id: "tool-1",
+            kind: "guardrail",
+            origin: "otlp",
+            outcome: "error",
+            attributes: {
+              "otari.gate.id": "judge-review",
+              "otari.gate.outcome": "error",
+              "otari.gate.blocked": true,
+            },
+          }),
+          traceSpan({
+            span_id: "ask-1",
+            parent_span_id: "tool-1",
+            kind: "other",
+            operation: "tool.blocked_on_user",
+          }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("tool-1")?.statusMessage).toBe(
+      "Blocked by judge-review before it ran.",
+    )
+    expect(byId.get("tool-1:gates")?.name).toBe("Gates · 1 could not decide")
+    expect(byId.get("ask-1")?.name).toBe("Permission")
+    expect(byId.get("ask-1")?.explain?.sentence).toMatch(
+      /did not say what was decided/,
+    )
   })
 
   it("names the user for every user_* decision source Claude Code reports", () => {

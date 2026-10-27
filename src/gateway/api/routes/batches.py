@@ -24,7 +24,12 @@ from gateway.api.deps import (
     model_provider_port_on,
     verify_api_key_or_master_key,
 )
-from gateway.api.routes._helpers import resolve_user_id
+from gateway.api.routes._helpers import (
+    country_gate_for,
+    country_not_supported,
+    missing_credential_error,
+    resolve_user_id,
+)
 from gateway.api.routes._pipeline import (
     FUNDS_CHECK_UNAVAILABLE_DETAIL,
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
@@ -80,7 +85,13 @@ from gateway.services.provider_kwargs import (
     require_declared_credential,
     resolve_provider_selector,
 )
-from gateway.services.providers import hosted_implementation, serve_on_hosted_provider
+from gateway.services.providers import (
+    CountryGate,
+    CountryNotServedError,
+    ensure_provider_country,
+    hosted_implementation,
+    serve_on_hosted_provider,
+)
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -201,6 +212,7 @@ async def _resolve_batch_provider(
     *,
     port: ModelProviderPort,
     organization_id: uuid.UUID | None,
+    country_gate: CountryGate,
     workspace_id: uuid.UUID | None = None,
 ) -> tuple[LLMProvider, dict[str, Any], bool]:
     """Resolve a batch ``provider`` query param into (implementation, kwargs, deployment-paid).
@@ -220,8 +232,14 @@ async def _resolve_batch_provider(
     a master-key or cross-workspace call; ``list_batches`` has no batch id to
     key off of and keeps using the caller's own workspace. A provider nothing
     declared is served on the deployment's own credential where one serves it,
-    as ``create_batch`` served it.
+    as ``create_batch`` served it. ``country_gate`` holds the call to the
+    countries the provider serves, as it held the batch's creation, since a
+    batch's status and results reach the caller as its completions would.
     """
+    try:
+        ensure_provider_country(config, country_gate, provider)
+    except CountryNotServedError as exc:
+        raise country_not_supported(exc.gate, provider, noun="Provider") from exc
     if provider in config.providers:
         impl = LLMProvider(config.provider_instance_type(provider))
         return impl, get_provider_kwargs(config, impl, instance=provider), False
@@ -242,6 +260,7 @@ async def _resolve_batch_provider(
             organization_id=organization_id,
             workspace_id=workspace_id,
             any_model=True,
+            country_gate=country_gate,
         )
     except HostedAccessDeniedError as exc:
         raise HTTPException(
@@ -249,6 +268,8 @@ async def _resolve_batch_provider(
             detail=model_not_allowed_detail(provider),
             headers=error_headers(MODEL_NOT_ALLOWED),
         ) from exc
+    except CountryNotServedError as exc:
+        raise country_not_supported(exc.gate, provider, noun="Provider") from exc
     except Exception as exc:
         raise _hosted_credential_unusable(provider, exc) from exc
     if served is not None:
@@ -256,7 +277,7 @@ async def _resolve_batch_provider(
     try:
         require_declared_credential(config, provider, impl, kwargs)
     except MissingApiKeyError as exc:
-        raise _not_configured(exc) from exc
+        raise missing_credential_error(MissingCredential.from_error(exc)) from exc
     return impl, kwargs, False
 
 
@@ -264,12 +285,6 @@ def _hosted_credential_unusable(provider: str, exc: Exception) -> HTTPException:
     """The 502 for a port that failed to resolve a credential, logged by class: its message may carry a row."""
     logger.error("ModelProviderPort failed to resolve a credential for %s: %s", provider, describe_port_error(exc))
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=HOSTED_CREDENTIAL_UNUSABLE_DETAIL)
-
-
-def _not_configured(exc: MissingApiKeyError) -> HTTPException:
-    """The 424 a ``MissingApiKeyError`` maps to."""
-    missing = MissingCredential.from_error(exc)
-    return HTTPException(status_code=missing.status_code, detail=missing.detail, headers=error_headers(missing.code))
 
 
 async def _lifecycle_workspace_id(db: AsyncSession, record: BatchRecord | None, api_key: APIKey | None) -> uuid.UUID:
@@ -495,6 +510,11 @@ async def create_batch(
             detail=refusal.detail,
             headers=error_headers(refusal.code),
         )
+    country_gate = country_gate_for(config, raw_request)
+    try:
+        ensure_provider_country(config, country_gate, resolved.instance)
+    except CountryNotServedError as exc:
+        raise country_not_supported(exc.gate, request.model) from exc
 
     # Validate provider supports batch operations
     provider_class = AnyLLM.get_provider_class(provider)
@@ -513,6 +533,7 @@ async def create_batch(
             resolved,
             organization_id=organization_id,
             workspace_id=workspace_id,
+            country_gate=country_gate,
         )
     except HostedAccessDeniedError as exc:
         raise HTTPException(
@@ -520,6 +541,8 @@ async def create_batch(
             detail=model_not_allowed_detail(request.model),
             headers=error_headers(MODEL_NOT_ALLOWED),
         ) from exc
+    except CountryNotServedError as exc:
+        raise country_not_supported(exc.gate, request.model) from exc
     except Exception as exc:
         raise _hosted_credential_unusable(resolved.instance, exc) from exc
     if served is not None:
@@ -555,7 +578,7 @@ async def create_batch(
     try:
         require_declared_credential(config, resolved.instance, provider, provider_kwargs)
     except MissingApiKeyError as exc:
-        raise _not_configured(exc) from exc
+        raise missing_credential_error(MissingCredential.from_error(exc)) from exc
 
     # A key flagged exclude_from_budget logs cost but is never reserved or folded
     # into users.spend, at create time and again when results are accounted.
@@ -687,6 +710,7 @@ async def retrieve_batch(
         config,
         provider,
         port=model_provider_port_on(raw_request, db),
+        country_gate=country_gate_for(config, raw_request),
         organization_id=await organization_for_workspace_id(db, workspace_id),
         workspace_id=workspace_id,
     )
@@ -719,6 +743,7 @@ async def cancel_batch(
         config,
         provider,
         port=model_provider_port_on(raw_request, db),
+        country_gate=country_gate_for(config, raw_request),
         organization_id=await organization_for_workspace_id(db, workspace_id),
         workspace_id=workspace_id,
     )
@@ -767,6 +792,7 @@ async def list_batches(
         config,
         provider,
         port=model_provider_port_on(raw_request, db),
+        country_gate=country_gate_for(config, raw_request),
         organization_id=await organization_for_workspace_id(db, workspace_id),
         workspace_id=workspace_id,
     )
@@ -842,6 +868,7 @@ async def retrieve_batch_results(
         config,
         provider,
         port=model_provider_port_on(raw_request, db),
+        country_gate=country_gate_for(config, raw_request),
         organization_id=origin_organization_id,
         workspace_id=origin_workspace_id,
     )

@@ -32,11 +32,14 @@ _LogSessionLocal: async_sessionmaker[AsyncSession] | None = None
 # "database is locked", in milliseconds.
 _SQLITE_BUSY_TIMEOUT_MS = 5000
 
-# Async drivers this gateway can be pointed at, mapped to the sync driver
-# Alembic needs for the same database. Both are declared dependencies.
+# Drivers this gateway can be pointed at, mapped to the sync driver Alembic
+# needs for the same database. Both are declared dependencies. A bare
+# ``postgresql`` is named explicitly because SQLAlchemy 2.1 resolves it to
+# psycopg 3, which is not installed.
 _ASYNC_TO_SYNC_DRIVER = {
     "sqlite+aiosqlite": "sqlite",
-    "postgresql+asyncpg": "postgresql",
+    "postgresql+asyncpg": "postgresql+psycopg2",
+    "postgresql": "postgresql+psycopg2",
 }
 
 
@@ -74,8 +77,9 @@ def to_sync_url(database_url: str) -> str:
     either form (see :func:`_to_async_url`), so the documented
     ``sqlite+aiosqlite://`` URL must not be the one thing that breaks startup.
 
-    A URL that is already synchronous, or whose driver has no async counterpart
-    here, is returned unchanged.
+    A bare ``postgresql://`` gains its psycopg2 driver; any other URL that is
+    already synchronous, or whose driver has no async counterpart here, is
+    returned unchanged.
     """
 
     url: URL = make_url(database_url)

@@ -861,6 +861,57 @@ describe("KeysPage", () => {
     },
   )
 
+  it("keeps a member from switching back on a key an operator switched off", async () => {
+    mockApi({
+      keys: [
+        apiKey({
+          id: "key-1",
+          key_name: "locked",
+          is_active: false,
+          operator_disabled: true,
+        }),
+      ],
+      deploymentOperator: false,
+      role: "member",
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("locked")).closest("tr")!
+    await user.click(
+      within(row).getByRole("button", { name: "Actions for locked" }),
+    )
+    const enable = await screen.findByRole("menuitem", { name: /^Enable/ })
+    expect(enable).toHaveAttribute("aria-disabled", "true")
+    expect(
+      within(enable).getByText("Switched off by an operator"),
+    ).toBeInTheDocument()
+  })
+
+  it("offers a viewer their keys to read and nothing that changes one", async () => {
+    mockApi({
+      keys: [apiKey({ id: "key-1", key_name: "issued" })],
+      deploymentOperator: false,
+      role: "viewer",
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("issued")).closest("tr")!
+    expect(
+      screen.queryByRole("button", { name: "Create key" }),
+    ).not.toBeInTheDocument()
+    expect(within(row).queryByRole("checkbox")).not.toBeInTheDocument()
+
+    // The trigger still opens the key's details, with no menu under them.
+    await user.click(
+      within(row).getByRole("button", { name: "Details for issued" }),
+    )
+    expect(await screen.findByText("Created:")).toBeInTheDocument()
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument()
+    expect(screen.queryAllByRole("menuitem")).toEqual([])
+  })
+
   it("regenerates a secret after an explicit confirm", async () => {
     mockApi({
       keys: [apiKey({ id: "key-1", key_name: "ci-bot", is_active: true })],

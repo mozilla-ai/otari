@@ -25,6 +25,7 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+from sqlmodel import col
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.auth.models import hash_key
@@ -33,6 +34,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.tenancy import OrganizationService
 
 _PREFIX = f"{API_ROOT}/organizations/me/keys"
 
@@ -55,6 +57,7 @@ def _identity(
     organization_id: uuid.UUID,
     role: str = "member",
     workspace_ids: tuple[uuid.UUID, ...] = (),
+    workspace_role: str = "member",
     membership: bool = True,
     is_superuser: bool = False,
 ) -> tuple[uuid.UUID, str]:
@@ -83,7 +86,7 @@ def _identity(
             WorkspaceMember(
                 workspace_id=workspace_id,
                 user_id=user.id,
-                role="member",
+                role=workspace_role,
                 status="active",
             )
         )
@@ -148,6 +151,33 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
                 session,
                 email="colleague@alpha.test",
                 organization_id=alpha.id,
+                workspace_ids=(alpha_one.id,),
+            ),
+            # Read-only in the organization and in alpha one.
+            "alpha_viewer": _identity(
+                session,
+                email="viewer@alpha.test",
+                organization_id=alpha.id,
+                role="viewer",
+                workspace_ids=(alpha_one.id,),
+                workspace_role="viewer",
+            ),
+            # A member of the organization made a viewer of alpha one: the
+            # workspace role is the one that decides.
+            "alpha_workspace_viewer": _identity(
+                session,
+                email="workspace-viewer@alpha.test",
+                organization_id=alpha.id,
+                workspace_ids=(alpha_one.id,),
+                workspace_role="viewer",
+            ),
+            # The other way round, and what an invitation used to produce: a
+            # viewer of the organization given member in alpha one.
+            "alpha_viewer_promoted": _identity(
+                session,
+                email="promoted@alpha.test",
+                organization_id=alpha.id,
+                role="viewer",
                 workspace_ids=(alpha_one.id,),
             ),
             # In the organization, in none of its workspaces.
@@ -318,6 +348,123 @@ def test_a_revoked_spend_identity_cannot_mint_its_way_back(client: TestClient, w
     )
     assert code == status.HTTP_404_NOT_FOUND, body
     assert "has been deleted" in body["detail"]
+
+
+@pytest.mark.parametrize("who", ["alpha_viewer", "alpha_workspace_viewer", "alpha_viewer_promoted"])
+def test_a_viewer_cannot_mint_a_key(client: TestClient, world: _World, who: str) -> None:
+    """Viewer is read-only, held in the organization, the workspace or both: the more restrictive role wins."""
+    for body in ({"key_name": "named", "workspace_id": str(world.workspaces["alpha_one"])}, {"key_name": "default"}):
+        code, refused = _create(client, world, who, body)
+        assert code == status.HTTP_403_FORBIDDEN, refused
+
+    code, listed = _request(client, world, who, "GET", _PREFIX)
+    assert code == status.HTTP_200_OK
+    assert listed == []
+
+
+def test_a_viewer_outside_the_default_workspace_hears_403_not_409(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """Told to name a workspace, a viewer would only be refused again there."""
+    session = db_session_factory()
+    try:
+        _identity(session, email="outsider@alpha.test", organization_id=world.alpha, role="viewer")
+    finally:
+        session.close()
+    world.sessions["alpha_outsider_viewer"] = "otari-sess-outsider@alpha.test"
+
+    code, body = _create(client, world, "alpha_outsider_viewer", {"key_name": "default"})
+    assert code == status.HTTP_403_FORBIDDEN, body
+    # A member in the same position still gets the advice.
+    code, body = _create(client, world, "alpha_newcomer", {"key_name": "default"})
+    assert code == status.HTTP_409_CONFLICT, body
+
+
+def test_removing_a_member_from_a_workspace_switches_their_keys_there_off(client: TestClient, world: _World) -> None:
+    """The removed member keeps nothing that still spends, and may only take the key further away."""
+    workspace = str(world.workspaces["alpha_one"])
+    code, mine = _create(client, world, "alpha_member", {"key_name": "mine", "workspace_id": workspace})
+    assert code == status.HTTP_200_OK, mine
+    code, theirs = _create(client, world, "alpha_colleague", {"key_name": "theirs", "workspace_id": workspace})
+    assert code == status.HTTP_200_OK, theirs
+
+    code, body = _request(
+        client,
+        world,
+        "alpha_owner",
+        "DELETE",
+        f"{API_ROOT}/workspaces/{workspace}/members/{world.users['alpha_member']}",
+    )
+    assert code == status.HTTP_200_OK, body
+
+    code, listed = _request(client, world, "alpha_member", "GET", _PREFIX)
+    assert code == status.HTTP_200_OK
+    assert next(row for row in listed if row["id"] == mine["id"])["is_active"] is False
+    # A colleague who stays keeps their key.
+    code, listed = _request(client, world, "alpha_colleague", "GET", _PREFIX)
+    assert next(row for row in listed if row["id"] == theirs["id"])["is_active"] is True
+
+    for method, path, body in (
+        ("PATCH", f"{_PREFIX}/{mine['id']}", {"is_active": True}),
+        ("PATCH", f"{_PREFIX}/{mine['id']}", {"key_name": "renamed"}),
+        ("POST", f"{_PREFIX}/{mine['id']}/rotate", None),
+    ):
+        code, refused = _request(client, world, "alpha_member", method, path, json=body)
+        assert code == status.HTTP_403_FORBIDDEN, (method, body, refused)
+
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{mine['id']}", json={"is_active": False})
+    assert code == status.HTTP_200_OK, body
+    code, _ = _request(client, world, "alpha_member", "DELETE", f"{_PREFIX}/{mine['id']}")
+    assert code == status.HTTP_204_NO_CONTENT
+
+
+def test_a_viewer_lists_but_cannot_change_a_key_issued_to_them(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """The operator issues a viewer's key and the viewer may read it, but not edit, rotate or revoke it."""
+    raw = DefaultApiKeyFormatAdapter(None).mint()
+    key_id = str(uuid.uuid4())
+    owner_id = str(world.users["alpha_viewer"])
+    session = db_session_factory()
+    try:
+        session.add(BillingUser(user_id=owner_id, alias="Viewer"))
+        session.commit()
+        session.add(
+            APIKey(
+                id=key_id,
+                workspace_id=world.workspaces["alpha_one"],
+                key_hash=hash_key(raw),
+                key_prefix=DefaultApiKeyFormatAdapter(None).fingerprint(raw),
+                key_name="issued",
+                user_id=owner_id,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    code, listed = _request(client, world, "alpha_viewer", "GET", _PREFIX)
+    assert code == status.HTTP_200_OK
+    assert key_id in {row["id"] for row in listed}
+
+    for method, path, body in (
+        ("PATCH", f"{_PREFIX}/{key_id}", {"key_name": "renamed"}),
+        ("PATCH", f"{_PREFIX}/{key_id}", {"is_active": False}),
+        ("POST", f"{_PREFIX}/{key_id}/rotate", None),
+        ("DELETE", f"{_PREFIX}/{key_id}", None),
+    ):
+        code, refused = _request(client, world, "alpha_viewer", method, path, json=body)
+        assert code == status.HTTP_403_FORBIDDEN, (method, path, refused)
+
+    # Somebody else's key still answers 404, not 403: the role check runs on the
+    # caller's own key only, so it reveals nothing about other ids.
+    code, _ = _request(client, world, "alpha_workspace_viewer", "DELETE", f"{_PREFIX}/{key_id}")
+    assert code == status.HTTP_404_NOT_FOUND
+
+    code, listed = _request(client, world, "alpha_viewer", "GET", _PREFIX)
+    row = next(row for row in listed if row["id"] == key_id)
+    assert row["key_name"] == "issued"
+    assert row["is_active"] is True
 
 
 def test_a_stale_organization_pointer_grants_nothing(client: TestClient, world: _World) -> None:
@@ -645,3 +792,257 @@ def test_a_member_minted_key_authenticates_on_the_data_plane(client: TestClient,
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
     assert "Unknown or unsupported model" in response.json()["detail"]
+
+
+# =============================================================================
+# Provenance: who issued a key decides what a role change does to it
+# =============================================================================
+
+
+def _key_row(db_session_factory: Callable[[], Session], key_id: str) -> APIKey:
+    session = db_session_factory()
+    try:
+        row = session.get(APIKey, key_id)
+        assert row is not None
+        session.expunge(row)
+        return row
+    finally:
+        session.close()
+
+
+def _issue_directly(
+    db_session_factory: Callable[[], Session], world: _World, who: str, *, self_service: bool | None
+) -> str:
+    """A key in alpha one billed to ``who``, of the given origin, as no request can set one up."""
+    raw = DefaultApiKeyFormatAdapter(None).mint()
+    key_id = str(uuid.uuid4())
+    owner_id = str(world.users[who])
+    session = db_session_factory()
+    try:
+        if session.get(BillingUser, owner_id) is None:
+            session.add(BillingUser(user_id=owner_id, alias=who))
+            session.commit()
+        session.add(
+            APIKey(
+                id=key_id,
+                workspace_id=world.workspaces["alpha_one"],
+                key_hash=hash_key(raw),
+                key_prefix=DefaultApiKeyFormatAdapter(None).fingerprint(raw),
+                user_id=owner_id,
+                self_service=self_service,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    return key_id
+
+
+def _organization_member_id(db_session_factory: Callable[[], Session], world: _World, who: str) -> uuid.UUID:
+    session = db_session_factory()
+    try:
+        membership = (
+            session.query(OrganizationMember)
+            .filter(
+                col(OrganizationMember.organization_id) == world.alpha,
+                col(OrganizationMember.user_id) == world.users[who],
+            )
+            .one()
+        )
+        return membership.id
+    finally:
+        session.close()
+
+
+def test_a_member_made_a_workspace_viewer_loses_only_the_keys_they_minted(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """An operator's key and one of unrecorded origin stay on; promoting them back lets them switch theirs on."""
+    workspace = str(world.workspaces["alpha_one"])
+    code, minted = _create(client, world, "alpha_member", {"key_name": "mine", "workspace_id": workspace})
+    assert code == status.HTTP_200_OK, minted
+    issued = _issue_directly(db_session_factory, world, "alpha_member", self_service=False)
+    legacy = _issue_directly(db_session_factory, world, "alpha_member", self_service=None)
+
+    member_path = f"{API_ROOT}/workspaces/{workspace}/members/{world.users['alpha_member']}"
+    code, body = _request(client, world, "alpha_owner", "PATCH", f"{member_path}?role=viewer")
+    assert code == status.HTTP_200_OK, body
+
+    assert _key_row(db_session_factory, minted["id"]).is_active is False
+    assert _key_row(db_session_factory, minted["id"]).operator_disabled is False
+    assert _key_row(db_session_factory, issued).is_active is True
+    assert _key_row(db_session_factory, legacy).is_active is True
+
+    code, body = _request(client, world, "alpha_owner", "PATCH", f"{member_path}?role=member")
+    assert code == status.HTTP_200_OK, body
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": True})
+    assert code == status.HTTP_200_OK, body
+    assert body["is_active"] is True
+
+
+def test_an_organization_viewer_loses_the_keys_they_minted_in_every_workspace(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    code, minted = _create(
+        client, world, "alpha_member", {"key_name": "mine", "workspace_id": str(world.workspaces["alpha_one"])}
+    )
+    assert code == status.HTTP_200_OK, minted
+    issued = _issue_directly(db_session_factory, world, "alpha_member", self_service=False)
+
+    member_id = _organization_member_id(db_session_factory, world, "alpha_member")
+    code, body = _request(
+        client,
+        world,
+        "alpha_owner",
+        "PATCH",
+        f"{API_ROOT}/organizations/me/members/{member_id}",
+        json={"role": "viewer"},
+    )
+    assert code == status.HTTP_200_OK, body
+
+    assert _key_row(db_session_factory, minted["id"]).is_active is False
+    assert _key_row(db_session_factory, issued).is_active is True
+
+
+def test_removing_someone_from_the_organization_switches_off_every_key_billed_to_them_there(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    code, minted = _create(
+        client, world, "alpha_member", {"key_name": "mine", "workspace_id": str(world.workspaces["alpha_one"])}
+    )
+    assert code == status.HTTP_200_OK, minted
+    issued = _issue_directly(db_session_factory, world, "alpha_member", self_service=False)
+    code, theirs = _create(client, world, "alpha_colleague", {"key_name": "theirs"})
+    assert code == status.HTTP_200_OK, theirs
+    # One they had already switched off themselves is locked as well.
+    code, off = _create(client, world, "alpha_member", {"key_name": "off"})
+    assert code == status.HTTP_200_OK, off
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{off['id']}", json={"is_active": False})
+    assert code == status.HTTP_200_OK, body
+
+    member_id = _organization_member_id(db_session_factory, world, "alpha_member")
+    code, body = _request(client, world, "alpha_owner", "DELETE", f"{API_ROOT}/organizations/me/members/{member_id}")
+    assert code in {status.HTTP_200_OK, status.HTTP_204_NO_CONTENT}, body
+
+    for key_id in (minted["id"], issued, off["id"]):
+        row = _key_row(db_session_factory, key_id)
+        assert row.is_active is False
+        assert row.operator_disabled is True
+    assert _key_row(db_session_factory, theirs["id"]).is_active is True
+
+
+def test_a_key_an_operator_switched_off_stays_off_for_its_owner(client: TestClient, world: _World) -> None:
+    code, minted = _create(client, world, "alpha_member", {"key_name": "mine"})
+    assert code == status.HTTP_200_OK, minted
+
+    code, body = _request(
+        client, world, "alpha_operator", "PATCH", f"{API_ROOT}/keys/{minted['id']}", json={"is_active": False}
+    )
+    assert code == status.HTTP_200_OK, body
+    assert body["operator_disabled"] is True
+
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": True})
+    assert code == status.HTTP_403_FORBIDDEN, body
+    # A refusal changes nothing else sent with it.
+    code, body = _request(
+        client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": True, "key_name": "y"}
+    )
+    assert code == status.HTTP_403_FORBIDDEN, body
+    code, listed = _request(client, world, "alpha_member", "GET", _PREFIX)
+    assert next(row for row in listed if row["id"] == minted["id"])["key_name"] == "mine"
+    # Their other edits, and keeping it off, are still theirs.
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"key_name": "x"})
+    assert code == status.HTTP_200_OK, body
+
+    code, body = _request(
+        client, world, "alpha_operator", "PATCH", f"{API_ROOT}/keys/{minted['id']}", json={"is_active": True}
+    )
+    assert code == status.HTTP_200_OK, body
+    assert body["operator_disabled"] is False
+    code, body = _request(
+        client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": False}
+    )
+    assert code == status.HTTP_200_OK, body
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": True})
+    assert code == status.HTTP_200_OK, body
+
+
+def _operator_edit_after_the_load(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session_factory: Callable[[], Session],
+    key_id: str,
+    edit: Callable[[APIKey], None],
+) -> list[int]:
+    """Commit an operator's ``edit`` to the key between the member PATCH's load and its locked re-read."""
+    hold = OrganizationService.hold_workspace_write_access
+    calls = [0]
+
+    async def edit_after_the_load(self: OrganizationService, **kwargs: Any) -> None:
+        await hold(self, **kwargs)
+        calls[0] += 1
+        if calls[0] == 1:
+            session = db_session_factory()
+            try:
+                row = session.get(APIKey, key_id)
+                assert row is not None
+                edit(row)
+                session.commit()
+            finally:
+                session.close()
+
+    monkeypatch.setattr(OrganizationService, "hold_workspace_write_access", edit_after_the_load)
+    return calls
+
+
+def test_an_operator_switch_off_landing_mid_update_is_not_overwritten(
+    client: TestClient,
+    world: _World,
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The owner's update re-reads the key it decides on, so a switch-off committed after the load still refuses."""
+    code, minted = _create(client, world, "alpha_member", {"key_name": "mine"})
+    assert code == status.HTTP_200_OK, minted
+
+    def switch_off(row: APIKey) -> None:
+        row.is_active = False
+        row.operator_disabled = True
+
+    calls = _operator_edit_after_the_load(monkeypatch, db_session_factory, minted["id"], switch_off)
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": True})
+
+    assert calls == [1]
+    assert code == status.HTTP_403_FORBIDDEN, body
+    row = _key_row(db_session_factory, minted["id"])
+    assert (row.is_active, row.operator_disabled) == (False, True)
+
+
+def test_an_operator_narrowing_landing_mid_update_survives_an_unrelated_edit(
+    client: TestClient,
+    world: _World,
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An update that sends no access list leaves the stored ones as they are by then, not as they were loaded."""
+    code, minted = _create(client, world, "alpha_member", {"key_name": "mine"})
+    assert code == status.HTTP_200_OK, minted
+
+    def narrow(row: APIKey) -> None:
+        row.allowed_models = ["openai:gpt-4o-mini"]
+        row.allowed_tools = []
+
+    calls = _operator_edit_after_the_load(monkeypatch, db_session_factory, minted["id"], narrow)
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"key_name": "x"})
+
+    assert calls == [1]
+    assert code == status.HTTP_200_OK, body
+    row = _key_row(db_session_factory, minted["id"])
+    assert (row.key_name, row.allowed_models, row.allowed_tools) == ("x", ["openai:gpt-4o-mini"], [])
+
+
+def test_a_member_minted_key_records_its_origin(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    code, minted = _create(client, world, "alpha_member", {"key_name": "mine"})
+    assert code == status.HTTP_200_OK, minted
+    assert _key_row(db_session_factory, minted["id"]).self_service is True

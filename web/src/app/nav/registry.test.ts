@@ -90,7 +90,7 @@ describe("nav registry", () => {
       "Settings",
       "Accounts",
       "Hosted providers",
-      "Web search pricing",
+      "Web search",
       "Code execution pricing",
       "Health",
     ])
@@ -183,7 +183,7 @@ describe("nav registry", () => {
       ["/settings", "settings", "refused"],
       ["/admin/accounts", "admin", "unlisted"],
       ["/admin/hosted-providers", "hosted_providers", "unlisted"],
-      ["/admin/web-search", "pricing", "refused"],
+      ["/admin/web-search", "tools", "refused"],
       ["/admin/code-execution", "pricing", "refused"],
       ["/health-checks", "health_checks", "refused"],
     ] as const) {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import mimetypes
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -111,6 +112,34 @@ class SandboxFileBridge:
             chunks,
         )
         return file_id if size else None
+
+    async def store_provider_output(self, data: bytes, mime_type: str) -> str | None:
+        """Store a file a provider's sandbox returned inline, and return its new ``file_id``.
+
+        Gemini sends what its code produced as bytes in the reply rather than as a
+        file ID, so there is nothing to fetch and no ID to keep. Draws on the same
+        per-request caps as :meth:`copy_provider_files`; ``None`` when the caps are
+        spent or the store refused it, since a lost file is a smaller failure than a
+        lost reply.
+        """
+        if self._provider_files_left <= 0 or len(data) > self._provider_bytes_left:
+            logger.warning("Provider output of %d bytes skipped: over what this request may still store", len(data))
+            return None
+        filename = f"output-{uuid.uuid4().hex[:12]}{mimetypes.guess_extension(mime_type) or ''}"
+
+        async def chunks() -> AsyncIterator[bytes]:
+            yield data
+
+        try:
+            file_id = await self.store_output(filename, chunks())
+        except Exception as exc:  # noqa: BLE001 - a file that cannot be stored must not fail the reply
+            # The class only: a storage backend's error can carry its paths and settings.
+            logger.warning("Could not store a %d byte provider output: %s", len(data), type(exc).__name__)
+            return None
+        if file_id is not None:
+            self._provider_files_left -= 1
+            self._provider_bytes_left -= len(data)
+        return file_id
 
     async def copy_provider_files(self, files: list[ProviderFile], *, provider: str, provider_instance: str) -> None:
         """Copy the files a provider's own sandbox produced into the store, each under the provider's ID.

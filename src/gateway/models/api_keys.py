@@ -51,6 +51,15 @@ class APIKey(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(default=True)
+    # True for a key a member minted for themselves on the member key surface,
+    # false for one an operator issued or config.yml declared, NULL where the
+    # key predates the column and its origin is unrecorded. Demoting a member
+    # to viewer switches off only the true ones.
+    self_service: Mapped[bool | None] = mapped_column(default=None)
+    # True while the key is off because an operator, or a removal from its
+    # workspace or organization, switched it off; its owner may not switch it
+    # back on. Cleared when an operator switches it on.
+    operator_disabled: Mapped[bool] = mapped_column(default=False, server_default=false())
     # When true, requests authenticated with this key are logged with their computed
     # cost but skip budget reservation/reconciliation: their spend is never written to
     # User.spend and never gates enforcement. Default false keeps every existing key

@@ -4,7 +4,8 @@ A leaf type, so the traces service can build it and the response schemas can map
 it without either importing the other.
 """
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from typing import Literal
@@ -54,6 +55,30 @@ class GateSummary:
     gate_type: str | None = None
     enforcement: str | None = None
     message: str | None = None
+    runs: tuple[str, ...] = ()
+    origin: str | None = None
+
+
+@dataclass(frozen=True)
+class ToolCost:
+    """An estimate of what one tool call cost, from the model requests either side of it.
+
+    ``subagent`` is exact: what the requests of a subagent the call ran cost.
+    """
+
+    span_id: str
+    calling: Decimal
+    writing: Decimal
+    rereading: Decimal
+    result_tokens: int
+    later_requests: int
+    calls_sharing_request: int
+    calls_sharing_result: int
+    subagent: Decimal | None = None
+
+    @property
+    def total(self) -> Decimal:
+        return self.calling + self.writing + self.rereading + (self.subagent or Decimal(0))
 
 
 @dataclass(frozen=True)
@@ -68,3 +93,6 @@ class TraceView:
     approximate: frozenset[str]
     truncated: bool
     gates: tuple[GateSummary, ...] = ()
+    tool_costs: tuple[ToolCost, ...] = ()
+    # The context window of each model request's model, by span id, where one is known.
+    context_windows: Mapping[str, int] = field(default_factory=dict)

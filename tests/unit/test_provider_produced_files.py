@@ -14,7 +14,9 @@ from typing import Any, cast
 import httpx
 import pytest
 from any_llm import LLMProvider
+from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice
 from any_llm.types.files import AsyncFileDownload
+from any_llm.utils.messages_compat import chat_completion_to_message_response
 
 from gateway.adapters.provider_file_adapter import (
     _TIMEOUT,
@@ -28,6 +30,7 @@ from gateway.services.files._provider_files import (
     anthropic_produced_files,
     produced_files_for,
     responses_produced_files,
+    store_inline_outputs,
 )
 from gateway.types.provider_account import ResolvedCredential
 from gateway.types.provider_file import ProviderFile
@@ -472,3 +475,104 @@ async def test_a_lookup_that_fails_otherwise_keeps_the_file_held(monkeypatch: py
     _serving(monkeypatch, lambda request: httpx.Response(500, json=error))
 
     assert await _client().holds("file_01abc") is True
+
+
+_PNG = "iVBORw0KGgo="  # base64 of the PNG signature, eight bytes
+
+
+def _gemini_completion() -> ChatCompletion:
+    """A chat completion carrying Gemini code execution with one produced image."""
+    items = [
+        {"type": "executable_code", "id": "code_exec_0", "language": "PYTHON", "code": "plot()"},
+        {"type": "code_execution_result", "id": "code_exec_0", "outcome": "OUTCOME_OK", "output": "done"},
+        {"type": "code_execution_output", "id": "code_exec_0", "mime_type": "image/png", "data": _PNG},
+    ]
+    message = ChatCompletionMessage(
+        role="assistant", content="Here it is.", extra_content={"google": {"code_execution": items}}
+    )
+    return ChatCompletion(
+        id="c",
+        choices=[Choice(index=0, finish_reason="stop", message=message)],
+        created=0,
+        model="m",
+        object="chat.completion",
+    )
+
+
+class _Store:
+    def __init__(self, answer: str | None = "file-1") -> None:
+        self.answer = answer
+        self.stored: list[tuple[bytes, str]] = []
+
+    async def __call__(self, data: bytes, mime_type: str) -> str | None:
+        self.stored.append((data, mime_type))
+        return self.answer
+
+
+def _execution_result(reply: Any) -> dict[str, Any]:
+    result = next(block for block in reply.content if block.type == "code_execution_tool_result")
+    return cast(dict[str, Any], result.model_dump()["content"])
+
+
+@pytest.mark.asyncio
+async def test_a_bridged_gemini_reply_names_its_produced_file_like_anthropic_does() -> None:
+    reply = chat_completion_to_message_response(_gemini_completion())
+    store = _Store()
+
+    await store_inline_outputs("messages", reply, store)
+
+    dumped = _execution_result(reply)
+    assert store.stored == [(b"\x89PNG\r\n\x1a\n", "image/png")]
+    assert dumped["content"] == [{"type": "code_execution_output", "file_id": "file-1"}]
+    assert "inline_outputs" not in dumped
+    assert [file.file_id for file in produced_files_for("messages", reply)] == ["file-1"]
+
+
+@pytest.mark.asyncio
+async def test_a_bridged_output_that_could_not_be_stored_keeps_its_bytes() -> None:
+    reply = chat_completion_to_message_response(_gemini_completion())
+
+    await store_inline_outputs("messages", reply, _Store(answer=None))
+
+    dumped = _execution_result(reply)
+    assert dumped["content"] == []
+    assert dumped["inline_outputs"] == [{"mime_type": "image/png", "data": _PNG}]
+
+
+@pytest.mark.asyncio
+async def test_a_gemini_chat_reply_keeps_the_file_id_instead_of_the_bytes() -> None:
+    completion = _gemini_completion()
+    store = _Store()
+
+    await store_inline_outputs("chat", completion, store)
+
+    output = completion.choices[0].message.extra_content["google"]["code_execution"][2]  # type: ignore[index]
+    assert output == {
+        "type": "code_execution_output",
+        "id": "code_exec_0",
+        "mime_type": "image/png",
+        "file_id": "file-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_output_that_could_not_be_stored_is_left_as_sent() -> None:
+    completion = _gemini_completion()
+
+    await store_inline_outputs("chat", completion, _Store(answer=None))
+
+    output = completion.choices[0].message.extra_content["google"]["code_execution"][2]  # type: ignore[index]
+    assert output["data"] == _PNG
+    assert "file_id" not in output
+
+
+@pytest.mark.asyncio
+async def test_undecodable_bytes_and_other_dialects_store_nothing() -> None:
+    completion = _gemini_completion()
+    completion.choices[0].message.extra_content["google"]["code_execution"][2]["data"] = "not base64!"  # type: ignore[index]
+    store = _Store()
+
+    await store_inline_outputs("chat", completion, store)
+    await store_inline_outputs("responses", _gemini_completion(), store)
+
+    assert store.stored == []

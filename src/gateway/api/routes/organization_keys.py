@@ -22,6 +22,11 @@ established for usage reads (otari#837), applied to a write surface:
   organization, or one in this organization the caller is not a member of,
   answers 404 exactly as one that does not exist. Omitting it targets the
   organization's default workspace, put through the same check.
+* **A viewer is read-only.** Creating, changing, rotating or revoking a key
+  takes a role above ``viewer`` in both the organization and the key's
+  workspace (or organization owner/admin), through
+  ``OrganizationService.require_workspace_contributor_access``.
+  A viewer still lists the keys billed to them, so an operator can issue them one.
 * **No budget bypass.** The operator's create takes ``exclude_from_budget``;
   this one does not, and always mints an enforced key: a member exempting their
   own key from budget would be minting their own unlimited spend.
@@ -78,8 +83,7 @@ from gateway.services.model_access import (
     validate_allowed_models,
     validate_allowed_tools,
 )
-from gateway.services.organizations import AccessLists
-from gateway.services.tenancy import OrganizationService
+from gateway.services.tenancy import DeploymentUserService, OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
 from gateway.services.workspace_scope import organization_default_workspace_id
 
@@ -173,6 +177,29 @@ async def _caller_context(db: AsyncSession, identity: TenancyUser) -> tuple[uuid
     return organization.id, str(identity.id)
 
 
+async def _load_own_writable_key(
+    db: AsyncSession,
+    organizations: OrganizationService,
+    identity: TenancyUser,
+    key_id: str,
+    *,
+    revoking: bool = False,
+) -> APIKey:
+    """One of the caller's own keys, or 404, refused with 403 to a viewer of its workspace.
+
+    A viewer still lists their keys; changing, rotating or revoking one is a
+    write, and an operator who issued a key to a read-only member is the one
+    who changes it. A caller removed from the key's workspace may still
+    ``revoking`` it, switching it off or deleting it, and nothing else.
+    """
+    organization = await organizations.get_active_organization_for_user(identity)
+    key = await _load_key_in_organization(db, key_id, organization.id, owner_user_id=str(identity.id))
+    await organizations.hold_workspace_write_access(
+        user=identity, organization_id=organization.id, workspace_id=key.workspace_id, revoking=revoking
+    )
+    return key
+
+
 @router.post("")
 async def create_own_key(
     request: CreateOwnKeyRequest,
@@ -182,15 +209,16 @@ async def create_own_key(
     config: Annotated[GatewayConfig, Depends(get_config)],
     growth: GrowthSignalPortDep,
     key_format: ApiKeyFormatPortDep,
+    organizations: OrganizationServiceDep,
 ) -> CreateKeyResponse:
     """Create an API key owned by the caller, in a workspace they may see.
 
     The member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the
     caller's own attribution user, the key is always budget-enforced, and the
     workspace must be visible to the caller (a member of it, or an organization
-    owner/admin, who see every workspace). The secret is returned once.
+    owner/admin, who see every workspace). A viewer of the workspace is refused
+    with 403. The secret is returned once.
     """
-    organizations = OrganizationService(db, membership_listener=None)
     organization = await organizations.get_active_organization_for_user(identity)
 
     if request.workspace_id is not None:
@@ -220,6 +248,11 @@ async def create_own_key(
                 organizations=organizations,
             )
         except WorkspaceNotFoundError:
+            # A viewer is refused whichever workspace they name, so they hear
+            # that rather than advice to name one.
+            await organizations.require_workspace_contributor_access(
+                user=identity, organization_id=organization.id, workspace_id=resolved, membership_required=False
+            )
             # The caller named nothing, so "not found" would point them at a
             # parameter they did not send; say what to do instead.
             raise HTTPException(
@@ -228,6 +261,9 @@ async def create_own_key(
                 "pass workspace_id naming a workspace you belong to.",
             ) from None
         workspace_id = workspace.id
+    await organizations.hold_workspace_write_access(
+        user=identity, organization_id=organization.id, workspace_id=workspace_id, revoking=False
+    )
 
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)
@@ -283,6 +319,7 @@ async def create_own_key(
         allowed_models=allowed_models,
         allowed_tools=allowed_tools,
         exclude_from_budget=False,
+        self_service=True,
         reject_user_mismatch=request.reject_user_mismatch,
         capture_agent_telemetry=request.capture_agent_telemetry,
         metadata_=request.metadata,
@@ -358,53 +395,27 @@ async def update_own_key(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     api_keys: ApiKeyServiceDep,
+    organizations: OrganizationServiceDep,
 ) -> KeyInfo:
     """Update one of the caller's own API keys."""
-    organization_id, owner_user_id = await _caller_context(db, identity)
-    key = await _load_key_in_organization(db, key_id, organization_id, owner_user_id=owner_user_id)
+    switching_off = request.model_fields_set == {"is_active"} and request.is_active is False
+    key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=switching_off)
 
-    # Before the key is changed, and narrow-only against the caller's own lists
-    # (see keys.update_key).
-    fields = request.model_fields_set
-    stored = AccessLists(key.allowed_models, key.allowed_tools)
+    # Tri-state via model_fields_set: the nullable columns take null to clear
+    # them, so "absent" and "null" have to be told apart. ``is_active`` and
+    # ``metadata`` are not nullable, so ``is not None`` is the whole distinction there.
+    changes = request.model_dump(include=request.model_fields_set - {"is_active", "metadata"})
+    if request.is_active is not None:
+        changes["is_active"] = request.is_active
+    if request.metadata is not None:
+        changes["metadata_"] = request.metadata
+
     try:
-        access = await api_keys.check_access_lists(
-            config,
-            AccessLists(
-                request.allowed_models if "allowed_models" in fields else stored.models,
-                request.allowed_tools if "allowed_tools" in fields else stored.tools,
-            ),
-            stored=stored,
-            owner_id=owner_user_id,
-        )
+        await api_keys.update_owned(config, key, changes, owner_id=str(identity.id))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-    # Tri-state via model_fields_set: both columns are nullable and the
-    # dashboard's edit form sends null to clear them, so "absent" and "null"
-    # have to be told apart. ``is_active`` is not nullable, so ``is not None``
-    # is the whole distinction there.
-    if "key_name" in request.model_fields_set:
-        key.key_name = request.key_name
-    if request.is_active is not None:
-        key.is_active = request.is_active
-    if "expires_at" in request.model_fields_set:
-        key.expires_at = request.expires_at
-    if "reject_user_mismatch" in request.model_fields_set:
-        key.reject_user_mismatch = request.reject_user_mismatch
-    if "capture_agent_telemetry" in request.model_fields_set:
-        key.capture_agent_telemetry = request.capture_agent_telemetry
-    key.allowed_models = access.models
-    key.allowed_tools = access.tools
-    if request.metadata is not None:
-        key.metadata_ = request.metadata
-
-    try:
-        await db.commit()
     except DATABASE_ERRORS as exc:
-        await db.rollback()
         raise database_error("update own key", exc) from None
-    await db.refresh(key)
 
     return KeyInfo.from_model(key)
 
@@ -415,6 +426,7 @@ async def rotate_own_key(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
     key_format: ApiKeyFormatPortDep,
+    organizations: OrganizationServiceDep,
 ) -> CreateKeyResponse:
     """Rotate the secret of one of the caller's own API keys, in place.
 
@@ -422,8 +434,7 @@ async def rotate_own_key(
     raw key is returned once, and the previous secret stops authenticating
     immediately with no grace window.
     """
-    organization_id, owner_user_id = await _caller_context(db, identity)
-    key = await _load_key_in_organization(db, key_id, organization_id, owner_user_id=owner_user_id)
+    key = await _load_own_writable_key(db, organizations, identity, key_id)
 
     new_api_key = key_format.mint()
     key.key_hash = hash_key(new_api_key)
@@ -450,10 +461,10 @@ async def delete_own_key(
     key_id: str,
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organizations: OrganizationServiceDep,
 ) -> None:
     """Delete (revoke) one of the caller's own API keys."""
-    organization_id, owner_user_id = await _caller_context(db, identity)
-    key = await _load_key_in_organization(db, key_id, organization_id, owner_user_id=owner_user_id)
+    key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=True)
 
     await db.delete(key)
     try:
@@ -466,10 +477,10 @@ async def delete_own_key(
 async def _federation_rule_key(
     db: AsyncSession,
     organizations: OrganizationService,
+    deployment_users: DeploymentUserService,
     identity: TenancyUser,
     key_id: str,
     *,
-    operates: bool,
     adding: bool,
 ) -> APIKey:
     """The key a federation rule route acts on, or 404.
@@ -479,6 +490,7 @@ async def _federation_rule_key(
     rule decides which workloads may act as the key; listing and deleting do not, so a caller whose role was lowered
     can still see and take back what they set up.
     """
+    operates = await deployment_users.has_administration_access(identity)
     organization = await organizations.get_active_organization_for_user(identity)
     if operates:
         return await _load_key_in_organization(db, key_id, organization.id)
@@ -511,14 +523,7 @@ async def create_own_federation_rule(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This deployment does not let organizations manage federation rules.",
         )
-    key = await _federation_rule_key(
-        db,
-        organizations,
-        identity,
-        key_id,
-        operates=await deployment_users.has_administration_access(identity),
-        adding=True,
-    )
+    key = await _federation_rule_key(db, organizations, deployment_users, identity, key_id, adding=True)
     return await api_keys.add_federation_rule(key.id, request, allowed_issuers=(), member_managed=True)
 
 
@@ -536,14 +541,7 @@ async def list_own_federation_rules(
     The caller's own key, or for the deployment operator any key in their active organization. Includes any rule
     the operator gave the key on ``/api/v1/keys``, which ``member_managed`` tells apart.
     """
-    key = await _federation_rule_key(
-        db,
-        organizations,
-        identity,
-        key_id,
-        operates=await deployment_users.has_administration_access(identity),
-        adding=False,
-    )
+    key = await _federation_rule_key(db, organizations, deployment_users, identity, key_id, adding=False)
     return await api_keys.list_federation_rules(key.id)
 
 
@@ -562,13 +560,6 @@ async def delete_own_federation_rule(
     The caller's own key whatever their role, or for the deployment operator any key in their active organization.
     Works whether or not ``federation_member_rules`` is on, so a rule can always be taken back.
     """
-    key = await _federation_rule_key(
-        db,
-        organizations,
-        identity,
-        key_id,
-        operates=await deployment_users.has_administration_access(identity),
-        adding=False,
-    )
+    key = await _federation_rule_key(db, organizations, deployment_users, identity, key_id, adding=False)
     await api_keys.delete_federation_rule(key.id, rule_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

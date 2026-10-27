@@ -25,7 +25,7 @@ import re
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from types import MappingProxyType
 from typing import Literal
@@ -111,6 +111,22 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.mcp.tool_count": int,
     "otari.tool_loop.round": int,
     "otari.harness.version": str,
+    "otari.llm.ttft_ms": int,
+    # USD per million tokens a priced model request paid on each meter, as a decimal.
+    "otari.llm.rate.input": str,
+    "otari.llm.rate.output": str,
+    "otari.llm.rate.cache_read": str,
+    "otari.llm.rate.cache_write": str,
+    # Characters per kind of input in a model request, and how many tool definitions and
+    # messages it held. Sizes only, never text; the dashboard scales them to the exact input tokens.
+    "otari.context.system_chars": int,
+    "otari.context.tools_chars": int,
+    "otari.context.user_chars": int,
+    "otari.context.assistant_chars": int,
+    "otari.context.tool_result_chars": int,
+    "otari.context.file_chars": int,
+    "otari.context.tool_count": int,
+    "otari.context.message_count": int,
     "otari.tool.decision": str,
     "otari.tool.decision_source": str,
     "otari.tool.succeeded": bool,
@@ -127,6 +143,13 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
 # and each element is held to the identifier rule on its own.
 LIST_ATTRIBUTES = frozenset({"gen_ai.response.finish_reasons"})
 LIST_SEPARATOR = ","
+
+
+# What a span may say it was about, when a deployment keeps content
+# (``trace_content_enabled``). Prose, so never a typed field or an attribute,
+# and never searched: shown on the span, and only there.
+SPAN_CONTENT_KEYS = frozenset({"prompt", "command", "file_path", "gate.evidence", "gate.detail"})
+SPAN_CONTENT_MAX_LENGTH = 4_000
 
 
 class InvalidSpanError(ValueError):
@@ -173,6 +196,16 @@ def _check_identifier(name: str, value: str | None) -> None:
         raise InvalidSpanError(f"{name} must be identifier-shaped")
 
 
+# The operation of a span that carries only what a model request cost, priced by
+# the usage ledger after the request: a read folds it onto that request.
+USAGE_OPERATION = "usage"
+# A judge's further model is priced under ``<gate request id><separator><span id>``,
+# so a read adds that cost to its gate's.
+GATE_USAGE_SEPARATOR = ":"
+# The meters a model request is priced on, each a rate attribute ``otari.llm.rate.<meter>``.
+RATE_METERS = ("input", "output", "cache_read", "cache_write")
+
+
 @dataclass(frozen=True)
 class SpanRecord:
     """One span, projected and ready to store.
@@ -209,6 +242,7 @@ class SpanRecord:
     otel_trace_id: str | None = None
     otel_span_id: str | None = None
     attributes: Mapping[str, str | int | float | bool] = field(default_factory=dict)
+    content: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _check_choice("kind", self.kind, SPAN_KINDS)
@@ -244,6 +278,15 @@ class SpanRecord:
             ):
                 raise InvalidSpanError(f"attribute {key} must be identifier-shaped")
         object.__setattr__(self, "attributes", MappingProxyType(attributes))
+        content = dict(self.content)
+        for key, value in content.items():
+            if key not in SPAN_CONTENT_KEYS:
+                raise InvalidSpanError("content may only hold its known keys")
+            if not isinstance(value, str) or len(value) > SPAN_CONTENT_MAX_LENGTH:
+                raise InvalidSpanError(
+                    f"content {key} must be a string of at most {SPAN_CONTENT_MAX_LENGTH} characters"
+                )
+        object.__setattr__(self, "content", MappingProxyType(content))
 
 
 @dataclass(frozen=True)
@@ -295,25 +338,36 @@ class TraceScope:
 
     workspace_ids: frozenset[uuid.UUID]
     deployment_wide: bool = False
+    # A span's retained content (prompts, commands) goes to whoever manages the
+    # workspaces and to the user the trace belongs to; anyone else reads it empty.
+    all_content: bool = False
+    content_user_id: str | None = None
 
     @classmethod
     def deployment(cls) -> "TraceScope":
         """Every workspace: only for a deployment operator."""
-        return cls(workspace_ids=frozenset(), deployment_wide=True)
+        return cls(workspace_ids=frozenset(), deployment_wide=True, all_content=True)
 
     @classmethod
-    def workspaces(cls, workspace_ids: frozenset[uuid.UUID]) -> "TraceScope":
-        """Only these workspaces."""
-        return cls(workspace_ids=workspace_ids)
+    def workspaces(
+        cls, workspace_ids: frozenset[uuid.UUID], *, all_content: bool = False, content_user_id: str | None = None
+    ) -> "TraceScope":
+        """Only these workspaces, with every trace's content or only ``content_user_id``'s own."""
+        return cls(workspace_ids=workspace_ids, all_content=all_content, content_user_id=content_user_id)
+
+    def reads_content_of(self, user_id: str | None) -> bool:
+        """Whether a read in this scope returns the content of a trace ``user_id`` owns."""
+        return self.all_content or (user_id is not None and user_id == self.content_user_id)
 
 
 @dataclass(frozen=True)
 class TraceFilter:
     """What narrows a read, inside its scope.
 
-    Every field narrows; an unset field does not filter. ``start`` is inclusive
-    and ``end`` exclusive, and both apply to a trace's last activity. A naive
-    bound means UTC. Several values in a tuple match any of them. ``workspace_ids``
+    Every field narrows; an unset field does not filter. ``start`` and ``end``
+    keep the traces active in ``[start, end)``: last active at or after ``start``
+    and started before ``end``, so a session still running past ``end`` stays in.
+    A naive bound means UTC. Several values in a tuple match any of them. ``workspace_ids``
     narrows inside the scope like every other field: a workspace outside the scope
     matches nothing, never widens it.
     """
@@ -365,13 +419,27 @@ class TraceSummary:
 
 
 # The grain a series is bucketed by. Bucket starts cross the seam as canonical UTC
-# strings (``YYYY-MM-DDTHH:00:00Z``), so two adapters cannot disagree about a bucket.
-TraceBucketGrain = Literal["hour", "day"]
+# strings (``YYYY-MM-DDTHH:MM:SSZ``), so two adapters cannot disagree about a bucket.
+TraceBucketGrain = Literal["1m", "5m", "30m", "hour", "6h", "day"]
+TRACE_BUCKET_DURATION: Mapping[str, timedelta] = MappingProxyType(
+    {
+        "1m": timedelta(minutes=1),
+        "5m": timedelta(minutes=5),
+        "30m": timedelta(minutes=30),
+        "hour": timedelta(hours=1),
+        "6h": timedelta(hours=6),
+        "day": timedelta(days=1),
+    }
+)
 
 
 @dataclass(frozen=True)
 class TraceBucket:
-    """How many traces started in one bucket, split by whether any of their spans failed unrecovered."""
+    """How many sessions were active in one bucket, split by whether any of their spans failed unrecovered.
+
+    A session is active in every bucket between its start and its last activity, so
+    a long one counts in each bucket it ran through, not only in the one it began in.
+    """
 
     bucket: str
     succeeded: int

@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
+import { useState } from "react"
 import { FiInfo, FiTrash2 } from "react-icons/fi"
 
 import { IconButton } from "../actions/IconButton"
@@ -112,4 +113,38 @@ export const OpensAtOnce: Story = {
       <span className="text-mono-caption text-muted">(7xKp)</span>
     </Tooltip>
   ),
+}
+
+function OpensOnATapDemo() {
+  const [isOpen, setIsOpen] = useState(false)
+  return (
+    <Tooltip
+      content="Messages · 4.7k tokens · 2.4%"
+      delay={0}
+      isOpen={isOpen}
+      onOpenChange={setIsOpen}
+    >
+      {(props) => (
+        <button
+          {...props}
+          type="button"
+          aria-label="Messages: 4.7k tokens · 2.4%"
+          onClick={(event) => {
+            props.onClick?.(event)
+            setIsOpen(true)
+          }}
+          className="size-8 border border-border bg-surface-subtle"
+        />
+      )}
+    </Tooltip>
+  )
+}
+
+/**
+ * The caller holds the open state, so a tap opens it as well as hover and
+ * focus: here a context map block too small to write its numbers on, which a
+ * touch screen could otherwise never read.
+ */
+export const OpensOnATap: Story = {
+  render: () => <OpensOnATapDemo />,
 }

@@ -120,11 +120,17 @@ gateway process rather than to any organization on it:
   Adding a provider offers every model it lists on the key; each model carries a
   serving switch and a price, set per million tokens or per 1,000 requests or
   images, and a model nothing prices arrives switched off. Refresh models asks
-  one provider again, and Refresh and purge asks every provider and then removes
+  one provider again. Update catalog fetches the latest models.dev prices and
+  then asks every provider what it lists, showing the price changes and each
+  provider's new models before applying them; its optional cleanup also removes
   priced models nothing on the deployment serves, along with the model lists of
   providers nothing configures any more, listing them before anything is
   removed. A provider kept to one organization shows which; that restriction
-  is set through `/api/v1/hosted-providers`. A provider defined in the
+  is set through `/api/v1/hosted-providers`. The Countries column shows the
+  countries a provider serves, set in the add and edit dialogs as two-letter
+  codes, typed or loaded from a JSON file holding a list of them (or one under
+  `supported_countries`), blank for every country (see
+  [Supported countries](configuration.md#supported-countries)). A provider defined in the
   `hosted_providers:` block of `config.yml` carries a `config.yml` badge and
   cannot be edited, switched or removed here, while its models can; adding a
   provider of the same name overrides it, which the form warns about.
@@ -152,20 +158,37 @@ gateway process rather than to any organization on it:
   automatically at startup. Any that could not be moved are listed in a banner
   with the reason: once the cause is fixed, move it from there, or Discard it,
   since a row left behind serves nothing.
-- Web search pricing and Code execution pricing, what the deployment charges
-  per successful call of a tool it runs itself. Web search pricing lists the
-  `otari:web_search` and `otari:web_fetch` rates and each search and fetch
-  instance's own rate, saying which rate an instance with none of its own falls
-  back to. Code execution pricing lists `otari:code_execution`. Edit sets a
-  rate in dollars per call, in force from the moment it is saved, and 0 prices a
-  tool as free. An instance whose rate comes from `price_per_call` in
-  `config.yml` is marked and changed there. With `require_pricing` on, the page
+- Web search, the search and fetch tools the deployment runs for every
+  workspace and what each call costs. Its two tables list the search tools and
+  the fetch tools, `builtin_fetch` first, each with its key's last four and its
+  price per call, and end with the `otari:web_search` or `otari:web_fetch` rate
+  that prices what no tool's own rate does. A search tool with no price of its
+  own takes that rate for the model's searches, while its calls on the search
+  API go unpriced. A row opens its endpoint, enrichment and options; its star
+  makes it the default the model uses, and Test runs one search or fetch and
+  says how many hits or characters came back. Add search tool and Add fetch tool
+  pick a provider first, then ask for what it needs (its key, an endpoint when it
+  has none of its own) and a price, with the endpoint, timeout, enrichment and
+  the provider's options under More settings, typed from the provider catalog or
+  written as JSON. Edit and Remove change a stored tool; a `config.yml` tool,
+  `builtin_fetch` and the two fallback rates take only a price, and a rate from
+  `price_per_call` is changed in `config.yml`. Below the tables, The model's web
+  tools turns the model's search off, and sets the calls a request may make, the
+  results per search, reading pages for hits without text, and running a
+  provider's own web search here. The legacy SearXNG backend's URL and engines
+  show while they are set.
+- Code execution pricing, what the deployment charges per successful call of
+  `otari:code_execution`.
+
+  On both pages, Edit sets a rate in dollars per call, in force from the moment
+  it is saved, and 0 prices a tool as free. With `require_pricing` on, the page
   warns while a tool it lists has no rate, because a request that would run it
   is refused. See [Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool).
 
 Accounts and Hosted providers are listed only for a deployment operator, and
-answer anyone else that they are not available to them. The two pricing pages
-are listed for one too, and say the same to anyone else who opens them.
+answer anyone else that they are not available to them. Web search and Code
+execution pricing are listed for one too, and say the same to anyone else who
+opens them. Tools > Web search links an operator to the Web search page.
 
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the
@@ -195,8 +218,8 @@ rate the operator set for this organization, never from one the organization
 wrote itself, even one written while its own key still covered the model. A rate
 the operator set for an organization is listed beside the organization's own,
 and only the operator may change or remove it. The models.dev defaults are
-likewise kept current through `/api/v1/pricing/refresh` rather than from the
-dashboard.
+kept current by Update catalog on the Hosted providers page, or on a schedule
+under `pricing_refresh`.
 
 A rate is per million tokens, per request, or per image, and the rate form asks
 which. A request or image rate is entered per 1,000, the way providers publish
@@ -220,7 +243,10 @@ member sees the same page scoped to their own keys, always billed to themselves
 and never budget-exempt. An operator, or an organization owner or admin, can also
 cap a key's own spend: the key's create and edit forms take an existing budget
 or a custom amount and reset, and a Budget column shows each key's spend this
-period against its limit.
+period against its limit. Where the deployment turns on
+`federation_member_rules`, a key's actions menu offers Workload identity… to the
+operator, and to an organization owner or admin on their own keys; see [Rules on
+a member's own key](workload-identity.md#rules-on-a-members-own-key).
 
 Overview splits the same way. Everyone lands on their own spend, traffic and
 recent requests. An organization owner or admin also gets a budget-health
@@ -261,7 +287,8 @@ Two things are worth knowing about how it is billed and what it stores.
 A Playground request carries no API key. It is authorized by the dashboard
 session and billed to whoever sent it, in the workspace the switcher has
 selected, against that person's own budget and rate limit; its usage row
-therefore has no key attached. Picking a different model changes which provider
+therefore has no key attached. A viewer cannot send one, since it spends like a
+key, so the page tells them so instead of offering a composer. Picking a different model changes which provider
 credential the gateway resolves, never who pays. A request made here also does
 not count as the workspace's first request, so the setup guide keeps waiting for
 one from outside the product, which is the milestone it exists to mark.

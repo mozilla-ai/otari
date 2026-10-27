@@ -74,6 +74,7 @@ def _identity(
     organization_id: uuid.UUID,
     role: str = "member",
     workspace_ids: tuple[uuid.UUID, ...] = (),
+    workspace_role: str = "member",
 ) -> tuple[uuid.UUID, str]:
     """Create an identity with a live dashboard session, and return its cookie."""
     user = User(email=email, full_name=email.split("@")[0].title(), active_organization_id=organization_id)
@@ -83,7 +84,7 @@ def _identity(
 
     session.add(OrganizationMember(organization_id=organization_id, user_id=user.id, role=role, status="active"))
     for workspace_id in workspace_ids:
-        session.add(WorkspaceMember(workspace_id=workspace_id, user_id=user.id, role="member", status="active"))
+        session.add(WorkspaceMember(workspace_id=workspace_id, user_id=user.id, role=workspace_role, status="active"))
 
     token = f"otari-sess-{email}"
     session.add(
@@ -160,6 +161,15 @@ def _build_world(
                 session,
                 email="colleague@alpha.test",
                 organization_id=alpha.id,
+                workspace_ids=(alpha_one.id,),
+            ),
+            # Read-only in the organization, and a member of alpha one as an
+            # invitation used to make every invitee.
+            "viewer": _identity(
+                session,
+                email="viewer@alpha.test",
+                organization_id=alpha.id,
+                role="viewer",
                 workspace_ids=(alpha_one.id,),
             ),
             # In the organization, in none of its workspaces.
@@ -814,6 +824,22 @@ def test_a_completion_is_billed_to_the_caller_with_no_api_key(
     assert row.source == SERVED_HERE_SLUG
 
 
+def test_a_viewer_cannot_run_a_completion(
+    client: TestClient,
+    world: _World,
+    db_session: Session,
+    _priced: None,
+) -> None:
+    """A viewer is read-only, and a completion spends as a key would; refused before the pipeline."""
+    code, body = _chat(client, world, "viewer")
+    assert code == status.HTTP_403_FORBIDDEN, body
+    assert db_session.query(UsageLog).count() == 0
+
+    # Their own saved state stays theirs to read.
+    code, _ = _request(client, world, "viewer", "GET", f"{_PREFIX}/conversations", params=_ws(world))
+    assert code == status.HTTP_200_OK
+
+
 def test_a_completion_cannot_be_billed_to_a_workspace_that_is_not_the_caller_s(
     client: TestClient,
     world: _World,
@@ -1075,6 +1101,11 @@ def test_an_upload_lists_for_its_owner_in_its_workspace_only(
     code, theirs = _request(client, world, "colleague", "GET", f"{_PREFIX}/files", params=_ws(world))
     assert code == status.HTTP_200_OK
     assert theirs["data"] == []
+
+
+def test_a_viewer_cannot_upload(client: TestClient, world: _World, _file_store: None) -> None:
+    code, body = _upload(client, world, "viewer")
+    assert code == status.HTTP_403_FORBIDDEN, body
 
 
 def test_an_upload_into_a_workspace_that_is_not_the_caller_s_answers_404(

@@ -33,6 +33,7 @@ from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyErro
 from gateway.exceptions.tools_exceptions import (
     WebSearchKeyAlreadyExistsError,
     WebSearchKeyArchivedError,
+    WebSearchKeyCredentialRequiredError,
     WebSearchKeyDefaultConflictError,
     WebSearchKeyIncompleteError,
     WebSearchKeyMalformedError,
@@ -44,7 +45,7 @@ from gateway.exceptions.tools_exceptions import (
     WorkspaceWebSearchKeyOverrideConflictError,
 )
 from gateway.log_config import logger
-from gateway.models.secret_fields import restore_redacted_values
+from gateway.models.secret_fields import restore_redacted_values, stored_secrets_survive
 from gateway.models.tenancy import User
 from gateway.models.tools import (
     OrgWebSearchKey,
@@ -80,7 +81,7 @@ from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tool_settings_service import validate_url
 from gateway.services.tools._web_search import in_loop_default, resolve_fetch
-from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
+from gateway.services.web_retrieval_network import RetrievalTargetError, validate_retrieval_target
 from gateway.services.web_search_providers import is_sendable_api_key
 
 # Takes the workspace's row lock for the rest of the transaction.
@@ -294,6 +295,13 @@ class WebSearchKeyService:
                 key = await self._live_key(key_id, organization_id)
                 provider, kind = key.provider, _kind(key)
                 adds_a_key = request.api_key is not None and key.encrypted_api_key is None
+                if sets_api_base and api_base is not None and api_base != key.api_base:
+                    # The stored credential would go to the new host on the next call.
+                    stored_options_follow = stored_secrets_survive(
+                        key.options, request.options, sent="options" in request.model_fields_set
+                    )
+                    if (key.encrypted_api_key is not None and request.api_key is None) or stored_options_follow:
+                        raise WebSearchKeyCredentialRequiredError
                 if sets_api_base or adds_a_key:
                     _check_endpoint(
                         kind,
@@ -590,11 +598,14 @@ def _check_options(kind: ToolKind, provider: str, options: Mapping[str, Any] | N
 
 
 async def _gate_api_base(api_base: str) -> None:
-    """Refuse an endpoint on an internal address, where the deployment gates those off."""
+    """Refuse an endpoint that does not reach public addresses alone.
+
+    A tenant chose it, so ``provider_allow_private_hosts`` does not apply; calls to it are pinned the same way.
+    """
     try:
-        await validate_provider_api_base(api_base)
-    except UnsafeURLError as exc:
-        raise WebSearchKeySettingRefusedError("api_base", str(exc)) from None
+        await validate_retrieval_target(api_base)
+    except RetrievalTargetError as exc:
+        raise WebSearchKeySettingRefusedError("api_base", f"must reach a public address: {exc}") from None
 
 
 def _blank_to_none(value: str | None) -> str | None:

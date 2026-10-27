@@ -244,6 +244,7 @@ class HostedProviderService:
                     enabled=request.enabled,
                     restricted_to_organization_id=request.restricted_to_organization_id,
                     serves_unlisted_models=request.serves_unlisted_models,
+                    supported_countries=request.supported_countries,
                 )
             except HostedProviderConflict as conflict:
                 # The pre-check races the insert; the unique constraint decides.
@@ -269,7 +270,7 @@ class HostedProviderService:
         key, where the provider can be served without one. ``client_args``
         omitted is left alone, null clears, and an entry echoed back as the
         mask keeps the stored value. The restriction reads the same way:
-        omitted keeps it, null lifts it.
+        omitted keeps it, null lifts it, and so do the supported countries.
 
         Raises:
             HostedProviderNotFoundError: no such provider.
@@ -321,6 +322,8 @@ class HostedProviderService:
             if "restricted_to_organization_id" in request.model_fields_set:
                 await self._require_organization(request.restricted_to_organization_id)
                 row.restricted_to_organization_id = request.restricted_to_organization_id
+            if "supported_countries" in request.model_fields_set:
+                row.supported_countries = request.supported_countries
             await self.providers.save(row)
             public = self._public(source)
         # The cached listing was made on what this request may just have changed.
@@ -719,13 +722,15 @@ class HostedProviderService:
         row.source_removed = True
         return True
 
-    async def refresh_catalog(self, *, apply: bool) -> HostedCatalogRefreshPublic:
+    async def refresh_catalog(self, *, apply: bool, remove: bool = True) -> HostedCatalogRefreshPublic:
         """Sweep the deployment price list against the roster, or preview the sweep.
+
+        ``remove=False`` refreshes every provider's models and removes nothing.
 
         Raises:
             HostedCatalogEmptyError: no provider offers a model, and no orphaned roster is left.
         """
-        return await self.sweep.run(apply=apply)
+        return await self.sweep.run(apply=apply, remove=remove)
 
     async def serveable_models(self, *, organization_id: uuid.UUID | None) -> dict[str, frozenset[str]]:
         """Each provider serveable to ``organization_id``, with the models switched on under it.
@@ -763,6 +768,11 @@ class HostedProviderService:
                 else functools.partial(self._dial, name, implementation, credential, declared)
             )
         return dials
+
+    async def names_limited_to_countries(self) -> list[str]:
+        """The enabled hosted providers that serve only some countries, by name."""
+        async with self.uow:
+            return await self.sources.names_limited_to_countries()
 
     async def audit_config(self) -> HostedConfigAudit:
         """What boot reports about the ``hosted_providers:`` block: shadowed entries and unknown restrictions."""
@@ -834,6 +844,7 @@ class HostedProviderService:
             client_args=entry.client_args,
             enabled=entry.enabled,
             restricted_to_organization_id=entry.restricted_to_organization_id,
+            supported_countries=list(entry.supported_countries) if entry.supported_countries is not None else None,
         )
 
     async def _require_organization(self, organization_id: uuid.UUID | None) -> None:

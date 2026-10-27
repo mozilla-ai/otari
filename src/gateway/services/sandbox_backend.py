@@ -550,7 +550,8 @@ class SandboxBackend:
             raise
         self._executions.append(CodeExecution(code=code, result=block, file_ids=file_ids))
         if self._tally is not None:
-            self._tally.record_result(CODE_EXECUTION_TOOL_NAME, result)
+            # The sandbox is the deployment's, whichever backend runs it.
+            self._tally.record_result(CODE_EXECUTION_TOOL_NAME, result, deployment_paid=True)
         self._record_span(started, ok=not is_tool_error(result))
         return result
 

@@ -1,4 +1,10 @@
-import { type KeyboardEvent, useMemo } from "react"
+import {
+  type CSSProperties,
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react"
 import { FiChevronRight } from "react-icons/fi"
 
 import { IconButton } from "@/design-system/actions/IconButton"
@@ -10,24 +16,34 @@ import { LevelChip } from "./LevelChip"
 import { OBSERVATION_TYPES, TypeMark } from "./observationTypes"
 import { moveRowFocus } from "./rowFocus"
 import { matchesSearch } from "./search"
-import { buildTree, type FlatItem, flattenTreeOrder } from "./tree"
+import {
+  buildTree,
+  type FlatItem,
+  flattenTreeOrder,
+  type TreeNode,
+} from "./tree"
 import { type Observation, summarizeTrace, type Trace } from "./types"
 
 function Metrics({
   durationMs,
   cost,
   tokens,
+  estimate,
 }: {
   durationMs: number
   cost: number
   tokens: number
+  /** An estimated cost, marked as one. */
+  estimate?: number
 }) {
-  if (durationMs <= 0 && !cost && !tokens) return null
+  if (durationMs <= 0 && !cost && !tokens && !estimate) return null
   return (
     <span className="flex items-center gap-x-3 truncate text-mono-caption whitespace-nowrap text-muted">
       {durationMs > 0 ? <span>{formatDuration(durationMs)}</span> : null}
       {cost ? (
         <span>{formatCost(cost)}</span>
+      ) : estimate ? (
+        <span>≈ {formatCost(estimate)}</span>
       ) : tokens ? (
         <span>{formatNumber(tokens)} tokens</span>
       ) : null}
@@ -49,6 +65,76 @@ const MARK =
 // Holds a childless row's text where a chevron would be, so names align.
 const CHEVRON_SLOT = <span aria-hidden="true" className="size-11 shrink-0" />
 
+// Rows that arrive together enter 45ms apart, capped so a whole turn still lands
+// in about a third of a second.
+const ARRIVAL_STAGGER_MS = 45
+const ARRIVAL_STAGGER_ROWS = 6
+// Longer than the wash plus the largest stagger.
+const ARRIVAL_MS = 1_000
+const NO_ARRIVALS: ReadonlyMap<string, number> = new Map()
+
+function settledOn(traceId: string, roots: TreeNode[]) {
+  return {
+    traceId,
+    known: new Set(flattenTreeOrder(roots).map(({ node }) => node.obs.id)),
+    arrivals: NO_ARRIVALS,
+  }
+}
+
+// The rows a live session added since the panel opened on it, each with its place
+// in the order its batch enters. What is there when the panel opens, or when a
+// session's spans first load, is not news, and neither is a new row that wraps
+// rows already on screen: the first turn row only appears once a second turn
+// does. Only `shown` rows can arrive, so one that lands under a collapsed parent
+// or behind a search does not enter when it is revealed. Arrivals clear once
+// their entrance has played.
+function useArrivals(
+  traceId: string,
+  roots: TreeNode[],
+  shown: FlatItem[],
+): ReadonlyMap<string, number> {
+  const [state, setState] = useState(() => settledOn(traceId, roots))
+  if (state.traceId !== traceId) {
+    setState(settledOn(traceId, roots))
+  } else {
+    const fresh = flattenTreeOrder(roots)
+      .map(({ node }) => node)
+      .filter((node) => !state.known.has(node.obs.id))
+    if (fresh.length > 0) {
+      const news =
+        state.known.size === 0
+          ? []
+          : shown
+              .map(({ node }) => node)
+              .filter(
+                (node) =>
+                  !state.known.has(node.obs.id) &&
+                  node.children.every(
+                    (child) => !state.known.has(child.obs.id),
+                  ),
+              )
+      // A batch landing while the last one still plays joins it, so neither is cut short.
+      setState({
+        traceId,
+        known: new Set([...state.known, ...fresh.map((node) => node.obs.id)]),
+        arrivals: new Map([
+          ...state.arrivals,
+          ...news.map((node, slot) => [node.obs.id, slot] as const),
+        ]),
+      })
+    }
+  }
+  useEffect(() => {
+    if (state.arrivals.size === 0) return
+    const timer = window.setTimeout(
+      () => setState((current) => ({ ...current, arrivals: NO_ARRIVALS })),
+      ARRIVAL_MS,
+    )
+    return () => window.clearTimeout(timer)
+  }, [state.arrivals])
+  return state.arrivals
+}
+
 function DropLine() {
   return (
     <span
@@ -65,6 +151,7 @@ function TreeRow({
   isOpen,
   isSelected,
   isTabStop,
+  arrival,
   onSelect,
   onToggle,
 }: {
@@ -72,6 +159,8 @@ function TreeRow({
   isOpen: boolean
   isSelected: boolean
   isTabStop: boolean
+  /** The row's place in the batch that just arrived; absent for one that was already there. */
+  arrival?: number
   onSelect: (observationId: string) => void
   onToggle: (observationId: string) => void
 }) {
@@ -94,7 +183,14 @@ function TreeRow({
   }
   return (
     <li
-      className={`flex ${isSelected ? "bg-primary-subtle" : "hover:bg-surface-alt"}`}
+      className={`flex ${isSelected ? "bg-primary-subtle" : "hover:bg-surface-alt"} ${arrival === undefined ? "" : "otari-trace-arrive"}`}
+      style={
+        arrival === undefined
+          ? undefined
+          : ({
+              "--arrive-delay": `${Math.min(arrival, ARRIVAL_STAGGER_ROWS) * ARRIVAL_STAGGER_MS}ms`,
+            } as CSSProperties)
+      }
     >
       <button
         type="button"
@@ -126,12 +222,13 @@ function TreeRow({
         <span className={TEXT}>
           <span className="flex min-w-0 items-center gap-2">
             <span className="truncate text-body">{obs.name}</span>
-            <LevelChip level={obs.level} />
+            <LevelChip level={obs.level} returnedError={obs.returnedError} />
           </span>
           <Metrics
             durationMs={obs.endMs - obs.startMs}
             cost={obs.cost ?? 0}
             tokens={tokens}
+            estimate={obs.estimate?.total}
           />
         </span>
       </button>
@@ -188,7 +285,7 @@ function SearchRow({
         <span className="flex min-w-0 flex-1 flex-col py-0.5 pl-2">
           <span className="flex min-w-0 items-center gap-2">
             <span className="truncate text-body">{obs.name}</span>
-            <LevelChip level={obs.level} />
+            <LevelChip level={obs.level} returnedError={obs.returnedError} />
           </span>
           <Metrics
             durationMs={obs.endMs - obs.startMs}
@@ -222,6 +319,7 @@ export function TraceTreeView({
     [roots, collapsed],
   )
   const summary = summarizeTrace(trace)
+  const arrivals = useArrivals(trace.id, roots, query.trim() ? [] : items)
 
   // A query turns the tree into a flat list of the matches: while searching, a
   // match's ancestors are in the way rather than context.
@@ -302,6 +400,7 @@ export function TraceTreeView({
           isOpen={!collapsed.has(item.node.obs.id)}
           isSelected={selectedId === item.node.obs.id}
           isTabStop={tabStop === item.node.obs.id}
+          arrival={arrivals.get(item.node.obs.id)}
           onSelect={onSelect}
           onToggle={onToggle}
         />

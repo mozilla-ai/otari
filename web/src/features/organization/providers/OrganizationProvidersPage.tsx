@@ -283,7 +283,11 @@ function KeyForm({
         value={draft.apiBase}
         onChange={(apiBase) => setDraft({ ...draft, apiBase })}
         placeholder="https://api.example.com/v1"
-        description="Optional. Point this key at a compatible endpoint of your own instead of the provider's default."
+        description={
+          editing
+            ? "Optional. Point this key at a compatible endpoint of your own instead of the provider's default. A new URL needs the API key, and any hidden credential below, entered again, because the key will be sent there."
+            : "Optional. Point this key at a compatible endpoint of your own instead of the provider's default."
+        }
       />
 
       {/* What this provider needs beyond a key, asked for by name rather than

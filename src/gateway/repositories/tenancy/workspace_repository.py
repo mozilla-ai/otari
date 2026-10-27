@@ -32,7 +32,7 @@ _UNIQUE_VIOLATION = frozenset({"23505", "SQLITE_CONSTRAINT_UNIQUE"})
 _FOREIGN_KEY_VIOLATION = frozenset({"23503"})
 
 
-def ids_in_organization(organization_id: uuid.UUID) -> Select[tuple[uuid.UUID]]:
+def ids_in_organization(organization_id: uuid.UUID) -> Select[uuid.UUID]:
     """Select the ID of every workspace in an organization, for use as a subquery."""
     return select(col(Workspace.id)).where(col(Workspace.organization_id) == organization_id)
 
@@ -76,6 +76,19 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
         load-bearing.
         """
         await self.db.execute(select(col(Workspace.id)).where(col(Workspace.id) == workspace_id).with_for_update())
+
+    async def lock_in_organization(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
+        """Take ``lock`` on every workspace in an organization, in id order, and return their ids.
+
+        In id order so two callers locking overlapping sets cannot deadlock.
+        """
+        result = await self.db.execute(
+            select(col(Workspace.id))
+            .where(col(Workspace.organization_id) == organization_id)
+            .order_by(col(Workspace.id))
+            .with_for_update()
+        )
+        return list(result.scalars().all())
 
     async def get_by_ids(self, workspace_ids: Collection[uuid.UUID]) -> Sequence[Workspace]:
         """Return the workspaces named by a batch of ids (order unspecified).

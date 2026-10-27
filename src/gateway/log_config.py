@@ -1,3 +1,4 @@
+import copy
 import logging
 from typing import Any
 
@@ -30,7 +31,7 @@ class CredentialMaskingFilter(logging.Filter):
             return True
         message = record.getMessage()
         masked = mask_credentials(message, _LOG_PLACEHOLDER)
-        if masked != message:
+        if masked != message and not _mask_args(record):
             record.msg, record.args = masked, None
         if record.exc_info and record.exc_info[1] is not None:
             text = logging.Formatter().formatException(record.exc_info)
@@ -38,6 +39,41 @@ class CredentialMaskingFilter(logging.Filter):
             if masked_text != text:
                 record.exc_info, record.exc_text = None, masked_text
         return True
+
+
+def _mask_args(record: logging.LogRecord) -> bool:
+    """Mask a record's string arguments in place, when that alone masks its message.
+
+    Keeps the arguments a formatter unpacks: uvicorn's access log reads the
+    client, method and path back out of ``record.args``.
+    """
+    if not isinstance(record.msg, str) or not isinstance(record.args, tuple):
+        return False
+    args = tuple(mask_credentials(arg, _LOG_PLACEHOLDER) if isinstance(arg, str) else arg for arg in record.args)
+    try:
+        message = record.msg % args
+    except (TypeError, ValueError):
+        return False
+    if mask_credentials(message, _LOG_PLACEHOLDER) != message:
+        return False
+    record.args = args
+    return True
+
+
+def uvicorn_log_config() -> dict[str, Any]:
+    """uvicorn's own logging config, with its handlers masking credentials as the gateway's does.
+
+    uvicorn's loggers print through handlers of their own, so the gateway
+    handler's filter never sees them, and an access log line carries the query
+    string.
+    """
+    from uvicorn.config import LOGGING_CONFIG
+
+    config = copy.deepcopy(LOGGING_CONFIG)
+    config.setdefault("filters", {})["mask_credentials"] = {"()": CredentialMaskingFilter}
+    for handler in config["handlers"].values():
+        handler.setdefault("filters", []).append("mask_credentials")
+    return config
 
 
 def _log_console() -> Console:
@@ -94,6 +130,11 @@ def setup_logger(
         handler.setFormatter(formatter)
 
     logger.addHandler(handler)
+
+    # A library logger with no handler of its own (any-llm, httpx) prints through the last resort.
+    last_resort = logging.lastResort
+    if last_resort is not None and not any(isinstance(f, CredentialMaskingFilter) for f in last_resort.filters):
+        last_resort.addFilter(CredentialMaskingFilter())
 
 
 setup_logger()

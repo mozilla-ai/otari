@@ -104,7 +104,7 @@
             "type": "string"
           },
           "accepted_by": {
-            "description": "`operator` for a dashboard confirm, `schedule` for the auto policy.",
+            "description": "`operator` for a catalog update an operator ran, `schedule` for the auto policy.",
             "title": "Accepted By",
             "type": "string"
           },
@@ -1553,7 +1553,7 @@
         "type": "object"
       },
       "Annotations": {
-        "additionalProperties": true,
+        "description": "Optional annotations the client can use to inform how objects are used or displayed.",
         "properties": {
           "audience": {
             "anyOf": [
@@ -1572,6 +1572,17 @@
               }
             ],
             "title": "Audience"
+          },
+          "lastModified": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastmodified"
           },
           "priority": {
             "anyOf": [
@@ -1749,8 +1760,7 @@
         "type": "object"
       },
       "AudioContent": {
-        "additionalProperties": true,
-        "description": "Audio content for a message.",
+        "description": "Audio provided to or from an LLM.",
         "properties": {
           "_meta": {
             "anyOf": [
@@ -1784,12 +1794,12 @@
           },
           "type": {
             "const": "audio",
+            "default": "audio",
             "title": "Type",
             "type": "string"
           }
         },
         "required": [
-          "type",
           "data",
           "mimeType"
         ],
@@ -2031,7 +2041,6 @@
         "type": "object"
       },
       "BlobResourceContents": {
-        "additionalProperties": true,
         "description": "Binary contents of a resource.",
         "properties": {
           "_meta": {
@@ -2062,8 +2071,6 @@
             "title": "Mimetype"
           },
           "uri": {
-            "format": "uri",
-            "minLength": 1,
             "title": "Uri",
             "type": "string"
           }
@@ -2651,8 +2658,7 @@
         "type": "object"
       },
       "CallToolResult": {
-        "additionalProperties": true,
-        "description": "The server's response to a tool call.",
+        "description": "The server's response to a tool call.\n\nErrors that originate from the tool SHOULD be reported inside the result\nwith `is_error` set to true, not as an MCP protocol-level error, so the LLM\ncan see and self-correct. Errors in finding the tool, or any other\nexceptional condition, should be reported as an MCP error response.",
         "properties": {
           "_meta": {
             "anyOf": [
@@ -2694,16 +2700,23 @@
             "title": "Iserror",
             "type": "boolean"
           },
-          "structuredContent": {
+          "resultType": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "enum": [
+                  "complete",
+                  "input_required"
+                ],
+                "type": "string"
               },
               {
-                "type": "null"
+                "type": "string"
               }
             ],
+            "default": "complete",
+            "title": "Resulttype"
+          },
+          "structuredContent": {
             "title": "Structuredcontent"
           }
         },
@@ -4562,6 +4575,33 @@
           "input_tokens"
         ],
         "title": "CountTokensResponse",
+        "type": "object"
+      },
+      "CountryDatabaseStatus": {
+        "description": "The country file a request's address is looked up in.",
+        "properties": {
+          "client_country_database_set": {
+            "description": "Whether `client_country_database` names a file. That file is read, and a stored one is not.",
+            "title": "Client Country Database Set",
+            "type": "boolean"
+          },
+          "stored": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StoredCountryDatabasePublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The stored file, or null when none is stored."
+          }
+        },
+        "required": [
+          "stored",
+          "client_country_database_set"
+        ],
+        "title": "CountryDatabaseStatus",
         "type": "object"
       },
       "CreateBatchRequest": {
@@ -6523,7 +6563,6 @@
         "type": "object"
       },
       "EmbeddedResource": {
-        "additionalProperties": true,
         "description": "The contents of a resource, embedded into a prompt or tool call result.\n\nIt is up to the client how best to render embedded resources for the benefit\nof the LLM and/or the user.",
         "properties": {
           "_meta": {
@@ -6561,12 +6600,12 @@
           },
           "type": {
             "const": "resource",
+            "default": "resource",
             "title": "Type",
             "type": "string"
           }
         },
         "required": [
-          "type",
           "resource"
         ],
         "title": "EmbeddedResource",
@@ -7610,7 +7649,7 @@
                 "type": "null"
               }
             ],
-            "description": "When set, the id of the rule's key.",
+            "description": "Ignored. Accepted so that a client configured for Anthropic's service account id is not refused.",
             "title": "Service Account Id"
           },
           "workspace_id": {
@@ -7622,7 +7661,7 @@
                 "type": "null"
               }
             ],
-            "description": "When set, the UUID of the rule's key's workspace.",
+            "description": "Ignored. Accepted so that a client configured for Anthropic's workspace id is not refused.",
             "title": "Workspace Id"
           }
         },
@@ -7819,6 +7858,22 @@
             "description": "What the gate says when it fails, from the guardrail's definition.",
             "title": "Message"
           },
+          "origin": {
+            "anyOf": [
+              {
+                "enum": [
+                  "repo",
+                  "user"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the gate is the repository's (.otari/) or the user's own (~/.otari/).",
+            "title": "Origin"
+          },
           "passed": {
             "title": "Passed",
             "type": "integer"
@@ -7827,6 +7882,14 @@
             "description": "Checks where the gate could not decide and held the agent anyway.",
             "title": "Refused",
             "type": "integer"
+          },
+          "runs": {
+            "description": "The moments the gate runs at (pre_tool_use.edit_target, stop.session, ...).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Runs",
+            "type": "array"
           },
           "span_id": {
             "anyOf": [
@@ -7856,7 +7919,9 @@
           "span_id",
           "gate_type",
           "enforcement",
-          "message"
+          "message",
+          "runs",
+          "origin"
         ],
         "title": "GateSummaryPublic",
         "type": "object"
@@ -8675,6 +8740,94 @@
         "title": "HostedCatalogKeptGroupPublic",
         "type": "object"
       },
+      "HostedCatalogPriceChangePublic": {
+        "description": "One model whose models.dev price a catalog update adds, changes or removes.",
+        "properties": {
+          "change": {
+            "enum": [
+              "added",
+              "changed",
+              "removed"
+            ],
+            "title": "Change",
+            "type": "string"
+          },
+          "model_key": {
+            "title": "Model Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_key",
+          "change"
+        ],
+        "title": "HostedCatalogPriceChangePublic",
+        "type": "object"
+      },
+      "HostedCatalogPriceUpdatePublic": {
+        "description": "The models.dev price changes a catalog update would apply.\n\n``changes`` is a sample and the counts are the totals. ``digest`` names the\nfetched prices, so applying them applies what was reviewed. ``needs_review``\nis why the scheduled update would hold them for a person under ``auto``.",
+        "properties": {
+          "added_count": {
+            "title": "Added Count",
+            "type": "integer"
+          },
+          "changed_count": {
+            "title": "Changed Count",
+            "type": "integer"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/HostedCatalogPriceChangePublic"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "changes_truncated": {
+            "title": "Changes Truncated",
+            "type": "boolean"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "needs_review": {
+            "title": "Needs Review",
+            "type": "boolean"
+          },
+          "removed_count": {
+            "title": "Removed Count",
+            "type": "integer"
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Reason"
+          }
+        },
+        "required": [
+          "fetched_at",
+          "added_count",
+          "changed_count",
+          "removed_count",
+          "changes",
+          "changes_truncated",
+          "digest",
+          "needs_review"
+        ],
+        "title": "HostedCatalogPriceUpdatePublic",
+        "type": "object"
+      },
       "HostedCatalogProviderRefreshPublic": {
         "description": "What one hosted provider newly lists, as a catalog sweep found it.\n\nPer provider rather than one total, because a dial that failed is a fact\nabout that provider, and the operator has to be told which one went quiet\nrather than read a smaller number than they expected.",
         "properties": {
@@ -8787,6 +8940,97 @@
           "kept"
         ],
         "title": "HostedCatalogRefreshPublic",
+        "type": "object"
+      },
+      "HostedCatalogUpdatePreviewPublic": {
+        "description": "What a catalog update would do: its price changes, then what each provider newly lists.\n\n``prices`` is ``None`` when models.dev changed nothing, or when it could not\nbe fetched, which ``price_error`` then says. ``catalog`` carries the cleanup\nthe preview was asked for, and no removals otherwise.",
+        "properties": {
+          "catalog": {
+            "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
+          },
+          "price_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Error"
+          },
+          "prices": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HostedCatalogPriceUpdatePublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "prices",
+          "catalog"
+        ],
+        "title": "HostedCatalogUpdatePreviewPublic",
+        "type": "object"
+      },
+      "HostedCatalogUpdatePreviewRequest": {
+        "description": "What to preview: the update alone, or with the cleanup.",
+        "properties": {
+          "cleanup": {
+            "default": false,
+            "description": "Also preview removing the prices of models no hosted provider serves.",
+            "title": "Cleanup",
+            "type": "boolean"
+          }
+        },
+        "title": "HostedCatalogUpdatePreviewRequest",
+        "type": "object"
+      },
+      "HostedCatalogUpdatePublic": {
+        "description": "What a catalog update did.",
+        "properties": {
+          "catalog": {
+            "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
+          },
+          "prices_applied": {
+            "title": "Prices Applied",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "prices_applied",
+          "catalog"
+        ],
+        "title": "HostedCatalogUpdatePublic",
+        "type": "object"
+      },
+      "HostedCatalogUpdateRequest": {
+        "description": "What to apply, as the preview showed it.",
+        "properties": {
+          "cleanup": {
+            "default": false,
+            "description": "Also remove the prices of models no hosted provider serves, with their history.",
+            "title": "Cleanup",
+            "type": "boolean"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `digest` of the previewed prices, to apply them; 409 when the pending prices differ. Without it, no price changes.",
+            "title": "Digest"
+          }
+        },
+        "title": "HostedCatalogUpdateRequest",
         "type": "object"
       },
       "HostedModelCreateRequest": {
@@ -9147,7 +9391,7 @@
         "type": "object"
       },
       "HostedProviderCreateRequest": {
-        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``provider`` is the any-llm implementation. ``name`` is what requests\naddress it by (``name:model``), defaulting to ``provider``; a name of its\nown lets two endpoints of one implementation coexist. ``api_key`` may be\nleft out for a backend that needs none, or for an endpoint of its own\n(``api_base``), which is called with a placeholder key.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.\n``serves_unlisted_models`` serves a model the roster does not list, as a\n``config.yml`` instance does, and switches on every model it offers\nwhether or not something prices it.",
+        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``provider`` is the any-llm implementation. ``name`` is what requests\naddress it by (``name:model``), defaulting to ``provider``; a name of its\nown lets two endpoints of one implementation coexist. ``api_key`` may be\nleft out for a backend that needs none, or for an endpoint of its own\n(``api_base``), which is called with a placeholder key.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.\n``serves_unlisted_models`` serves a model the roster does not list, as a\n``config.yml`` instance does, and switches on every model it offers\nwhether or not something prices it. ``supported_countries`` keeps the\nprovider to requests from those ISO country codes, checked as well as\n``provider_supported_countries``; null serves every country.",
         "example": {
           "api_key": "<your OpenAI API key>",
           "provider": "openai"
@@ -9230,6 +9474,21 @@
             "default": false,
             "title": "Serves Unlisted Models",
             "type": "boolean"
+          },
+          "supported_countries": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 300,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supported Countries"
           }
         },
         "required": [
@@ -9239,7 +9498,7 @@
         "type": "object"
       },
       "HostedProviderPublic": {
-        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.\n``serves_unlisted_models`` is true for one that serves a model its roster\ndoes not list.",
+        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.\n``serves_unlisted_models`` is true for one that serves a model its roster\ndoes not list. ``supported_countries`` is null for one that serves every\ncountry.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -9351,6 +9610,20 @@
             ],
             "title": "Source",
             "type": "string"
+          },
+          "supported_countries": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supported Countries"
           },
           "updated_at": {
             "anyOf": [
@@ -9479,7 +9752,7 @@
         "type": "object"
       },
       "HostedProviderUpdateRequest": {
-        "description": "Rotate the key, repoint the base, or turn a provider off.\n\n``provider`` and ``name`` are immutable: changing either is a delete plus a\ncreate, because the key belongs to the provider it was issued by and\nrequests address the name. Omitting ``api_key`` leaves the stored\ncredential untouched, so a toggle never re-sends a secret the caller does\nnot have; an explicit null removes it, where the provider can be served\nwithout one. ``client_args`` omitted is left alone; an explicit\nnull clears it, and an entry echoed back as the mask keeps the stored value.\n``restricted_to_organization_id`` reads the same way: omitted keeps the\nrestriction, null lifts it.",
+        "description": "Rotate the key, repoint the base, or turn a provider off.\n\n``provider`` and ``name`` are immutable: changing either is a delete plus a\ncreate, because the key belongs to the provider it was issued by and\nrequests address the name. Omitting ``api_key`` leaves the stored\ncredential untouched, so a toggle never re-sends a secret the caller does\nnot have; an explicit null removes it, where the provider can be served\nwithout one. ``client_args`` omitted is left alone; an explicit\nnull clears it, and an entry echoed back as the mask keeps the stored value.\n``restricted_to_organization_id`` reads the same way: omitted keeps the\nrestriction, null lifts it, and so does ``supported_countries``, where an\nempty list closes the provider to every country.",
         "example": {
           "enabled": false
         },
@@ -9554,6 +9827,21 @@
               }
             ],
             "title": "Serves Unlisted Models"
+          },
+          "supported_countries": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 300,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supported Countries"
           }
         },
         "title": "HostedProviderUpdateRequest",
@@ -9606,8 +9894,7 @@
         "type": "object"
       },
       "Icon": {
-        "additionalProperties": true,
-        "description": "An icon for display in user interfaces.",
+        "description": "An optionally-sized icon for display in a user interface (2025-11-25+).",
         "properties": {
           "mimeType": {
             "anyOf": [
@@ -9637,6 +9924,21 @@
           "src": {
             "title": "Src",
             "type": "string"
+          },
+          "theme": {
+            "anyOf": [
+              {
+                "enum": [
+                  "light",
+                  "dark"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theme"
           }
         },
         "required": [
@@ -9646,8 +9948,7 @@
         "type": "object"
       },
       "ImageContent": {
-        "additionalProperties": true,
-        "description": "Image content for a message.",
+        "description": "An image provided to or from an LLM.",
         "properties": {
           "_meta": {
             "anyOf": [
@@ -9681,12 +9982,12 @@
           },
           "type": {
             "const": "image",
+            "default": "image",
             "title": "Type",
             "type": "string"
           }
         },
         "required": [
-          "type",
           "data",
           "mimeType"
         ],
@@ -10247,6 +10548,11 @@
             "additionalProperties": true,
             "title": "Metadata",
             "type": "object"
+          },
+          "operator_disabled": {
+            "default": false,
+            "title": "Operator Disabled",
+            "type": "boolean"
           },
           "reject_user_mismatch": {
             "anyOf": [
@@ -16115,18 +16421,6 @@
         "title": "PricingRefreshChangeResponse",
         "type": "object"
       },
-      "PricingRefreshConfirmationResponse": {
-        "description": "Result of activating a reviewed models.dev refresh.",
-        "properties": {
-          "applied": {
-            "default": true,
-            "title": "Applied",
-            "type": "boolean"
-          }
-        },
-        "title": "PricingRefreshConfirmationResponse",
-        "type": "object"
-      },
       "PricingRefreshPreviewResponse": {
         "description": "Reviewable summary of a pending models.dev refresh.",
         "properties": {
@@ -16151,7 +16445,7 @@
           },
           "digest": {
             "default": "",
-            "description": "Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.",
+            "description": "Identity of the pending snapshot, to act on exactly this one: send it as `digest` to `POST /hosted-providers/catalog-update` to apply it, or to `POST /pricing/refresh/reject` to discard it.",
             "title": "Digest",
             "type": "string"
           },
@@ -16260,6 +16554,18 @@
           "output_price_per_million": {
             "title": "Output Price Per Million",
             "type": "number"
+          },
+          "price_per_request": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD for each request, for a rate in requests; null for any other unit.",
+            "title": "Price Per Request"
           },
           "pricing_tiers": {
             "items": {
@@ -17041,6 +17347,21 @@
           "tpm": 200000
         },
         "properties": {
+          "budgets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.",
+            "title": "Budgets"
+          },
           "lease_sec": {
             "default": 900.0,
             "description": "How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.",
@@ -17060,6 +17381,16 @@
             ],
             "description": "Requests in flight at once.",
             "title": "Max Concurrent"
+          },
+          "mode": {
+            "default": "enforce",
+            "description": "'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a limit can be watched before it is enforced.",
+            "enum": [
+              "enforce",
+              "report"
+            ],
+            "title": "Mode",
+            "type": "string"
           },
           "models": {
             "anyOf": [
@@ -17088,7 +17419,8 @@
               "deployment",
               "key",
               "user",
-              "model"
+              "model",
+              "budget"
             ],
             "title": "Per",
             "type": "string"
@@ -17141,6 +17473,21 @@
         "additionalProperties": false,
         "description": "One rule in effect, and where it is defined.",
         "properties": {
+          "budgets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.",
+            "title": "Budgets"
+          },
           "lease_sec": {
             "default": 900.0,
             "description": "How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.",
@@ -17160,6 +17507,16 @@
             ],
             "description": "Requests in flight at once.",
             "title": "Max Concurrent"
+          },
+          "mode": {
+            "default": "enforce",
+            "description": "'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a limit can be watched before it is enforced.",
+            "enum": [
+              "enforce",
+              "report"
+            ],
+            "title": "Mode",
+            "type": "string"
           },
           "models": {
             "anyOf": [
@@ -17188,7 +17545,8 @@
               "deployment",
               "key",
               "user",
-              "model"
+              "model",
+              "budget"
             ],
             "title": "Per",
             "type": "string"
@@ -17267,6 +17625,21 @@
           "rpm": 1200
         },
         "properties": {
+          "budgets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The budget IDs a per: budget rule counts; null for every budget, and on any other rule.",
+            "title": "Budgets"
+          },
           "lease_sec": {
             "anyOf": [
               {
@@ -17293,6 +17666,22 @@
             "description": "Requests in flight at once.",
             "title": "Max Concurrent"
           },
+          "mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "enforce",
+                  "report"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "'enforce' refuses a request over the rule; 'report' serves it and names the rule.",
+            "title": "Mode"
+          },
           "models": {
             "anyOf": [
               {
@@ -17315,7 +17704,8 @@
                   "deployment",
                   "key",
                   "user",
-                  "model"
+                  "model",
+                  "budget"
                 ],
                 "type": "string"
               },
@@ -17887,7 +18277,6 @@
         "type": "object"
       },
       "ResourceLink": {
-        "additionalProperties": true,
         "description": "A resource that the server is capable of reading, included in a prompt or tool call result.\n\nNote: resource links returned by tools are not guaranteed to appear in the results of `resources/list` requests.",
         "properties": {
           "_meta": {
@@ -17976,20 +18365,18 @@
           },
           "type": {
             "const": "resource_link",
+            "default": "resource_link",
             "title": "Type",
             "type": "string"
           },
           "uri": {
-            "format": "uri",
-            "minLength": 1,
             "title": "Uri",
             "type": "string"
           }
         },
         "required": [
           "name",
-          "uri",
-          "type"
+          "uri"
         ],
         "title": "ResourceLink",
         "type": "object"
@@ -19752,6 +20139,19 @@
             "title": "Output Price Per Million",
             "type": "number"
           },
+          "price_per_request": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not combined with token prices.",
+            "title": "Price Per Request"
+          },
           "pricing_tiers": {
             "anyOf": [
               {
@@ -19780,9 +20180,7 @@
           }
         },
         "required": [
-          "model_key",
-          "input_price_per_million",
-          "output_price_per_million"
+          "model_key"
         ],
         "title": "SetPricingRequest",
         "type": "object"
@@ -19846,7 +20244,7 @@
         "type": "object"
       },
       "SpanPublic": {
-        "description": "One span of a session. Content is never part of a span.",
+        "description": "One span of a session. Its content is empty unless the deployment keeps content.",
         "properties": {
           "approximate": {
             "description": "True when the start was inferred rather than measured.",
@@ -19896,6 +20294,26 @@
             ],
             "description": "Input tokens written to the prompt cache.",
             "title": "Cache Write Tokens"
+          },
+          "content": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the deployment keeps content and the agent sent it. Empty otherwise.",
+            "title": "Content",
+            "type": "object"
+          },
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The model's context window in tokens, where the catalog knows it. Null on a span that is not a model request, and for a model the catalog does not list.",
+            "title": "Context Window"
           },
           "cost": {
             "anyOf": [
@@ -20162,6 +20580,7 @@
           "cache_read_tokens",
           "cache_write_tokens",
           "reasoning_tokens",
+          "context_window",
           "cost",
           "tool_name",
           "tool_type",
@@ -20169,9 +20588,49 @@
           "request_id",
           "otel_trace_id",
           "otel_span_id",
-          "attributes"
+          "attributes",
+          "content"
         ],
         "title": "SpanPublic",
+        "type": "object"
+      },
+      "StoredCountryDatabasePublic": {
+        "description": "The country file stored in the database, which every replica reads.",
+        "properties": {
+          "built_at": {
+            "description": "When the file was built, from its metadata.",
+            "format": "date-time",
+            "title": "Built At",
+            "type": "string"
+          },
+          "database_type": {
+            "description": "The type the file's metadata names, such as `GeoLite2-Country` or `DBIP-Country-Lite`.",
+            "title": "Database Type",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "The file's SHA-256, in hex.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "uploaded_at": {
+            "format": "date-time",
+            "title": "Uploaded At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "database_type",
+          "built_at",
+          "size_bytes",
+          "sha256",
+          "uploaded_at"
+        ],
+        "title": "StoredCountryDatabasePublic",
         "type": "object"
       },
       "StoredSearchToolSchema": {
@@ -20390,8 +20849,7 @@
         "type": "object"
       },
       "TextContent": {
-        "additionalProperties": true,
-        "description": "Text content for a message.",
+        "description": "Text provided to or from an LLM.",
         "properties": {
           "_meta": {
             "anyOf": [
@@ -20421,19 +20879,18 @@
           },
           "type": {
             "const": "text",
+            "default": "text",
             "title": "Type",
             "type": "string"
           }
         },
         "required": [
-          "type",
           "text"
         ],
         "title": "TextContent",
         "type": "object"
       },
       "TextResourceContents": {
-        "additionalProperties": true,
         "description": "Text contents of a resource.",
         "properties": {
           "_meta": {
@@ -20464,8 +20921,6 @@
             "type": "string"
           },
           "uri": {
-            "format": "uri",
-            "minLength": 1,
             "title": "Uri",
             "type": "string"
           }
@@ -20520,7 +20975,7 @@
       },
       "ToolChargeLine": {
         "additionalProperties": true,
-        "description": "A gateway-run tool's charge line, one per tool and label.\n\nA subclass with ``label`` required, rather than a defaulted field on\n:class:`UnitChargeLine`, so the per-request, rerank and image lines, and a\nstored tool line without a label, serialize back without a\n``\"label\": null`` they never had.",
+        "description": "A gateway-run tool's charge line, one per tool, label and payer.\n\nA subclass with ``label`` required, rather than a defaulted field on\n:class:`UnitChargeLine`, so the per-request, rerank and image lines, and a\nstored tool line without a label, serialize back without a\n``\"label\": null`` they never had.\n\nA line written since tools are charged by whose account ran them also\ncarries ``deployment_paid``: true where the deployment's account ran the\ncalls, which charges the organization's funds where the deployment bills\nthem, and false where the organization's own key did. It is kept as an extra\nkey rather than declared, so an older line serializes back without it.",
         "properties": {
           "cost": {
             "description": "USD charged for this line.",
@@ -20563,6 +21018,80 @@
           "label"
         ],
         "title": "ToolChargeLine",
+        "type": "object"
+      },
+      "ToolCostPublic": {
+        "description": "An estimate of what one tool call cost, from the model requests either side of it.",
+        "properties": {
+          "calling": {
+            "description": "Its share of the output of the request that called it.",
+            "title": "Calling",
+            "type": "number"
+          },
+          "calls_sharing_request": {
+            "description": "Tool calls the request that called it made, sharing its output.",
+            "title": "Calls Sharing Request",
+            "type": "integer"
+          },
+          "calls_sharing_result": {
+            "description": "Tool calls whose results arrived together, sharing that growth.",
+            "title": "Calls Sharing Result",
+            "type": "integer"
+          },
+          "later_requests": {
+            "description": "The later requests that read its result again.",
+            "title": "Later Requests",
+            "type": "integer"
+          },
+          "rereading": {
+            "description": "Reading its result again in later requests, until the context was compacted.",
+            "title": "Rereading",
+            "type": "number"
+          },
+          "result_tokens": {
+            "description": "About how many tokens its result added to the context.",
+            "title": "Result Tokens",
+            "type": "integer"
+          },
+          "span_id": {
+            "title": "Span Id",
+            "type": "string"
+          },
+          "subagent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What a subagent the call ran cost, exactly.",
+            "title": "Subagent"
+          },
+          "total": {
+            "title": "Total",
+            "type": "number"
+          },
+          "writing": {
+            "description": "Writing its result into the context, on the next request.",
+            "title": "Writing",
+            "type": "number"
+          }
+        },
+        "required": [
+          "span_id",
+          "total",
+          "calling",
+          "writing",
+          "rereading",
+          "result_tokens",
+          "later_requests",
+          "calls_sharing_request",
+          "calls_sharing_result",
+          "subagent"
+        ],
+        "title": "ToolCostPublic",
         "type": "object"
       },
       "ToolMeter": {
@@ -20740,12 +21269,12 @@
             "type": "string"
           },
           "failed": {
-            "description": "Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.",
+            "description": "Sessions active in the bucket that hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.",
             "title": "Failed",
             "type": "integer"
           },
           "succeeded": {
-            "description": "Sessions that started in the bucket and did not fail.",
+            "description": "Sessions active in the bucket that did not fail.",
             "title": "Succeeded",
             "type": "integer"
           }
@@ -20799,6 +21328,14 @@
           "summary": {
             "$ref": "#/components/schemas/TraceSummaryPublic"
           },
+          "tool_costs": {
+            "description": "An estimate for each tool call between two priced model requests, in the order they were made.",
+            "items": {
+              "$ref": "#/components/schemas/ToolCostPublic"
+            },
+            "title": "Tool Costs",
+            "type": "array"
+          },
           "truncated": {
             "description": "True when the session holds more spans than one read returns.",
             "title": "Truncated",
@@ -20818,7 +21355,8 @@
           "turns",
           "spans",
           "truncated",
-          "gates"
+          "gates",
+          "tool_costs"
         ],
         "title": "TraceDetailPublic",
         "type": "object"
@@ -20848,7 +21386,11 @@
         "properties": {
           "bucket": {
             "enum": [
+              "1m",
+              "5m",
+              "30m",
               "hour",
+              "6h",
               "day"
             ],
             "title": "Bucket",
@@ -30429,7 +30971,7 @@
     },
     "/api/v1/hooks/guardrails": {
       "post": {
-        "description": "Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.\n\n`otari hook` sends this once per version, the first time it reports a check\nagainst it. The fingerprint is recomputed from the gates, and one that does\nnot match the one sent is refused, so a version cannot be stored under\nanother's name. Sending a version again changes nothing. It is stored in the\nAPI key's workspace, beside that key's traces, and takes the same key a trace\nexport does: a budget-exempt API key, never the master key.",
+        "description": "Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.\n\n`otari hook` sends this once per version, the first time it reports a check\nagainst it. The fingerprint is recomputed from the gates, and one that does\nnot match the one sent is refused, so a version cannot be stored under\nanother's name. Sending a version again changes nothing. A workspace keeps at\nmost 1,000 versions, and a new one past that is refused with a 409. It is stored in the\nAPI key's workspace, beside that key's traces, and takes the same key a trace\nexport does: a budget-exempt API key, never the master key.",
         "operationId": "hooks-record_guardrail_definition",
         "requestBody": {
           "content": {
@@ -30451,6 +30993,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "description": "The workspace already keeps the most guardrail versions it may, and this one is new."
           },
           "422": {
             "content": {
@@ -30585,6 +31130,106 @@
           }
         ],
         "summary": "Create Hosted Provider",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/catalog-update": {
+      "post": {
+        "description": "Apply the reviewed prices, then refresh every provider's models, then the cleanup if asked.\n\nThe price step comes first, so the model step prices new models at the\nprices it applied, and a model held for want of a price is served once it\nhas one. Without a ``digest`` no price changes. A ``digest`` that no longer\nnames the pending prices answers 409 and changes nothing. ``cleanup``\nremoves the prices of models no provider serves, with their history.",
+        "operationId": "hosted-providers-update_catalog",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedCatalogUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedCatalogUpdatePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Catalog",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/catalog-update/preview": {
+      "post": {
+        "description": "What updating the catalog would do: the models.dev price changes, then what each provider newly lists.\n\nA POST, because it holds the fetched prices as pending for the apply to\nname by their ``digest``; nothing else is written. It dials every enabled\nprovider. A price fetch that fails is reported in ``price_error`` and the\nmodel lists are still previewed. With ``cleanup``, it also previews which\nprices of models no provider serves would be removed.",
+        "operationId": "hosted-providers-preview_catalog_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedCatalogUpdatePreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedCatalogUpdatePreviewPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Preview Catalog Update",
         "tags": [
           "hosted-providers"
         ]
@@ -30737,66 +31382,6 @@
           }
         ],
         "summary": "Reencrypt Hosted Providers",
-        "tags": [
-          "hosted-providers"
-        ]
-      }
-    },
-    "/api/v1/hosted-providers/refresh": {
-      "post": {
-        "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. A model list whose\nprovider nothing defines any more, such as a removed ``config.yml`` entry,\ngoes too, and is named in ``orphaned_rosters``. Where no provider offers a\nmodel, only those lists go and every price stays; with none of them either,\nthe sweep answers 409. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
-        "operationId": "hosted-providers-refresh_catalog",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Refresh Catalog",
-        "tags": [
-          "hosted-providers"
-        ]
-      }
-    },
-    "/api/v1/hosted-providers/refresh/preview": {
-      "get": {
-        "description": "What a catalog sweep would remove, without removing it.\n\nA GET, and a truthful one: it writes nothing. It does dial every enabled\nprovider, as ``available-models`` does, because a model the provider still\nlists would survive the sweep and previewing it as doomed would be a lie.",
-        "operationId": "hosted-providers-preview_catalog_refresh",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Preview Catalog Refresh",
         "tags": [
           "hosted-providers"
         ]
@@ -33190,7 +33775,7 @@
     },
     "/api/v1/oauth/token": {
       "post": {
-        "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:\none on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,\n``workspace_id`` and ``service_account_id``, where set, must be the UUIDs of the rule's key's organization and\nworkspace and the key's id. The access token authenticates as that key until ``expires_in`` runs out, the rule is\ndeleted or the key stops passing its checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
+        "description": "Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).\n\nThe identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:\none on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,\nwhere set, must be the UUID of the rule's key's organization. ``workspace_id`` and ``service_account_id`` are\naccepted and ignored, so a client configured for Anthropic needs only its rule and organization changed. The\naccess token authenticates as that key until ``expires_in`` runs out, the rule is deleted or the key stops passing\nits checks.\n\nEvery refusal of the identity token answers 401 ``invalid_grant`` with the same description.",
         "operationId": "oauth-exchange_token",
         "requestBody": {
           "content": {
@@ -34833,7 +35418,7 @@
         ]
       },
       "post": {
-        "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). The secret is returned once.",
+        "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). A viewer of the workspace is refused\nwith 403. The secret is returned once.",
         "operationId": "organization-keys-create_own_key",
         "requestBody": {
           "content": {
@@ -36352,7 +36937,7 @@
         ]
       },
       "patch": {
-        "description": "Change a key's name, credential, base URL, or client args. Organization owners and admins only.",
+        "description": "Change a key's name, credential, base URL, or client args. Organization owners and admins only.\n\nA new base URL on a key that holds a credential needs that credential in the\nsame request, `api_key` and any masked `client_args` entry, since the next call\nsends it to the new host. Clearing the base URL needs neither.",
         "operationId": "provider-keys-update_org_provider_key",
         "parameters": [
           {
@@ -37595,7 +38180,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -37609,12 +38194,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -37628,7 +38213,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -37825,7 +38410,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -37839,12 +38424,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -37858,7 +38443,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -38083,7 +38668,7 @@
     },
     "/api/v1/organizations/me/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+        "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
         "operationId": "organization-traces-trace_series",
         "parameters": [
           {
@@ -38093,7 +38678,11 @@
             "schema": {
               "default": "hour",
               "enum": [
+                "1m",
+                "5m",
+                "30m",
                 "hour",
+                "6h",
                 "day"
               ],
               "title": "Bucket",
@@ -38120,7 +38709,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -38134,12 +38723,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -38153,7 +38742,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -40162,7 +40751,7 @@
         ]
       },
       "patch": {
-        "description": "Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.\n\nIts kind and provider are fixed.",
+        "description": "Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.\n\nIts kind and provider are fixed. A new api_base on a key that holds a secret\nneeds that secret in the same request, `api_key` and any masked `options`\nentry, since the next call sends it to the new host. Clearing api_base needs\nneither.",
         "operationId": "web-search-keys-update_org_web_search_key",
         "parameters": [
           {
@@ -41600,96 +42189,6 @@
           }
         ],
         "summary": "List Pricing Drift",
-        "tags": [
-          "pricing"
-        ]
-      }
-    },
-    "/api/v1/pricing/refresh": {
-      "post": {
-        "description": "Fetch the latest defaults and hold them for operator review.",
-        "operationId": "pricing-preview_pricing_refresh",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PricingRefreshPreviewResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Preview Pricing Refresh",
-        "tags": [
-          "pricing"
-        ]
-      }
-    },
-    "/api/v1/pricing/refresh/confirm": {
-      "post": {
-        "description": "Activate the latest reviewed default-price snapshot.",
-        "operationId": "pricing-confirm_pricing_refresh",
-        "parameters": [
-          {
-            "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
-            "in": "query",
-            "name": "digest",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
-              "title": "Digest"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PricingRefreshConfirmationResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Confirm Pricing Refresh",
         "tags": [
           "pricing"
         ]
@@ -44200,6 +44699,111 @@
         ]
       }
     },
+    "/api/v1/settings/country-database": {
+      "delete": {
+        "description": "Remove the stored country file.\n\nAnswers 404 when none is stored, and 409 when it is the only country source\nfor ``provider_supported_countries`` or for the supported countries of an\nenabled hosted provider.",
+        "operationId": "settings-delete_country_database",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Country Database",
+        "tags": [
+          "settings"
+        ]
+      },
+      "get": {
+        "description": "Describe the stored country file, and say whether ``client_country_database`` is read instead.",
+        "operationId": "settings-get_country_database",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountryDatabaseStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Country Database",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "description": "Store a country file in place of the one stored before.\n\nA file larger than 32 MiB answers 413, and one that is no MaxMind DB\ncountry file answers 400. Either way the file stored before stays. While\n``client_country_database`` is set, the stored file is kept but not read.",
+        "operationId": "settings-upload_country_database",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "contentMediaType": "application/octet-stream",
+                    "description": "A MaxMind DB country file, such as GeoLite2 Country or DB-IP Lite Country.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountryDatabaseStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "413": {
+            "description": "The file is larger than 32 MiB."
+          },
+          "422": {
+            "description": "The body holds no file in the field ``file``."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Upload Country Database",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/api/v1/settings/mail": {
       "get": {
         "description": "Report the effective outgoing-mail configuration.",
@@ -44828,7 +45432,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -44842,12 +45446,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -44861,7 +45465,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -45058,7 +45662,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -45072,12 +45676,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -45091,7 +45695,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },
@@ -45316,7 +45920,7 @@
     },
     "/api/v1/traces/series": {
       "get": {
-        "description": "Count sessions per bucket of their start, split by whether they failed.\n\nA session failed when it holds an unrecovered error other than a tool's. A tool's error\ngoes back to the model, an MCP tool's included, so a session whose only errors are tools'\ncounts as succeeded.",
+        "description": "Count the sessions active in each bucket, split by whether they failed.\n\nA session is active from its start to its last activity, so a long one counts in every bucket it ran\nthrough. Here ``start`` and ``end`` bound the buckets: a session that began before\n``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are\naligned to their size in UTC and only the populated ones are returned. A session failed when it holds an\nunrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so\na session whose only errors are tools' counts as succeeded.",
         "operationId": "traces-trace_series",
         "parameters": [
           {
@@ -45326,7 +45930,11 @@
             "schema": {
               "default": "hour",
               "enum": [
+                "1m",
+                "5m",
+                "30m",
                 "hour",
+                "6h",
                 "day"
               ],
               "title": "Bucket",
@@ -45353,7 +45961,7 @@
             }
           },
           {
-            "description": "Last activity at or after this instant (ISO 8601).",
+            "description": "Sessions active at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
             "required": false,
@@ -45367,12 +45975,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity at or after this instant (ISO 8601).",
+              "description": "Sessions active at or after this instant (ISO 8601).",
               "title": "Start"
             }
           },
           {
-            "description": "Last activity before this instant (ISO 8601).",
+            "description": "Sessions started before this instant (ISO 8601).",
             "in": "query",
             "name": "end",
             "required": false,
@@ -45386,7 +45994,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last activity before this instant (ISO 8601).",
+              "description": "Sessions started before this instant (ISO 8601).",
               "title": "End"
             }
           },

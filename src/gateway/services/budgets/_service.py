@@ -270,7 +270,7 @@ class BudgetService:
         return listed
 
     async def minute_limits(self, user_id: str, *, strategy: str | None) -> BudgetMinuteLimits | None:
-        """The per-minute limits of the user's own budget, or None when it sets neither or budgets are disabled."""
+        """The user's own budget and its per-minute limits, or None when the user is on none or budgets are disabled."""
         if _normalize_strategy(strategy) == "disabled":
             return None
         async with self._uow:

@@ -208,3 +208,11 @@ def test_a_real_model_or_tool_name_is_kept(value: str) -> None:
 def test_an_id_takes_no_slash_or_at_sign() -> None:
     with pytest.raises(InvalidSpanError, match="span_id"):
         _span(span_id="a/b@c")
+
+
+def test_a_span_holds_only_known_content() -> None:
+    with pytest.raises(InvalidSpanError):
+        SpanRecord(span_id="s", kind="tool", origin="otlp", name="x", outcome="ok", content={"output": "secret"})
+
+    span = SpanRecord(span_id="s", kind="tool", origin="otlp", name="x", outcome="ok", content={"command": "ls -la"})
+    assert span.content == {"command": "ls -la"}

@@ -16,8 +16,9 @@ import zlib
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from http.cookiejar import Cookie, CookieJar
 from time import monotonic
-from typing import ClassVar, Protocol, TypeAlias, TypeVar
+from typing import Any, ClassVar, Protocol, TypeAlias, TypeVar
 from urllib.request import getproxies_environment
 
 import httpx
@@ -268,6 +269,16 @@ class RedirectTracker:
         self._visited.add(next_url.redirect_loop_key)
         self._current = next_url
         return next_url
+
+
+class NoCookieJar(CookieJar):
+    """A jar that keeps no cookie, for a client that serves every tenant: one's cookie never rides on another's call."""
+
+    def set_cookie(self, cookie: Cookie) -> None:
+        return None
+
+    def extract_cookies(self, response: Any, request: Any) -> None:
+        return None
 
 
 def is_redirect_status(status_code: int) -> bool:

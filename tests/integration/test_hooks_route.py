@@ -1525,6 +1525,40 @@ def test_a_guardrail_definition_is_kept_once_under_its_fingerprint(
     assert stored.gates[0]["message"] == "CHANGELOG.md is generated."
 
 
+def _versioned_definition(message: str) -> dict[str, object]:
+    gate = GateDefinition(
+        gate_id="no-changelog",
+        gate_type="path",
+        enforcement="required",
+        origin="repo",
+        runs=("pre_tool_use.edit_target",),
+        message=message,
+    )
+    return definition_body((gate,))
+
+
+def test_a_workspace_keeps_a_bounded_number_of_guardrail_versions(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A new version past the cap is a 409, which `otari hook` drops rather than retrying; a known one still stores."""
+    monkeypatch.setattr("gateway.services.traces._service.MAX_GUARDRAIL_VERSIONS_PER_WORKSPACE", 2)
+    api_key_header = _exempt_key(client, master_key_header)
+    first, second, third = (_versioned_definition(f"version {n}") for n in range(3))
+
+    statuses = [
+        client.post(f"{API_ROOT}/hooks/guardrails", json=body, headers=api_key_header).status_code
+        for body in (first, second, third, first)
+    ]
+
+    assert statuses == [200, 200, 409, 200]
+    with db_session_factory() as session:
+        stored = {row.digest for row in session.scalars(select(TraceGuardrailDefinition)).all()}
+    assert stored == {first["digest"], second["digest"]}
+
+
 def test_a_definition_whose_fingerprint_does_not_match_its_gates_is_refused(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:

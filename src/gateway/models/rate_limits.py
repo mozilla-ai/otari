@@ -19,7 +19,7 @@ class StoredRateLimitRule(Base):
     __table_args__ = (
         # The same set ``RateLimitRule.per`` accepts.
         CheckConstraint(
-            "per IN ('deployment', 'key', 'user', 'model')",
+            "per IN ('deployment', 'key', 'user', 'model', 'budget')",
             name="ck_rate_limit_rules_per",
         ),
     )
@@ -28,6 +28,10 @@ class StoredRateLimitRule(Base):
     per: Mapped[str] = mapped_column(String)
     # The instance:model names a per-model rule limits; null for every other rule.
     models: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    # The budgets a per-budget rule counts; null for every budget, and on every other rule.
+    budgets: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    # ``enforce`` refuses a request over the rule; ``report`` serves it and names the rule.
+    mode: Mapped[str] = mapped_column(String, default="enforce", server_default="enforce")
     rpm: Mapped[int | None] = mapped_column(default=None)
     tpm: Mapped[int | None] = mapped_column(default=None)
     tpm_admission: Mapped[str] = mapped_column(String, default="used", server_default="used")

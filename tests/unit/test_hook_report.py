@@ -190,6 +190,18 @@ def test_each_further_model_a_judge_ran_on_goes_on_a_usage_span_under_its_gate()
     assert "otari.gate.outcome" not in attributes
 
 
+def test_what_a_check_read_travels_once_on_its_first_gate() -> None:
+    second = GateReport(**{**_GATE.__dict__, "gate_id": "no-lockfile"})
+    body = report.otlp_body(
+        CheckReport(**{**_CHECK.__dict__, "gates": (_GATE, second), "evidence": "CHANGELOG.md"}),
+        ended_ns=_CHECK.started_ns + 1,
+    )
+
+    first, other = (_attributes(span) for span in body["resourceSpans"][0]["scopeSpans"][0]["spans"])
+    assert first["otari.gate.evidence"] == "CHANGELOG.md"
+    assert "otari.gate.evidence" not in other
+
+
 def test_a_queued_report_holds_no_credential(tmp_path: Path) -> None:
     assert report.enqueue(_CHECK, _EXPORTING, outbox=tmp_path, spawn=False)
 
@@ -581,3 +593,27 @@ def test_a_stop_check_times_its_judge_apart_and_reports_what_the_judge_used(
     assert took_s(by_gate["no-changelog"]) < _JUDGE_TAKES_S
     assert _attributes(by_gate["follows-pattern"])["gen_ai.usage.cache_write_tokens"] == "6684"
     assert "gen_ai.request.model" not in _attributes(by_gate["no-changelog"])
+
+
+def test_what_a_check_read_goes_only_when_content_is_reported(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for key, value in _EXPORTING.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(report, "_spawn_sender", lambda outbox: None)
+
+    def reported() -> dict[str, Any]:
+        queue = report.queue_for(_EXPORTING)
+        assert queue is not None
+        [queued] = sorted(queue.glob("*.json"))[-1:]
+        body = json.loads(queued.read_text(encoding="utf-8"))["body"]
+        queued.unlink()
+        return _attributes(body["resourceSpans"][0]["scopeSpans"][0]["spans"][0])
+
+    CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit(repo)))
+    quiet = reported()
+    monkeypatch.setenv("OTARI_HOOK_REPORT_CONTENT", "1")
+    CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit(repo)))
+    told = reported()
+
+    assert "otari.gate.evidence" not in quiet and "otari.gate.detail" not in quiet
+    assert "CHANGELOG.md" in told["otari.gate.evidence"]
+    assert "CHANGELOG.md" in told["otari.gate.detail"]

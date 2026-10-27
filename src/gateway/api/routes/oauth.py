@@ -36,9 +36,10 @@ async def exchange_token(grant: FederationTokenRequest, exchange: FederationToke
 
     The identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:
     one on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,
-    ``workspace_id`` and ``service_account_id``, where set, must be the UUIDs of the rule's key's organization and
-    workspace and the key's id. The access token authenticates as that key until ``expires_in`` runs out, the rule is
-    deleted or the key stops passing its checks.
+    where set, must be the UUID of the rule's key's organization. ``workspace_id`` and ``service_account_id`` are
+    accepted and ignored, so a client configured for Anthropic needs only its rule and organization changed. The
+    access token authenticates as that key until ``expires_in`` runs out, the rule is deleted or the key stops passing
+    its checks.
 
     Every refusal of the identity token answers 401 ``invalid_grant`` with the same description.
     """
@@ -48,8 +49,6 @@ async def exchange_token(grant: FederationTokenRequest, exchange: FederationToke
             assertion=grant.assertion,
             federation_rule_id=grant.federation_rule_id,
             organization_id=grant.organization_id,
-            workspace_id=grant.workspace_id,
-            service_account_id=grant.service_account_id,
         )
     except FederationGrantError as exc:
         record_auth_failure(exc.reason)

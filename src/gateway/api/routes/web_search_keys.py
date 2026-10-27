@@ -66,7 +66,10 @@ async def update_org_web_search_key(
 ) -> OrgWebSearchKeyPublic:
     """Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.
 
-    Its kind and provider are fixed.
+    Its kind and provider are fixed. A new api_base on a key that holds a secret
+    needs that secret in the same request, `api_key` and any masked `options`
+    entry, since the next call sends it to the new host. Clearing api_base needs
+    neither.
     """
     return await service.update_key(user=current_identity, key_id=key_id, request=body)
 

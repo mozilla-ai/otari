@@ -327,7 +327,8 @@ function InviteMemberForm({
           ? workspaceIds.map(
               (workspace_id): WorkspaceAssignment => ({
                 workspace_id,
-                role: "member",
+                // A viewer of the organization is a viewer of its workspaces.
+                role: role === "viewer" ? "viewer" : "member",
               }),
             )
           : null,

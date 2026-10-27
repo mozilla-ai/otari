@@ -51,6 +51,10 @@ from gateway.services.url_safety import UnsafeURLError, validate_provider_api_ba
 # applies to direct callers (e.g. tests).
 _ADHOC_DISCOVERY_TIMEOUT_SECONDS = 10.0
 
+# The undiscovered declared ids last warned about per instance, so a mismatch
+# that persists across refreshes is logged once rather than on every refresh.
+_warned_undiscovered: dict[str, frozenset[str]] = {}
+
 
 @dataclass
 class ProviderDiscovery:
@@ -384,7 +388,29 @@ async def _discover_for_provider(
             )
             return provider_name, declared
         raise
+    _warn_about_undiscovered_declared_models(config, provider_name, models)
     return provider_name, list(models)
+
+
+def _warn_about_undiscovered_declared_models(config: GatewayConfig, instance: str, models: Sequence[Model]) -> None:
+    """Warn when the instance declares a model id its backend does not list.
+
+    A self-hosted server can serve a model under an id other than the one the
+    operator declared and priced (llama-server without ``--alias`` lists the
+    GGUF path), and a request for the declared id then fails upstream.
+    """
+    discovered = {model.id for model in models}
+    missing = frozenset(model.id for model in _declared_models(config, instance) if model.id not in discovered)
+    if missing == _warned_undiscovered.get(instance, frozenset()):
+        return
+    _warned_undiscovered[instance] = missing
+    if missing:
+        logger.warning(
+            "Instance '%s' declares models its backend does not list: %s; it lists: %s",
+            instance,
+            ", ".join(sorted(missing)),
+            ", ".join(sorted(discovered)) or "nothing",
+        )
 
 
 # A provider error is echoed into a health or test response, so it is redacted

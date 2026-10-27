@@ -1747,3 +1747,90 @@ async def test_report_chunks_repeat_the_first_chunk_with_choices(monkeypatch: py
     ]
 
     assert [(chunk.id, chunk.model) for chunk in reports] == [("cmpl-1", "fake"), ("cmpl-1", "fake")]
+
+
+# ---------- provider state on tool calls ----------
+
+_GOOGLE_SIGNATURE = {"google": {"thought_signature": "c2lnbmF0dXJl"}}
+
+
+def test_accumulate_keeps_tool_call_extra_content() -> None:
+    slots: dict[int, dict[str, Any]] = {}
+    _accumulate_tool_call_deltas(
+        slots,
+        [
+            ChoiceDeltaToolCall(
+                index=0,
+                id="a",
+                type="function",
+                function=DeltaFn(name="t", arguments="{}"),
+                extra_content=_GOOGLE_SIGNATURE,
+            ),
+            ChoiceDeltaToolCall(index=1, id="b", type="function", function=DeltaFn(name="u", arguments="{}")),
+        ],
+    )
+    out = _finalize_tool_calls(slots)
+    assert out[0]["extra_content"] == _GOOGLE_SIGNATURE
+    assert "extra_content" not in out[1]
+
+
+@pytest.mark.asyncio
+async def test_loop_echoes_tool_call_extra_content_back_to_the_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gemini 3 rejects a tool turn whose ``thought_signature`` is not sent back."""
+    first = _completion(finish="tool_calls", tool_calls=[("call_1", "fetch_url", "{}")])
+    first_calls = first.choices[0].message.tool_calls
+    assert first_calls is not None
+    cast(Any, first_calls[0]).extra_content = _GOOGLE_SIGNATURE
+    responses = iter([first, _completion(finish="stop", content="done")])
+    captured_messages: list[list[dict[str, Any]]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        captured_messages.append(kwargs["messages"])
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=_FakePool(tool_names=["fetch_url"]),
+        max_iterations=5,
+    )
+
+    assert captured_messages[1][-2]["tool_calls"][0]["extra_content"] == _GOOGLE_SIGNATURE
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_echoes_tool_call_extra_content_back_to_the_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signed = ChoiceDeltaToolCall(
+        index=0,
+        id="call_1",
+        type="function",
+        function=DeltaFn(name="fetch_url", arguments="{}"),
+        extra_content=_GOOGLE_SIGNATURE,
+    )
+    first_chunk = _chunk()
+    first_chunk.choices[0].delta.tool_calls = [signed]
+    iter_streams = iter(
+        [
+            _async_iter(first_chunk, _chunk(finish="tool_calls")),
+            _async_iter(_chunk(content="all done", finish="stop")),
+        ]
+    )
+    captured_messages: list[list[dict[str, Any]]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        captured_messages.append(list(kwargs["messages"]))
+        return next(iter_streams)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    async for _ in mcp_tool_loop_stream(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=_FakePool(tool_names=["fetch_url"]),
+        max_iterations=5,
+    ):
+        pass
+
+    assert captured_messages[1][-2]["tool_calls"][0]["extra_content"] == _GOOGLE_SIGNATURE

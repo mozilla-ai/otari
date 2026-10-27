@@ -83,19 +83,29 @@ from gateway.services.external_usage_service import (
     MAX_EVENTS_PER_BATCH,
     ExternalEventsRequest,
     ExternalUsageEvent,
+    PricedEvent,
     claude_usage_events,
     ingest_external_events,
     is_reserved_source,
+    token_count,
 )
-from gateway.services.traces import HOOK_SCOPE, OtlpSpan, TraceWriter, record_otlp_export
+from gateway.services.traces import (
+    CLAUDE_CODE_USAGE_SOURCE,
+    HOOK_SCOPE,
+    HOOK_USAGE_SOURCE,
+    OtlpSpan,
+    PricedRequest,
+    TraceWriter,
+    gate_usage_event_id,
+    record_otlp_export,
+    record_priced_requests,
+)
 
 router = APIRouter(tags=["otel"])
 
 _JSON = "application/json"
 _PROTOBUF = ("application/x-protobuf", "application/octet-stream")
 _DEFAULT_SOURCE = "otel"
-# What a judge gate's model calls, reported on its span by ``otari hook``, are imported as.
-_HOOK_SOURCE = "otari-hook"
 
 # Request bounds. OTLP exporters batch to a few MiB per export; the cap keeps one
 # request from expanding without bound in memory (gzip bombs decompress fully
@@ -236,13 +246,6 @@ def _attributes(kv_list: Any, *, arrays: bool = False) -> dict[str, Any]:
     return {kv.key: _any_value(kv.value, arrays=arrays) for kv in kv_list}
 
 
-def _int(value: Any) -> int:
-    try:
-        return max(int(value), 0)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _nanos_to_dt(nanos: int) -> datetime | None:
     if not nanos:
         return None
@@ -322,14 +325,14 @@ def _build_event(
     event_name = attrs.get("event.name")
     if event_name == "api_request":
         # Claude Code: cache reads/writes are additive (outside input_tokens).
-        source = "claude_code"
+        source = CLAUDE_CODE_USAGE_SOURCE
         provider = "anthropic"
         model = attrs.get("model")
         event_id = attrs.get("request_id") or fallback_event_id
-        input_tokens = _int(attrs.get("input_tokens"))
-        output_tokens = _int(attrs.get("output_tokens"))
-        cache_read = _int(attrs.get("cache_read_tokens"))
-        cache_write = _int(attrs.get("cache_creation_tokens"))
+        input_tokens = token_count(attrs.get("input_tokens"))
+        output_tokens = token_count(attrs.get("output_tokens"))
+        cache_read = token_count(attrs.get("cache_read_tokens"))
+        cache_write = token_count(attrs.get("cache_creation_tokens"))
         session = attrs.get("session.id")
         duration = attrs.get("duration_ms", duration_ms)
         cache_tokens_in_prompt = False
@@ -343,16 +346,16 @@ def _build_event(
         provider = attrs.get("provider_name") or "openai"
         model = attrs.get("model")
         if event_name == "codex.sse_event":
-            input_tokens = _int(attrs.get("input_token_count"))
-            output_tokens = _int(attrs.get("output_token_count"))
-            cache_read = _int(attrs.get("cached_token_count"))
-            reasoning = _int(attrs.get("reasoning_token_count"))
+            input_tokens = token_count(attrs.get("input_token_count"))
+            output_tokens = token_count(attrs.get("output_token_count"))
+            cache_read = token_count(attrs.get("cached_token_count"))
+            reasoning = token_count(attrs.get("reasoning_token_count"))
             event_id = _codex_event_id(attrs, None)
             duration = duration_ms
         else:  # codex.api_request (HTTP /models path)
-            input_tokens = _int(attrs.get("gen_ai.usage.input_tokens"))
-            output_tokens = _int(attrs.get("gen_ai.usage.output_tokens"))
-            cache_read = _int(attrs.get("gen_ai.usage.cache_read.input_tokens"))
+            input_tokens = token_count(attrs.get("gen_ai.usage.input_tokens"))
+            output_tokens = token_count(attrs.get("gen_ai.usage.output_tokens"))
+            cache_read = token_count(attrs.get("gen_ai.usage.cache_read.input_tokens"))
             event_id = _codex_event_id(attrs, attrs.get("gen_ai.response.id"))
             duration = attrs.get("duration_ms", duration_ms)
         cache_write = 0
@@ -362,14 +365,14 @@ def _build_event(
         provider = attrs.get("gen_ai.provider.name") or attrs.get("gen_ai.system")
         model = attrs.get("gen_ai.request.model") or attrs.get("gen_ai.response.model")
         event_id = attrs.get("gen_ai.response.id") or fallback_event_id
-        input_tokens = _int(attrs.get("gen_ai.usage.input_tokens"))
-        output_tokens = _int(attrs.get("gen_ai.usage.output_tokens"))
-        cache_read = _int(
+        input_tokens = token_count(attrs.get("gen_ai.usage.input_tokens"))
+        output_tokens = token_count(attrs.get("gen_ai.usage.output_tokens"))
+        cache_read = token_count(
             attrs.get("gen_ai.usage.cache_read_tokens")
             or attrs.get("gen_ai.usage.cache_read.input_tokens")
             or attrs.get("gen_ai.usage.cached_tokens")
         )
-        cache_write = _int(attrs.get("gen_ai.usage.cache_write_tokens"))
+        cache_write = token_count(attrs.get("gen_ai.usage.cache_write_tokens"))
         client = attrs.get("otari.client_name")
         source = _sanitize_source(str(client)) if client else _DEFAULT_SOURCE
         session = attrs.get("otari.user_session_label") or attrs.get("otari.session_label")
@@ -469,12 +472,29 @@ async def _release_after_auth(db: AsyncSession) -> None:
     await release_session(db)
 
 
+def _record_priced(request: Request, priced: list[PricedEvent], *, api_key: APIKey, config: GatewayConfig) -> None:
+    """Hand each priced event's cost to the session it names: the session's cost is the ledger's."""
+    writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
+    if writer is None or not priced:
+        return
+    record_priced_requests(
+        writer,
+        (PricedRequest(e.source_event_id, e.session_label, e.timestamp, e.cost, e.source, e.rates) for e in priced),
+        budget_exempt=api_key.exclude_from_budget,
+        workspace_id=api_key.workspace_id,
+        user_id=api_key.user_id,
+        api_key_id=api_key.id,
+        retention=timedelta(days=config.trace_retention_days),
+    )
+
+
 async def _ingest(
     pairs: list[tuple[str, ExternalUsageEvent]],
     *,
     api_key: APIKey,
     db: AsyncSession,
     config: GatewayConfig,
+    priced: list[PricedEvent] | None = None,
 ) -> int:
     """Group events by their derived source and ingest each group (chunked).
 
@@ -494,6 +514,7 @@ async def _ingest(
                 api_key=api_key,
                 is_master_key=False,
                 reject_user_mismatch=config.reject_user_mismatch,
+                priced=priced,
             )
             rejected += result.rejected
             logger.info(
@@ -554,10 +575,18 @@ async def receive_traces(
                 attrs = _attributes(span.attributes)
                 if scope == HOOK_SCOPE:
                     # A judge's calls are made for the agent's session, so they are booked to it.
-                    attrs = {**attrs, "otari.client_name": _HOOK_SOURCE, "otari.session_label": attrs.get("session.id")}
+                    attrs = {
+                        **attrs,
+                        "otari.client_name": HOOK_USAGE_SOURCE,
+                        "otari.session_label": attrs.get("session.id"),
+                    }
                 mapped = _build_event(
                     attrs,
-                    fallback_event_id=span.span_id.hex() or None,
+                    fallback_event_id=gate_usage_event_id(
+                        scope, span.name, span.span_id.hex(), span.parent_span_id.hex()
+                    )
+                    or span.span_id.hex()
+                    or None,
                     default_timestamp=_nanos_to_dt(span.start_time_unix_nano),
                     duration_ms=duration,
                 )
@@ -565,9 +594,10 @@ async def receive_traces(
                     pairs.append(mapped)
 
     response = ExportTraceServiceResponse()
+    priced: list[PricedEvent] = []
     if pairs:
         with retryable_on_database_outage("otlp traces ingest"):
-            rejected = await _ingest(pairs, api_key=api_key, db=db, config=config)
+            rejected = await _ingest(pairs, api_key=api_key, db=db, config=config, priced=priced)
         if rejected:
             response.partial_success.rejected_spans = rejected
             response.partial_success.error_message = f"{rejected} usage event(s) rejected (see gateway logs)"
@@ -585,7 +615,9 @@ async def receive_traces(
             user_id=api_key.user_id,
             api_key_id=api_key.id,
             retention=timedelta(days=config.trace_retention_days),
+            content_enabled=config.trace_content_enabled,
         )
+    _record_priced(request, priced, api_key=api_key, config=config)
     return _otlp_response(content_type, response)
 
 
@@ -640,10 +672,12 @@ async def receive_logs(
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Too many events in one OTLP export")
 
     response = ExportLogsServiceResponse()
+    priced: list[PricedEvent] = []
     with retryable_on_database_outage("otlp logs ingest"):
-        rejected = await _ingest(pairs, api_key=api_key, db=db, config=config) if pairs else 0
+        rejected = await _ingest(pairs, api_key=api_key, db=db, config=config, priced=priced) if pairs else 0
         if telemetry:
             rejected += (await ingest_telemetry(db, telemetry, api_key=api_key, storage=storage)).rejected
+    _record_priced(request, priced, api_key=api_key, config=config)
     if rejected:
         response.partial_success.rejected_log_records = rejected
         response.partial_success.error_message = f"{rejected} log record(s) rejected (see gateway logs)"

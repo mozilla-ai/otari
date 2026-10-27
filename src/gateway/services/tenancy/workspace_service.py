@@ -393,8 +393,11 @@ class WorkspaceService:
         if member is None:
             raise WorkspaceMemberNotFoundError(workspace_id, user_id)
 
-        updated = await self.members.update(member, WorkspaceMemberUpdate(role=role))
-        await self.db.commit()
+        async with self._uow:
+            # As in remove_member: a key minted while a demotion runs cannot outlive it.
+            await self.workspaces.lock(workspace.id)
+            updated = await self.members.update(member, WorkspaceMemberUpdate(role=role))
+            await self._membership_listener.member_role_changed(updated)
         return WorkspaceMemberPublic.model_validate(updated)
 
     async def remove_member(self, *, user: User, workspace_id: uuid.UUID, user_id: uuid.UUID) -> None:
@@ -407,6 +410,9 @@ class WorkspaceService:
             return
 
         async with self._uow:
+            # The key write routes take the same lock before checking membership,
+            # so a key minted or re-enabled while this runs cannot outlive it.
+            await self.workspaces.lock(workspace.id)
             await self._membership_listener.member_removed(member)
             await self.members.delete(member)
 

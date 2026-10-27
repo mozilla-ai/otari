@@ -5,8 +5,7 @@ that references it by ``file_id``, and assert the gateway extracted the file to
 text and that text reached the provider — proving a text-only local model can
 "read" an uploaded file.
 
-The markitdown extraction boundary is monkeypatched for determinism so the test
-needs no optional extraction deps; everything else (HTTP, DB, blob store,
+The extraction boundary is monkeypatched for determinism; everything else (HTTP, DB, blob store,
 file_id resolution, capability resolution, message rewriting) is real.
 """
 
