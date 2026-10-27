@@ -53,7 +53,7 @@ export function SupportedCountriesField({
           onChange(next)
         }}
         placeholder="Every country"
-        description="Two-letter country codes, such as US, DE, GB, typed or loaded from a JSON list. A request from any other country, or from one Otari cannot place, is not served here. Needs a country source in the gateway's configuration."
+        description="Two-letter country codes, such as US, DE, GB, typed or loaded from a JSON list. A request from any other country, or from one Otari cannot place, is not served here. Needs a country source: a header or a country file in the gateway's configuration, or a country file stored on the Settings page."
         isInvalid={error !== undefined}
         errorMessage={error}
       />

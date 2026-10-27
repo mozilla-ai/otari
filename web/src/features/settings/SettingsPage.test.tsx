@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type {
   ConfigField,
+  CountryDatabaseStatus,
   GatewaySettings,
   HostedProvider,
   MailSettings,
@@ -199,6 +200,11 @@ const MAIL_SETTINGS: MailSettings = {
   missing: ["smtp_host", "mail_from_email", "public_base_url"],
 }
 
+const NO_COUNTRY_DATABASE: CountryDatabaseStatus = {
+  stored: null,
+  client_country_database_set: false,
+}
+
 function storedProvider(name: string, decryptable = true): HostedProvider {
   return {
     name,
@@ -270,6 +276,9 @@ function mockApi(
       if (url.includes(`${API_ROOT}/settings/mail`)) {
         return jsonResponse(MAIL_SETTINGS)
       }
+      if (url.includes(`${API_ROOT}/settings/country-database`)) {
+        return jsonResponse(NO_COUNTRY_DATABASE)
+      }
       if (url.includes(`${API_ROOT}/settings/master-key/rotate`)) {
         return jsonResponse({ master_key: "otari-mk-new" })
       }
@@ -318,6 +327,9 @@ function mockApiMovingTo(before: GatewaySettings, after: GatewaySettings) {
       const url = String(input)
       if (url.includes(`${API_ROOT}/settings/mail`)) {
         return jsonResponse(MAIL_SETTINGS)
+      }
+      if (url.includes(`${API_ROOT}/settings/country-database`)) {
+        return jsonResponse(NO_COUNTRY_DATABASE)
       }
       if (url.includes(`${API_ROOT}/settings`)) {
         if ((init?.method ?? "GET").toUpperCase() === "PATCH") current = after
