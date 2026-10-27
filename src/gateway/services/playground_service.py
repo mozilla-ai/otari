@@ -76,8 +76,12 @@ async def resolve_playground_workspace(
     *,
     identity: TenancyUser,
     workspace_id: uuid.UUID | None,
+    spending: bool = False,
 ) -> uuid.UUID:
     """The workspace this caller is acting in, proved to be theirs.
+
+    ``spending`` also refuses a viewer, of the organization or of the workspace:
+    a completion or an upload spends as a key would, and a viewer is read-only.
 
     A named one goes through ``resolve_workspace_in_organization``, so a
     workspace in another organization, or one in this organization the caller
@@ -112,6 +116,10 @@ async def resolve_playground_workspace(
         if workspace_id is None:
             raise TenancyConflictError(_NO_WORKSPACE) from None
         raise
+    if spending:
+        await organizations.require_workspace_contributor_access(
+            user=identity, organization_id=organization.id, workspace_id=workspace.id
+        )
     return workspace.id
 
 
@@ -147,12 +155,8 @@ async def resolve_playground_principal(
     committed, because the route that asked for this is about to run a
     completion and the request's transaction boundary is that route's.
     """
-    resolved_workspace_id = await resolve_playground_workspace(db, identity=identity, workspace_id=workspace_id)
-    # A viewer is read-only: a completion or an upload here spends, as a key would.
-    organizations = OrganizationService(db, membership_listener=None)
-    organization = await organizations.get_active_organization_for_user(identity)
-    await organizations.require_workspace_contributor_access(
-        user=identity, organization_id=organization.id, workspace_id=resolved_workspace_id
+    resolved_workspace_id = await resolve_playground_workspace(
+        db, identity=identity, workspace_id=workspace_id, spending=True
     )
 
     # Deleting a spend identity is an operator's revocation

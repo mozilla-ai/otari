@@ -412,6 +412,27 @@ class OrganizationService:
         self._enforce_management_role(membership)
         return membership
 
+    async def hold_workspace_write_access(
+        self,
+        *,
+        user: User,
+        organization_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        revoking: bool,
+    ) -> None:
+        """Refuse a write the caller's roles do not allow, holding the workspace's lock unless ``revoking``.
+
+        The lock lasts until the commit, so a removal from the workspace cannot
+        land between this check and the write. A commit before the write
+        releases it, so call this again after one. ``revoking`` (switching
+        something off or deleting it) needs no lock and no active membership.
+        """
+        if not revoking:
+            await self.lock_workspace(workspace_id)
+        await self.require_workspace_contributor_access(
+            user=user, organization_id=organization_id, workspace_id=workspace_id, membership_required=not revoking
+        )
+
     async def require_workspace_contributor_access(
         self,
         *,
