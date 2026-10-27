@@ -135,14 +135,20 @@ def _restore_list(incoming: list[Any], stored: list[Any], depth: int) -> list[An
     return out
 
 
-def holds_secret_like_values(values: dict[str, Any] | None) -> bool:
-    """Whether a stored object has an entry a read masks, which is a credential it carries."""
-    return values is not None and redact_secret_like_values(values) != values
-
-
 def carries_redaction(values: dict[str, Any] | None) -> bool:
     """Whether a submitted object still holds the mask somewhere a read could have put it."""
     return values is not None and _carries_mask(values, 0)
+
+
+def stored_secrets_survive(stored: dict[str, Any] | None, submitted: dict[str, Any] | None, *, sent: bool) -> bool:
+    """Whether an update keeps a stored credential-shaped entry the editor never saw.
+
+    A ``sent`` object keeps one only where it still carries the mask; an object
+    left out of the update keeps every entry a read masks.
+    """
+    if sent:
+        return carries_redaction(submitted)
+    return stored is not None and redact_secret_like_values(stored) != stored
 
 
 def restore_redacted_values(

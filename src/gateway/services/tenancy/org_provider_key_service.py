@@ -68,7 +68,7 @@ from gateway.models.provider_keys import (
     WorkspaceProviderKeyOverride,
     WorkspaceProviderModelRestriction,
 )
-from gateway.models.secret_fields import carries_redaction, holds_secret_like_values, restore_redacted_values
+from gateway.models.secret_fields import restore_redacted_values, stored_secrets_survive
 from gateway.models.tenancy import User, Workspace
 from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import (
@@ -531,10 +531,8 @@ class OrgProviderKeyService:
         if "api_base" in update_data:
             await _gate_api_base(update_data["api_base"])
             if update_data["api_base"] and update_data["api_base"] != key.api_base:
-                stored_args_follow = (
-                    carries_redaction(update_data["client_args"])
-                    if "client_args" in update_data
-                    else holds_secret_like_values(key.client_args)
+                stored_args_follow = stored_secrets_survive(
+                    key.client_args, update_data.get("client_args"), sent="client_args" in update_data
                 )
                 if (key.encrypted_api_key is not None and "api_key" not in update_data) or stored_args_follow:
                     raise OrgProviderKeyCredentialRequiredError

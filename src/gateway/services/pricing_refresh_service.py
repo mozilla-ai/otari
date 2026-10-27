@@ -98,6 +98,11 @@ class PricingRefreshPreview:
     needs_review: bool = False
     review_reason: str | None = None
 
+    @property
+    def changes_nothing(self) -> bool:
+        """Whether the fetched prices match the active ones."""
+        return self.added_count + self.changed_count + self.removed_count == 0
+
 
 def _snapshot_prices(index: ModelsDevPriceIndex) -> dict[str, tuple[object, ...]]:
     """Each priced model's rates, keyed by its models.dev provider and model ids."""
@@ -383,6 +388,15 @@ async def list_accepted_snapshots(session: AsyncSession, limit: int = 50) -> lis
     ]
 
 
+async def _discard_unchanged(session: AsyncSession, preview: PricingRefreshPreview) -> bool:
+    """Discard a fetch that changes nothing; false when a later fetch replaced it first."""
+    try:
+        await reject_price_refresh(session, digest=preview.digest)
+    except PendingSnapshotChanged:
+        return False
+    return True
+
+
 async def poll_price_updates(session: AsyncSession, policy: str, config: GatewayConfig | None = None) -> str:
     """One tick of the scheduled refresh: fetch, then hold or apply per ``policy``.
 
@@ -393,12 +407,8 @@ async def poll_price_updates(session: AsyncSession, policy: str, config: Gateway
     # A catalog the metadata refresher fetched within half an interval is reused.
     reuse_within = config.pricing_refresh_interval_seconds / 2 if config is not None else 0.0
     preview = await prepare_price_refresh(session, config, reuse_within=reuse_within)
-    if preview.added_count + preview.changed_count + preview.removed_count == 0:
-        try:
-            await reject_price_refresh(session, digest=preview.digest)
-        except PendingSnapshotChanged:
-            return "pending"
-        return "unchanged"
+    if preview.changes_nothing:
+        return "unchanged" if await _discard_unchanged(session, preview) else "pending"
     if policy == "auto" and preview.needs_review:
         logger.warning("Leaving the models.dev price update pending for review: %s", preview.review_reason)
         return "pending"
@@ -469,12 +479,9 @@ class ModelsDevPriceUpdates:
         """
         async with create_session() as session:
             preview = await prepare_price_refresh(session, self.config)
-            if preview.added_count + preview.changed_count + preview.removed_count:
+            if not preview.changes_nothing:
                 return preview
-            try:
-                await reject_price_refresh(session, digest=preview.digest)
-            except PendingSnapshotChanged:
-                pass
+            await _discard_unchanged(session, preview)
             return None
 
     async def poll(self, policy: str) -> str:
