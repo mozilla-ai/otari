@@ -212,7 +212,7 @@ function LabelRow({
  * which is the gateway saying some identity holds one. Nothing has a reset link
  * to reset before then, and an operator who has not claimed the deployment
  * recovers through the master key against `PUT /v1/auth/password` instead (see
- * docs/access-control.md) rather than through a mailed link.
+ * docs/sign-in.md) rather than through a mailed link.
  *
  * A passkey signs in as a row above the typed credential rather than instead
  * of it (otari#652), offered only when the gateway publishes `passkey` *and*

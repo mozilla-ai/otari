@@ -1,128 +1,96 @@
+---
+description: Go from sign-up to your first request in a few minutes.
+---
+
 # Quickstart
 
-This guide runs a persistent Otari with Docker Compose. For an
-ephemeral, no-clone example, use the [README quickstart](../README.md#quickstart).
+In this quickstart you send your first request through [otari.ai](https://otari.ai):
+you create an API key in your default workspace, pick a model, send one request,
+and see it in the workspace's usage. It takes about five minutes, and all you
+need is an otari.ai account.
 
-## Prerequisites
+To run Otari on your own machine instead, follow the
+[Self-hosted quickstart](self-hosted-quickstart.md).
 
-- Docker with Compose
-- A provider API key, or a self-hosted model server such as
-  [llama.cpp](#self-hosted-llamacpp)
+## 1. Open your workspace
 
-## Configure
+Log in to [otari.ai](https://otari.ai) and open your default workspace from the
+top-left corner. This quickstart uses its **API Keys**, **Models** and **Usage**
+tabs.
+
+## 2. Create an API key
+
+1. Open the **API Keys** tab and click **Create Key**.
+2. Give the key a name. It can use every model your workspace can, unless you
+   limit it under **Advanced**.
+3. Copy the key, which starts with `otk_`. It is shown only once.
+
+Keep the key in your shell for the next steps:
 
 ```bash
-git clone https://github.com/mozilla-ai/otari
-cd otari
+export OTARI_API_KEY=otk_...
 ```
 
-Compose reads the settings from `.env`. Create it once; the guard leaves an
-existing `.env` alone, because a second `OTARI_SECRET_KEY` would make stored
-provider keys undecryptable:
+Treat it like a password: keep it in your shell or a secret store, never in
+source control.
+
+## 3. Pick a model
+
+Open the **Models** tab, find a model with the filters (modality, provider,
+vendor, capabilities), and click **Use this model** to copy its name. This
+quickstart uses `deepseek/deepseek-v4-pro-0813`.
+
+## 4. Send a request
+
+otari.ai's API lives under `https://api.otari.ai/api`, or
+`https://eu.api.otari.ai/api` for an account in the European Union. Send a chat
+completion to it:
 
 ```bash
-test -e .env || cat > .env <<EOF
-OTARI_CONFIG_PATH=/dev/null
-OTARI_DATABASE_URL=postgresql://otari:otari@postgres:5432/otari
-OTARI_MASTER_KEY=$(openssl rand -hex 32)
-OTARI_DEFAULT_PRICING=true
-OTARI_SECRET_KEY=$(docker run --rm mzdotai/otari:latest otari gen-secret-key)
-OTARI_PROVIDER_ACCOUNT_PEPPER=$(openssl rand -base64 32)
-EOF
-```
-
-- `OTARI_CONFIG_PATH=/dev/null` runs Otari on environment variables alone.
-- `OTARI_MASTER_KEY` signs you in to the dashboard.
-- `OTARI_DEFAULT_PRICING` prices common models from bundled rates.
-- `OTARI_SECRET_KEY` encrypts the provider keys you add in the dashboard.
-- `OTARI_PROVIDER_ACCOUNT_PEPPER` turns on provider copies of attached files.
-  Without it, Otari starts with them off and logs a warning. See
-  [Provider copies](configuration.md#provider-copies).
-
-`.env` is gitignored. For a shared deployment, inject these through your
-platform's secret manager instead.
-
-## Start
-
-```bash
-docker compose pull
-docker compose up -d
-curl http://localhost:8000/api/v1/health
-```
-
-The first startup on an empty database creates an API key and prints it once.
-Find the `tk-` value in the Otari container logs. You can also create a key
-from the dashboard at `http://localhost:8000/`.
-
-## Add a provider
-
-1. Open the dashboard at `http://localhost:8000/` and sign in with the master
-   key.
-2. Open the account menu, choose **Deployment**, then **Hosted providers**
-   (`http://localhost:8000/admin/hosted-providers`).
-3. Choose **Add provider**, pick the provider (for example OpenAI), paste its
-   API key, and save. Otari lists the models the key reaches.
-4. Check that each model you want to serve is switched on and priced.
-   `OTARI_DEFAULT_PRICING` prices common models from bundled rates. A model
-   nothing prices arrives switched off, and Otari rejects unpriced budgeted
-   traffic by default, so set a price on the model's row and switch it on.
-
-See [Hosted providers](hosted-providers.md) and
-[Admin dashboard](dashboard.md) for the rest of the page.
-
-## Send a request
-
-```bash
-curl http://localhost:8000/api/v1/chat/completions \
-  -H "Authorization: Bearer tk-..." \
+curl https://api.otari.ai/api/v1/chat/completions \
+  -H "Authorization: Bearer $OTARI_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "openai:gpt-4o-mini",
-    "messages": [{"role": "user", "content": "Say hello."}]
+    "model": "deepseek/deepseek-v4-pro-0813",
+    "messages": [{"role": "user", "content": "Say hello in one short sentence."}]
   }'
 ```
 
-The request is authenticated, checked against applicable budgets, routed with
-the provider credential held by Otari, and recorded in Activity and Usage.
+The answer is an OpenAI-style chat completion, with the model's reply in
+`choices[0].message.content`.
 
-## Self-hosted llama.cpp
+## 5. Call it from your code
 
-Start `llama-server` with `--alias`, so the model id it serves is a stable name
-rather than the path of the GGUF file:
+Any OpenAI SDK works with Otari: point its base URL at the API plus `/v1`. With
+Python, after `pip install openai`:
 
-```bash
-llama-server -m ./models/qwen3-8b-q4_k_m.gguf --alias qwen3-8b --host 0.0.0.0 --port 8080
+```python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(base_url="https://api.otari.ai/api/v1", api_key=os.environ["OTARI_API_KEY"])
+response = client.chat.completions.create(
+    model="deepseek/deepseek-v4-pro-0813",
+    messages=[{"role": "user", "content": "Say hello in one short sentence."}],
+)
+print(response.choices[0].message.content)
 ```
 
-On the Hosted providers page, add a provider of type **llama.cpp**
-(`llamacpp`). It needs no API key, so leave the key blank, rather than using
-the `openai` provider with a placeholder key. Set the API base URL to where
-Otari reaches the server: `http://host.docker.internal:8080/v1` from the
-Compose container on macOS or Windows, or the host's address on Linux.
+It prints the model's reply.
 
-Bundled pricing does not cover a local model, so set a price on its row (0 is
-accepted) and switch it on. The id you price is the alias, and it is also the
-model you request:
+## 6. See it in Usage
 
-```bash
-curl http://localhost:8000/api/v1/chat/completions \
-  -H "Authorization: Bearer tk-..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "llamacpp:qwen3-8b",
-    "messages": [{"role": "user", "content": "Say hello."}]
-  }'
-```
+Open the **Usage** tab: your request is listed with its model, its tokens and
+its cost.
 
-Without `--alias`, the server reports the file path as the model id, so a price
-set under a shorter name never matches it and requests are refused.
+You now have a key your applications can call otari.ai with, and every request
+they send is recorded against your workspace.
 
 ## Next steps
 
-- [Admin dashboard](dashboard.md)
-- [Hosted providers](hosted-providers.md)
-- [Configuration](configuration.md)
-- [Deployment](deployment.md)
-- [Models](models.md)
-- [Routing](routing.md)
-- [Built-in tools](tools.md)
+- [Base URL](api-reference.md#base-url): the base URL each SDK and region takes.
+- [Use with Claude Code](use-with-claude-code.md): point Claude Code at otari.ai.
+- [Access control](access-control.md): workspaces, members, keys and budgets.
+- [Routing policies](routing.md): fall back to another model when one fails.
+- [Inference Guardrails](guardrails.md): check requests and responses.

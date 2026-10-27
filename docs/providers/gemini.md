@@ -1,41 +1,36 @@
-# Gemini
+# Connect Gemini
 
-Route requests to Google's Gemini models through Otari, using a Gemini API key from Google AI Studio. For Gemini on Google Cloud, use the `vertex` provider instead. See any-llm's [supported providers](https://docs.mozilla.ai/any-llm/providers/) for the current provider list and [Models](../models.md) for Otari's model-name format.
+Serve Google's Gemini models through Otari with a Gemini API key from Google AI
+Studio. For Gemini on Google Cloud, use the `vertexai` provider instead. See
+any-llm's [supported providers](https://docs.mozilla.ai/any-llm/providers/) for
+the current provider list and [Models](../models.md) for Otari's model-name
+format.
 
-## What you'll set up
+## Before you start
 
-A Gemini provider entry in your `config.yml` that reads your key from `GEMINI_API_KEY` (or the key stored on the dashboard's Providers page), then a first request that Otari routes to Gemini.
+- A running Otari with `OTARI_SECRET_KEY` set, and its master key. The
+  [Self-hosted quickstart](../self-hosted-quickstart.md) sets up both.
+- A Gemini API key from <https://aistudio.google.com/apikey>.
 
-## Prerequisites
+## Add the key
 
-- Otari running locally (see the [Quickstart](../quickstart.md))
-- A Gemini API key from <https://aistudio.google.com/apikey>
-
-## Configure
-
-Add Gemini under `providers:` in your `config.yml`:
-
-```yaml
-providers:
-  gemini:
-    api_key: "AIza..."   # your Gemini API key
-```
-
-To keep your provider key out of the file with environment interpolation:
-
-```yaml
-providers:
-  gemini:
-    api_key: ${GEMINI_API_KEY}
-```
-
-...then export it before starting Otari:
+Add Gemini as a hosted provider, on **Hosted providers** in the dashboard's
+deployment view or through the API:
 
 ```bash
-export GEMINI_API_KEY=AIza...
+curl -X POST http://localhost:8000/api/v1/hosted-providers \
+  -H "Authorization: Bearer $OTARI_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"provider": "gemini", "api_key": "AIza..."}'
 ```
 
-> `GEMINI_API_KEY` alone is not enough, and neither is a bare `gemini:` entry: Otari reads the variable only where an entry names it, as the `api_key: ${GEMINI_API_KEY}` line above does. The dashboard's Providers page and an organization's own key work too.
+Otari stores the key encrypted and offers every model Gemini lists on it; each
+model with a price is switched on, and one nothing prices arrives switched off.
+To keep the provider in configuration instead, declare it under
+`hosted_providers:` in `config.yml` (see
+[Hosted providers in config.yml](../configuration.md#hosted-providers-in-configyml)).
+Otari does not read `GEMINI_API_KEY` from its environment unless a declaration
+names it; see [Configuring a provider](../models.md#configuring-a-provider).
 
 ## Choose a model
 
@@ -46,16 +41,20 @@ gemini:gemini-3-flash-preview
 gemini:gemini-3.1-flash-lite
 ```
 
-Everything after the colon is passed straight to Gemini, so any model your key can access works. Google retires older models for new keys, so check the [model list](https://ai.google.dev/gemini-api/docs/models) if a name is rejected.
+Everything after the colon is passed to Gemini. A model is served once it is
+switched on under the provider on the Hosted providers page. Google retires
+older models for new keys, so check the
+[model list](https://ai.google.dev/gemini-api/docs/models) if a name is
+rejected.
 
-Chat completions take only text-generation models. Embedding models such as `gemini-embedding-001` do not work there; send them to `POST /api/v1/embeddings` instead (see the [API reference](../api-reference.md)).
+Chat completions take only text-generation models. Send an embedding model such
+as `gemini-embedding-001` to `POST /api/v1/embeddings` instead (see the
+[API reference](../api-reference.md)).
 
 ## Verify
 
-If you have not already started Otari and created a client key, follow the [Quickstart](../quickstart.md) first.
-
-Then make a request with the Otari Python SDK (`pip install otari`; any
-OpenAI-compatible client also works), using a `gemini:<model>` selector:
+Make a request with your Otari API key (`tk-...`) through the Otari Python SDK
+(`pip install otari`; any OpenAI-compatible client also works):
 
 ```python
 from otari import OtariClient
@@ -78,8 +77,9 @@ Hello there, how are you?
 
 | Symptom | Likely cause |
 |---------|--------------|
-| HTTP 400 `API key not valid. Please pass a valid API key.` | Gemini rejected the `api_key` Otari sent. Check the `api_key` (or `GEMINI_API_KEY`) configured on the gateway. |
+| HTTP 424 (code `provider_not_configured`) | Nothing serves the model: no Gemini provider is configured, it is switched off, or the model is not switched on under it. Switch the model on under Gemini on the Hosted providers page. |
+| HTTP 400 `API key not valid. Please pass a valid API key.` | Gemini rejected the key Otari sent. Replace the key on the Hosted providers page. |
 | HTTP 404 `This model ... is no longer available to new users` | Google has retired that model for new keys. Use the model the message suggests. |
 | HTTP 429 `You exceeded your current quota` (code `upstream_rate_limited`) | Your key's quota for that model is used up or is zero, which is common for Pro models on the free tier. Wait, pick another model, or enable billing in Google AI Studio. |
 | HTTP 502 `The provider failed the request with HTTP 503` | Gemini is overloaded or failed on its side. These are retryable. |
-| HTTP 402 `No pricing configured for model ...` | Otari could not resolve pricing for that model and `require_pricing` rejected the request. Add a `pricing:` entry, enable `default_pricing: true` for bundled fallback pricing, or use a model that already has pricing coverage. |
+| HTTP 402 `No pricing configured for model ...` | The model has no price and `require_pricing` rejected the request. Set a price for it on the Hosted providers page or in a `pricing:` entry, or enable `default_pricing: true`. |

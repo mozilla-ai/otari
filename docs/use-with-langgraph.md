@@ -19,9 +19,9 @@ Create an API key at [otari.ai](https://otari.ai) and export it:
 export OTARI_API_KEY=<your-otari-key>
 ```
 
-That is all the configuration otari.ai's gateway needs, once your organization
-there has credit or provider keys of its own; without either, it answers 402. For
-a gateway you run yourself, use a key it issued and also export its API root:
+On otari.ai that key is all the configuration there is (your organization needs
+credit or provider keys of its own there, or requests answer 402). For a gateway
+you run yourself, use a key it issued and also export its API root:
 
 ```bash
 export OTARI_BASE_URL=http://localhost:8000/api/v1   # your gateway's URL plus /api/v1
@@ -96,8 +96,10 @@ print()
 
 Each node can use its own model through the same gateway, for example a cheap
 model to route and a stronger one to answer. Otari tracks the spend of both under
-the same key, and a routing policy name works anywhere a model name does; see
-[Choosing a model](use-with-pydantic-ai.md#choosing-a-model).
+the same key. Give each node's `ChatOtari(model=...)` its own name, written as
+Otari spells it (`provider:model`, or a routing policy or alias name); see
+[Model format](models.md#model-format) and
+[Routing-policy model names](models.md#routing-policy-model-names).
 
 ## See also
 

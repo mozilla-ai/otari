@@ -6,6 +6,8 @@ spill-over past a rate limit, learned selection, or guardrails the caller cannot
 remove. Use an
 [alias](models.md#model-aliases) when one name always maps to one target.
 
+![Your application sends one request to Otari, which routes it to OpenAI, Anthropic, or another provider.](assets/routing-overview.webp)
+
 ## Failover
 
 ```yaml
@@ -22,17 +24,7 @@ Callers send `model: fast`. If the first provider fails before any response is
 sent, Otari tries the fallback. The response keeps the policy name; Activity and
 usage record the models that were attempted.
 
-In the dashboard, choose Create policy on Routing, then Fallback: name it, pick
-the main model, and list at least one backup under "If unavailable, use", each a
-model other than the main one and the other backups. The backups are
-`on_failure`, in the order shown. Create policy offers one kind at a time
-(Fallback, Split traffic, Smart router, Spill over at rate limits, Tier down on
-budget), each with only its own fields. To combine them, open the policy from
-the list once it exists: its page has a section each for the main selection,
-the fallback chain, a budget tier-down and guardrails, and each section saves on
-its own, writing the rest of the policy back unchanged. A policy from
-`config.yml`, or one using options the page cannot show, opens read-only with
-its spec in full.
+![Otari tries OpenAI first and moves to Anthropic when OpenAI returns a retryable error.](assets/routing-fallback-flow.webp)
 
 ## Selection and failure are separate
 
@@ -44,7 +36,7 @@ the policy moves on to the next; a provider nothing declares has none, keyless
 local backends included, and an entry that names no key has none, whatever the
 provider's own environment variable holds. A candidate nothing declares that one of the
 deployment's hosted providers serves is sent on the deployment's own credential, as a single model is
-([modes](hosted-providers.md#deployment-paid-credentials)). When no candidate has a credential, the request is
+([hosted providers](hosted-providers.md#deployment-paid-credentials)). When no candidate has a credential, the request is
 refused with `424 provider_not_configured`. A candidate whose provider rejects
 the configured credential (401, or a 403 that does not reject the request itself) moves on too; when every candidate
 either lacks a credential or had it rejected, and at least one was rejected, the
@@ -158,11 +150,7 @@ The policy says which is which: `candidates` handles "full", `on_failure`
 handles "broke". `Otari-Router: off` skips the order and starts from the
 default.
 
-In the dashboard, choose Create policy on Routing, then "Spill over at rate
-limits", order the models with the arrows, and add the limit under Settings,
-Rate limit rules, counted for "Each model". On an existing policy, pick "Spill
-over" in its Main selection section.
-
+## Learned routing (knn router)
 
 The `knn` router uses scored examples to rank candidates for each user's
 traffic:
@@ -194,13 +182,7 @@ runnable example.
 Learned memory is scoped by user and workspace. Optional task IDs create separate
 pools. It is not learned automatically from live traffic.
 
-### Per-request control
-
-| Header | Effect |
-| --- | --- |
-| `Otari-Router: off` | Skip learned, weighted or priority selection and use the policy default. |
-| `Otari-Conversation-Id` | Reuse a learned decision for a conversation when granularity is `trace_sticky`. |
-| `Otari-Router-Task` | Use examples from one task partition. |
+### Learned-routing settings
 
 The default learned-routing settings are `k=5`, a 20-example warm-up, and
 `trace_sticky` granularity. They are deployment settings named
@@ -211,6 +193,18 @@ The default learned-routing settings are `k=5`, a 20-example warm-up, and
 Trace stickiness is process-local. A restart or request routed to another replica
 may choose again. The result is still valid, but prompt-cache locality is not
 guaranteed across replicas.
+
+## Per-request control
+
+These request headers change how a policy selects. `Otari-Router: off` applies to
+learned, weighted and priority routers alike; the other two apply to learned
+routing only.
+
+| Header | Effect |
+| --- | --- |
+| `Otari-Router: off` | Skip learned, weighted or priority selection and use the policy default. |
+| `Otari-Conversation-Id` | Reuse a learned decision for a conversation when granularity is `trace_sticky`. |
+| `Otari-Router-Task` | Use examples from one task partition. |
 
 ## Mandatory guardrails
 
@@ -253,15 +247,30 @@ effective weighted shares, and mandatory guardrails. The API equivalent is
 
 A policy decides the model of a request that reaches Otari. A coding agent that
 talks to its provider directly can still ask Otari which model a new subagent
-should run on, through `POST /api/v1/routing/recommend`. A self-run
-deployment puts one choice question to the decision model it configured and
-recommends the candidate it picks; on otari.ai a managed recommender answers
-instead. The harness that asks picks the candidates: Claude Code chooses among
-its own `haiku`, `sonnet` and `opus` aliases, and pi, through
-[pi-otari](https://github.com/mozilla-ai/pi-otari), among the Otari model ids
-it sends with the request.
-Either way the recommendation is billed to the caller, and nothing
-else is dispatched. See
+should run on, through `POST /api/v1/routing/recommend`, at the moment it spawns
+the subagent, before the subagent has a prompt cache to lose.
+
+A gateway you run puts one choice question to the decision model
+`agent_recommender_model` names (TypeSafe's Jev by default, or a local one):
+given the harness, the subagent type, the parent's model, the task description
+and the task, which is the cheapest candidate that would complete the task well
+on the first attempt? The candidate it picks is the recommendation. The model
+the caller asked for is left out of the question, so the orchestrator's guess
+cannot pull the answer toward itself, and only the task's first 32,000
+characters are sent. The call costs what that decision provider charges. On
+otari.ai a managed recommender answers behind the same route instead, which
+you never configure, at the price of one recommendation.
+
+The harness that asks picks the candidates: Claude Code chooses among
+`agent_recommender_candidates`, its own `haiku`, `sonnet` and `opus` aliases by
+default, and pi, through [pi-otari](https://github.com/mozilla-ai/pi-otari),
+among the Otari model ids it sends with the request. Either way the
+recommendation is billed to the caller, and nothing else is dispatched: the
+harness runs the subagent with its own provider credentials.
+
+The fields and errors are in the
+[API reference](api-reference.md#routing-recommendations), and the Claude Code
+plugin that asks is in
 [Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model).
 
 ## Managing policies at runtime
@@ -360,3 +369,26 @@ committed from that report on. Shared service failures, such as an unavailable m
 guardrail or sandbox, also do not improve by changing candidates.
 
 If every candidate of a plan with more than one candidate fails, Otari returns a gateway error in its own words, never a provider's message. A plan with one candidate answers as naming that model directly would. When every candidate rejected the request as invalid (400), Otari returns 400 with the code `all_candidates_rejected`, because the request is at fault. When every candidate found the prompt too long, the code is `context_length_exceeded`. When no candidate knew the model (404), Otari returns 502, because Otari chose the candidates. If caller restrictions remove every candidate, Otari returns 403 without revealing the hidden targets.
+
+## In the dashboard
+
+The Routing page manages stored policies.
+
+- **Create policy** offers one kind at a time (Fallback, Split traffic, Smart
+  router, Spill over at rate limits, Tier down on budget), each with only its
+  own fields.
+- **Fallback** ([Failover](#failover)): name the policy, pick the main model,
+  and list at least one backup under "If unavailable, use", each a model other
+  than the main one and the other backups. The backups are `on_failure`, in the
+  order shown.
+- **Spill over at rate limits**
+  ([priority routing](#spill-over-when-a-model-is-full-priority-routing)): order
+  the models with the arrows, and add the limit under Settings, Rate limit
+  rules, counted for "Each model". On an existing policy, pick "Spill over" in
+  its Main selection section.
+- **Combining kinds**: open the policy from the list once it exists. Its page
+  has a section each for the main selection, the fallback chain, a budget
+  tier-down and guardrails, and each section saves on its own, writing the rest
+  of the policy back unchanged.
+- A policy from `config.yml`, or one using options the page cannot show, opens
+  read-only with its spec in full.

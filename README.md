@@ -161,7 +161,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 ## Documentation
 
-- [Quickstart](docs/quickstart.md)
+- [Quickstart](docs/self-hosted-quickstart.md)
 - [Deployment](docs/deployment.md)
 - [Configuration](docs/configuration.md)
 - [Models](docs/models.md)
@@ -169,7 +169,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 - [Access control](docs/access-control.md)
 - [Built-in tools](docs/tools.md)
 - [Agent Guardrails](docs/agent-guardrails.md)
-- [SDK and agent integrations](docs/index.md#for-integrators)
+- [SDK and agent integrations](docs/index.md#integrations)
 - [Architecture](ARCHITECTURE.md)
 
 ## License

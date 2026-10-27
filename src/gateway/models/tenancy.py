@@ -1433,7 +1433,7 @@ class WebAuthnCredential(WebAuthnCredentialBase, PrimaryKeyMixin, CreatedAtMixin
     import therefore holds exactly while the hosted origin stays ``otari.ai``:
     moving it re-scopes every passkey and no amount of data migration recovers
     them, because the key material never left the authenticator. See
-    `docs/access-control.md`.
+    `docs/sign-in.md`.
 
     ``credential_id`` and ``public_key`` are base64url text rather than
     ``LargeBinary``. Both cross the wire in that encoding in every WebAuthn

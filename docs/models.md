@@ -30,9 +30,13 @@ configuration, pricing, aliases, and routing policies.
 
 ## Configuring a provider
 
-Declare a provider under `providers` in `config.yml`, or add it on the
-Hosted providers page. Either way it serves requests and its models are
-discovered. Supply the key from the environment with a `${VAR}` reference:
+Add a provider as a [hosted provider](hosted-providers.md), on the Hosted
+providers page or through `/api/v1/hosted-providers`; it serves requests and its
+models are discovered. The `providers:` block of `config.yml` is deprecated, and
+a start copies what it can onto hosted providers (see
+[Upgrading](hosted-providers.md#upgrading)); it remains the place for a provider
+a hosted provider cannot hold, such as Bedrock on the server's own cloud role.
+An entry there supplies its key from the environment with a `${VAR}` reference:
 
 ```yaml
 providers:
@@ -61,9 +65,11 @@ providers:
   bedrock:
 ```
 
-The one exception is a build whose extension serves the request on a credential
-the deployment owns (`ModelProviderPort`, asked only after every other source
-missed); a plain deployment has none. The gateway logs a warning at startup
+The exception is a credential the deployment owns, one of its
+[hosted providers](hosted-providers.md), asked only after every other source
+missed; a build can rebind `ModelProviderPort` to decide differently. The order
+of the sources is the [credential ladder](hosted-providers.md#the-credential-ladder).
+The gateway logs a warning at startup
 naming each `<PROVIDER>_API_KEY` variable that is set and that no entry's
 `api_key` reads, and ignores an entry for a keyed provider that names no key.
 
@@ -99,8 +105,9 @@ way (`my-vllm:qwen3`) but visible only to its owner. See
 
 ## Local providers
 
-Ollama, llama.cpp, and llamafile can run without an API key. Add a provider entry
-when you want Otari to discover their models:
+Ollama, llama.cpp, and llamafile can run without an API key. Their entry
+declares them, and `api_base` points at the server when it is not on the
+provider's default address:
 
 ```yaml
 providers:
@@ -108,9 +115,9 @@ providers:
     api_base: "http://gpu-box:11434"
 ```
 
-Without the entry, a direct selector can still work if the backend is reachable
-at the provider's default address. Otari does not probe local servers merely
-because their provider exists in any-llm.
+Without an entry (or a hosted provider of the same name), a request for one is
+refused as `provider_not_configured`, and its models are not listed. Otari does
+not probe local servers merely because their provider exists in any-llm.
 
 ## Model discovery
 
@@ -121,16 +128,11 @@ does, is read to the last page.
 Discovery is cached and bounded; an unreachable provider does not block the
 catalog indefinitely.
 
-A [hosted provider](hosted-providers.md#hosted-providers-and-byo-credentials) lists its
-roster, the models switched on under it, rather than everything its upstream
-lists. The operator's `GET /api/v1/models/discoverable` and provider health
-dial it on its stored key beside the configured instances. A hosted provider
-serves only its roster unless it serves models not on its roster
-(`serves_unlisted_models`, off by default): it then also serves any model a
-request names, the way a `providers:` instance does, switches on every model
-it offers whether or not something prices it, and still refuses a model its
-roster switches off. A provider moved from the retired Deployment providers page
-starts with it off and every model it lists switched on.
+A [hosted provider](hosted-providers.md) lists its roster, the models switched
+on under it, rather than everything its upstream lists. How its listing is
+dialed and refreshed, and what `serves_unlisted_models` changes, are in
+[Catalog and discovery](hosted-providers.md#catalog-and-discovery) and
+[Roster and serving](hosted-providers.md#roster-and-serving).
 
 Each listed model carries the rate a request from the caller would be billed at,
 and `pricing_source` says which price list it came from: `organization` for the
@@ -328,7 +330,7 @@ Each offering also carries the provider's list price from the live models.dev
 catalog, where it has one. The default is billed from the accepted models.dev
 snapshot, which can lag that catalog, so a difference between the two means a
 price update is waiting for review. Each offering also carries, for a signed-in
-caller, for a signed-in caller the organization's last thirty
+caller, the organization's last thirty
 days on that offering: requests, cache hit rate, and the effective price per
 million tokens after cache reads and tiers.
 
@@ -381,35 +383,8 @@ null where the caller has no such spelling for it.
 
 A request that names a catalog id with more than one offering falls back across them. When the first offering fails before it sends a response, the next one in the same order serves the request, as a routing policy's `on_failure` list does. A catalog id spelled like the legacy `provider/model` of one of its own offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that offering first and the others after it in the usual order. The colon spelling of an offering (`openai:gpt-4o`) never falls back, so it is the way to pin one provider. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it.
 
-The Routing page's "Automatic fallback" section, read from
-`GET /api/v1/organizations/me/automatic-fallbacks`, lists every model your
-organization sent requests to in the last 30 days, most requested first, with
-its offerings in the order a request sent by catalog id tries them for your
-organization. Beside each it counts the requests (an absorbed attempt is not one), the
-successful ones a later offering served, and the ones that named one offering
-or a policy rather than the catalog id and so had no automatic fallback. A model
-most of whose requests named one provider shows that provider alone, marked "No
-backup · pinned", because those requests get no fallback until they send the
-catalog id. Under each provider it says who runs the built-in tools: "Own
-tools" where the provider runs at least one itself, "Otari's tools" where Otari
-runs them all; the response's `own_tools` and `otari_tools` name which tool is
-whose. That assumes a caller who declares
-the tools in the provider's own words and sends no `Otari-*` executor header,
-so the deployment's code execution executor and web search interception decide;
-a workspace's code execution pin is not reflected. The order is the catalog's,
-before a key's allow-list or a missing credential leaves an offering out of a
-request's plan. An owner or admin reads every workspace in the organization,
-anyone else the workspaces they belong to.
-
-The dashboard's Models page is this catalog: one card per model, with a rail
-of filters beside it, and a page per model with its facts and every offering
-compared in a table. "Use this model" opens a drawer beside the table with
-the request to copy, sent to the gateway's pick or to a provider pinned by
-its selector. It is read-only; an organization's own rate is set on Providers,
-which an offering on one of that organization's keys links to. An offering the
-deployment supplies the credential for says so instead, because its rate is the
-deployment price list's rather than a tenant's. A metered rate that differs from the provider's
-list price is marked with the list price.
+The dashboard's Models page and the Routing page's Automatic fallback section
+show this catalog and this order; see [Models and Routing](dashboard.md#models-and-routing).
 
 With `public_catalog: true` (see [Configuration](configuration.md)), the same
 two routes and the same page are served to a visitor with no session, at the
@@ -428,8 +403,7 @@ curl http://localhost:8000/api/v1/models \
 On a deployment that hosts at least one provider, an organization API key is
 shown a priced model only where something would
 serve it from the key's workspace: a configured instance, the organization's own
-provider key, a hosted provider the deployment serves the organization, or the
-provider's own environment variable. A hosted provider the operator switched
+provider key, or a hosted provider the deployment serves the organization. A hosted provider the operator switched
 off or deleted leaves its rates on the price list, and its models leave this
 listing. The master key and an operator session still list the whole price
 list.

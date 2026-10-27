@@ -6,8 +6,10 @@ LLM call, routing attempt, guardrail check, MCP connection and tool call, with
 their timing and cost. An LLM call is one kind of span among several, so a trace
 answers what an agent run did and cost, not only what one call did.
 
-No prompt, model output or tool content is recorded. A trace holds names, ids,
-timings, token counts, outcomes and costs.
+A trace holds names, ids, timings, token counts, outcomes and costs. No model
+output or tool output is recorded, and no prompt, command or file path either,
+unless the deployment opts in (see
+[Keeping what a span was about](#keeping-what-a-span-was-about)).
 
 An LLM call's input tokens are its whole prompt, cached tokens included,
 whichever way its provider reports them. Beside them the call keeps how many
@@ -26,12 +28,15 @@ Otari never guesses that two requests belong together from their content.
 | A `session_id` request tag | `"metadata": {"session_id": "chat-42"}` | `client` |
 | The agent harness's own session id | Claude Code's `x-claude-code-session-id`, sent on every request | `harness` |
 | The agent harness's own session id | Codex's `thread-id`, or `session-id` without one, on a request whose `originator` or `User-Agent` starts with `codex` | `harness` |
+| A Claude Code span's session | `session.id` on a span Claude Code exported | `otlp` |
 | An OTLP span's Claude session | `anthropic.session.id` on an exported span | `otlp` |
 | An OTLP span's conversation | `gen_ai.conversation.id` on an exported span | `otlp` |
-| A Claude Code span's session | `session.id` on a span Claude Code exported | `otlp` |
+| An OTLP span's Otari label | `otari.session_label` on an exported span | `otlp` |
 
 A request that names no session is a trace of its own. To group a custom
-client's requests, send one of the signals above.
+client's requests, send one of the signals above. An exported span that names
+none of the OTLP attributes is grouped by its OTel trace instead, and when
+it names more than one, the first in the table wins.
 
 A session belongs to the user whose API key sent it: two people who choose the
 same label get two sessions, and a session id never reaches another workspace.
@@ -123,9 +128,11 @@ include every one of them.
 ## Instrumented agents
 
 An agent that exports OpenTelemetry spans to `/otlp/v1/traces` (see
-[Importing external usage](external-usage.md)) has every span kept on its
-trace, including its own `invoke_agent` and `execute_tool` spans, with the span
-tree it sent. Span names and attribute values are kept only when they are
+[Importing external usage](external-usage.md#opentelemetry)) has every span kept,
+while `trace_capture_enabled` is on, on the agent trace of the exporting key's
+user, including its own `invoke_agent` and `execute_tool` spans, with the span
+tree it sent. Its sessions are grouped by the OTLP attributes in
+[What makes a session](#what-makes-a-session). Span names and attribute values are kept only when they are
 identifier-shaped. A span's `gen_ai.response.finish_reasons` array is kept as
 one value, its reasons joined by a comma: `stop,length`. The read API returns
 each of these spans with the `otel_trace_id` and `otel_span_id` it was exported
@@ -135,24 +142,11 @@ backend. A span the gateway records itself has neither.
 ### Claude Code without routing
 
 Claude Code can export its own spans, so a session is traced without sending
-its model traffic through Otari. [Send Claude Code sessions to Otari](use-with-claude-code.md#send-claude-code-sessions-to-otari)
-has the whole setup, guardrail checks included. In short, with a budget-exempt
-API key:
+its model traffic through Otari, guardrail checks included. The setup is in
+[Send Claude Code sessions to Otari](use-with-claude-code.md#send-claude-code-sessions-to-otari).
 
-```bash
-export CLAUDE_CODE_ENABLE_TELEMETRY=1
-export CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1
-export OTEL_TRACES_EXPORTER=otlp
-export OTEL_LOGS_EXPORTER=otlp
-export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com/otlp"
-export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer tk-your-import-key"
-claude
-```
-
-Span export is a Claude Code beta. Each prompt becomes a turn, with its model
-calls and the tools it ran. A tool call keeps a digest of its id, never the id
-itself, and records who allowed it
+Each prompt becomes a turn, with its model calls and the tools it ran. A tool
+call keeps a digest of its id, never the id itself, and records who allowed it
 or refused it: a tool a hook refused, such as an
 [agent guardrail](agent-guardrails.md), is `blocked` with the decision source
 `hook`. A blocked tool call is a guardrail doing its job, not an error, and does
@@ -161,13 +155,12 @@ error, such as a command that exited non-zero: the agent reads that error like
 any other result, and `grep` finding nothing or a test failing on purpose
 returns one too. A tool the gateway runs itself (an MCP tool, web search, web
 fetch or code execution) still records an error result as an error, as
-[Sessions and failures](#sessions-and-failures) describes. A short `claude -p` run can exit before its last spans are
-exported.
+[Sessions and failures](#sessions-and-failures) describes.
 
 A session's cost comes from its logs, not its spans: Otari prices each model
 request's `api_request` event at the deployment's rates, cache reads and writes
-included, and shows the cost on the request and its session. Without
-`OTEL_LOGS_EXPORTER=otlp` a session has its tokens but no cost. The cost is
+included, and shows the cost on the request and its session, so a session
+whose logs are not exported has its tokens but no cost. The cost is
 what the requests are worth at API prices, so on a Claude subscription it is
 not what was charged.
 
@@ -193,7 +186,7 @@ one for its cost, each with a row per part.
   Requests priced whole, as a gateway prices a routed request, are split by
   model instead. A session with nothing priced says so rather than $0.00.
 
-A judge gate that [reports its model calls](agent-guardrails.md#reporting-to-otari)
+A judge gate that [reports its model calls](agent-guardrails-reference.md#what-otari-hook-reports)
 is priced like a request and counted in the session's cost, though not in any
 turn's. Its check shows the model, the tokens and the cost, and **At a glance**
 says what the judge gates cost in all.
@@ -261,8 +254,8 @@ active between them (last active at or after `start`, started before `end`), so 
 session still running past `end` is listed in the window it was counted in.
 
 A list read narrows to one workspace with `workspace_id`, inside the caller's
-scope and never beyond it. `q` matches the start of a session's trace id or of
-its name, case-sensitively, inside the same scope. A trace is keyed by its
+scope and never beyond it. `q` matches any part of a session's trace id, name,
+agent or user, in any case, inside the same scope. A trace is keyed by its
 workspace and its id, so a detail read takes the `workspace_id` its list entry
 names; without it, an id in more than one of the caller's workspaces answers 409
 rather than a guess.
@@ -280,12 +273,15 @@ Deleting a user erases their traces, as it erases their telemetry.
 | `trace_capture_enabled` | `true` | Record traces and serve the read API. Requires restart. |
 | `trace_retention_days` | `30` | Delete a trace once it has had no activity for this long. |
 | `trace_session_max_age_days` | `90` | Delete a session's trace this long after it started, even while it is active, so a reused session id starts a new trace. |
+| `trace_content_enabled` | `false` | Keep what an instrumented agent says a span was about; see [Keeping what a span was about](#keeping-what-a-span-was-about). |
 
 Traces are written off the request path, within fixed limits: a trace never
 slows or fails a request, and when the writer cannot keep up it drops whole
 requests' spans rather than parts of them. One OTLP export adds at most
-1,000 spans in at most 100 sessions. The
-`gateway_trace_spans_dropped` metric counts what was dropped, by reason.
+1,000 spans in at most 100 sessions; spans past either limit, or that arrive
+while the writer's queue is full, are dropped, and the export and the usage it
+carries are still accepted. The `gateway_trace_spans_dropped` metric counts what
+was dropped, by reason.
 
 The cost on a trace is a snapshot of the usage rows' cost. Usage stays the
 billing record.

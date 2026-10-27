@@ -1,7 +1,8 @@
 # SDK compatibility
 
-This page explains which SDK version works with which Otari version, and how
-SDK releases relate to gateway releases.
+Which SDK version works with which Otari version. SDKs and Otari release on
+separate tracks, linked by the spec version stamped into each SDK rather than by
+matching package numbers.
 
 ## At a glance
 
@@ -40,8 +41,7 @@ version for your language.
 |----------------------------|------------------|--------------|--------------|----------------|
 | `0.0.0-dev` (unreleased)   | unreleased       | unreleased   | unreleased   | unreleased     |
 
-Update this table when tagged SDK releases land. Until then, the gateway and
-SDKs report `0.0.0-dev`.
+Until tagged SDK releases land, the SDKs report `0.0.0-dev`.
 
 ## Why releases are independent
 
@@ -55,20 +55,9 @@ covers behavior the generator does not provide, including:
 Because of that split, an SDK may need shell work after a spec change, and an
 SDK may also ship shell-only fixes with no Otari release.
 
-## Release flow
-
-1. A spec change regenerates the typed core and opens PRs in the SDK repos.
-2. A maintainer reviews and merges the regeneration PR.
-3. `release-please` opens or updates the SDK's release PR.
-4. Merging the release PR tags the release and publishes the SDK. For Go, the
-   tag itself is the consumable release via `go get`.
-
-Otari and the SDKs therefore move on separate release tracks, linked by spec
-version rather than matching package numbers.
-
 ## Related
 
+- [Releasing](https://github.com/mozilla-ai/otari/blob/main/RELEASE.md#sdk-releases)
+  for how SDK regeneration and releases run (maintainers)
 - [`scripts/sdk_codegen/README.md`](https://github.com/mozilla-ai/otari/blob/main/scripts/sdk_codegen/README.md)
   for codegen details and spec version stamping
-- `.github/workflows/otari-sdk-codegen.yml`
-- `.github/workflows/sdk-regen-staleness.yml`

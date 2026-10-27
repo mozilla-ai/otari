@@ -191,6 +191,40 @@ uv run --frozen --no-dev python scripts/oss_edition_smoke.py
   create and drop databases. Never use production, and do not run concurrent
   suites against the same server URL because their worker database names collide.
 
+## Writing docs
+
+`docs/` is the one source for [docs.otari.ai](https://docs.otari.ai), for otari.ai and for
+your own gateway alike, and it publishes with each release. The pages are flat files in
+`docs/`; [`docs/SUMMARY.md`](docs/SUMMARY.md) places each one in the site.
+
+Each `#` heading of `SUMMARY.md` is one entry of the site's top bar, and its `##` headings
+are the sidebar groups under it:
+
+| Top bar | For |
+| --- | --- |
+| Home | What Otari is, and a first request |
+| Guides | Doing one thing with Otari: workspaces, keys, budgets, tools, integrations |
+| Self-Hosting | Deploying, configuring and operating your own gateway |
+| Reference | Lookup material: the API, models, routing, tools, file formats, protocols |
+
+Write each page as one [Diátaxis](https://diataxis.fr) kind: a tutorial, a how-to guide,
+reference, or explanation. A section of another kind goes on a page of that kind, linked.
+
+Say otari.ai or your own gateway only where it changes something:
+
+1. **Write for the product, not the deployment.** If a sentence is true on both, mention
+   neither.
+2. **Base URLs live in one place.** The API reference's [Base URL](docs/api-reference.md#base-url)
+   section gives them, with the form each SDK expects; elsewhere, use one in a command, or
+   link there.
+3. **A procedure for running a gateway belongs in Self-Hosting**, and what only the service
+   has, such as billing, says so in its title.
+
+A new page owes an entry in `docs/SUMMARY.md`, and `tests/unit/test_gitbook_site.py` fails
+without one. A page's URL comes from its top-bar entry, its sidebar group and its file name,
+so moving or renaming a page changes its URL. Images go in `docs/assets/`. Spell in US
+English and avoid em dashes, as [AGENTS.md](AGENTS.md#writing-style) says.
+
 ## Pull requests
 
 - PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/); CI enforces this.

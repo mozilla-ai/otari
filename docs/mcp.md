@@ -27,12 +27,168 @@ that would keep calling tools still ends with an answer. Your own tools stay on
 offer in that round. The request fails only if the model calls one of Otari's
 tools anyway.
 
+That loop is managed MCP. To run the tool loop in your own application instead,
+see [Caller-orchestrated MCP](#caller-orchestrated-mcp).
+
+## Inline MCP servers
+
+```json
+{
+  "model": "anthropic:claude-sonnet-4-6",
+  "messages": [{"role": "user", "content": "List open issues in mozilla-ai/otari"}],
+  "mcp_servers": [
+    {
+      "name": "github",
+      "url": "https://mcp.example.com/github",
+      "authorization_token": "ghp_...",
+      "purpose_hint": "Use for repository and issue lookups",
+      "allowed_tools": ["list_issues", "get_issue"]
+    }
+  ]
+}
+```
+
+- `name`: label for the server
+- `url`: streamable HTTP MCP endpoint, reachable from the gateway
+- `authorization_token`: optional bearer token; when set, the `url` must use `https://`
+- `purpose_hint`: optional hint Otari prepends to the system message to help the model choose the tool
+- `allowed_tools`: optional allow-list with three states: omit it or send `null` to expose every listed tool, send `[]` to expose none, or send a non-empty list to expose only those named tools
+
+## Workspace-scoped servers
+
+Reference servers your workspace has configured by id, instead of inlining
+their configs:
+
+```json
+{
+  "model": "anthropic:claude-sonnet-4-6",
+  "messages": [{"role": "user", "content": "Summarize the open PRs"}],
+  "mcp_server_ids": ["11111111-1111-1111-1111-111111111111"]
+}
+```
+
+The workspace is the one your API key belongs to; it is never read from a
+header. An id that names no server in that workspace returns `404`, and a
+server that is configured but disabled is skipped rather than refusing the
+request.
+
+The same stored servers are what
+[caller-orchestrated MCP](#caller-orchestrated-mcp) refers to by id, so a server
+registered once serves both integration modes. The two read a disabled server
+differently, and deliberately: the loop above resolves a list and skips one
+entry, while an endpoint asked about exactly that server answers `404` rather
+than returning nothing.
+
+### Configuring them
+
+The dashboard manages them under **Tools → MCP servers**, which acts on the
+workspace the switcher has selected. Everything below is the same thing over the
+API.
+
+Manage a workspace's servers with the master key, under
+`/api/v1/workspaces/{workspace_id}/mcp-servers`:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
+  -H "Otari-Key: $OTARI_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "name": "github",
+        "url": "https://mcp.example.com/github",
+        "authorization_token": "ghp_...",
+        "purpose_hint": "Use for repository and issue lookups",
+        "allowed_tools": ["list_issues", "get_issue"]
+      }'
+```
+
+`GET` lists them, `PATCH /{server_id}` updates one, and `DELETE /{server_id}`
+removes it. The list is readable by any member who can see the workspace;
+creating, updating, or deleting a server needs an organization owner/admin or
+an owner/admin of that workspace.
+
+- The `authorization_token` is encrypted at rest with `OTARI_SECRET_KEY` and is
+  never returned. Responses carry `has_token` instead. On a `PATCH`, omit the
+  field to leave the stored token alone, send `""` to clear it, or send a value
+  to rotate it.
+- `name` is unique within a workspace; a duplicate is refused with `409`.
+- `enabled: false` keeps the row and its token but takes the server out of
+  every request that names it.
+- The URL is checked for SSRF safety when it is stored as well as when a
+  request uses it, and must be `https://` when a token is set. A stored URL that
+  passes the first check and fails the second, because the host it resolves to
+  moved, refuses the request with a `500`: the endpoint is a workspace setting
+  the caller cannot see or fix, so the reason goes to the log rather than into
+  the response. A URL sent in the request body is yours to fix and still fails
+  with a `400` naming what was wrong with it.
+- A workspace may configure up to 50 servers.
+
+#### Connection checks
+
+Creating a server connects to it once, lists its tools, and returns the outcome
+as `health`. So does a `PATCH` that changes the URL, the token, or
+`allowed_tools`; other edits leave `health` as it was.
+`POST /{server_id}/check` runs the check again on demand, with the same
+permissions as an update.
+
+A server that fails its check is still stored. `health.status` is `failing` and
+`health.error` names the cause: `unreachable`, `tls_failed`, `timeout`,
+`redirected`, `unauthorized` (401), `forbidden` (403), `not_found` (404 or
+405), `server_error` (5xx), `http_error` (another status), `not_mcp` (the URL
+answered, but not as a streamable HTTP MCP server), `limits_exceeded`,
+`unsafe_url`, `credentials_unavailable` (the stored token will not decrypt), or
+`connection_failed`. `health.http_status` carries the status where the server
+refused with one. A passing check reports `tools`, every tool name the server
+offers whatever the allow-list says (up to 200), `tool_count`, the number of
+those the allow-list admits, and `missing_allowed_tools`, the allow-listed names
+the server does not offer.
+
+`POST /check` (on the collection, with no server id) checks connection details
+without storing anything, which is what the dashboard's **Test connection**
+button calls before a save. It takes `url`, `authorization_token` and
+`allowed_tools`, and answers with what `health` would say. Pass `server_id` and
+omit `authorization_token` to test with that server's stored token; `""` tests
+with none. An unsafe URL is refused with the same `400` a create gets.
+
+`health` is `null` until a check has run. It is also `null` after a connection
+change when every check slot on the gateway was busy; `POST /{server_id}/check`
+answers `429` in that case and records nothing. The value describes the server
+as of `health.checked_at`; a request still checks the URL again, and nothing is
+skipped because a check once passed.
+
+## Limits and safety
+
+- `mcp_servers` and `mcp_server_ids` may be combined with Otari's built-in tools in one request. [Combining tools](tools.md#combining-tools) describes how, including when a server tool named like a built-in is refused
+- `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`. The last round answers rather than calling Otari's tools (see above)
+- `mcp_server_ids` accepts at most 50 ids, which is also the most servers a workspace can have; a repeated id resolves once
+- Server names must be unique across everything one request uses, because Otari routes each tool call to its server by name. Two `mcp_servers` entries sharing a name are refused with a `400` naming it, the way a bad request-body URL is. An `mcp_servers` name colliding with one of your workspace's stored servers is a `400` too, but a fixed one that repeats neither name, since a stored server is not yours to read. Two stored servers sharing a name is a `500` with the names in the log, on the same grounds as a stored URL that fails its safety check
+- MCP URLs are validated to reduce SSRF risk; by default, private and reserved addresses are blocked, loopback is allowed, and `http://` is rejected when `authorization_token` is present
+- The managed MCP loop follows redirects only when the scheme, host, and port stay the same, or when a default-port `http://` URL upgrades to `https://` on the same host. Caller-orchestrated discovery and execution do not follow redirects. Configure the final URL when a managed-loop redirect changes host or port
+- `OTARI_MCP_ALLOW_LOOPBACK=false` disables loopback; `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` relaxes the private-host restriction
+
+## Messages streaming activity
+
+For streaming `/api/v1/messages` requests with the standard Anthropic header
+`anthropic-beta: mcp-client-2025-11-20`, Otari emits server-owned activity
+around each gateway-run MCP call. The body form
+`betas: ["mcp-client-2025-11-20"]` is also accepted. An `mcp_tool_use` block
+starts immediately before execution with an opaque call id, tool and server
+names, and parsed input. A matching
+`mcp_tool_result` block follows with the result content and `is_error` value.
+Each block uses a `content_block_start` / `content_block_stop` pair. Without an
+MCP client beta, Otari still runs the call but omits these activity blocks.
+
+The blocks report execution without transferring it: Otari runs the call, feeds
+the result back to the model, and returns one logical Messages stream. It strips
+the blocks from history echoed on later turns and never includes the server URL,
+authorization token, or headers. Chat Completions and Responses streams continue
+to hide this activity because they have no equivalent server-owned MCP vocabulary.
+
 ## Caller-orchestrated MCP
 
 Otari supports two MCP integration modes, and they are alternatives rather than
 layers.
 
-**Managed MCP** is the loop above: you send `mcp_servers` or `mcp_server_ids`
+**Managed MCP** is the loop the sections above describe: you send `mcp_servers` or `mcp_server_ids`
 with a completion, and Otari owns the model/tool loop.
 
 **Caller-orchestrated MCP** hands the loop back to your application. Otari
@@ -299,156 +455,3 @@ sent to the redirect destination.
 Both endpoints resolve stored servers from the authenticated API key's
 workspace; a master-key request holds no workspace of its own and reaches no
 stored server, so it gets the `404`.
-
-## Messages streaming activity
-
-For streaming `/api/v1/messages` requests with the standard Anthropic header
-`anthropic-beta: mcp-client-2025-11-20`, Otari emits server-owned activity
-around each gateway-run MCP call. The body form
-`betas: ["mcp-client-2025-11-20"]` is also accepted. An `mcp_tool_use` block
-starts immediately before execution with an opaque call id, tool and server
-names, and parsed input. A matching
-`mcp_tool_result` block follows with the result content and `is_error` value.
-Each block uses a `content_block_start` / `content_block_stop` pair. Without an
-MCP client beta, Otari still runs the call but omits these activity blocks.
-
-The blocks report execution without transferring it: Otari runs the call, feeds
-the result back to the model, and returns one logical Messages stream. It strips
-the blocks from history echoed on later turns and never includes the server URL,
-authorization token, or headers. Chat Completions and Responses streams continue
-to hide this activity because they have no equivalent server-owned MCP vocabulary.
-
-## Inline MCP servers
-
-```json
-{
-  "model": "anthropic:claude-sonnet-4-6",
-  "messages": [{"role": "user", "content": "List open issues in mozilla-ai/otari"}],
-  "mcp_servers": [
-    {
-      "name": "github",
-      "url": "https://mcp.example.com/github",
-      "authorization_token": "ghp_...",
-      "purpose_hint": "Use for repository and issue lookups",
-      "allowed_tools": ["list_issues", "get_issue"]
-    }
-  ]
-}
-```
-
-- `name`: label for the server
-- `url`: streamable HTTP MCP endpoint, reachable from the gateway
-- `authorization_token`: optional bearer token; when set, the `url` must use `https://`
-- `purpose_hint`: optional hint Otari prepends to the system message to help the model choose the tool
-- `allowed_tools`: optional allow-list with three states: omit it or send `null` to expose every listed tool, send `[]` to expose none, or send a non-empty list to expose only those named tools
-
-## Workspace-scoped servers
-
-Reference servers your workspace has configured by id, instead of inlining
-their configs:
-
-```json
-{
-  "model": "anthropic:claude-sonnet-4-6",
-  "messages": [{"role": "user", "content": "Summarize the open PRs"}],
-  "mcp_server_ids": ["11111111-1111-1111-1111-111111111111"]
-}
-```
-
-The workspace is the one your API key belongs to; it is never read from a
-header. An id that names no server in that workspace returns `404`, and a
-server that is configured but disabled is skipped rather than refusing the
-request.
-
-The same stored servers are what
-[caller-orchestrated MCP](#caller-orchestrated-mcp) refers to by id, so a server
-registered once serves both integration modes. The two read a disabled server
-differently, and deliberately: the loop above resolves a list and skips one
-entry, while an endpoint asked about exactly that server answers `404` rather
-than returning nothing.
-
-### Configuring them
-
-The dashboard manages them under **Tools → MCP servers**, which acts on the
-workspace the switcher has selected. Everything below is the same thing over the
-API.
-
-Manage a workspace's servers with the master key, under
-`/api/v1/workspaces/{workspace_id}/mcp-servers`:
-
-```bash
-curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
-  -H "Otari-Key: $OTARI_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-        "name": "github",
-        "url": "https://mcp.example.com/github",
-        "authorization_token": "ghp_...",
-        "purpose_hint": "Use for repository and issue lookups",
-        "allowed_tools": ["list_issues", "get_issue"]
-      }'
-```
-
-`GET` lists them, `PATCH /{server_id}` updates one, and `DELETE /{server_id}`
-removes it. The list is readable by any member who can see the workspace;
-creating, updating, or deleting a server needs an organization owner/admin or
-an owner/admin of that workspace.
-
-- The `authorization_token` is encrypted at rest with `OTARI_SECRET_KEY` and is
-  never returned. Responses carry `has_token` instead. On a `PATCH`, omit the
-  field to leave the stored token alone, send `""` to clear it, or send a value
-  to rotate it.
-- `name` is unique within a workspace; a duplicate is refused with `409`.
-- `enabled: false` keeps the row and its token but takes the server out of
-  every request that names it.
-- The URL is checked for SSRF safety when it is stored as well as when a
-  request uses it, and must be `https://` when a token is set. A stored URL that
-  passes the first check and fails the second, because the host it resolves to
-  moved, refuses the request with a `500`: the endpoint is a workspace setting
-  the caller cannot see or fix, so the reason goes to the log rather than into
-  the response. A URL sent in the request body is yours to fix and still fails
-  with a `400` naming what was wrong with it.
-- A workspace may configure up to 50 servers.
-
-#### Connection checks
-
-Creating a server connects to it once, lists its tools, and returns the outcome
-as `health`. So does a `PATCH` that changes the URL, the token, or
-`allowed_tools`; other edits leave `health` as it was.
-`POST /{server_id}/check` runs the check again on demand, with the same
-permissions as an update.
-
-A server that fails its check is still stored. `health.status` is `failing` and
-`health.error` names the cause: `unreachable`, `tls_failed`, `timeout`,
-`redirected`, `unauthorized` (401), `forbidden` (403), `not_found` (404 or
-405), `server_error` (5xx), `http_error` (another status), `not_mcp` (the URL
-answered, but not as a streamable HTTP MCP server), `limits_exceeded`,
-`unsafe_url`, `credentials_unavailable` (the stored token will not decrypt), or
-`connection_failed`. `health.http_status` carries the status where the server
-refused with one. A passing check reports `tools`, every tool name the server
-offers whatever the allow-list says (up to 200), `tool_count`, the number of
-those the allow-list admits, and `missing_allowed_tools`, the allow-listed names
-the server does not offer.
-
-`POST /check` (on the collection, with no server id) checks connection details
-without storing anything, which is what the dashboard's **Test connection**
-button calls before a save. It takes `url`, `authorization_token` and
-`allowed_tools`, and answers with what `health` would say. Pass `server_id` and
-omit `authorization_token` to test with that server's stored token; `""` tests
-with none. An unsafe URL is refused with the same `400` a create gets.
-
-`health` is `null` until a check has run. It is also `null` after a connection
-change when every check slot on the gateway was busy; `POST /{server_id}/check`
-answers `429` in that case and records nothing. The value describes the server
-as of `health.checked_at`; a request still checks the URL again, and nothing is
-skipped because a check once passed.
-
-## Limits and safety
-
-- `mcp_servers` and `mcp_server_ids` may be combined with Otari's built-in tools in one request, as [Combining tools](tools.md#combining-tools) describes. A server tool named like a built-in the request declares (`web_search`, `web_fetch` or `code_execution`) is refused with a `400`
-- `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`. The last round answers rather than calling Otari's tools (see above)
-- `mcp_server_ids` accepts at most 50 ids, which is also the most servers a workspace can have; a repeated id resolves once
-- Server names must be unique across everything one request uses, because Otari routes each tool call to its server by name. Two `mcp_servers` entries sharing a name are refused with a `400` naming it, the way a bad request-body URL is. An `mcp_servers` name colliding with one of your workspace's stored servers is a `400` too, but a fixed one that repeats neither name, since a stored server is not yours to read. Two stored servers sharing a name is a `500` with the names in the log, on the same grounds as a stored URL that fails its safety check
-- MCP URLs are validated to reduce SSRF risk; by default, private and reserved addresses are blocked, loopback is allowed, and `http://` is rejected when `authorization_token` is present
-- The managed MCP loop follows redirects only when the scheme, host, and port stay the same, or when a default-port `http://` URL upgrades to `https://` on the same host. Caller-orchestrated discovery and execution do not follow redirects. Configure the final URL when a managed-loop redirect changes host or port
-- `OTARI_MCP_ALLOW_LOOPBACK=false` disables loopback; `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` relaxes the private-host restriction
