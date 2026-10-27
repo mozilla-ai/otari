@@ -94,7 +94,7 @@ interface ManagedToolSpec {
   help?: string
   /**
    * The deployment page an operator sets the tool up on, linked from its
-   * unavailable status where a URL field on this page would otherwise be.
+   * unavailable status.
    */
   setUpPage?: "/admin/web-search"
 }
@@ -155,8 +155,8 @@ const SERVICES: ServiceSpec[] = [
         help: "Lets the model read a web page by its URL.",
       },
     ],
-    // Its tools, defaults and rates are the deployment's, on Deployment > Web
-    // search; this page keeps what a workspace sees and decides.
+    // Its tools, defaults and rates are set on Deployment > Web search; this
+    // page shows what a workspace sees and decides.
     groups: [],
   },
   {
@@ -287,9 +287,8 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   // below. Of the deployment-wide reads above them, the tool settings answer a
   // tenant without the service endpoints in them (otari-ai#1969), and the tool
   // list is a catalog read any session may make, so both are asked
-  // unconditionally. Anything operator-only links to the deployment's own
-  // pages, gated on the same answer the sidebar uses, rather than being asked
-  // for here and refused with a 403.
+  // unconditionally. Anything operator-only is a link to the deployment's own
+  // pages, shown on the same answer the sidebar uses.
   const { isOperator } = useDeploymentOperator()
   const query = useToolSettings()
   const tools = useTools()

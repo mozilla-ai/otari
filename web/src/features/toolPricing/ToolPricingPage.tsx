@@ -24,11 +24,9 @@ import {
   toRowId,
 } from "./toolRates"
 
-// What the deployment charges for each call of a tool the gateway runs itself,
-// other than web search and fetch, whose rates the Web search page sets beside
-// their tools. Deployment-scoped, as Hosted providers is for models: one price
-// list for every organization, which an organization's own override can still
-// narrow.
+// What the deployment charges for each call of code execution.
+// Deployment-scoped: one price list for every organization, which an
+// organization's own override can still narrow.
 //
 // Operator-only. `/pricing` refuses everyone else with a 403, so the rail shows
 // the row and the page words the refusal itself rather than rendering a table

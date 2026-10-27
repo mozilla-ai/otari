@@ -284,7 +284,7 @@ describe("ToolsGuardrailsPage", () => {
     expect(
       await screen.findByRole("heading", { name: "Guardrails · Backend" }),
     ).toBeInTheDocument()
-    // Web search's own settings are the deployment's page's, linked from here.
+    // Web search's settings are on the deployment's Web search page.
     expect(
       screen.queryByRole("heading", { name: /Search backend/ }),
     ).not.toBeInTheDocument()
