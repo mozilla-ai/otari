@@ -393,8 +393,9 @@ class WorkspaceService:
         if member is None:
             raise WorkspaceMemberNotFoundError(workspace_id, user_id)
 
-        updated = await self.members.update(member, WorkspaceMemberUpdate(role=role))
-        await self.db.commit()
+        async with self._uow:
+            updated = await self.members.update(member, WorkspaceMemberUpdate(role=role))
+            await self._membership_listener.member_role_changed(updated)
         return WorkspaceMemberPublic.model_validate(updated)
 
     async def remove_member(self, *, user: User, workspace_id: uuid.UUID, user_id: uuid.UUID) -> None:

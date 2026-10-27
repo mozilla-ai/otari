@@ -11978,6 +11978,11 @@ export interface components {
             metadata: {
                 [key: string]: unknown;
             };
+            /**
+             * Operator Disabled
+             * @default false
+             */
+            operator_disabled: boolean;
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
             /** User Id */

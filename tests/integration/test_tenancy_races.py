@@ -58,6 +58,7 @@ from gateway.models.tenancy import (
     ActiveOrganizationMemberUpdateRequest,  # noqa: E402
     InviteOrganizationMemberRequest,
     Organization,
+    OrganizationMember,
     User,
     WorkspaceActivationState,
     WorkspaceAssignmentRequest,
@@ -559,6 +560,14 @@ class _PausingListener:
 
     async def member_removed(self, member: WorkspaceMember) -> None:
         await self._inner.member_removed(member)
+
+    async def member_role_changed(self, member: WorkspaceMember) -> None:
+        await self._inner.member_role_changed(member)
+
+    async def organization_member_changed(
+        self, membership: OrganizationMember, workspace_ids: Sequence[uuid.UUID]
+    ) -> None:
+        await self._inner.organization_member_changed(membership, workspace_ids)
 
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         await self._inner.workspace_deleted(workspace_id, member_ids)

@@ -320,6 +320,7 @@ async def create_own_key(
         allowed_models=allowed_models,
         allowed_tools=allowed_tools,
         exclude_from_budget=False,
+        self_service=True,
         reject_user_mismatch=request.reject_user_mismatch,
         capture_agent_telemetry=request.capture_agent_telemetry,
         metadata_=request.metadata,
@@ -422,6 +423,11 @@ async def update_own_key(
     await organizations.hold_workspace_write_access(
         user=identity, organization_id=organization.id, workspace_id=key.workspace_id, revoking=switching_off
     )
+    if request.is_active is True and key.operator_disabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="An operator switched this key off; ask them to switch it back on.",
+        )
 
     # Tri-state via model_fields_set: both columns are nullable and the
     # dashboard's edit form sends null to clear them, so "absent" and "null"

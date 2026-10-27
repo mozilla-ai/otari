@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Protocol
 
-from gateway.models.tenancy import WorkspaceMember
+from gateway.models.tenancy import OrganizationMember, WorkspaceMember
 
 
 class MembershipListener(Protocol):
@@ -22,6 +22,14 @@ class MembershipListener(Protocol):
 
     async def member_removed(self, member: WorkspaceMember) -> None:
         """A membership is about to be deleted."""
+
+    async def member_role_changed(self, member: WorkspaceMember) -> None:
+        """A workspace membership's role changed; ``member`` carries the new one."""
+
+    async def organization_member_changed(
+        self, membership: OrganizationMember, workspace_ids: Sequence[uuid.UUID]
+    ) -> None:
+        """An organization membership's role or status changed; ``workspace_ids`` are the organization's."""
 
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         """A workspace and these memberships are about to be deleted."""
@@ -40,6 +48,16 @@ class MembershipListeners:
     async def member_removed(self, member: WorkspaceMember) -> None:
         for listener in self._listeners:
             await listener.member_removed(member)
+
+    async def member_role_changed(self, member: WorkspaceMember) -> None:
+        for listener in self._listeners:
+            await listener.member_role_changed(member)
+
+    async def organization_member_changed(
+        self, membership: OrganizationMember, workspace_ids: Sequence[uuid.UUID]
+    ) -> None:
+        for listener in self._listeners:
+            await listener.organization_member_changed(membership, workspace_ids)
 
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         for listener in self._listeners:
