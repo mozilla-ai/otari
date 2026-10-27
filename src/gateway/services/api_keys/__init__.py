@@ -10,7 +10,7 @@ from gateway.services.api_keys._access_tokens import (
     mint_access_token,
     read_access_token,
 )
-from gateway.services.api_keys._admission import key_refusal
+from gateway.services.api_keys._admission import key_refusal, owner_enable_refusal
 from gateway.services.api_keys._federation import (
     FederatedIdentity,
     FederatedTokenVerifier,
@@ -46,6 +46,7 @@ __all__ = [
     "key_refusal",
     "match_federation_rules",
     "mint_access_token",
+    "owner_enable_refusal",
     "read_access_token",
     "refuse_unusable_declared_secrets",
     "rule_matches",
