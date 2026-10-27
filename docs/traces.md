@@ -208,14 +208,15 @@ not what was charged.
 
 A session's header counts its tool calls and the gates its hooks ran, each
 broken down on hover: the calls by tool, and the gates by what they decided.
-**At a glance** opens a session with what it did and where its time and money
-went: its turns, model requests and tool calls, then one bar for its time and
-one for its cost, each with a row per part.
+**At a glance** opens a session with where its time and money went: how long
+it took, with its turns and tool calls, and what it cost, with its requests and
+tokens, each above one bar and a figure per part. Below them, the gates its
+hooks ran and what they decided.
 
 - **Time** splits the session into model requests, hooks, running tools,
   waiting for you to approve a call, and idle between turns. When idle is more
-  than half the session, the bar draws it shorter, marked `//`, and its row
-  keeps the true time and share. Running tools opens onto each tool's calls and
+  than half the session, the bar draws it shorter, marked `//`, and its figure
+  keeps the true time. Running tools opens onto each tool's calls and
   running time. A call that started a subagent runs until the subagent's last
   span, so its time also counts as model time, and the panel says when parts
   overlap like that. Tools that ran inside the request that called them, as a
@@ -225,8 +226,8 @@ one for its cost, each with a row per part.
 - **Cost** is the session's total, split by meter (fresh input, output, cache
   reads and cache writes) when the requests were priced by the token, with what
   reading from the cache saved over paying for those tokens as fresh input.
-  Requests priced whole, as a gateway prices a routed request, are split by
-  model instead. A session with nothing priced says so rather than $0.00.
+  Requests priced whole, as a gateway prices a routed request, have no split.
+  A session with nothing priced says so rather than $0.00.
 
 A judge gate that [reports its model calls](agent-guardrails.md#reporting-to-otari)
 is priced like a request and counted in the session's cost, though not in any

@@ -32,8 +32,8 @@ export interface SessionStats {
   tools: ToolTally[]
   /** Each agent guardrail gate a hook ran, by what it decided. */
   gates: { runs: number; verdicts: Partial<Record<GuardrailVerdict, number>> }
-  /** The judge gates that called a model: what they ran on and what the priced ones cost. */
-  judges: { calls: number; models: string[]; cost: number; priced: number }
+  /** The judge gates that called a model, and what the priced ones cost. */
+  judges: { calls: number; cost: number; priced: number }
   /**
    * Each overlapping span counted once. A tool runs until any subagent it started
    * finishes, and that subagent's requests count as model time too, so these can
@@ -236,12 +236,7 @@ export function sessionStats(
   // A gateway guardrail is a guardrail span too, but not a hook's.
   const hooks = detail.spans.filter((span) => gateVerdict(span))
   const gates: SessionStats["gates"] = { runs: 0, verdicts: {} }
-  const judges: SessionStats["judges"] = {
-    calls: 0,
-    models: [],
-    cost: 0,
-    priced: 0,
-  }
+  const judges: SessionStats["judges"] = { calls: 0, cost: 0, priced: 0 }
   for (const span of detail.spans) {
     const verdict = gateVerdict(span)
     if (!verdict) continue
@@ -249,7 +244,6 @@ export function sessionStats(
     gates.verdicts[verdict] = (gates.verdicts[verdict] ?? 0) + 1
     if (!span.model) continue
     judges.calls += 1
-    if (!judges.models.includes(span.model)) judges.models.push(span.model)
     if (span.cost != null) {
       judges.cost += span.cost
       judges.priced += 1

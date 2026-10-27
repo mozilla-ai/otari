@@ -87,10 +87,10 @@ async function openFirstSession(user: Pick<UserEvent, "click"> = userEvent) {
   return screen.findByRole("complementary", { name: "Trace claude-code" })
 }
 
-// The total At a glance heads its Cost block with.
+// The total At a glance heads its Cost band with.
 async function costTotal(peek: HTMLElement) {
-  const heading = await within(peek).findByRole("heading", { name: "Cost" })
-  return heading.nextElementSibling?.textContent
+  const heading = await within(peek).findByRole("heading", { name: /^Cost / })
+  return heading.lastElementChild?.textContent
 }
 
 describe("SessionsPage", () => {
@@ -564,9 +564,7 @@ describe("SessionsPage", () => {
       within(peek).getByRole("button", { name: /^\d+ tool calls?$/ }),
     ).toBeInTheDocument()
     expect(
-      within(peek).getByText(
-        /^\d+ turns?, \d+ model requests? and \d+ tool calls?/,
-      ),
+      within(peek).getByText(/^\d+ turns? · \d+ tool calls?/),
     ).toBeInTheDocument()
     expect(within(peek).getByText("Running tools")).toBeInTheDocument()
   })
@@ -638,7 +636,7 @@ describe("SessionsPage", () => {
 
     expect(
       await within(peek).findByText(
-        /^Judge gates called claude-haiku-4-5-20251001 once, for \$0\.01\d* the split above leaves out\./,
+        /^Judge gates made 1 model call, for \$0\.01\d*\.$/,
       ),
     ).toBeInTheDocument()
     await userEvent.click(
