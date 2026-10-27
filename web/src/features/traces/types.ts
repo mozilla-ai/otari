@@ -4,7 +4,7 @@
 import type { TraceGateSummary, TraceToolCost } from "@/client"
 
 import type { ContextWeights, SessionRequests } from "./contextMap"
-import type { Explanation } from "./explain"
+import type { Explanation, NoInput } from "./explain"
 import type { GatewayEvent, GuardrailVerdict } from "./gateway"
 import type { SessionStats } from "./sessionStats"
 import type { ToolCostBreakdown } from "./toolCostBreakdown"
@@ -48,6 +48,8 @@ export interface Observation {
   cost?: number
   input?: unknown
   output?: unknown
+  /** Why there is no input, for a span or turn that has none. */
+  noInput?: NoInput
   metadata?: Record<string, string>
   /** A guardrail gate's check: what the gate is, what it decided and what it read. */
   gate?: GateCheck

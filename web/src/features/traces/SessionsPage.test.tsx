@@ -154,6 +154,58 @@ describe("SessionsPage", () => {
     expect(within(peek).getAllByText("gpt-5").length).toBeGreaterThan(0)
   })
 
+  it("says why a span has no input, and links how to keep it where it could be kept", async () => {
+    const user = userEvent.setup()
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      traces: [],
+      // Exported by Claude Code, so its command could have been kept.
+      traceDetail: {
+        ...detail,
+        spans: detail.spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, origin: "otlp" as const }
+            : span,
+        ),
+      },
+    })
+
+    renderPage(
+      <SessionsPage />,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=req-1`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+    const never = "Otari never keeps what a request sent or got back."
+
+    expect(await within(peek).findByText(never)).toBeInTheDocument()
+    expect(
+      within(peek).queryByRole("link", { name: /How to keep it/ }),
+    ).not.toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: /^Tool, Bash/ }))
+
+    expect(
+      await within(peek).findByText("Its command is not shown."),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByRole("link", { name: /How to keep it/ }),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/mozilla-ai/otari/blob/main/docs/traces.md#keeping-what-a-span-was-about",
+    )
+
+    await user.click(within(peek).getByRole("button", { name: "Log View" }))
+    await user.click(
+      within(peek).getByRole("button", { name: /Request \(req-1\)/ }),
+    )
+
+    expect(within(peek).getByText(never)).toBeInTheDocument()
+    expect(within(peek).queryByText("No input or output")).toBeNull()
+  })
+
   it("reads an opened session in the workspace its list entry names", async () => {
     const { calls } = mockApi({
       traces: [traceSummary()],

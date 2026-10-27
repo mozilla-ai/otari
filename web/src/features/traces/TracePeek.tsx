@@ -20,6 +20,7 @@ import { Tooltip } from "@/design-system/overlays/Tooltip"
 import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
 import { CostCard } from "./CostCard"
 import { ExplainCard } from "./ExplainCard"
+import type { NoInput } from "./explain"
 import {
   formatDuration,
   formatRelativeTime,
@@ -31,6 +32,7 @@ import { GatewayPanel } from "./GatewayPanel"
 import { type Format, IOBlock } from "./IOBlock"
 import { LogView } from "./LogView"
 import { NavHeader, type NavView } from "./NavHeader"
+import { NoInputNote } from "./NoInputNote"
 import { TypeMark } from "./observationTypes"
 import type { SessionStats } from "./sessionStats"
 import { TraceTimelineView } from "./TraceTimelineView"
@@ -181,18 +183,22 @@ const STATUS_TONE: Record<Observation["level"], string> = {
 function PreviewBody({
   input,
   output,
+  noInput,
   statusMessage,
   level,
   format,
 }: {
   input: unknown
   output: unknown
+  noInput?: NoInput
   statusMessage?: string
   level: Observation["level"]
   format: Format
 }) {
   if (input == null && output == null && !statusMessage) {
-    return <span className="text-caption text-subtle">No input or output</span>
+    return noInput ? (
+      <NoInputNote noInput={noInput} className="text-subtle" />
+    ) : null
   }
   return (
     <>
@@ -908,13 +914,16 @@ export function TracePeek({
                   {observation.estimate ? (
                     <CostCard cost={observation.estimate} />
                   ) : null}
+                  {/* An explained span says nothing more about a missing input, unless it could be kept. */}
                   {observation.explain &&
                   observation.input == null &&
                   observation.output == null &&
-                  !observation.statusMessage ? null : (
+                  !observation.statusMessage &&
+                  !observation.noInput?.docsHref ? null : (
                     <PreviewBody
                       input={observation.input}
                       output={observation.output}
+                      noInput={observation.noInput}
                       statusMessage={observation.statusMessage}
                       level={observation.level}
                       format={format}
