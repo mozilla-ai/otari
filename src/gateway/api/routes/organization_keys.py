@@ -23,8 +23,9 @@ established for usage reads (otari#837), applied to a write surface:
   answers 404 exactly as one that does not exist. Omitting it targets the
   organization's default workspace, put through the same check.
 * **A viewer is read-only.** Creating, changing, rotating or revoking a key
-  takes a role above ``viewer`` in the key's workspace (or organization
-  owner/admin), through ``OrganizationService.require_workspace_contributor_access``.
+  takes a role above ``viewer`` in both the organization and the key's
+  workspace (or organization owner/admin), through
+  ``OrganizationService.require_workspace_contributor_access``.
   A viewer still lists the keys billed to them, so an operator can issue them one.
 * **No budget bypass.** The operator's create takes ``exclude_from_budget``;
   this one does not, and always mints an enforced key: a member exempting their
@@ -242,6 +243,11 @@ async def create_own_key(
                 organizations=organizations,
             )
         except WorkspaceNotFoundError:
+            # A viewer is refused whichever workspace they name, so they hear
+            # that rather than advice to name one.
+            await organizations.require_workspace_contributor_access(
+                user=identity, organization_id=organization.id, workspace_id=resolved
+            )
             # The caller named nothing, so "not found" would point them at a
             # parameter they did not send; say what to do instead.
             raise HTTPException(

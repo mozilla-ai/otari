@@ -316,6 +316,7 @@ class SignupRegistration:
 # Roles that may change a workspace's resources, such as minting their own key in
 # it: everything but "viewer", which is read-only.
 _CONTRIBUTOR_ROLES = frozenset({"owner", "admin", "member"})
+_READ_ONLY_DETAIL = "Viewers have read-only access to this workspace"
 
 
 class OrganizationService:
@@ -418,21 +419,20 @@ class OrganizationService:
         organization_id: uuid.UUID,
         workspace_id: uuid.UUID,
     ) -> None:
-        """Allow an organization owner/admin, or an owner, admin or member of this workspace.
+        """Allow an organization owner/admin, or a caller who is a viewer neither of the organization nor here.
 
-        A workspace viewer is read-only, so it is refused here although it may
-        see the workspace. The workspace role decides where the caller holds
-        one, so an organization viewer given ``member`` in a workspace may
-        contribute there; with no workspace membership the organization role
-        decides.
+        The more restrictive of the two roles wins. Invitations have given
+        organization viewers ``member`` in their workspaces, so letting the
+        workspace role override would leave those viewers writable.
         """
         organization_membership = await self.members.get_active_by_organization_and_user(organization_id, user.id)
         if organization_membership is not None and organization_membership.role in MANAGEMENT_ROLES:
             return
+        if organization_membership is None or organization_membership.role not in _CONTRIBUTOR_ROLES:
+            raise NotAuthorizedError(_READ_ONLY_DETAIL)
         membership = await self.workspaces.get_active_by_workspace_and_user(workspace_id, user.id)
-        deciding = membership if membership is not None else organization_membership
-        if deciding is None or deciding.role not in _CONTRIBUTOR_ROLES:
-            raise NotAuthorizedError("Viewers have read-only access to this workspace")
+        if membership is not None and membership.role not in _CONTRIBUTOR_ROLES:
+            raise NotAuthorizedError(_READ_ONLY_DETAIL)
 
     async def user_has_active_membership(self, *, organization_id: uuid.UUID, user_id: uuid.UUID) -> bool:
         """Whether an identity is an active member of an organization."""

@@ -169,8 +169,8 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
                 workspace_ids=(alpha_one.id,),
                 workspace_role="viewer",
             ),
-            # The other way round: a viewer of the organization given member in
-            # alpha one may contribute there.
+            # The other way round, and what an invitation used to produce: a
+            # viewer of the organization given member in alpha one.
             "alpha_viewer_promoted": _identity(
                 session,
                 email="promoted@alpha.test",
@@ -348,9 +348,9 @@ def test_a_revoked_spend_identity_cannot_mint_its_way_back(client: TestClient, w
     assert "has been deleted" in body["detail"]
 
 
-@pytest.mark.parametrize("who", ["alpha_viewer", "alpha_workspace_viewer"])
+@pytest.mark.parametrize("who", ["alpha_viewer", "alpha_workspace_viewer", "alpha_viewer_promoted"])
 def test_a_viewer_cannot_mint_a_key(client: TestClient, world: _World, who: str) -> None:
-    """Viewer is read-only, whether the role is held in the organization or only in the workspace."""
+    """Viewer is read-only, held in the organization, the workspace or both: the more restrictive role wins."""
     for body in ({"key_name": "named", "workspace_id": str(world.workspaces["alpha_one"])}, {"key_name": "default"}):
         code, refused = _create(client, world, who, body)
         assert code == status.HTTP_403_FORBIDDEN, refused
@@ -360,14 +360,22 @@ def test_a_viewer_cannot_mint_a_key(client: TestClient, world: _World, who: str)
     assert listed == []
 
 
-def test_an_organization_viewer_who_is_a_workspace_member_mints_there(client: TestClient, world: _World) -> None:
-    code, body = _create(
-        client,
-        world,
-        "alpha_viewer_promoted",
-        {"key_name": "mine", "workspace_id": str(world.workspaces["alpha_one"])},
-    )
-    assert code == status.HTTP_200_OK, body
+def test_a_viewer_outside_the_default_workspace_hears_403_not_409(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """Told to name a workspace, a viewer would only be refused again there."""
+    session = db_session_factory()
+    try:
+        _identity(session, email="outsider@alpha.test", organization_id=world.alpha, role="viewer")
+    finally:
+        session.close()
+    world.sessions["alpha_outsider_viewer"] = "otari-sess-outsider@alpha.test"
+
+    code, body = _create(client, world, "alpha_outsider_viewer", {"key_name": "default"})
+    assert code == status.HTTP_403_FORBIDDEN, body
+    # A member in the same position still gets the advice.
+    code, body = _create(client, world, "alpha_newcomer", {"key_name": "default"})
+    assert code == status.HTTP_409_CONFLICT, body
 
 
 def test_a_viewer_lists_but_cannot_change_a_key_issued_to_them(

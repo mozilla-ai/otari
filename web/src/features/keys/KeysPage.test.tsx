@@ -876,15 +876,13 @@ describe("KeysPage", () => {
     ).not.toBeInTheDocument()
     expect(within(row).queryByRole("checkbox")).not.toBeInTheDocument()
 
+    // The trigger still opens the key's details, with no menu under them.
     await user.click(
-      within(row).getByRole("button", { name: "Actions for issued" }),
+      within(row).getByRole("button", { name: "Details for issued" }),
     )
-    const menu = await screen.findByRole("menu")
-    for (const action of ["Disable", "Edit…", "Regenerate…", "Delete…"]) {
-      expect(
-        within(menu).queryByRole("menuitem", { name: new RegExp(action) }),
-      ).not.toBeInTheDocument()
-    }
+    expect(await screen.findByText("Created:")).toBeInTheDocument()
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument()
+    expect(screen.queryAllByRole("menuitem")).toEqual([])
   })
 
   it("regenerates a secret after an explicit confirm", async () => {

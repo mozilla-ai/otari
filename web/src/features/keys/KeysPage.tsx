@@ -1630,7 +1630,7 @@ export function KeysPage() {
           These are your keys: requests on them are billed to you and spend
           against your budget.
           {isReadOnly
-            ? " You are a viewer here, so an owner or admin issues and changes them."
+            ? " You are a viewer here, so your deployment operator issues and changes them."
             : null}
         </p>
       )}
@@ -1660,7 +1660,11 @@ export function KeysPage() {
       {showOnboarding ? (
         <EmptyState
           title="No API keys yet"
-          description="An API key authenticates callers to this gateway. Create one to make your first request; the secret is shown once, so keep it somewhere safe."
+          description={
+            isReadOnly
+              ? "An API key authenticates callers to this gateway. Ask your deployment operator to issue you one."
+              : "An API key authenticates callers to this gateway. Create one to make your first request; the secret is shown once, so keep it somewhere safe."
+          }
           actionLabel={isReadOnly ? undefined : "Create your first key"}
           onAction={isReadOnly ? undefined : openCreate}
         />
@@ -1840,7 +1844,11 @@ export function KeysPage() {
             rows={rows}
             getRowKey={getKeyRowKey}
             isLoading={loading}
-            emptyContent="No API keys yet. Create one to authenticate a caller."
+            emptyContent={
+              isReadOnly
+                ? "No API keys yet. Ask your deployment operator to issue you one."
+                : "No API keys yet. Create one to authenticate a caller."
+            }
             selectionMode={isReadOnly ? "none" : "multiple"}
             selectedKeys={selection.selectedKeys}
             onSelectionChange={selection.onSelectionChange}

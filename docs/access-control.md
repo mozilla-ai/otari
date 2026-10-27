@@ -89,7 +89,7 @@ Organization and workspace memberships use four roles:
 | Owner | Full management, including organization administration |
 | Admin | Manage most organization or workspace resources |
 | Member | Use the workspace and read permitted resources |
-| Viewer | Read-only access: sees their own keys but cannot create, change, rotate or delete one |
+| Viewer | Read-only on API keys: sees the ones billed to them, cannot create, change, rotate or delete one |
 
 The API key that authenticates a request determines its workspace. A caller
 cannot select another workspace with a header. Master-key inference uses the
@@ -185,9 +185,9 @@ deployment operator's standing. A signed-in member without it manages their own
 keys at `/api/v1/organizations/me/keys`, which derives the owner rather than
 accepting one, mints only into a workspace the caller may see, and never issues
 a budget-exempt key. A viewer may list their keys there and is refused (`403`)
-every write: creating, editing, rotating or deleting a key takes a role above
-viewer in the key's workspace, or in the organization where the caller holds no
-workspace role, or organization owner or admin. To give a viewer a key, an
+every write: creating, editing, rotating or deleting a key takes organization
+owner or admin, or a caller who is a viewer neither of the organization nor of
+the key's workspace. To give a viewer a key, an
 operator issues it on `/api/v1/keys` and owns its changes.
 
 ### Mismatched `user` fields

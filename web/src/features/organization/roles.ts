@@ -191,15 +191,19 @@ const CONTRIBUTOR_ROLES: readonly string[] = ["owner", "admin", "member"]
 
 /**
  * Whether the caller may change their own resources in a workspace, such as
- * minting a key there: `canManage`'s organization arm, or a role above viewer.
- * The workspace role decides where the caller holds one, else the organization
- * role, as `OrganizationService.require_workspace_contributor_access` does on the server.
+ * minting a key there: `canManage`'s organization arm, or viewer in neither the
+ * organization nor the workspace. The more restrictive role wins, as
+ * `OrganizationService.require_workspace_contributor_access` does on the server.
  */
 export function canContributeToWorkspace(
   context: OrganizationContext | undefined,
   workspaceRole: string | undefined,
 ): boolean {
   if (canManage(context)) return true
-  const deciding = workspaceRole ?? context?.role
-  return deciding !== undefined && CONTRIBUTOR_ROLES.includes(deciding)
+  if (context === undefined || !CONTRIBUTOR_ROLES.includes(context.role)) {
+    return false
+  }
+  return (
+    workspaceRole === undefined || CONTRIBUTOR_ROLES.includes(workspaceRole)
+  )
 }
