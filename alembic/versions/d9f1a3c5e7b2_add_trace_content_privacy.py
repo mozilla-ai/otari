@@ -19,7 +19,7 @@
   and the organization so it outlives both, and deleted after its retention.
 
 Revision ID: d9f1a3c5e7b2
-Revises: bea0cc9abb34
+Revises: e5a7c9d1f3b2
 Create Date: 2026-10-23
 """
 
@@ -29,7 +29,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "d9f1a3c5e7b2"
-down_revision: str | Sequence[str] | None = "bea0cc9abb34"
+down_revision: str | Sequence[str] | None = "e5a7c9d1f3b2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
