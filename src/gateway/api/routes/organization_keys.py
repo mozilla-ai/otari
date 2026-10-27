@@ -425,7 +425,7 @@ async def update_own_key(
         user=identity, organization_id=organization.id, workspace_id=key.workspace_id, revoking=switching_off
     )
     # Re-read under the row's lock: the copy loaded above may predate an
-    # operator's switch-off, and writing over it would drop that switch-off.
+    # operator's switch-off or narrowing, and writing it back would undo either.
     await db.refresh(key, with_for_update=True)
     if (refusal := owner_enable_refusal(key, request.is_active)) is not None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=refusal)
@@ -444,8 +444,10 @@ async def update_own_key(
         key.reject_user_mismatch = request.reject_user_mismatch
     if "capture_agent_telemetry" in request.model_fields_set:
         key.capture_agent_telemetry = request.capture_agent_telemetry
-    key.allowed_models = access.models
-    key.allowed_tools = access.tools
+    if "allowed_models" in request.model_fields_set:
+        key.allowed_models = access.models
+    if "allowed_tools" in request.model_fields_set:
+        key.allowed_tools = access.tools
     if request.metadata is not None:
         key.metadata_ = request.metadata
 

@@ -967,6 +967,33 @@ def test_a_key_an_operator_switched_off_stays_off_for_its_owner(client: TestClie
     assert code == status.HTTP_200_OK, body
 
 
+def _operator_edit_after_the_load(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session_factory: Callable[[], Session],
+    key_id: str,
+    edit: Callable[[APIKey], None],
+) -> list[int]:
+    """Commit an operator's ``edit`` to the key between the member PATCH's load and its locked re-read."""
+    hold = OrganizationService.hold_workspace_write_access
+    calls = [0]
+
+    async def edit_after_the_load(self: OrganizationService, **kwargs: Any) -> None:
+        await hold(self, **kwargs)
+        calls[0] += 1
+        if calls[0] == 2:
+            session = db_session_factory()
+            try:
+                row = session.get(APIKey, key_id)
+                assert row is not None
+                edit(row)
+                session.commit()
+            finally:
+                session.close()
+
+    monkeypatch.setattr(OrganizationService, "hold_workspace_write_access", edit_after_the_load)
+    return calls
+
+
 def test_an_operator_switch_off_landing_mid_update_is_not_overwritten(
     client: TestClient,
     world: _World,
@@ -977,31 +1004,40 @@ def test_an_operator_switch_off_landing_mid_update_is_not_overwritten(
     code, minted = _create(client, world, "alpha_member", {"key_name": "mine"})
     assert code == status.HTTP_200_OK, minted
 
-    hold = OrganizationService.hold_workspace_write_access
-    calls = 0
+    def switch_off(row: APIKey) -> None:
+        row.is_active = False
+        row.operator_disabled = True
 
-    async def switch_off_after_the_load(self: OrganizationService, **kwargs: Any) -> None:
-        nonlocal calls
-        await hold(self, **kwargs)
-        calls += 1
-        if calls == 2:
-            session = db_session_factory()
-            try:
-                row = session.get(APIKey, minted["id"])
-                assert row is not None
-                row.is_active = False
-                row.operator_disabled = True
-                session.commit()
-            finally:
-                session.close()
-
-    monkeypatch.setattr(OrganizationService, "hold_workspace_write_access", switch_off_after_the_load)
+    calls = _operator_edit_after_the_load(monkeypatch, db_session_factory, minted["id"], switch_off)
     code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": True})
 
-    assert calls == 2
+    assert calls == [2]
     assert code == status.HTTP_403_FORBIDDEN, body
     row = _key_row(db_session_factory, minted["id"])
     assert (row.is_active, row.operator_disabled) == (False, True)
+
+
+def test_an_operator_narrowing_landing_mid_update_survives_an_unrelated_edit(
+    client: TestClient,
+    world: _World,
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An update that sends no access list leaves the stored ones as they are by then, not as they were loaded."""
+    code, minted = _create(client, world, "alpha_member", {"key_name": "mine"})
+    assert code == status.HTTP_200_OK, minted
+
+    def narrow(row: APIKey) -> None:
+        row.allowed_models = ["openai:gpt-4o-mini"]
+        row.allowed_tools = []
+
+    calls = _operator_edit_after_the_load(monkeypatch, db_session_factory, minted["id"], narrow)
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"key_name": "x"})
+
+    assert calls == [2]
+    assert code == status.HTTP_200_OK, body
+    row = _key_row(db_session_factory, minted["id"])
+    assert (row.key_name, row.allowed_models, row.allowed_tools) == ("x", ["openai:gpt-4o-mini"], [])
 
 
 def test_a_member_minted_key_records_its_origin(
