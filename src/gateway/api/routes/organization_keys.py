@@ -195,10 +195,29 @@ async def _load_own_writable_key(
     """
     organization = await organizations.get_active_organization_for_user(identity)
     key = await _load_key_in_organization(db, key_id, organization.id, owner_user_id=str(identity.id))
-    await organizations.require_workspace_contributor_access(
-        user=identity, organization_id=organization.id, workspace_id=key.workspace_id, membership_required=not revoking
-    )
+    await _hold_write_access(organizations, identity, organization.id, key.workspace_id, revoking=revoking)
     return key
+
+
+async def _hold_write_access(
+    organizations: OrganizationService,
+    identity: TenancyUser,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    *,
+    revoking: bool,
+) -> None:
+    """Refuse a write the caller's roles do not allow, holding the workspace's lock unless ``revoking``.
+
+    The lock lasts until the commit, so a removal from the workspace cannot land
+    between this check and the write. A commit before the write releases it, so
+    call this again after one.
+    """
+    if not revoking:
+        await organizations.lock_workspace(workspace_id)
+    await organizations.require_workspace_contributor_access(
+        user=identity, organization_id=organization_id, workspace_id=workspace_id, membership_required=not revoking
+    )
 
 
 @router.post("")
@@ -262,9 +281,7 @@ async def create_own_key(
                 "pass workspace_id naming a workspace you belong to.",
             ) from None
         workspace_id = workspace.id
-    await organizations.require_workspace_contributor_access(
-        user=identity, organization_id=organization.id, workspace_id=workspace_id
-    )
+    await _hold_write_access(organizations, identity, organization.id, workspace_id, revoking=False)
 
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)
@@ -417,6 +434,9 @@ async def update_own_key(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    # Again: a changed list is checked in a block whose commit released the lock.
+    organization = await organizations.get_active_organization_for_user(identity)
+    await _hold_write_access(organizations, identity, organization.id, key.workspace_id, revoking=switching_off)
 
     # Tri-state via model_fields_set: both columns are nullable and the
     # dashboard's edit form sends null to clear them, so "absent" and "null"

@@ -407,6 +407,9 @@ class WorkspaceService:
             return
 
         async with self._uow:
+            # The key write routes take the same lock before checking membership,
+            # so a key minted or re-enabled while this runs cannot outlive it.
+            await self.workspaces.lock(workspace.id)
             await self._membership_listener.member_removed(member)
             await self.members.delete(member)
 
