@@ -1,4 +1,10 @@
-import { type KeyboardEvent, useMemo } from "react"
+import {
+  type CSSProperties,
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react"
 import { FiChevronRight } from "react-icons/fi"
 
 import { IconButton } from "@/design-system/actions/IconButton"
@@ -54,6 +60,59 @@ const MARK =
 // Holds a childless row's text where a chevron would be, so names align.
 const CHEVRON_SLOT = <span aria-hidden="true" className="size-11 shrink-0" />
 
+// A connector that starts continuing when a sibling arrives fades in, timed with
+// the arriving row's branch so the two read as one line.
+const LINE =
+  "border-l transition-[border-color] duration-200 ease-out-fluid motion-reduce:transition-none"
+
+// The step between rows that arrive together, and the most rows it applies to,
+// so a whole turn arriving at once still lands in about a third of a second.
+const ARRIVAL_STAGGER_MS = 45
+const ARRIVAL_STAGGER_ROWS = 6
+// Longer than the slowest entrance (the wash) plus the largest stagger.
+const ARRIVAL_MS = 1_400
+const NO_ARRIVALS: ReadonlySet<string> = new Set()
+
+// The spans a live session added since the panel opened on it. Whatever is there
+// when the panel opens, or when the session first loads, is not news, so the
+// first observations of a session never count. They stay arrivals only for as
+// long as their entrance plays, so a row shown again by expanding its parent
+// later does not enter twice.
+function useArrivals(trace: Trace): ReadonlySet<string> {
+  const [state, setState] = useState(() => ({
+    traceId: trace.id,
+    known: new Set(trace.observations.map((obs) => obs.id)),
+    arrivals: NO_ARRIVALS,
+  }))
+  if (state.traceId !== trace.id) {
+    setState({
+      traceId: trace.id,
+      known: new Set(trace.observations.map((obs) => obs.id)),
+      arrivals: NO_ARRIVALS,
+    })
+  } else {
+    const fresh = trace.observations
+      .map((obs) => obs.id)
+      .filter((id) => !state.known.has(id))
+    if (fresh.length > 0) {
+      setState({
+        traceId: trace.id,
+        known: new Set([...state.known, ...fresh]),
+        arrivals: state.known.size > 0 ? new Set(fresh) : NO_ARRIVALS,
+      })
+    }
+  }
+  useEffect(() => {
+    if (state.arrivals.size === 0) return
+    const timer = window.setTimeout(
+      () => setState((current) => ({ ...current, arrivals: NO_ARRIVALS })),
+      ARRIVAL_MS,
+    )
+    return () => window.clearTimeout(timer)
+  }, [state.arrivals])
+  return state.arrivals
+}
+
 function DropLine() {
   return (
     <span
@@ -70,6 +129,7 @@ function TreeRow({
   isOpen,
   isSelected,
   isTabStop,
+  arrival,
   onSelect,
   onToggle,
 }: {
@@ -77,6 +137,8 @@ function TreeRow({
   isOpen: boolean
   isSelected: boolean
   isTabStop: boolean
+  /** Where the row falls among those that just arrived, or null for one that was already there. */
+  arrival: number | null
   onSelect: (observationId: string) => void
   onToggle: (observationId: string) => void
 }) {
@@ -99,7 +161,14 @@ function TreeRow({
   }
   return (
     <li
-      className={`flex ${isSelected ? "bg-primary-subtle" : "hover:bg-surface-alt"}`}
+      className={`flex ${isSelected ? "bg-primary-subtle" : "hover:bg-surface-alt"} ${arrival === null ? "" : "otari-trace-arrive"}`}
+      style={
+        arrival === null
+          ? undefined
+          : ({
+              "--arrive-delay": `${Math.min(arrival, ARRIVAL_STAGGER_ROWS) * ARRIVAL_STAGGER_MS}ms`,
+            } as CSSProperties)
+      }
     >
       <button
         type="button"
@@ -115,20 +184,20 @@ function TreeRow({
           <span
             key={level}
             aria-hidden="true"
-            className={`w-4 shrink-0 ${continues ? "border-l border-border" : ""}`}
+            className={`w-4 shrink-0 ${LINE} ${continues ? "border-border" : "border-transparent"}`}
           />
         ))}
         <span aria-hidden="true" className="relative w-2 shrink-0">
-          <span className="absolute top-0 left-0 h-1/2 w-1.5 border-b border-l border-border" />
-          {!isLast ? (
-            <span className="absolute top-1/2 bottom-0 left-0 border-l border-border" />
-          ) : null}
+          <span className="otari-trace-branch absolute top-0 left-0 h-1/2 w-1.5 border-b border-l border-border" />
+          <span
+            className={`absolute top-1/2 bottom-0 left-0 ${LINE} ${isLast ? "border-transparent" : "border-border"}`}
+          />
         </span>
-        <span className={MARK}>
+        <span className={`otari-trace-node ${MARK}`}>
           <TypeMark type={obs.type} />
           {hasChildren && isOpen ? <DropLine /> : null}
         </span>
-        <span className={TEXT}>
+        <span className={`otari-trace-leaf ${TEXT}`}>
           <span className="flex min-w-0 items-center gap-2">
             <span className="truncate text-body">{obs.name}</span>
             <LevelChip level={obs.level} returnedError={obs.returnedError} />
@@ -142,7 +211,7 @@ function TreeRow({
         </span>
       </button>
       {hasChildren ? (
-        <span className="otari-toolbar flex shrink-0 items-center">
+        <span className="otari-trace-leaf otari-toolbar flex shrink-0 items-center">
           <IconButton
             label={isOpen ? "Collapse" : "Expand"}
             size="sm"
@@ -228,6 +297,7 @@ export function TraceTreeView({
     [roots, collapsed],
   )
   const summary = summarizeTrace(trace)
+  const arrivals = useArrivals(trace)
 
   // A query turns the tree into a flat list of the matches: while searching, a
   // match's ancestors are in the way rather than context.
@@ -265,6 +335,13 @@ export function TraceTreeView({
   const tabStop = items.some(({ node }) => node.obs.id === selectedId)
     ? selectedId
     : null
+  // Rows that arrived together enter top to bottom, in the order they are drawn.
+  const arrivalOrder = new Map<string, number>()
+  for (const { node } of items) {
+    if (arrivals.has(node.obs.id)) {
+      arrivalOrder.set(node.obs.id, arrivalOrder.size)
+    }
+  }
 
   return (
     <ul
@@ -308,6 +385,7 @@ export function TraceTreeView({
           isOpen={!collapsed.has(item.node.obs.id)}
           isSelected={selectedId === item.node.obs.id}
           isTabStop={tabStop === item.node.obs.id}
+          arrival={arrivalOrder.get(item.node.obs.id) ?? null}
           onSelect={onSelect}
           onToggle={onToggle}
         />
