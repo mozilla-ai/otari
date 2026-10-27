@@ -48,7 +48,13 @@ The CLI does not surface that refusal. The task stops with a message about an ar
 LLMBadResponseException: 'user' field does not match the authenticated API key's user
 ```
 
-Set `reject_user_mismatch=false` on the key Junie uses. This is a per-key override, so the deployment-wide default stays as it is. Spend still binds to that key's own user either way, so the override gives up no budget enforcement. The supplied name is then treated as an end-user tag. See [Mismatched `user` fields](access-control.md#mismatched-user-fields) for what the field does.
+There are two ways to accept it, and they differ in what you get back.
+
+**Make the key a [service key](access-control.md#service-keys-and-end-users).** This is the better option, and it needs no setting relaxed: leave `reject_user_mismatch` on the deployment default. On a service key a name other than the key's own user names one of its end users, so Otari creates an end user for the name Junie sends and records that end user's spend separately. You get per-client spend instead of one undifferentiated total, and you can give the end user a budget of its own.
+
+**Or set `reject_user_mismatch=false` on the key.** Simpler, and it is a per-key override so the deployment-wide default stays as it is. Spend binds to the key's own user, so the whole of Junie's usage lands in one place. Nothing is weakened either way, because spend binds to the key's own user whenever the key is not a service key.
+
+See [Mismatched `user` fields](access-control.md#mismatched-user-fields) for the full picture.
 
 ### Automatic discovery does not find Otari
 
