@@ -1168,7 +1168,7 @@ function CreateBudgetDialog({
 }
 
 /**
- * Spend & budgets, picking the page for whoever is asking.
+ * Budgets, picking the page for whoever is asking.
  *
  * One route with two pages behind it, the way Routing does since otari#867: an
  * operator gets the deployment's budgets, and an organization owner or admin
@@ -1187,7 +1187,7 @@ export function BudgetsPage() {
   const { answer, isSettled } = useDeploymentOperator()
 
   if (!isSettled) {
-    return <PageLoading label="Loading spend and budgets…" />
+    return <PageLoading label="Loading budgets…" />
   }
   // No organization means no budgets of its own and none to operate; the
   // index is where such a caller is told how to get in.
