@@ -8,7 +8,7 @@ removal from its workspace or organization, switched it off, which its owner
 may then not undo.
 
 Revision ID: e5a7c9d1f3b2
-Revises: bea0cc9abb34
+Revises: e3a1c5d7f9b2
 Create Date: 2026-10-27
 """
 
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e5a7c9d1f3b2"
-down_revision: str | Sequence[str] | None = "bea0cc9abb34"
+down_revision: str | Sequence[str] | None = "e3a1c5d7f9b2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

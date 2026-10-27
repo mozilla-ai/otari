@@ -25,6 +25,7 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+from sqlmodel import col
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.auth.models import hash_key
@@ -841,7 +842,10 @@ def _organization_member_id(db_session_factory: Callable[[], Session], world: _W
     try:
         membership = (
             session.query(OrganizationMember)
-            .filter(OrganizationMember.organization_id == world.alpha, OrganizationMember.user_id == world.users[who])
+            .filter(
+                col(OrganizationMember.organization_id) == world.alpha,
+                col(OrganizationMember.user_id) == world.users[who],
+            )
             .one()
         )
         return membership.id
