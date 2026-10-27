@@ -313,6 +313,11 @@ class SignupRegistration:
     created: bool
 
 
+# Roles that may change a workspace's resources, such as minting their own key in
+# it: everything but "viewer", which is read-only.
+_CONTRIBUTOR_ROLES = frozenset({"owner", "admin", "member"})
+
+
 class OrganizationService:
     """Business logic for the organization surface."""
 
@@ -405,6 +410,29 @@ class OrganizationService:
         membership = await self._require_active_membership(user, organization)
         self._enforce_management_role(membership)
         return membership
+
+    async def require_workspace_contributor_access(
+        self,
+        *,
+        user: User,
+        organization_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+    ) -> None:
+        """Allow an organization owner/admin, or an owner, admin or member of this workspace.
+
+        A workspace viewer is read-only, so it is refused here although it may
+        see the workspace. The workspace role decides where the caller holds
+        one, so an organization viewer given ``member`` in a workspace may
+        contribute there; with no workspace membership the organization role
+        decides.
+        """
+        organization_membership = await self.members.get_active_by_organization_and_user(organization_id, user.id)
+        if organization_membership is not None and organization_membership.role in MANAGEMENT_ROLES:
+            return
+        membership = await self.workspaces.get_active_by_workspace_and_user(workspace_id, user.id)
+        deciding = membership if membership is not None else organization_membership
+        if deciding is None or deciding.role not in _CONTRIBUTOR_ROLES:
+            raise NotAuthorizedError("Viewers have read-only access to this workspace")
 
     async def user_has_active_membership(self, *, organization_id: uuid.UUID, user_id: uuid.UUID) -> bool:
         """Whether an identity is an active member of an organization."""

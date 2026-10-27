@@ -24,8 +24,8 @@ established for usage reads (otari#837), applied to a write surface:
   organization's default workspace, put through the same check.
 * **A viewer is read-only.** Creating, changing, rotating or revoking a key
   takes a role above ``viewer`` in the key's workspace (or organization
-  owner/admin), through ``require_workspace_contributor_access``. A viewer
-  still lists the keys billed to them, so an operator can issue them one.
+  owner/admin), through ``OrganizationService.require_workspace_contributor_access``.
+  A viewer still lists the keys billed to them, so an operator can issue them one.
 * **No budget bypass.** The operator's create takes ``exclude_from_budget``;
   this one does not, and always mints an enforced key: a member exempting their
   own key from budget would be minting their own unlimited spend.
@@ -84,10 +84,7 @@ from gateway.services.model_access import (
 )
 from gateway.services.organizations import AccessLists
 from gateway.services.tenancy import DeploymentUserService, OrganizationService
-from gateway.services.tenancy.authorization import (
-    require_workspace_contributor_access,
-    resolve_workspace_in_organization,
-)
+from gateway.services.tenancy.authorization import resolve_workspace_in_organization
 from gateway.services.workspace_scope import organization_default_workspace_id
 
 router = APIRouter(
@@ -191,8 +188,8 @@ async def _load_own_writable_key(
     """
     organization = await organizations.get_active_organization_for_user(identity)
     key = await _load_key_in_organization(db, key_id, organization.id, owner_user_id=str(identity.id))
-    await require_workspace_contributor_access(
-        db, user=identity, organization_id=organization.id, workspace_id=key.workspace_id, organizations=organizations
+    await organizations.require_workspace_contributor_access(
+        user=identity, organization_id=organization.id, workspace_id=key.workspace_id
     )
     return key
 
@@ -253,8 +250,8 @@ async def create_own_key(
                 "pass workspace_id naming a workspace you belong to.",
             ) from None
         workspace_id = workspace.id
-    await require_workspace_contributor_access(
-        db, user=identity, organization_id=organization.id, workspace_id=workspace_id, organizations=organizations
+    await organizations.require_workspace_contributor_access(
+        user=identity, organization_id=organization.id, workspace_id=workspace_id
     )
 
     try:
