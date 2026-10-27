@@ -157,7 +157,8 @@ The successful body is the native MCP result:
 {
   "content": [{"type": "text", "text": "Created issue #42"}],
   "structuredContent": {"issue_number": 42},
-  "isError": false
+  "isError": false,
+  "resultType": "complete"
 }
 ```
 

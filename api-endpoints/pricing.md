@@ -16,14 +16,6 @@
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}
 
-{% openapi-operation spec="otari-openapi-spec" path="/api/v1/pricing/refresh" method="post" %}
-[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
-{% endopenapi-operation %}
-
-{% openapi-operation spec="otari-openapi-spec" path="/api/v1/pricing/refresh/confirm" method="post" %}
-[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
-{% endopenapi-operation %}
-
 {% openapi-operation spec="otari-openapi-spec" path="/api/v1/pricing/refresh/pending" method="get" %}
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}

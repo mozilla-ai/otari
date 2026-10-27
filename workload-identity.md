@@ -198,7 +198,6 @@ unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
 export ANTHROPIC_BASE_URL="https://otari.example.com/api"
 export ANTHROPIC_FEDERATION_RULE_ID="<the id of the Otari federation rule>"
 export ANTHROPIC_ORGANIZATION_ID="<the UUID of the key's Otari organization>"
-unset ANTHROPIC_WORKSPACE_ID   # or set it to the key's Otari workspace id
 export ANTHROPIC_IDENTITY_TOKEN_FILE="/var/run/otari/identity-token"
 claude
 ```
@@ -217,16 +216,12 @@ Claude Code checks them ahead of the federation variables too.
   answers the caller's own organization, so read it with the authority that
   manages the key: the master key, or a dashboard session of the operator.
   When set, it must be that organization.
-- `ANTHROPIC_WORKSPACE_ID`, optional, must be the key's `workspace_id`, a UUID
-  the operator reads in `GET /api/v1/keys/{key_id}`. Otari has no `default`
-  alias. `ANTHROPIC_SERVICE_ACCOUNT_ID`, optional, must be the key's `id`.
 - `ANTHROPIC_IDENTITY_TOKEN_FILE` (or `ANTHROPIC_IDENTITY_TOKEN`) holds the
   identity token; see [Keeping the token file fresh](#keeping-the-token-file-fresh).
 
-These are Otari's ids, not Anthropic's. A deployment that already sets
-`ANTHROPIC_ORGANIZATION_ID` or `ANTHROPIC_WORKSPACE_ID` to an Anthropic value
-must replace or unset it, because Otari checks every one that is set, and an
-Anthropic value never matches.
+Both are Otari's ids, not Anthropic's, so a deployment moving from Anthropic
+replaces both values. `ANTHROPIC_WORKSPACE_ID` and `ANTHROPIC_SERVICE_ACCOUNT_ID`
+can stay as they are: Otari ignores them, since the rule alone decides the key.
 
 The access token lasts `federation_access_token_ttl_sec` seconds (600 by
 default, between 60 and 3600), and never past the identity token it was

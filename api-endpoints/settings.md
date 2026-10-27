@@ -8,6 +8,18 @@
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}
 
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/settings/country-database" method="get" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/settings/country-database" method="put" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/settings/country-database" method="delete" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
 {% openapi-operation spec="otari-openapi-spec" path="/api/v1/settings/mail" method="get" %}
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}

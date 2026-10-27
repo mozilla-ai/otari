@@ -47,7 +47,7 @@ uv tool install https://github.com/mozilla-ai/otari/releases/download/vX.Y.Z/ota
 ```
 
 A source checkout's virtualenv carries the same command. See
-[cli/README.md](https://github.com/mozilla-ai/otari/blob/v0.32.0/cli/README.md) for the rest of that distribution.
+[cli/README.md](https://github.com/mozilla-ai/otari/blob/v0.33.0/cli/README.md) for the rest of that distribution.
 
 Five commands apply here:
 
@@ -432,7 +432,9 @@ read. What each gate is and says goes separately, once per version of the
 guardrail, to the server `OTARI_URL` names: its id, type, enforcement, when it
 runs, whether it is yours or the repository's, and its `message`. That includes
 your own gates in `~/.otari/`, and the server keeps it, so set `OTARI_URL` only
-for a server you would show your guardrails to. A session then
+for a server you would show your guardrails to. A workspace keeps at most
+1,000 versions; past that a new one is refused, and its gates show by id
+alone. A session then
 shows each gate's message where it blocked, and lists the gates the guardrail
 declares that never ran. When the agent also exports its own spans, as
 [Claude Code can](traces.md#claude-code-without-routing), a gate shows under
@@ -451,10 +453,16 @@ sends it with that same key; one the server cannot take yet, a rejected key
 included, waits there for the next check, for up to a day. The API key is read
 from the environment when it is sent and never written to the outbox.
 
+With `OTARI_HOOK_REPORT_CONTENT=1`, a check on a tool call also sends what it
+read, the command or the paths, and each gate its own detail. A server keeps them
+only where it keeps content; see [Keeping what a span was about](traces.md#keeping-what-a-span-was-about).
+
 Without `OTARI_URL`, a harness's own OpenTelemetry trace export
 (`OTEL_TRACES_EXPORTER=otlp` with `OTEL_EXPORTER_OTLP_ENDPOINT` and its headers)
 is used instead. Claude Code does not pass `OTEL_*` variables to its hooks, so
-it needs `OTARI_URL`. `OTARI_HOOK_REPORT=off` turns reporting off.
+it needs `OTARI_URL`, set in the `env` block of its settings as
+[Send Claude Code sessions to Otari](use-with-claude-code.md#send-claude-code-sessions-to-otari)
+shows. `OTARI_HOOK_REPORT=off` turns reporting off.
 
 ## Generating gates from AGENTS.md or CLAUDE.md
 
