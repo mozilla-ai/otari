@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useState } from "react"
 import { describe, expect, it, vi } from "vitest"
@@ -110,6 +110,52 @@ describe("MultiSelect", () => {
     await user.keyboard("{Escape}")
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
     expect(onKeyDown).not.toHaveBeenCalled()
+  })
+
+  it("stays open while the dialog around it scrolls", async () => {
+    // A dialog body scrolls under an open list without anybody choosing to: the
+    // field is brought into view on focus, the caret is kept in view while
+    // typing. react-aria would close the list on each of those scrolls.
+    render(
+      <section aria-label="Dialog body" className="overflow-auto">
+        <Live />
+      </section>,
+    )
+    const body = screen.getByRole("region", { name: "Dialog body" })
+
+    act(() => field().focus())
+    fireEvent.scroll(body)
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)))
+    fireEvent.scroll(body)
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)))
+
+    expect(field()).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByRole("listbox")).toBeInTheDocument()
+  })
+
+  it("closes once a scroll takes its field out of the dialog's view", async () => {
+    render(
+      <section aria-label="Dialog body" className="overflow-auto">
+        <Live />
+      </section>,
+    )
+    const body = screen.getByRole("region", { name: "Dialog body" })
+    const box = (top: number, bottom: number) =>
+      ({ top, bottom, height: bottom - top }) as DOMRect
+    act(() => field().focus())
+    expect(field()).toHaveAttribute("aria-expanded", "true")
+
+    // jsdom has no layout, so the two boxes are given: the field has scrolled
+    // above the top of the dialog's visible body.
+    vi.spyOn(body, "getBoundingClientRect").mockReturnValue(box(100, 500))
+    vi.spyOn(
+      field().parentElement as HTMLElement,
+      "getBoundingClientRect",
+    ).mockReturnValue(box(40, 76))
+    fireEvent.scroll(body)
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)))
+
+    expect(field()).toHaveAttribute("aria-expanded", "false")
   })
 
   it("swallows Enter while the list is open with nothing to toggle", async () => {

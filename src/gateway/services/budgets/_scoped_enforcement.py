@@ -30,7 +30,7 @@ from gateway.models.budgets import (
 )
 from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
 from gateway.repositories.budgets import ApplicableCeiling, CeilingUsage, ScopedBudgetRepository, ScopeIdSets
-from gateway.services.budgets._periods import period_window
+from gateway.services.budgets._periods import CYCLE_FIELD_ORDER, CycleSettings
 from gateway.services.budgets._refusals import BlockedAxis, blocked_on
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
@@ -195,17 +195,19 @@ async def roll_ended_windows(
     for ceiling in ceilings:
         if ceiling.period_end is None or now < ceiling.period_end:
             continue
-        budget_id, alignment = ceiling.scoped_budget_id, ceiling.reset_alignment
+        budget_id = ceiling.scoped_budget_id
+        settings = CycleSettings(*(getattr(ceiling, name) for name in CYCLE_FIELD_ORDER))
         try:
-            window = period_window(now, duration=ceiling.budget_duration_sec, alignment=alignment)
+            window = settings.window(now)
         except ValueError:
-            # Only reachable by a write that went around the API, and the safe
-            # direction is to leave the exhausted window in place: not resetting
-            # refuses requests, while guessing a cadence would admit them.
+            # Only reachable by a write that went around the API and its CHECKs,
+            # and the safe direction is to leave the exhausted window in place:
+            # not resetting refuses requests, while guessing a cadence would
+            # admit them.
             logger.warning(
-                "Scoped budget %s has an unrecognized reset_alignment %r; leaving its period in place",
+                "Scoped budget %s has an unusable reset cycle %r; leaving its period in place",
                 budget_id,
-                alignment,
+                settings.cycle,
             )
             continue
         period_start, next_period_end = window if window is not None else (now, None)

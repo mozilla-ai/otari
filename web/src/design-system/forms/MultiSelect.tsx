@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { Popover } from "react-aria-components"
 import { FiCheck, FiChevronDown } from "react-icons/fi"
 
 import { DismissChip } from "../indicators/DismissChip"
@@ -90,6 +91,10 @@ export function MultiSelect({
   // as a ref rather than walked up from the input, so wrapping the input in one
   // more div cannot silently close the popover before an option press lands.
   const wrapperRef = useRef<HTMLDivElement>(null)
+  // The input's box, which the popover hangs from and takes its width from.
+  const fieldRef = useRef<HTMLDivElement>(null)
+  // Flipped to make react-aria place the popover again; see the scroll effect.
+  const [nudge, setNudge] = useState(0)
   // The list, so the active option can be scrolled into view: the popover shows
   // six rows and the cap renders fifty, so the highlight walks off the bottom.
   const listRef = useRef<HTMLDivElement>(null)
@@ -118,6 +123,44 @@ export function MultiSelect({
       active.scrollIntoView({ block: "nearest" })
     }
   }, [isOpen, activeIndex, listId])
+
+  // react-aria places the popover when it opens, and closes it on any scroll of
+  // a container holding the field rather than moving it there. A dialog body
+  // scrolls under an open list for reasons nobody chose (the field brought into
+  // view on focus, the caret kept in view while typing), so the popover's own
+  // close requests are ignored and a scroll moves the list with the field
+  // instead: the offset changes by a hundredth of a pixel, which react-aria
+  // reads as a reason to place it again. A field scrolled out of its
+  // container's view closes the list, which would otherwise point at nothing.
+  useEffect(() => {
+    if (!isOpen) return
+    let frame = 0
+    const onScroll = (event: Event) => {
+      const field = fieldRef.current
+      const scroller = event.target
+      if (!field || !(scroller instanceof Element) || !scroller.contains(field))
+        return
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const box = field.getBoundingClientRect()
+        const view = scroller.getBoundingClientRect()
+        // A zero-height view is one with no layout (jsdom), not one scrolled away.
+        if (
+          view.height > 0 &&
+          (box.bottom <= view.top || box.top >= view.bottom)
+        ) {
+          setIsOpen(false)
+          return
+        }
+        setNudge((current) => (current === 0 ? 0.01 : 0))
+      })
+    }
+    document.addEventListener("scroll", onScroll, true)
+    return () => {
+      cancelAnimationFrame(frame)
+      document.removeEventListener("scroll", onScroll, true)
+    }
+  }, [isOpen])
 
   const needle = query.trim().toLowerCase()
   // Filtered, never re-ordered: a selected row keeps its place, so a second
@@ -224,10 +267,8 @@ export function MultiSelect({
       <label htmlFor={inputId} className="text-body">
         {label}
       </label>
-      {/* `relative` so the popover hangs off the field rather than off the
-          dialog, and the chips below it stay in flow. */}
-      <div ref={wrapperRef} className="relative flex flex-col gap-1.5">
-        <div className="relative">
+      <div ref={wrapperRef} className="flex flex-col gap-1.5">
+        <div ref={fieldRef} className="relative">
           <input
             id={inputId}
             role="combobox"
@@ -281,115 +322,129 @@ export function MultiSelect({
             className="text-muted pointer-events-none absolute top-1/2 right-3 size-3 -translate-y-1/2"
           />
         </div>
-        {isOpen ? (
-          <div className="border-control-border bg-surface absolute top-full right-0 left-0 z-10 mt-1 border">
-            {/* Divs rather than a ul/li pair: the roles are what carry the
+        {/* A react-aria popover rather than a box positioned under the field:
+            portaled above the page, so a dialog's scrolling body cannot clip
+            it, and placed against the viewport, so it opens upward where there
+            is no room below. Non-modal, as a combo box's is, so focus stays in
+            the input, and a press on the panel keeps it there too. Closing is
+            this component's, on blur, Escape and Tab, so `onOpenChange` is not
+            passed: the popover's own requests are scrolls (see above) and
+            presses outside, which blur the field anyway. */}
+        <Popover
+          triggerRef={fieldRef}
+          isOpen={isOpen}
+          isNonModal
+          placement="bottom start"
+          offset={4 + nudge}
+          onMouseDown={(event) => event.preventDefault()}
+          className="border-control-border bg-surface w-(--trigger-width) border"
+        >
+          {/* Divs rather than a ul/li pair: the roles are what carry the
                 semantics here, and a list element with an interactive role is
                 both a lint error and a second, conflicting announcement. The
                 chip row below IS a real list, because that one is a list. */}
-            <div
-              ref={listRef}
-              id={listId}
-              role="listbox"
-              aria-multiselectable
-              // Named apart from the field and from the chip row: three things
-              // carrying one name is three things a screen reader cannot tell
-              // apart, and it is what a query for the field then finds.
-              aria-label={`${label}, options`}
-              // Six rows before it scrolls. Each is 44px, the touch floor
-              // (motion-and-access.md: "44px is the floor, everywhere"), and
-              // all but the first carry a 1px rule, so six of them are
-              // 6 x 44 + 5 = 269px. `max-h-[16.8125rem]` rather than the 264px
-              // the rows alone would suggest, which clipped the sixth by 5px.
-              // A class rather than an inline style: it is a constant.
-              className="max-h-[16.8125rem] overflow-y-auto"
-            >
-              {matches.length === 0 ? (
-                <p className="text-caption px-2.5 py-2">
-                  {options.length === 0 ? emptyMessage : noMatchesMessage}
-                </p>
-              ) : (
-                matches.map((option, index) => {
-                  const isSelected = value.includes(option.id)
-                  return (
-                    <div
-                      key={option.id}
-                      id={optionId(index)}
-                      role="option"
-                      aria-selected={isSelected}
-                      aria-label={
-                        option.hint
-                          ? `${option.label} (${option.hint})`
-                          : undefined
-                      }
-                      // Not tabbable, and deliberately not focused either: the
-                      // input keeps focus and `aria-activedescendant` points at
-                      // the active row. -1 is what the option needs to be a
-                      // legal target for that.
-                      tabIndex={-1}
-                      // Pressed rather than clicked through a button: the row is
-                      // the option, and a button inside it would be a second
-                      // stop for a keyboard that is already driving the list
-                      // from the input.
-                      onMouseDown={(event) => {
-                        // Before blur, so the press is not lost to the list
-                        // closing under it.
-                        event.preventDefault()
-                        toggle(option.id)
-                      }}
-                      onMouseEnter={() => setActiveIndex(index)}
-                      // One background, picked here. Two classes on one element
-                      // are resolved by Tailwind's emitted order rather than by
-                      // the order they are written in, which `inputClass.ts`
-                      // documents as a hazard. `surface-alt` rather than
-                      // `surface-muted`: the two resolve to the same value and
-                      // only this one is registered in @theme.
-                      className={`flex min-h-11 cursor-pointer items-center gap-2.5 border-border-subtle px-2.5 text-sm not-first:border-t ${
-                        index === activeIndex
-                          ? "bg-surface-subtle"
-                          : isSelected
-                            ? "bg-surface-alt"
-                            : ""
-                      }`}
-                    >
-                      <span className="flex size-4 shrink-0 items-center justify-center">
-                        {isSelected ? (
-                          <FiCheck aria-hidden className="text-accent size-3" />
-                        ) : null}
-                      </span>
-                      {/* Spelled out when there is a hint, because the row has
+          <div
+            ref={listRef}
+            id={listId}
+            role="listbox"
+            aria-multiselectable
+            // Named apart from the field and from the chip row: three things
+            // carrying one name is three things a screen reader cannot tell
+            // apart, and it is what a query for the field then finds.
+            aria-label={`${label}, options`}
+            // Six rows before it scrolls. Each is 44px, the touch floor
+            // (motion-and-access.md: "44px is the floor, everywhere"), and
+            // all but the first carry a 1px rule, so six of them are
+            // 6 x 44 + 5 = 269px. `max-h-[16.8125rem]` rather than the 264px
+            // the rows alone would suggest, which clipped the sixth by 5px.
+            // A class rather than an inline style: it is a constant.
+            className="max-h-[16.8125rem] overflow-y-auto"
+          >
+            {matches.length === 0 ? (
+              <p className="text-caption px-2.5 py-2">
+                {options.length === 0 ? emptyMessage : noMatchesMessage}
+              </p>
+            ) : (
+              matches.map((option, index) => {
+                const isSelected = value.includes(option.id)
+                return (
+                  <div
+                    key={option.id}
+                    id={optionId(index)}
+                    role="option"
+                    aria-selected={isSelected}
+                    aria-label={
+                      option.hint
+                        ? `${option.label} (${option.hint})`
+                        : undefined
+                    }
+                    // Not tabbable, and deliberately not focused either: the
+                    // input keeps focus and `aria-activedescendant` points at
+                    // the active row. -1 is what the option needs to be a
+                    // legal target for that.
+                    tabIndex={-1}
+                    // Pressed rather than clicked through a button: the row is
+                    // the option, and a button inside it would be a second
+                    // stop for a keyboard that is already driving the list
+                    // from the input.
+                    onMouseDown={(event) => {
+                      // Before blur, so the press is not lost to the list
+                      // closing under it.
+                      event.preventDefault()
+                      toggle(option.id)
+                    }}
+                    onMouseEnter={() => setActiveIndex(index)}
+                    // One background, picked here. Two classes on one element
+                    // are resolved by Tailwind's emitted order rather than by
+                    // the order they are written in, which `inputClass.ts`
+                    // documents as a hazard. `surface-alt` rather than
+                    // `surface-muted`: the two resolve to the same value and
+                    // only this one is registered in @theme.
+                    className={`flex min-h-11 cursor-pointer items-center gap-2.5 border-border-subtle px-2.5 text-sm not-first:border-t ${
+                      index === activeIndex
+                        ? "bg-surface-subtle"
+                        : isSelected
+                          ? "bg-surface-alt"
+                          : ""
+                    }`}
+                  >
+                    <span className="flex size-4 shrink-0 items-center justify-center">
+                      {isSelected ? (
+                        <FiCheck aria-hidden className="text-accent size-3" />
+                      ) : null}
+                    </span>
+                    {/* Spelled out when there is a hint, because the row has
                           two text nodes and the name computed from them runs
                           the hint onto the end of the label with no separator.
                           The hint belongs in the name rather than being dropped
                           from it: it is what tells two rows with one label
                           apart. `ComboBoxField` does this the same way. */}
-                      <span className="flex min-w-0 flex-col">
-                        <span className="truncate">{option.label}</span>
-                        {option.hint ? (
-                          <span className="text-caption text-subtle truncate">
-                            {option.hint}
-                          </span>
-                        ) : null}
-                      </span>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-            <div className="border-border text-mono-caption text-subtle flex h-8 items-center justify-between border-t px-2.5">
-              {/* Two facts, two clauses. Nested, they read as one garbled
-                  sentence: "0 of 3 matches selected of 8". */}
-              <span>
-                {isCapped
-                  ? `Showing ${matches.length} of ${reached.length} · `
-                  : ""}
-                {selectedMatches} of {matches.length} selected here ·{" "}
-                {counted(value.length)}
-              </span>
-              <span>ESC closes</span>
-            </div>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate">{option.label}</span>
+                      {option.hint ? (
+                        <span className="text-caption text-subtle truncate">
+                          {option.hint}
+                        </span>
+                      ) : null}
+                    </span>
+                  </div>
+                )
+              })
+            )}
           </div>
-        ) : null}
+          <div className="border-border text-mono-caption text-subtle flex h-8 items-center justify-between border-t px-2.5">
+            {/* Two facts, two clauses. Nested, they read as one garbled
+                  sentence: "0 of 3 matches selected of 8". */}
+            <span>
+              {isCapped
+                ? `Showing ${matches.length} of ${reached.length} · `
+                : ""}
+              {selectedMatches} of {matches.length} selected here ·{" "}
+              {counted(value.length)}
+            </span>
+            <span>ESC closes</span>
+          </div>
+        </Popover>
         {value.length > 0 ? (
           // Below the field, which is the whole point: a growing selection
           // pushes down rather than moving the control it grew from.

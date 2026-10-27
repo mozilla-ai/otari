@@ -43,13 +43,15 @@ def _run(scenario: Callable[[AsyncSession], Awaitable[T]]) -> T:
     return asyncio.run(main())
 
 
-async def _seed_user(session: AsyncSession, *, next_reset_at: datetime, alignment: str | None) -> None:
+async def _seed_user(session: AsyncSession, *, next_reset_at: datetime, cycle: str) -> None:
+    hourly = cycle == "every_n_hours"
     session.add(
         Budget(
             budget_id="daily",
             max_budget=Decimal(10),
-            reset_alignment=alignment,
-            budget_duration_sec=None if alignment else 3600,
+            reset_cycle=cycle,
+            reset_every_n=1 if hourly else None,
+            reset_anchor_at=next_reset_at - timedelta(days=1) if hourly else None,
         )
     )
     session.add(
@@ -65,10 +67,10 @@ async def _seed_user(session: AsyncSession, *, next_reset_at: datetime, alignmen
     session.expunge_all()
 
 
-@pytest.mark.parametrize("alignment", ["calendar_day", None])
-def test_the_gate_admits_a_user_whose_period_has_not_ended(alignment: str | None) -> None:
+@pytest.mark.parametrize("cycle", ["daily", "every_n_hours"])
+def test_the_gate_admits_a_user_whose_period_has_not_ended(cycle: str) -> None:
     async def scenario(session: AsyncSession) -> User:
-        await _seed_user(session, next_reset_at=datetime.now(UTC) + timedelta(hours=1), alignment=alignment)
+        await _seed_user(session, next_reset_at=datetime.now(UTC) + timedelta(hours=1), cycle=cycle)
         await reserve_budget(session, "alice", Decimal("0.01"))
         session.expunge_all()
         return (await session.execute(select(User))).scalar_one()
@@ -78,10 +80,10 @@ def test_the_gate_admits_a_user_whose_period_has_not_ended(alignment: str | None
     assert user.spend == Decimal(3), "a period that has not ended keeps its spend"
 
 
-@pytest.mark.parametrize("alignment", ["calendar_day", None])
-def test_the_gate_rolls_a_period_that_has_ended(alignment: str | None) -> None:
+@pytest.mark.parametrize("cycle", ["daily", "every_n_hours"])
+def test_the_gate_rolls_a_period_that_has_ended(cycle: str) -> None:
     async def scenario(session: AsyncSession) -> tuple[User, BudgetResetLog]:
-        await _seed_user(session, next_reset_at=datetime.now(UTC) - timedelta(minutes=1), alignment=alignment)
+        await _seed_user(session, next_reset_at=datetime.now(UTC) - timedelta(minutes=1), cycle=cycle)
         await reserve_budget(session, "alice", Decimal("0.01"))
         session.expunge_all()
         user = (await session.execute(select(User))).scalar_one()
@@ -101,7 +103,7 @@ def test_the_gate_timestamps_read_back_utc_aware() -> None:
     moment = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
 
     async def scenario(session: AsyncSession) -> list[datetime | None]:
-        await _seed_user(session, next_reset_at=moment, alignment="calendar_day")
+        await _seed_user(session, next_reset_at=moment, cycle="daily")
         session.add(BudgetResetLog(budget_id="daily", user_id="alice", previous_spend=Decimal(0), next_reset_at=moment))
         session.add(BudgetReservation(user_id="alice", expires_at=moment))
         session.add(

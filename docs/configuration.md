@@ -293,12 +293,12 @@ that both sides read from the environment.
 budgets:
   end-user-budget-ai:
     max_budget: 0.1
-    reset_alignment: calendar_day
+    reset_cycle: daily
     rpm_limit: 40
     tpm_limit: 2000
   mlpa-global:
     max_budget: 100
-    reset_alignment: calendar_day
+    reset_cycle: daily
 
 api_keys:
   mlpa:
@@ -312,7 +312,9 @@ api_keys:
 
 A budget is keyed by its id and takes the fields `PUT /api/v1/budgets/{budget_id}`
 takes: `name`, `max_budget`, `token_limit`, `request_limit`, `rpm_limit`,
-`tpm_limit`, and either `budget_duration_sec` or `reset_alignment`, not both.
+`tpm_limit`, and `reset_cycle` with the settings that cycle takes
+(`reset_every_n`, `reset_anchor_at`, `reset_weekdays`, `reset_month_day`,
+`reset_month`; see [Budgets](access-control.md#budgets)).
 An id is up to 128 letters, digits, `.`, `_` and `-`, and starts with a letter
 or digit.
 

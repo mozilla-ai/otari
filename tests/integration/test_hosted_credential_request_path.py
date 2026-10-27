@@ -240,7 +240,7 @@ def test_an_adapter_failure_returns_the_budget_hold(overlay_client: TestClient, 
     called; this one asserts the column it is called for.
     """
     budget = overlay_client.post(
-        f"{API_ROOT}/budgets", json={"max_budget": 100.0, "budget_duration_sec": 86400}, headers=HEADERS
+        f"{API_ROOT}/budgets", json={"max_budget": 100.0, "reset_cycle": "daily"}, headers=HEADERS
     ).json()
     assert (
         overlay_client.post(

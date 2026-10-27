@@ -1,13 +1,22 @@
 """Budget settings."""
 
 import re
-from typing import Annotated, Self
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from gateway.core.settings.declarations import declaration_digest
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
-from gateway.models.budgets import BUDGET_ID_PATTERN, MAX_COUNT_LIMIT, MAX_MINUTE_LIMIT, ResetAlignment
+from gateway.models.budgets import (
+    BUDGET_ID_PATTERN,
+    MAX_COUNT_LIMIT,
+    MAX_EVERY_N_HOURS,
+    MAX_MINUTE_LIMIT,
+    MAX_MONTH_DAY,
+    WEEKDAY_MASK_MAX,
+    WEEKDAY_MASK_MIN,
+    ResetCycle,
+)
 from gateway.models.money import MAX_USD_LIMIT
 
 STREAM_MISSING_USAGE_POLICIES = ("estimate", "fail", "allow_free")
@@ -19,7 +28,9 @@ class BudgetConfig(BaseModel):
     """One budget config.yml declares, with the fields and bounds ``PUT /budgets/{budget_id}`` accepts.
 
     Unknown fields are refused rather than ignored, so a misspelled limit fails
-    the start instead of leaving the budget uncapped on that axis.
+    the start instead of leaving the budget uncapped on that axis. Which settings
+    a reset cycle takes is checked when the entry is applied, as it is for the
+    request.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -30,15 +41,22 @@ class BudgetConfig(BaseModel):
     request_limit: int | None = Field(default=None, ge=0, le=MAX_COUNT_LIMIT)
     rpm_limit: int | None = Field(default=None, ge=1, le=MAX_MINUTE_LIMIT)
     tpm_limit: int | None = Field(default=None, ge=1, le=MAX_MINUTE_LIMIT)
-    budget_duration_sec: int | None = Field(default=None, gt=0)
-    reset_alignment: ResetAlignment | None = None
+    reset_cycle: ResetCycle | None = None
+    reset_every_n: int | None = Field(default=None, gt=0, le=MAX_EVERY_N_HOURS)
+    reset_anchor_at: AwareDatetime | None = None
+    reset_weekdays: int | None = Field(default=None, ge=WEEKDAY_MASK_MIN, le=WEEKDAY_MASK_MAX)
+    reset_month_day: int | None = Field(default=None, ge=1, le=MAX_MONTH_DAY)
+    reset_month: int | None = Field(default=None, ge=1, le=12)
 
-    @model_validator(mode="after")
-    def _single_period_source(self) -> Self:
-        if self.budget_duration_sec is not None and self.reset_alignment is not None:
-            msg = "a budget resets on budget_duration_sec or on reset_alignment, not both"
-            raise ValueError(msg)
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_removed_period_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            removed = [name for name in ("budget_duration_sec", "reset_alignment") if name in data]
+            if removed:
+                msg = f"{', '.join(removed)} was replaced by reset_cycle and its settings"
+                raise ValueError(msg)
+        return data
 
     def declaration_digest(self) -> str:
         """A digest of this entry, which changes when any field config.yml sets for it does."""
