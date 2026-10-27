@@ -49,15 +49,15 @@ class BudgetSettings(BaseModel):
     """How spend is attributed to a user, held against a budget, and settled."""
 
     reject_user_mismatch: Annotated[bool, Shown(SettingsGroup.METERING)] = Field(
-        default=True,
+        default=False,
         description=(
-            "When True (default), a non-master key whose request names a 'user' other than its own "
-            "is rejected with 403. When False, the client-supplied 'user' is accepted and ignored "
-            "(it is not sent to the provider) and spend is always bound to the key's own user; "
-            "use this if clients send arbitrary 'user' values for abuse tracking. This setting "
-            "is the deployment-wide default: an individual key can override it in either "
-            "direction with its own reject_user_mismatch (null inherits this setting). The "
-            "master key may always bill an arbitrary user regardless of this setting."
+            "Spend on a non-master key is always bound to the key's own user, so a client-supplied "
+            "'user' (or Messages 'metadata.user_id') naming anyone else is ignored by default and "
+            "not sent to the provider. Clients such as Claude Code fill that field with values of "
+            "their own. When True, such a request is rejected with 403 instead. This setting is "
+            "the deployment-wide default: an individual key can override it in either direction "
+            "with its own reject_user_mismatch (null inherits this setting). The master key may "
+            "always bill an arbitrary user regardless of this setting."
         ),
     )
     budget_reservation_ttl_sec: Annotated[int, OMITTED] = Field(

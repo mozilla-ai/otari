@@ -8,6 +8,11 @@ Claude Code speaks the Anthropic Messages API. Otari serves
 Claude Code appends `/v1/messages` itself, so `ANTHROPIC_BASE_URL` ends in
 `/api`, not `/api/v1`.
 
+Claude Code sends a telemetry value in `metadata.user_id`. Otari ignores it and
+bills the key's own user, unless the key or the deployment sets
+`reject_user_mismatch: true`; see
+[Mismatched `user` fields](access-control.md#mismatched-user-fields).
+
 ### On otari.ai
 
 ```bash
@@ -17,30 +22,9 @@ export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
-Claude Code puts a telemetry value in `metadata.user_id`; the next section
-says how a key accepts it.
-
 ### On your own gateway
 
-Claude Code sends a telemetry value in `metadata.user_id`. It is not an
-Otari user ID, so create or update its API key with
-`reject_user_mismatch: false`, or pick **Always accept** for "Mismatched `user`
-field" under the dashboard key form's **Advanced** section. Spend still binds
-to the key's user; see
-[Mismatched `user` fields](access-control.md#mismatched-user-fields).
-
-```bash
-curl "$OTARI_URL/api/v1/keys" \
-  -H "Authorization: Bearer $OTARI_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "key_name": "claude-code",
-    "user_id": "alice",
-    "reject_user_mismatch": false
-  }'
-```
-
-Then point Claude Code at the gateway:
+Create an API key, then point Claude Code at the gateway:
 
 ```bash
 export ANTHROPIC_BASE_URL="http://localhost:8000/api"

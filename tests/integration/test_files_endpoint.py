@@ -448,12 +448,15 @@ def test_vision_describe_side_call_is_billed(
     assert user["spend"] == pytest.approx(0.0075)
 
 
-def test_files_user_mismatch_rejected_by_default(
+def test_files_user_mismatch_rejected_when_strict(
     client: TestClient,
     api_key_header: dict[str, str],
     tmp_file_store: None,
+    test_config: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Strict default: a non-master key naming a different 'user' is rejected."""
+    """With reject_user_mismatch=True, a non-master key naming a different 'user' is rejected."""
+    monkeypatch.setattr(test_config, "reject_user_mismatch", True)
     resp = client.post(
         f"{API_ROOT}/files",
         headers=api_key_header,
@@ -464,20 +467,17 @@ def test_files_user_mismatch_rejected_by_default(
     assert "does not match" in resp.json()["detail"]
 
 
-def test_files_user_mismatch_ignored_when_lenient(
+def test_files_user_mismatch_ignored_by_default(
     client: TestClient,
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
     tmp_file_store: None,
-    test_config: Any,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With reject_user_mismatch=False, a mismatched 'user' is ignored.
+    """A mismatched 'user' is ignored by default.
 
     The upload succeeds and ownership still binds to the key's own user, like
     every other pass-through route.
     """
-    monkeypatch.setattr(test_config, "reject_user_mismatch", False)
     resp = client.post(
         f"{API_ROOT}/files",
         headers=api_key_header,
