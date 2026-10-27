@@ -2280,11 +2280,12 @@ class OrganizationService:
         )
 
         async with self._require_unit_of_work():
+            workspace_ids = await self.workspace_rows.lock_in_organization(organization.id)
             updated = await self._update_membership(target, update_data)
             target_user = await self.users.get(updated.user_id)
             if target_user is None:
                 raise OrganizationMemberNotFoundError(organization_member_id)
-            await self._announce_organization_member_change(updated)
+            await self._require_membership_listener().organization_member_changed(updated, workspace_ids)
 
         live = await live_attribution_user_ids(self.db, [str(target_user.id)])
         invitation = None
@@ -2325,13 +2326,9 @@ class OrganizationService:
         )
 
         async with self._require_unit_of_work():
+            workspace_ids = await self.workspace_rows.lock_in_organization(organization.id)
             updated = await self._update_membership(target, {"status": "suspended"})
-            await self._announce_organization_member_change(updated)
-
-    async def _announce_organization_member_change(self, membership: OrganizationMember) -> None:
-        """Tell the membership listener a membership's role or status changed, with the organization's workspaces."""
-        workspace_ids = await self.workspace_rows.get_ids_by_organization(membership.organization_id)
-        await self._require_membership_listener().organization_member_changed(membership, workspace_ids)
+            await self._require_membership_listener().organization_member_changed(updated, workspace_ids)
 
     async def _validate_membership_update(
         self,

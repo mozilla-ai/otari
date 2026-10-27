@@ -34,6 +34,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.tenancy import OrganizationService
 
 _PREFIX = f"{API_ROOT}/organizations/me/keys"
 
@@ -964,6 +965,43 @@ def test_a_key_an_operator_switched_off_stays_off_for_its_owner(client: TestClie
     assert code == status.HTTP_200_OK, body
     code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": True})
     assert code == status.HTTP_200_OK, body
+
+
+def test_an_operator_switch_off_landing_mid_update_is_not_overwritten(
+    client: TestClient,
+    world: _World,
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The owner's update re-reads the key it decides on, so a switch-off committed after the load still refuses."""
+    code, minted = _create(client, world, "alpha_member", {"key_name": "mine"})
+    assert code == status.HTTP_200_OK, minted
+
+    hold = OrganizationService.hold_workspace_write_access
+    calls = 0
+
+    async def switch_off_after_the_load(self: OrganizationService, **kwargs: Any) -> None:
+        nonlocal calls
+        await hold(self, **kwargs)
+        calls += 1
+        if calls == 2:
+            session = db_session_factory()
+            try:
+                row = session.get(APIKey, minted["id"])
+                assert row is not None
+                row.is_active = False
+                row.operator_disabled = True
+                session.commit()
+            finally:
+                session.close()
+
+    monkeypatch.setattr(OrganizationService, "hold_workspace_write_access", switch_off_after_the_load)
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": True})
+
+    assert calls == 2
+    assert code == status.HTTP_403_FORBIDDEN, body
+    row = _key_row(db_session_factory, minted["id"])
+    assert (row.is_active, row.operator_disabled) == (False, True)
 
 
 def test_a_member_minted_key_records_its_origin(

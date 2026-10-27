@@ -394,6 +394,8 @@ class WorkspaceService:
             raise WorkspaceMemberNotFoundError(workspace_id, user_id)
 
         async with self._uow:
+            # As in remove_member: a key minted while a demotion runs cannot outlive it.
+            await self.workspaces.lock(workspace.id)
             updated = await self.members.update(member, WorkspaceMemberUpdate(role=role))
             await self._membership_listener.member_role_changed(updated)
         return WorkspaceMemberPublic.model_validate(updated)

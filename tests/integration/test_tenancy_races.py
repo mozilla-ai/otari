@@ -1749,3 +1749,89 @@ async def test_racers_naming_one_new_end_user_under_a_full_cap_all_get_it(
     async_db.expire_all()
     end_users = (await async_db.execute(select(BillingUser).where(BillingUser.parent_user_id == owner_id))).scalars()
     assert [user.user_id for user in end_users] == outcomes[:1]
+
+
+class _PausingOnMembershipChange(_PausingListener):
+    """Holds a membership change open, after the listener has acted, until the racing key write settles."""
+
+    async def member_role_changed(self, member: WorkspaceMember) -> None:
+        await self._inner.member_role_changed(member)
+        await self._let_the_writer_run()
+
+    async def organization_member_changed(
+        self, membership: OrganizationMember, workspace_ids: Sequence[uuid.UUID]
+    ) -> None:
+        await self._inner.organization_member_changed(membership, workspace_ids)
+        await self._let_the_writer_run()
+
+    async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
+        await self._inner.workspace_deleted(workspace_id, member_ids)
+
+
+@pytest.mark.parametrize("change", ["organization_removal", "organization_demotion", "workspace_demotion"])
+async def test_a_key_write_during_a_membership_change_waits_for_it_and_is_refused(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    change: str,
+) -> None:
+    """A key write that runs while its author is removed or made a viewer must see the change.
+
+    The change switches off the keys it finds, so a write admitted on the old
+    membership and committed after that switch-off would leave a key on.
+    """
+    organization, owner = await _seed_owner(async_db)
+    workspace = await WorkspaceRepository(async_db).create_workspace(
+        name="Shared", organization_id=organization.id, created_by_user_id=owner.id
+    )
+    member = await create_member(async_db, organization, role="member", full_name="Member")
+    await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=member.id, role="member")
+    membership = await OrganizationMemberRepository(async_db).get_active_by_organization_and_user(
+        organization.id, member.id
+    )
+    assert membership is not None
+    await async_db.commit()
+
+    changing = asyncio.Event()
+
+    async def write() -> object:
+        await changing.wait()
+        async with sessions() as session:
+            writer = await UserRepository(session).get(member.id)
+            assert writer is not None
+            try:
+                await OrganizationService(session, membership_listener=None).hold_workspace_write_access(
+                    user=writer, organization_id=organization.id, workspace_id=workspace.id, revoking=False
+                )
+            except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+                return exc
+            return None
+
+    writing = asyncio.create_task(write())
+
+    async def let_the_write_run() -> None:
+        changing.set()
+        await asyncio.wait({writing}, timeout=_WRITER_WINDOW)
+
+    async with sessions() as session:
+        actor = await UserRepository(session).get(owner.id)
+        assert actor is not None
+        writes = membership_writes(session)
+        listener = _PausingOnMembershipChange(writes["membership_listener"], let_the_write_run)
+        if change == "workspace_demotion":
+            await WorkspaceService(session, uow=writes["uow"], membership_listener=listener).update_member_role(
+                user=actor, workspace_id=workspace.id, user_id=member.id, role="viewer"
+            )
+        else:
+            organizations = OrganizationService(session, uow=writes["uow"], membership_listener=listener)
+            if change == "organization_removal":
+                await organizations.remove_active_organization_member_for_user(
+                    user=actor, organization_member_id=membership.id
+                )
+            else:
+                await organizations.update_active_organization_member_for_user(
+                    user=actor,
+                    organization_member_id=membership.id,
+                    request=ActiveOrganizationMemberUpdateRequest(role="viewer"),
+                )
+
+    assert isinstance(await writing, NotAuthorizedError)

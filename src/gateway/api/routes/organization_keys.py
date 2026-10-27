@@ -424,6 +424,9 @@ async def update_own_key(
     await organizations.hold_workspace_write_access(
         user=identity, organization_id=organization.id, workspace_id=key.workspace_id, revoking=switching_off
     )
+    # Re-read under the row's lock: the copy loaded above may predate an
+    # operator's switch-off, and writing over it would drop that switch-off.
+    await db.refresh(key, with_for_update=True)
     if (refusal := owner_enable_refusal(key, request.is_active)) is not None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=refusal)
 
