@@ -1025,16 +1025,24 @@ def _hook_untracked_paths(repo_root: Path) -> list[str] | None:
     return [path for path in result.stdout.split("\0") if path]
 
 
+_GIT_LOCATION_VARS = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"})
+
+
 def _hook_repo_files(repo_root: Path) -> list[str] | None:
     """Paths a guardrail glob can match: tracked files plus untracked ones the ignore rules keep.
 
     A file created this session counts, so a glob naming it is not reported as matching nothing.
     None means Git could not list them, and the caller skips the check rather than report on a guess.
+
+    Inside a Git hook, Git exports `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`, which override `cwd`.
+    They are dropped so the list is always for `repo_root` and not for whichever repository ran the hook.
     """
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_LOCATION_VARS}
     try:
         result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
             ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
             cwd=repo_root,
+            env=env,
             capture_output=True,
             text=True,
             encoding="utf-8",

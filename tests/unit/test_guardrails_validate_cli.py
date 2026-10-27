@@ -6,6 +6,7 @@ beyond the guardrail file itself is the verifier script a verifier gate
 names, and that it stats rather than runs.
 """
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -182,9 +183,15 @@ _DEAD_GLOBS = _HEADER + (
 )
 
 
+def _git(repo: Path, *args: str) -> None:
+    """Run Git in `repo`, ignoring any repository a surrounding Git hook points the environment at."""
+    env = {k: v for k, v in os.environ.items() if k not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"}}
+    subprocess.run(["git", *args], cwd=repo, env=env, check=True)
+
+
 def _git_init(repo: Path) -> None:
     (repo / ".git").rmdir()
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    _git(repo, "init", "-q")
 
 
 def test_a_glob_matching_no_file_is_reported_in_a_real_repo(repo: Path) -> None:
@@ -201,7 +208,7 @@ def test_a_glob_matching_a_tracked_or_new_file_is_not_reported(repo: Path) -> No
     _git_init(repo)
     (repo / "src").mkdir()
     (repo / "src" / "gone.gen.ts").write_text("x", encoding="utf-8")
-    subprocess.run(["git", "add", "src/gone.gen.ts"], cwd=repo, check=True)
+    _git(repo, "add", "src/gone.gen.ts")
     (repo / "lib").mkdir()
     (repo / "lib" / "new.py").write_text("x", encoding="utf-8")
     _write(repo, _DEAD_GLOBS)
@@ -738,3 +745,21 @@ def test_a_judge_gate_cap_outside_its_range_is_a_usage_error(repo: Path, value: 
     result = _invoke("--max-judges", value)
     assert result.exit_code == 2
     assert "--max-judges" in result.output
+
+
+def test_git_location_variables_from_a_hook_do_not_redirect_the_file_list(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _git_init(repo)
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "src").mkdir()
+    (other / "src" / "gone.gen.ts").write_text("x", encoding="utf-8")
+    _git(other, "init", "-q")
+    _git(other, "add", "src/gone.gen.ts")
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+    _write(repo, _DEAD_GLOBS)
+    result = _invoke("--strict")
+    assert result.exit_code == 1
+    assert "warning[glob-matches-no-file]: no-generated-client:" in result.output

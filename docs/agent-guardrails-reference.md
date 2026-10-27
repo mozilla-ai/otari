@@ -1204,10 +1204,10 @@ A **warning** is a gate that parses, runs, and may not mean what its author
 intended. Each kind has a stable code, which `validate` prints beside it:
 
 - `glob-matches-no-file`: a `forbidden` or `when_changed` glob that matches no file Git tracks and no
-  untracked file the ignore rules keep. Such a gate never fires, the same as one
-  with a typo in its path. A glob naming a file that does not exist yet, such as
-  build output, is the legitimate case, and the gate names this code in its
-  `accept_warnings`. The shallower twin of a `**` glob in the same list, such as
+  untracked file the ignore rules keep. That is what a typo in a path looks like,
+  so it is worth a look. A glob naming a file that does not exist yet, such as
+  build output, is the legitimate case: the gate can still refuse an edit that
+  would create the file, and it names this code in its `accept_warnings`. The shallower twin of a `**` glob in the same list, such as
   `.env` beside `**/.env`, is not reported, since it exists to cover the root.
   Skipped when Git cannot list the files.
 - `glob-misses-shallower-depth`: a `**` glob whose shallower depth nothing else in the same field covers.
