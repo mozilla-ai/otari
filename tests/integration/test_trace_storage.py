@@ -673,7 +673,7 @@ async def test_concurrent_new_guardrail_versions_never_pass_the_workspace_cap(
         version = gates(f"version {index}")
         async with create_unit_of_work() as uow:
             try:
-                await TraceService(uow, TracesRepositories.on(uow)).record_definition(
+                await TraceService(uow, TracesRepositories.on(uow), _no_window).record_definition(
                     workspace, version, definition_digest(version)
                 )
             except GuardrailVersionLimitError:

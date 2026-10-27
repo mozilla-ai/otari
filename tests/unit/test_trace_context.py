@@ -47,7 +47,8 @@ def test_a_chat_request_is_split_by_role_with_tool_results_and_definitions_count
     assert weights.assistant_chars == len("get_weather") + len('{"c":"Oslo"}') + len("It is 12.")
     assert weights.tool_result_chars == len("12 degrees")
     assert weights.file_chars == 0
-    assert weights.tools_chars == len(json.dumps(tools, separators=(",", ":")))
+    # Names and text, not JSON punctuation: type, function, function, name, get_weather, parameters, type, object.
+    assert weights.tools_chars == len("typefunctionfunctionnameget_weatherparameterstypeobject")
     assert (weights.tool_count, weights.message_count) == (1, 6)
 
 
@@ -300,3 +301,12 @@ def test_a_type_or_role_that_is_not_a_string_weighs_what_it_holds_instead_of_dro
     assert messages.assistant_chars == len("f") + len("a name")
     assert chat.user_chars == len("hi")
     assert responses.message_count == 2
+
+
+def test_a_tool_result_nested_deep_still_weighs_its_text() -> None:
+    payload: object = "deep text"
+    for _ in range(12):
+        payload = {"data": [payload]}
+    weights = _weights("chat", [{"role": "tool", "tool_call_id": "c1", "content": [payload]}])
+
+    assert weights.tool_result_chars == len("deep text")

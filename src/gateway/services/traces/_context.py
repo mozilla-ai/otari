@@ -10,7 +10,6 @@ The body is the client's, so every field is type-checked before use: a malformed
 one weighs nothing, and reading never raises into the request path.
 """
 
-import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -45,7 +44,9 @@ _STRUCTURAL_KEYS = frozenset(
 # readable `thinking` text of a thinking block still counts.
 _OPAQUE_BLOCKS = frozenset({"redacted_thinking"})
 _OPAQUE_KEYS = {"thinking": frozenset({"signature"}), "reasoning": frozenset({"encrypted_content"})}
-_MAX_DEPTH = 8
+# Deep enough for a tool result carrying a nested API payload; only a guard against
+# a pathological body, never a limit a real request reaches.
+_MAX_DEPTH = 32
 
 _SYSTEM_ROLES = frozenset({"system", "developer"})
 _RESULT_ROLES = frozenset({"tool", "function"})
@@ -193,11 +194,32 @@ def _responses(tally: _Tally, items: Any) -> int:
     return len(items)
 
 
+def _schema_chars(value: Any, depth: int = 0) -> int:
+    """The characters of a tool definition: its names and its text, without JSON's punctuation.
+
+    A schema's keys are property names the model reads, unlike a message's keys, so
+    they count; quotes, braces and commas do not, which keeps a definition on the
+    same scale as the messages beside it. Walked rather than serialized, since an
+    agent's tool list can run to a hundred kilobytes on every request.
+    """
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, bool | int | float):
+        return len(str(value))
+    if depth >= _MAX_DEPTH:
+        return 0
+    if isinstance(value, Mapping):
+        return sum(len(str(key)) + _schema_chars(item, depth + 1) for key, item in value.items())
+    if isinstance(value, Sequence) and not isinstance(value, bytes | bytearray):
+        return sum(_schema_chars(item, depth + 1) for item in value)
+    return 0
+
+
 def _definitions(tools: Any) -> tuple[int, int]:
-    """The serialized size of the tool definitions and how many there are."""
+    """The size of the tool definitions and how many there are."""
     if not isinstance(tools, Sequence) or isinstance(tools, str | bytes) or not tools:
         return 0, 0
-    return len(json.dumps(tools, separators=(",", ":"), default=str)), len(tools)
+    return _schema_chars(tools), len(tools)
 
 
 def read_context(dialect: Dialect, messages: Any, *, tools: Any = None, system: Any = None) -> ContextWeights | None:
