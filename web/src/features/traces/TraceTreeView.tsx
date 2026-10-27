@@ -85,11 +85,13 @@ function settledOn(traceId: string, roots: TreeNode[]) {
 // in the order its batch enters. What is there when the panel opens, or when a
 // session's spans first load, is not news, and neither is a new row that wraps
 // rows already on screen: the first turn row only appears once a second turn
-// does. Arrivals clear once their entrance has played, so a row shown again by
-// expanding its parent later does not enter twice.
+// does. Only `shown` rows can arrive, so one that lands under a collapsed parent
+// or behind a search does not enter when it is revealed. Arrivals clear once
+// their entrance has played.
 function useArrivals(
   traceId: string,
   roots: TreeNode[],
+  shown: FlatItem[],
 ): ReadonlyMap<string, number> {
   const [state, setState] = useState(() => settledOn(traceId, roots))
   if (state.traceId !== traceId) {
@@ -102,9 +104,15 @@ function useArrivals(
       const news =
         state.known.size === 0
           ? []
-          : fresh.filter((node) =>
-              node.children.every((child) => !state.known.has(child.obs.id)),
-            )
+          : shown
+              .map(({ node }) => node)
+              .filter(
+                (node) =>
+                  !state.known.has(node.obs.id) &&
+                  node.children.every(
+                    (child) => !state.known.has(child.obs.id),
+                  ),
+              )
       // A batch landing while the last one still plays joins it, so neither is cut short.
       setState({
         traceId,
@@ -151,8 +159,8 @@ function TreeRow({
   isOpen: boolean
   isSelected: boolean
   isTabStop: boolean
-  /** The row's place in the batch that just arrived, or null for one that was already there. */
-  arrival: number | null
+  /** The row's place in the batch that just arrived; absent for one that was already there. */
+  arrival?: number
   onSelect: (observationId: string) => void
   onToggle: (observationId: string) => void
 }) {
@@ -175,9 +183,9 @@ function TreeRow({
   }
   return (
     <li
-      className={`flex ${isSelected ? "bg-primary-subtle" : "hover:bg-surface-alt"} ${arrival === null ? "" : "otari-trace-arrive"}`}
+      className={`flex ${isSelected ? "bg-primary-subtle" : "hover:bg-surface-alt"} ${arrival === undefined ? "" : "otari-trace-arrive"}`}
       style={
-        arrival === null
+        arrival === undefined
           ? undefined
           : ({
               "--arrive-delay": `${Math.min(arrival, ARRIVAL_STAGGER_ROWS) * ARRIVAL_STAGGER_MS}ms`,
@@ -311,7 +319,7 @@ export function TraceTreeView({
     [roots, collapsed],
   )
   const summary = summarizeTrace(trace)
-  const arrivals = useArrivals(trace.id, roots)
+  const arrivals = useArrivals(trace.id, roots, query.trim() ? [] : items)
 
   // A query turns the tree into a flat list of the matches: while searching, a
   // match's ancestors are in the way rather than context.
@@ -392,7 +400,7 @@ export function TraceTreeView({
           isOpen={!collapsed.has(item.node.obs.id)}
           isSelected={selectedId === item.node.obs.id}
           isTabStop={tabStop === item.node.obs.id}
-          arrival={arrivals.get(item.node.obs.id) ?? null}
+          arrival={arrivals.get(item.node.obs.id)}
           onSelect={onSelect}
           onToggle={onToggle}
         />

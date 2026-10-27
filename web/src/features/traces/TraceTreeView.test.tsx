@@ -26,9 +26,11 @@ function trace(observations: Observation[], id = "session-1"): Trace {
 function Tree({
   value,
   collapsed = new Set(),
+  query = "",
 }: {
   value: Trace
   collapsed?: ReadonlySet<string>
+  query?: string
 }) {
   return (
     <TraceTreeView
@@ -37,7 +39,7 @@ function Tree({
       onSelect={() => {}}
       collapsed={collapsed}
       onToggle={() => {}}
-      query=""
+      query={query}
     />
   )
 }
@@ -155,8 +157,7 @@ describe("TraceTreeView arrivals", () => {
     expect(rowOf("turn-2").style.getPropertyValue("--arrive-delay")).toBe("0ms")
   })
 
-  it("does not animate a row shown later by expanding its parent", () => {
-    vi.useFakeTimers()
+  it("does not animate a row that arrived under a collapsed parent when it is expanded", () => {
     const first = [obs("turn-0")]
     const later = [...first, obs("turn-1"), obs("request", "turn-1")]
     const hidden = new Set(["turn-1"])
@@ -164,13 +165,22 @@ describe("TraceTreeView arrivals", () => {
       <Tree value={trace(first)} collapsed={hidden} />,
     )
     rerender(<Tree value={trace(later)} collapsed={hidden} />)
-    act(() => {
-      vi.advanceTimersByTime(1_000)
-    })
 
     rerender(<Tree value={trace(later)} collapsed={new Set()} />)
 
+    expect(arriving("turn-1")).toBe(true)
     expect(arriving("request")).toBe(false)
+  })
+
+  it("does not animate a row that arrived while a search hid the tree", () => {
+    const first = [obs("turn-0")]
+    const later = [...first, obs("turn-1")]
+    const { rerender } = render(<Tree value={trace(first)} />)
+    rerender(<Tree value={trace(later)} query="turn" />)
+
+    rerender(<Tree value={trace(later)} />)
+
+    expect(arriving("turn-1")).toBe(false)
   })
 
   it("stops marking rows as arrivals once their entrance has played", () => {
