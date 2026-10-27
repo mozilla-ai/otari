@@ -7,9 +7,7 @@ import { FaDiscord } from "react-icons/fa"
 import {
   FiBookOpen,
   FiChevronDown,
-  FiChevronRight,
   FiFileText,
-  FiHardDrive,
   FiLogOut,
   FiMessageCircle,
   FiMoon,
@@ -307,25 +305,11 @@ function AppearanceControl() {
 
 export function AccountMenu({
   isCollapsed,
-  deploymentLanding,
   triggerRef,
-  onOpenDeploymentLevel,
   onOpenFeedback,
 }: {
   isCollapsed: boolean
-  /**
-   * Where the Deployment row goes, or nothing when that rail has no rows for
-   * this caller. Resolved by the shell rather than here, because it is the
-   * remembered location of a rail and the shell is what owns that memory.
-   */
-  deploymentLanding?: LinkProps["to"]
-  /** So the shell can return focus here when a level it opened closes. */
   triggerRef?: React.RefObject<HTMLButtonElement | null>
-  /**
-   * Below `md`, what the Deployment row does instead of navigating: the rail
-   * opens it as a level inside the drawer, and this popover has closed by then.
-   */
-  onOpenDeploymentLevel?: () => void
   /**
    * Below `md`, opens the feedback dialog, which the shell mounts outside this
    * popover. From `md` up the top bar carries it beside Documentation.
@@ -405,74 +389,6 @@ export function AccountMenu({
               the page looks. */}
           <AccountMenuRows closeMenu={() => setOpen(false)} />
           <AppearanceControl />
-          {/* The deployment's own pages, which used to sit in the organization
-              rail's General section. They are the deployment talking about
-              itself rather than the tenant, and that rail is where a tenant
-              reads, so they hang off the account control instead.
-
-              No divider above: the heading already separates, and two marks for
-              one break read as noise. The divider below is the existing one,
-              and it is load-bearing now rather than decorative, because without
-              it Data & Privacy sits directly under Accounts and reads as a
-              third deployment row.
-
-              Rows and heading appear together or not at all. Each row is gated
-              on the value it declares (`/settings` 403s, `/admin/accounts`
-              404s), so a caller can be refused both, and a label over nothing
-              names a group that is not there. */}
-          {/* One row, not the pages themselves: it changes which rail the
-              shell is showing, the way the Organization row in the footer does.
-              The pages behind it are the deployment's own (the running process,
-              and every account across the organizations on it), which is why
-              they are a context rather than a section inside a tenant's rail.
-
-              Absent entirely when the caller operates nothing there, since the
-              rail it opens would have no rows: same predicate the rail runs,
-              so the control and its destination cannot disagree. */}
-          {deploymentLanding ? (
-            onOpenDeploymentLevel ? (
-              // Below `md` this opens a level inside the drawer rather than
-              // navigating, so it is a button: the page behind the drawer has
-              // not moved, and a link would claim it had.
-              <MenuItem
-                label="Deployment"
-                icon={FiHardDrive}
-                trailingIcon={
-                  <FiChevronRight
-                    aria-hidden="true"
-                    className={MENU_ICON_CLASS}
-                  />
-                }
-                onPress={() => {
-                  setOpen(false)
-                  onOpenDeploymentLevel()
-                }}
-              />
-            ) : (
-              <MenuLink
-                label="Deployment"
-                // Not `FiServer`, which the drawing shows: that mark is already
-                // "MCP servers" on the workspace rail, and this menu opens over
-                // that rail, so the two would be on screen together.
-                // `FiHardDrive` is unused across the nav and cannot collide with
-                // either row in the rail this opens.
-                icon={FiHardDrive}
-                to={deploymentLanding}
-                onNavigate={() => setOpen(false)}
-                // The only thing in the menu that says "this opens rather than
-                // goes": every other row leaves for a page, this one changes
-                // which rail is showing. It sits in the 44px trailing lane every
-                // row already holds open, the one Appearance puts its value in,
-                // so nothing shifts.
-                trailing={
-                  <FiChevronRight
-                    aria-hidden="true"
-                    className={MENU_ICON_CLASS}
-                  />
-                }
-              />
-            )
-          ) : null}
           <div className={MENU_DIVIDER} />
           {/* The top bar's destinations remain reachable in the mobile drawer. */}
           {isNavVisible(PLAYGROUND_NAV_ITEM) && (

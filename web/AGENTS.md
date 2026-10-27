@@ -89,8 +89,16 @@ These gates combine with AND, and the top bar and the account menu gate their
 Playground link through the same predicate. Organization and workspace
 authorization still comes from server responses.
 
-The workspace and organization rails have separate registries. A sidebar item
-points to a real page, never a redirect. `/playground`, `/account`, and `/invitations` are
+The workspace, organization and deployment rails have separate registries, and
+the scope switcher at the top of every rail is the one way between them. A
+sidebar item points to a real page, never a redirect.
+
+What a page shows follows its rail, not the caller's role. A deployment-wide
+version of a page lives under `/deployment`, whose layout wraps it in
+`DeploymentScope`, and the scope hooks (`useUsageScope`, `useKeysScope`,
+`useTraceScope`, `useRoutingScope`) read `useIsDeploymentScope()` rather than
+`useDeploymentOperator()`. A role may add controls or rows to a page; it never
+swaps what the page is about. `/playground`, `/account`, and `/invitations` are
 chrome destinations and do not belong in a rail.
 
 Overlay navigation uses the empty seam modules under `src/app/nav/` for new

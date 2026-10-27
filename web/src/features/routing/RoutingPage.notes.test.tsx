@@ -5,12 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { RoutingPage } from "@/features/routing/RoutingPage"
 import { API_ROOT } from "@/shared/api/client"
+import { DeploymentScope } from "@/shared/hooks/DeploymentScope"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
-// The page's empty state. The table and the create
-// dialog are covered in RoutingPage.test.tsx and RoutingPage.create.test.tsx.
+// The page's empty state, on the deployment's own page, where the caller may
+// create. The table and the create dialog are covered in RoutingPage.test.tsx
+// and RoutingPage.create.test.tsx.
 
 function mockEmptyApi() {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -32,10 +34,12 @@ function renderPage() {
   return render(
     <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>
-        <RoutingPage />
+        <DeploymentScope>
+          <RoutingPage />
+        </DeploymentScope>
       </QueryClientProvider>
     </DeploymentProvider>,
-    { wrapper: withRouter({ url: "/" }) },
+    { wrapper: withRouter({ url: "/deployment/routing" }) },
   )
 }
 

@@ -12,8 +12,8 @@ import {
   mockApi,
   policy,
   policyWrites,
+  renderDeploymentPage,
   renderInWorkspace,
-  renderPage,
   WEIGHTED,
 } from "@/tests/routing"
 
@@ -38,9 +38,10 @@ const COMBINED: PolicySpec = {
   guardrails: [{ profile: "pii", mode: "monitor", on_unavailable: "monitor" }],
 }
 
-function renderPolicy(name: string, url = `/routing/${name}`) {
-  return renderPage(<PolicyDetailPage name={name} />, url, [
-    { path: "/routing/$name", element: <p>Moved</p> },
+// On the deployment's own page, which is where every policy can be edited.
+function renderPolicy(name: string, url = `/deployment/routing/${name}`) {
+  return renderDeploymentPage(<PolicyDetailPage name={name} />, url, [
+    { path: "/deployment/routing/$name", element: <p>Moved</p> },
   ])
 }
 
@@ -81,7 +82,7 @@ describe("PolicyDetailPage", () => {
     ).toHaveTextContent(/Requests to fast go to .*If that fails/)
     expect(screen.getByRole("link", { name: "← Routing" })).toHaveAttribute(
       "href",
-      "/routing",
+      "/deployment/routing",
     )
     // Nothing to save until something changes.
     expect(
@@ -548,7 +549,7 @@ describe("PolicyDetailPage", () => {
       policy("cheap", CHAIN),
       policy("cheap", LEARNED, { user_id: "u-bob" }),
     ])
-    renderPolicy("cheap", "/routing/cheap?user=u-bob")
+    renderPolicy("cheap", "/deployment/routing/cheap?user=u-bob")
 
     expect(
       await screen.findByRole("combobox", { name: /model 1/i }),
@@ -668,6 +669,22 @@ describe("PolicyDetailPage read-only", () => {
 })
 
 describe("PolicyDetailPage for an organization admin", () => {
+  it("leads back to the workspace's list, not the deployment's", async () => {
+    mockApi([], null, [], {
+      context: adminContext(),
+      memberPolicies: [policy("fast", CHAIN)],
+    })
+    renderInWorkspace(<PolicyDetailPage name="fast" />, "/routing/fast")
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "fast" }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "← Routing" })).toHaveAttribute(
+      "href",
+      "/routing",
+    )
+  })
+
   it("writes an admin's edit back to the row's own workspace", async () => {
     const OTHER_WORKSPACE = "55555555-5555-5555-5555-555555555555"
     const { calls } = mockApi([], null, [], {

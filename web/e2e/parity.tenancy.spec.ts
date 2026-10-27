@@ -331,12 +331,15 @@ test.describe("tenancy", () => {
     await openPage(page, "Org settings", "Organization")
 
     // Creating an organization and moving between them are the scope switcher's,
-    // which sits on the workspace rail and is replaced by the way back out on
-    // this one, so neither control is here. Deleting one has no endpoint at all.
+    // which heads this rail too, so neither control is on the page. Exact,
+    // because the switcher's own name starts "Switch scope". Deleting one has
+    // no endpoint at all.
     await expect(
       page.getByRole("button", { name: /Create organization/ }),
     ).toHaveCount(0)
-    await expect(page.getByRole("button", { name: "Switch" })).toHaveCount(0)
+    await expect(
+      page.getByRole("button", { name: "Switch", exact: true }),
+    ).toHaveCount(0)
     await expect(
       page.getByRole("button", { name: /Delete organization/ }),
     ).toHaveCount(0)

@@ -15,6 +15,7 @@ import { Route as AccountRouteImport } from './routes/account'
 import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as AliasesRouteImport } from './routes/aliases'
 import { Route as BudgetsRouteImport } from './routes/budgets'
+import { Route as DeploymentRouteImport } from './routes/deployment'
 import { Route as HealthChecksRouteImport } from './routes/health-checks'
 import { Route as InvitationsRouteImport } from './routes/invitations'
 import { Route as KeysRouteImport } from './routes/keys'
@@ -32,6 +33,17 @@ import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
 import { Route as AdminCodeExecutionRouteImport } from './routes/admin.code-execution'
 import { Route as AdminHostedProvidersRouteImport } from './routes/admin.hosted-providers'
 import { Route as AdminWebSearchRouteImport } from './routes/admin.web-search'
+import { Route as DeploymentIndexRouteImport } from './routes/deployment.index'
+import { Route as DeploymentAccountsRouteImport } from './routes/deployment.accounts'
+import { Route as DeploymentActivityRouteImport } from './routes/deployment.activity'
+import { Route as DeploymentBudgetsRouteImport } from './routes/deployment.budgets'
+import { Route as DeploymentCodeExecutionPricingRouteImport } from './routes/deployment.code-execution-pricing'
+import { Route as DeploymentHealthRouteImport } from './routes/deployment.health'
+import { Route as DeploymentHostedProvidersRouteImport } from './routes/deployment.hosted-providers'
+import { Route as DeploymentKeysRouteImport } from './routes/deployment.keys'
+import { Route as DeploymentRoutingRouteImport } from './routes/deployment.routing'
+import { Route as DeploymentSettingsRouteImport } from './routes/deployment.settings'
+import { Route as DeploymentWebSearchPricingRouteImport } from './routes/deployment.web-search-pricing'
 import { Route as ModelsIndexRouteImport } from './routes/models.index'
 import { Route as ModelsSplatRouteImport } from './routes/models.$'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
@@ -48,6 +60,8 @@ import { Route as ToolsCodeExecutionRouteImport } from './routes/tools.code-exec
 import { Route as ToolsGuardrailsRouteImport } from './routes/tools.guardrails'
 import { Route as ToolsMcpServersRouteImport } from './routes/tools.mcp-servers'
 import { Route as ToolsWebSearchRouteImport } from './routes/tools.web-search'
+import { Route as DeploymentRoutingIndexRouteImport } from './routes/deployment.routing.index'
+import { Route as DeploymentRoutingNameRouteImport } from './routes/deployment.routing.$name'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -77,6 +91,11 @@ const AliasesRoute = AliasesRouteImport.update({
 const BudgetsRoute = BudgetsRouteImport.update({
   id: '/budgets',
   path: '/budgets',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeploymentRoute = DeploymentRouteImport.update({
+  id: '/deployment',
+  path: '/deployment',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HealthChecksRoute = HealthChecksRouteImport.update({
@@ -164,6 +183,64 @@ const AdminWebSearchRoute = AdminWebSearchRouteImport.update({
   path: '/admin/web-search',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DeploymentIndexRoute = DeploymentIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => DeploymentRoute,
+} as any)
+const DeploymentAccountsRoute = DeploymentAccountsRouteImport.update({
+  id: '/accounts',
+  path: '/accounts',
+  getParentRoute: () => DeploymentRoute,
+} as any)
+const DeploymentActivityRoute = DeploymentActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
+  getParentRoute: () => DeploymentRoute,
+} as any)
+const DeploymentBudgetsRoute = DeploymentBudgetsRouteImport.update({
+  id: '/budgets',
+  path: '/budgets',
+  getParentRoute: () => DeploymentRoute,
+} as any)
+const DeploymentCodeExecutionPricingRoute =
+  DeploymentCodeExecutionPricingRouteImport.update({
+    id: '/code-execution-pricing',
+    path: '/code-execution-pricing',
+    getParentRoute: () => DeploymentRoute,
+  } as any)
+const DeploymentHealthRoute = DeploymentHealthRouteImport.update({
+  id: '/health',
+  path: '/health',
+  getParentRoute: () => DeploymentRoute,
+} as any)
+const DeploymentHostedProvidersRoute =
+  DeploymentHostedProvidersRouteImport.update({
+    id: '/hosted-providers',
+    path: '/hosted-providers',
+    getParentRoute: () => DeploymentRoute,
+  } as any)
+const DeploymentKeysRoute = DeploymentKeysRouteImport.update({
+  id: '/keys',
+  path: '/keys',
+  getParentRoute: () => DeploymentRoute,
+} as any)
+const DeploymentRoutingRoute = DeploymentRoutingRouteImport.update({
+  id: '/routing',
+  path: '/routing',
+  getParentRoute: () => DeploymentRoute,
+} as any)
+const DeploymentSettingsRoute = DeploymentSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => DeploymentRoute,
+} as any)
+const DeploymentWebSearchPricingRoute =
+  DeploymentWebSearchPricingRouteImport.update({
+    id: '/web-search-pricing',
+    path: '/web-search-pricing',
+    getParentRoute: () => DeploymentRoute,
+  } as any)
 const ModelsIndexRoute = ModelsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -245,6 +322,16 @@ const ToolsWebSearchRoute = ToolsWebSearchRouteImport.update({
   path: '/web-search',
   getParentRoute: () => ToolsRoute,
 } as any)
+const DeploymentRoutingIndexRoute = DeploymentRoutingIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => DeploymentRoutingRoute,
+} as any)
+const DeploymentRoutingNameRoute = DeploymentRoutingNameRouteImport.update({
+  id: '/$name',
+  path: '/$name',
+  getParentRoute: () => DeploymentRoutingRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -253,6 +340,7 @@ export interface FileRoutesByFullPath {
   '/activity': typeof ActivityRoute
   '/aliases': typeof AliasesRoute
   '/budgets': typeof BudgetsRoute
+  '/deployment': typeof DeploymentRouteWithChildren
   '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
@@ -270,6 +358,16 @@ export interface FileRoutesByFullPath {
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/admin/web-search': typeof AdminWebSearchRoute
+  '/deployment/accounts': typeof DeploymentAccountsRoute
+  '/deployment/activity': typeof DeploymentActivityRoute
+  '/deployment/budgets': typeof DeploymentBudgetsRoute
+  '/deployment/code-execution-pricing': typeof DeploymentCodeExecutionPricingRoute
+  '/deployment/health': typeof DeploymentHealthRoute
+  '/deployment/hosted-providers': typeof DeploymentHostedProvidersRoute
+  '/deployment/keys': typeof DeploymentKeysRoute
+  '/deployment/routing': typeof DeploymentRoutingRouteWithChildren
+  '/deployment/settings': typeof DeploymentSettingsRoute
+  '/deployment/web-search-pricing': typeof DeploymentWebSearchPricingRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -282,10 +380,13 @@ export interface FileRoutesByFullPath {
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
+  '/deployment/': typeof DeploymentIndexRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
   '/routing/': typeof RoutingIndexRoute
   '/tools/': typeof ToolsIndexRoute
+  '/deployment/routing/$name': typeof DeploymentRoutingNameRoute
+  '/deployment/routing/': typeof DeploymentRoutingIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -307,6 +408,15 @@ export interface FileRoutesByTo {
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/admin/web-search': typeof AdminWebSearchRoute
+  '/deployment/accounts': typeof DeploymentAccountsRoute
+  '/deployment/activity': typeof DeploymentActivityRoute
+  '/deployment/budgets': typeof DeploymentBudgetsRoute
+  '/deployment/code-execution-pricing': typeof DeploymentCodeExecutionPricingRoute
+  '/deployment/health': typeof DeploymentHealthRoute
+  '/deployment/hosted-providers': typeof DeploymentHostedProvidersRoute
+  '/deployment/keys': typeof DeploymentKeysRoute
+  '/deployment/settings': typeof DeploymentSettingsRoute
+  '/deployment/web-search-pricing': typeof DeploymentWebSearchPricingRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -319,10 +429,13 @@ export interface FileRoutesByTo {
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
+  '/deployment': typeof DeploymentIndexRoute
   '/models': typeof ModelsIndexRoute
   '/organization': typeof OrganizationIndexRoute
   '/routing': typeof RoutingIndexRoute
   '/tools': typeof ToolsIndexRoute
+  '/deployment/routing/$name': typeof DeploymentRoutingNameRoute
+  '/deployment/routing': typeof DeploymentRoutingIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -332,6 +445,7 @@ export interface FileRoutesById {
   '/activity': typeof ActivityRoute
   '/aliases': typeof AliasesRoute
   '/budgets': typeof BudgetsRoute
+  '/deployment': typeof DeploymentRouteWithChildren
   '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
@@ -349,6 +463,16 @@ export interface FileRoutesById {
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/admin/web-search': typeof AdminWebSearchRoute
+  '/deployment/accounts': typeof DeploymentAccountsRoute
+  '/deployment/activity': typeof DeploymentActivityRoute
+  '/deployment/budgets': typeof DeploymentBudgetsRoute
+  '/deployment/code-execution-pricing': typeof DeploymentCodeExecutionPricingRoute
+  '/deployment/health': typeof DeploymentHealthRoute
+  '/deployment/hosted-providers': typeof DeploymentHostedProvidersRoute
+  '/deployment/keys': typeof DeploymentKeysRoute
+  '/deployment/routing': typeof DeploymentRoutingRouteWithChildren
+  '/deployment/settings': typeof DeploymentSettingsRoute
+  '/deployment/web-search-pricing': typeof DeploymentWebSearchPricingRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -361,10 +485,13 @@ export interface FileRoutesById {
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
+  '/deployment/': typeof DeploymentIndexRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
   '/routing/': typeof RoutingIndexRoute
   '/tools/': typeof ToolsIndexRoute
+  '/deployment/routing/$name': typeof DeploymentRoutingNameRoute
+  '/deployment/routing/': typeof DeploymentRoutingIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -375,6 +502,7 @@ export interface FileRouteTypes {
     | '/activity'
     | '/aliases'
     | '/budgets'
+    | '/deployment'
     | '/health-checks'
     | '/invitations'
     | '/keys'
@@ -392,6 +520,16 @@ export interface FileRouteTypes {
     | '/admin/code-execution'
     | '/admin/hosted-providers'
     | '/admin/web-search'
+    | '/deployment/accounts'
+    | '/deployment/activity'
+    | '/deployment/budgets'
+    | '/deployment/code-execution-pricing'
+    | '/deployment/health'
+    | '/deployment/hosted-providers'
+    | '/deployment/keys'
+    | '/deployment/routing'
+    | '/deployment/settings'
+    | '/deployment/web-search-pricing'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -404,10 +542,13 @@ export interface FileRouteTypes {
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
+    | '/deployment/'
     | '/models/'
     | '/organization/'
     | '/routing/'
     | '/tools/'
+    | '/deployment/routing/$name'
+    | '/deployment/routing/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -429,6 +570,15 @@ export interface FileRouteTypes {
     | '/admin/code-execution'
     | '/admin/hosted-providers'
     | '/admin/web-search'
+    | '/deployment/accounts'
+    | '/deployment/activity'
+    | '/deployment/budgets'
+    | '/deployment/code-execution-pricing'
+    | '/deployment/health'
+    | '/deployment/hosted-providers'
+    | '/deployment/keys'
+    | '/deployment/settings'
+    | '/deployment/web-search-pricing'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -441,10 +591,13 @@ export interface FileRouteTypes {
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
+    | '/deployment'
     | '/models'
     | '/organization'
     | '/routing'
     | '/tools'
+    | '/deployment/routing/$name'
+    | '/deployment/routing'
   id:
     | '__root__'
     | '/'
@@ -453,6 +606,7 @@ export interface FileRouteTypes {
     | '/activity'
     | '/aliases'
     | '/budgets'
+    | '/deployment'
     | '/health-checks'
     | '/invitations'
     | '/keys'
@@ -470,6 +624,16 @@ export interface FileRouteTypes {
     | '/admin/code-execution'
     | '/admin/hosted-providers'
     | '/admin/web-search'
+    | '/deployment/accounts'
+    | '/deployment/activity'
+    | '/deployment/budgets'
+    | '/deployment/code-execution-pricing'
+    | '/deployment/health'
+    | '/deployment/hosted-providers'
+    | '/deployment/keys'
+    | '/deployment/routing'
+    | '/deployment/settings'
+    | '/deployment/web-search-pricing'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -482,10 +646,13 @@ export interface FileRouteTypes {
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
+    | '/deployment/'
     | '/models/'
     | '/organization/'
     | '/routing/'
     | '/tools/'
+    | '/deployment/routing/$name'
+    | '/deployment/routing/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -495,6 +662,7 @@ export interface RootRouteChildren {
   ActivityRoute: typeof ActivityRoute
   AliasesRoute: typeof AliasesRoute
   BudgetsRoute: typeof BudgetsRoute
+  DeploymentRoute: typeof DeploymentRouteWithChildren
   HealthChecksRoute: typeof HealthChecksRoute
   InvitationsRoute: typeof InvitationsRoute
   KeysRoute: typeof KeysRoute
@@ -556,6 +724,13 @@ declare module '@tanstack/react-router' {
       path: '/budgets'
       fullPath: '/budgets'
       preLoaderRoute: typeof BudgetsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/deployment': {
+      id: '/deployment'
+      path: '/deployment'
+      fullPath: '/deployment'
+      preLoaderRoute: typeof DeploymentRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/health-checks': {
@@ -677,6 +852,83 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminWebSearchRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/deployment/': {
+      id: '/deployment/'
+      path: '/'
+      fullPath: '/deployment/'
+      preLoaderRoute: typeof DeploymentIndexRouteImport
+      parentRoute: typeof DeploymentRoute
+    }
+    '/deployment/accounts': {
+      id: '/deployment/accounts'
+      path: '/accounts'
+      fullPath: '/deployment/accounts'
+      preLoaderRoute: typeof DeploymentAccountsRouteImport
+      parentRoute: typeof DeploymentRoute
+    }
+    '/deployment/activity': {
+      id: '/deployment/activity'
+      path: '/activity'
+      fullPath: '/deployment/activity'
+      preLoaderRoute: typeof DeploymentActivityRouteImport
+      parentRoute: typeof DeploymentRoute
+    }
+    '/deployment/budgets': {
+      id: '/deployment/budgets'
+      path: '/budgets'
+      fullPath: '/deployment/budgets'
+      preLoaderRoute: typeof DeploymentBudgetsRouteImport
+      parentRoute: typeof DeploymentRoute
+    }
+    '/deployment/code-execution-pricing': {
+      id: '/deployment/code-execution-pricing'
+      path: '/code-execution-pricing'
+      fullPath: '/deployment/code-execution-pricing'
+      preLoaderRoute: typeof DeploymentCodeExecutionPricingRouteImport
+      parentRoute: typeof DeploymentRoute
+    }
+    '/deployment/health': {
+      id: '/deployment/health'
+      path: '/health'
+      fullPath: '/deployment/health'
+      preLoaderRoute: typeof DeploymentHealthRouteImport
+      parentRoute: typeof DeploymentRoute
+    }
+    '/deployment/hosted-providers': {
+      id: '/deployment/hosted-providers'
+      path: '/hosted-providers'
+      fullPath: '/deployment/hosted-providers'
+      preLoaderRoute: typeof DeploymentHostedProvidersRouteImport
+      parentRoute: typeof DeploymentRoute
+    }
+    '/deployment/keys': {
+      id: '/deployment/keys'
+      path: '/keys'
+      fullPath: '/deployment/keys'
+      preLoaderRoute: typeof DeploymentKeysRouteImport
+      parentRoute: typeof DeploymentRoute
+    }
+    '/deployment/routing': {
+      id: '/deployment/routing'
+      path: '/routing'
+      fullPath: '/deployment/routing'
+      preLoaderRoute: typeof DeploymentRoutingRouteImport
+      parentRoute: typeof DeploymentRoute
+    }
+    '/deployment/settings': {
+      id: '/deployment/settings'
+      path: '/settings'
+      fullPath: '/deployment/settings'
+      preLoaderRoute: typeof DeploymentSettingsRouteImport
+      parentRoute: typeof DeploymentRoute
+    }
+    '/deployment/web-search-pricing': {
+      id: '/deployment/web-search-pricing'
+      path: '/web-search-pricing'
+      fullPath: '/deployment/web-search-pricing'
+      preLoaderRoute: typeof DeploymentWebSearchPricingRouteImport
+      parentRoute: typeof DeploymentRoute
+    }
     '/models/': {
       id: '/models/'
       path: '/'
@@ -789,8 +1041,67 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ToolsWebSearchRouteImport
       parentRoute: typeof ToolsRoute
     }
+    '/deployment/routing/': {
+      id: '/deployment/routing/'
+      path: '/'
+      fullPath: '/deployment/routing/'
+      preLoaderRoute: typeof DeploymentRoutingIndexRouteImport
+      parentRoute: typeof DeploymentRoutingRoute
+    }
+    '/deployment/routing/$name': {
+      id: '/deployment/routing/$name'
+      path: '/$name'
+      fullPath: '/deployment/routing/$name'
+      preLoaderRoute: typeof DeploymentRoutingNameRouteImport
+      parentRoute: typeof DeploymentRoutingRoute
+    }
   }
 }
+
+interface DeploymentRoutingRouteChildren {
+  DeploymentRoutingNameRoute: typeof DeploymentRoutingNameRoute
+  DeploymentRoutingIndexRoute: typeof DeploymentRoutingIndexRoute
+}
+
+const DeploymentRoutingRouteChildren: DeploymentRoutingRouteChildren = {
+  DeploymentRoutingNameRoute: DeploymentRoutingNameRoute,
+  DeploymentRoutingIndexRoute: DeploymentRoutingIndexRoute,
+}
+
+const DeploymentRoutingRouteWithChildren =
+  DeploymentRoutingRoute._addFileChildren(DeploymentRoutingRouteChildren)
+
+interface DeploymentRouteChildren {
+  DeploymentAccountsRoute: typeof DeploymentAccountsRoute
+  DeploymentActivityRoute: typeof DeploymentActivityRoute
+  DeploymentBudgetsRoute: typeof DeploymentBudgetsRoute
+  DeploymentCodeExecutionPricingRoute: typeof DeploymentCodeExecutionPricingRoute
+  DeploymentHealthRoute: typeof DeploymentHealthRoute
+  DeploymentHostedProvidersRoute: typeof DeploymentHostedProvidersRoute
+  DeploymentKeysRoute: typeof DeploymentKeysRoute
+  DeploymentRoutingRoute: typeof DeploymentRoutingRouteWithChildren
+  DeploymentSettingsRoute: typeof DeploymentSettingsRoute
+  DeploymentWebSearchPricingRoute: typeof DeploymentWebSearchPricingRoute
+  DeploymentIndexRoute: typeof DeploymentIndexRoute
+}
+
+const DeploymentRouteChildren: DeploymentRouteChildren = {
+  DeploymentAccountsRoute: DeploymentAccountsRoute,
+  DeploymentActivityRoute: DeploymentActivityRoute,
+  DeploymentBudgetsRoute: DeploymentBudgetsRoute,
+  DeploymentCodeExecutionPricingRoute: DeploymentCodeExecutionPricingRoute,
+  DeploymentHealthRoute: DeploymentHealthRoute,
+  DeploymentHostedProvidersRoute: DeploymentHostedProvidersRoute,
+  DeploymentKeysRoute: DeploymentKeysRoute,
+  DeploymentRoutingRoute: DeploymentRoutingRouteWithChildren,
+  DeploymentSettingsRoute: DeploymentSettingsRoute,
+  DeploymentWebSearchPricingRoute: DeploymentWebSearchPricingRoute,
+  DeploymentIndexRoute: DeploymentIndexRoute,
+}
+
+const DeploymentRouteWithChildren = DeploymentRoute._addFileChildren(
+  DeploymentRouteChildren,
+)
 
 interface ModelsRouteChildren {
   ModelsSplatRoute: typeof ModelsSplatRoute
@@ -867,6 +1178,7 @@ const rootRouteChildren: RootRouteChildren = {
   ActivityRoute: ActivityRoute,
   AliasesRoute: AliasesRoute,
   BudgetsRoute: BudgetsRoute,
+  DeploymentRoute: DeploymentRouteWithChildren,
   HealthChecksRoute: HealthChecksRoute,
   InvitationsRoute: InvitationsRoute,
   KeysRoute: KeysRoute,

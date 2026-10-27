@@ -823,3 +823,260 @@ describe("the invitations row in the scope switcher", () => {
     ).toBeVisible()
   })
 })
+
+describe("the scope rows in the scope switcher", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    window.localStorage.clear()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  // A selected workspace, so a check on its row is one these cases could fail
+  // on: with none selected, "the workspace row is not checked" holds trivially.
+  const inAWorkspace = {
+    workspace_memberships: [
+      {
+        workspace_id: workspace().id,
+        name: "Default Workspace",
+        role: "owner",
+      },
+    ],
+  }
+
+  // The switcher with the props the shell resolves, over a router whose probes
+  // say where a row's navigation landed.
+  function renderInScope(
+    props: {
+      scope?: "workspace" | "organization" | "deployment"
+      workspaceLanding?: "/models"
+      organizationLanding?: "/organization/members"
+      deploymentLanding?: "/deployment/settings"
+      onNavigate?: () => void
+    },
+    url = "/usage",
+  ) {
+    return renderWithRouter(<div>STARTING PAGE</div>, {
+      url,
+      routes: [
+        { path: "/models", element: <div>MODELS PAGE</div> },
+        { path: "/organization/members", element: <div>MEMBERS PAGE</div> },
+        {
+          path: "/deployment/settings",
+          element: <div>DEPLOYMENT SETTINGS PAGE</div>,
+        },
+      ].filter((route) => route.path !== url),
+      shell: (
+        <Provider>
+          <DeploymentProvider value={bootstrap()}>
+            <SelectedWorkspaceProvider>
+              <WorkspaceSwitcher isCollapsed={false} {...props} />
+              <Outlet />
+            </SelectedWorkspaceProvider>
+          </DeploymentProvider>
+        </Provider>
+      ),
+    })
+  }
+
+  async function openScopeMenu() {
+    const user = userEvent.setup()
+    await user.click(
+      await screen.findByRole("button", { name: /^Switch (workspace|scope),/ }),
+    )
+    return { user, menu: await screen.findByRole("dialog") }
+  }
+
+  // Whether a row in the menu carries the check, read the way a screen reader
+  // does: the mark is decorative and its "Selected" text is what is announced.
+  function isChecked(row: HTMLElement) {
+    return within(row).queryByText("Selected") !== null
+  }
+
+  it("offers the deployment and the organization's pages only with a landing", async () => {
+    // The shell passes a landing only to a caller who may use that rail, so an
+    // absent prop is how the switcher withholds the row. Settled on the
+    // workspace row first, so the absences below are answers.
+    mockApi({ context: inAWorkspace })
+    await renderInScope({})
+
+    const { menu } = await openScopeMenu()
+    await within(menu).findByRole("button", { name: /^Default Workspace/ })
+    expect(
+      within(menu).queryByRole("button", { name: /^Deployment/ }),
+    ).toBeNull()
+    expect(
+      within(menu).queryByRole("button", { name: /^Manage organization/ }),
+    ).toBeNull()
+  })
+
+  it("puts the deployment first and the organization's pages under it", async () => {
+    mockApi({ context: inAWorkspace })
+    await renderInScope({
+      organizationLanding: "/organization/members",
+      deploymentLanding: "/deployment/settings",
+    })
+
+    const { menu } = await openScopeMenu()
+    const manage = await within(menu).findByRole("button", {
+      name: /^Manage organization/,
+    })
+    const deployment = within(menu).getByRole("button", { name: /^Deployment/ })
+    // In document order: the deployment heads the menu, above the organization
+    // it spans, and the organization's own pages sit in that organization's
+    // group, above the workspaces.
+    const buttons = within(menu).getAllByRole("button")
+    expect(buttons.indexOf(deployment)).toBe(0)
+    expect(buttons.indexOf(manage)).toBeLessThan(
+      buttons.indexOf(
+        within(menu).getByRole("button", { name: /^Default Workspace/ }),
+      ),
+    )
+  })
+
+  it("goes to the deployment's landing and closes", async () => {
+    mockApi({ context: inAWorkspace })
+    const onNavigate = vi.fn()
+    await renderInScope({
+      deploymentLanding: "/deployment/settings",
+      onNavigate,
+    })
+
+    const { user, menu } = await openScopeMenu()
+    await user.click(
+      await within(menu).findByRole("button", { name: /^Deployment/ }),
+    )
+
+    expect(
+      await screen.findByText("DEPLOYMENT SETTINGS PAGE"),
+    ).toBeInTheDocument()
+    // So the shell can close the mobile drawer over the rail it opened.
+    expect(onNavigate).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
+  it("goes to the organization's landing and closes", async () => {
+    mockApi({ context: inAWorkspace })
+    const onNavigate = vi.fn()
+    await renderInScope({
+      organizationLanding: "/organization/members",
+      onNavigate,
+    })
+
+    const { user, menu } = await openScopeMenu()
+    await user.click(
+      await within(menu).findByRole("button", {
+        name: /^Manage organization/,
+      }),
+    )
+
+    expect(await screen.findByText("MEMBERS PAGE")).toBeInTheDocument()
+    expect(onNavigate).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
+  it.each([
+    ["workspace", "Default Workspace"],
+    ["organization", "Manage organization"],
+    ["deployment", "Deployment"],
+  ] as const)(
+    "checks only the %s row while that scope is showing",
+    async (scope, checked) => {
+      mockApi({ context: inAWorkspace })
+      await renderInScope({
+        scope,
+        organizationLanding: "/organization/members",
+        deploymentLanding: "/deployment/settings",
+      })
+
+      const { menu } = await openScopeMenu()
+      await within(menu).findByRole("button", { name: /^Manage organization/ })
+      const rows = {
+        "Default Workspace": within(menu).getByRole("button", {
+          name: /^Default Workspace/,
+        }),
+        "Manage organization": within(menu).getByRole("button", {
+          name: /^Manage organization/,
+        }),
+        Deployment: within(menu).getByRole("button", { name: /^Deployment/ }),
+      }
+      for (const [label, row] of Object.entries(rows)) {
+        expect(isChecked(row), label).toBe(label === checked)
+      }
+    },
+  )
+
+  it("lands on the workspace rail when a workspace is chosen from another scope", async () => {
+    // From the organization's or the deployment's pages, choosing a workspace
+    // is how you leave them. Changing the selection under a rail that does not
+    // read it would look like the press did nothing.
+    mockApi({ context: inAWorkspace })
+    const onNavigate = vi.fn()
+    await renderInScope(
+      { scope: "organization", workspaceLanding: "/models", onNavigate },
+      "/organization/members",
+    )
+
+    const { user, menu } = await openScopeMenu()
+    await user.click(
+      await within(menu).findByRole("button", { name: /^Default Workspace/ }),
+    )
+
+    expect(await screen.findByText("MODELS PAGE")).toBeInTheDocument()
+    expect(onNavigate).toHaveBeenCalledTimes(1)
+  })
+
+  it("stays on the page when a workspace is chosen from the workspace rail", async () => {
+    // The control for the case above: on the workspace rail the page already
+    // reads the selection, so choosing one only closes the menu.
+    mockApi({ context: inAWorkspace })
+    const onNavigate = vi.fn()
+    await renderInScope({ workspaceLanding: "/models", onNavigate })
+
+    const { user, menu } = await openScopeMenu()
+    await user.click(
+      await within(menu).findByRole("button", { name: /^Default Workspace/ }),
+    )
+
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(screen.getByText("STARTING PAGE")).toBeInTheDocument()
+    expect(screen.queryByText("MODELS PAGE")).toBeNull()
+    expect(onNavigate).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [
+      "workspace",
+      "Switch workspace, currently Default Workspace in Default Organization",
+      ["Default Workspace", "Default Organization"],
+    ],
+    [
+      "organization",
+      "Switch scope, currently Default Organization",
+      ["Default Organization", "Organization"],
+    ],
+    [
+      "deployment",
+      "Switch scope, currently Deployment",
+      ["Deployment", "All organizations"],
+    ],
+  ] as const)(
+    "names the %s scope on its trigger",
+    async (scope, label, lines) => {
+      mockApi({ context: inAWorkspace })
+      await renderInScope({ scope })
+
+      // Awaited on the full name, which carries the context's answers, rather
+      // than on the trigger, which renders "Loading…" before they land.
+      const trigger = await screen.findByRole("button", { name: label })
+      const [title, subtitle] = lines
+      const text = [...trigger.querySelectorAll("span.truncate")].map(
+        (span) => span.textContent,
+      )
+      expect(text).toEqual([title, subtitle])
+    },
+  )
+})

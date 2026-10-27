@@ -54,7 +54,7 @@ export function PlaygroundGateNotice({
         <Link
           to={
             isOperator
-              ? "/admin/hosted-providers"
+              ? "/deployment/hosted-providers"
               : "/organization/provider-keys"
           }
           className="font-medium text-link hover:text-link-hover"

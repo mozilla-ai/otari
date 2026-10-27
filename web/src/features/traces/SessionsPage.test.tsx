@@ -3,10 +3,12 @@ import { act, screen, waitFor, within } from "@testing-library/react"
 import userEvent, { type UserEvent } from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { ScopedBudget } from "@/client"
+import type { OrganizationSpendCeiling, ScopedBudget } from "@/client"
 import { SessionsPage } from "@/features/traces/SessionsPage"
+import { API_ROOT } from "@/shared/api/client"
+import { DeploymentScope } from "@/shared/hooks/DeploymentScope"
 import { jsonResponse, mockApi, renderPage } from "@/tests/activity"
-import { scopedBudget } from "@/tests/fixtures"
+import { organizationSpendCeiling, scopedBudget } from "@/tests/fixtures"
 import {
   gateSummary,
   traceDetail,
@@ -59,8 +61,22 @@ const listReads = (calls: ReturnType<typeof mockApi>["calls"]) =>
     .filter((call) => /\/traces\?/.test(call.url))
     .map((call) => new URL(call.url, "http://localhost").searchParams)
 
-// The key's own ceiling over every provider, the one the panel reports.
-const keyCeiling = (overrides: Partial<ScopedBudget> = {}) =>
+// The key's own ceiling over every provider, the one the panel reports, as the
+// organization's spend ceilings list it. The page is the organization's, so this
+// is the list it reads.
+const keyCeiling = (overrides: Partial<OrganizationSpendCeiling> = {}) =>
+  organizationSpendCeiling({
+    scope_type: "api_token",
+    scope_id: "key-1",
+    provider_key_id: null,
+    max_budget: 10,
+    current_spend: 0,
+    ...overrides,
+  })
+
+// The same ceiling as the deployment's list reports it, for the panel on a
+// deployment page.
+const deploymentKeyCeiling = (overrides: Partial<ScopedBudget> = {}) =>
   scopedBudget({
     scope_type: "api_token",
     scope_id: "key-1",
@@ -176,10 +192,13 @@ describe("SessionsPage", () => {
 
   it("leads an opened session with its spend against the key's ceiling", async () => {
     const summary = traceSummary({ api_key_id: "key-1", cost: 0.5 })
-    mockApi({
+    // An admin who also operates the deployment: on the organization's page
+    // the ceiling still comes from the organization's list.
+    const { calls } = mockApi({
       traces: [summary],
       traceDetail: traceDetail({ summary }),
-      ceilings: [keyCeiling({ max_budget: 10, current_spend: 6 })],
+      role: "admin",
+      organizationCeilings: [keyCeiling({ max_budget: 10, current_spend: 6 })],
     })
 
     renderPage(<SessionsPage />, "/sessions")
@@ -195,6 +214,55 @@ describe("SessionsPage", () => {
         name: "This key's spend against its ceiling",
       }),
     ).toBeInTheDocument()
+    expect(calls.some((call) => call.url.includes("/scoped-budgets"))).toBe(
+      false,
+    )
+  })
+
+  it("reads the key's ceiling from the deployment's list on a deployment page", async () => {
+    const summary = traceSummary({ api_key_id: "key-1", cost: 0.5 })
+    const { calls } = mockApi({
+      traces: [summary],
+      traceDetail: traceDetail({ summary }),
+      ceilings: [deploymentKeyCeiling({ max_budget: 10, current_spend: 6 })],
+    })
+
+    renderPage(
+      <DeploymentScope>
+        <SessionsPage />
+      </DeploymentScope>,
+      "/sessions",
+    )
+    const peek = await openFirstSession()
+
+    expect(
+      await within(peek).findByText(
+        /This session is 5\.0% of this key's \$10\.00 ceiling, which has \$6\.00 spent this period\./,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      calls.some((call) =>
+        call.url.includes("/organizations/me/spend-ceilings"),
+      ),
+    ).toBe(false)
+  })
+
+  it("reads the organization's sessions for an operator outside the deployment's pages", async () => {
+    const summary = traceSummary()
+    const { calls } = mockApi({
+      traces: [summary],
+      traceDetail: traceDetail({ summary }),
+      deploymentOperator: true,
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    await openFirstSession()
+
+    const reads = calls.filter((call) => call.url.includes("/traces"))
+    expect(reads).not.toHaveLength(0)
+    for (const call of reads) {
+      expect(call.url).toContain(`${API_ROOT}/organizations/me/traces`)
+    }
   })
 
   it("says when a key has no ceiling of its own", async () => {
@@ -202,7 +270,7 @@ describe("SessionsPage", () => {
     mockApi({
       traces: [summary],
       traceDetail: traceDetail({ summary }),
-      ceilings: [keyCeiling()],
+      organizationCeilings: [keyCeiling()],
     })
 
     renderPage(<SessionsPage />, "/sessions")
@@ -213,21 +281,30 @@ describe("SessionsPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("does not ask a tenant for the deployment's ceilings", async () => {
+  it("does not ask a member for any ceiling, and says nothing of one", async () => {
     const summary = traceSummary({ api_key_id: "key-1" })
     const { calls } = mockApi({
       traces: [summary],
       traceDetail: traceDetail({ summary }),
       deploymentOperator: false,
+      role: "member",
+      organizationCeilings: [keyCeiling()],
     })
 
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession()
 
     expect(await costTotal(peek)).toBe("$0.02")
-    expect(calls.some((call) => call.url.includes("/scoped-budgets"))).toBe(
-      false,
-    )
+    // The organization's list is for its owners and admins, and the
+    // deployment's for a deployment page.
+    expect(
+      calls.some(
+        (call) =>
+          call.url.includes("/scoped-budgets") ||
+          call.url.includes("/spend-ceilings"),
+      ),
+    ).toBe(false)
+    expect(within(peek).queryByText(/ceiling/)).not.toBeInTheDocument()
   })
 
   it("shows how much of the session's and a call's prompt came from the cache", async () => {
@@ -877,7 +954,7 @@ describe("SessionsPage", () => {
       traces: [summary],
       traceDetail: traceDetail({ summary }),
     })
-    const refusals = refuse(mock, /\/scoped-budgets/, "Budgets unavailable")
+    const refusals = refuse(mock, /\/spend-ceilings/, "Budgets unavailable")
 
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession()
@@ -901,7 +978,7 @@ describe("SessionsPage", () => {
     mockApi({
       traces: [summary],
       traceDetail: traceDetail({ summary }),
-      ceilings: [keyCeiling({ provider_key_id: "provider-key-1" })],
+      organizationCeilings: [keyCeiling({ provider_key_id: "provider-key-1" })],
     })
 
     renderPage(<SessionsPage />, "/sessions")

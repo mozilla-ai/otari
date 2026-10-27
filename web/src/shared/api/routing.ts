@@ -14,7 +14,7 @@ import type {
   SetRoutingPolicyRequest,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
-import { useDeploymentOperator } from "@/shared/api/organizations"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   ALIASES,
   AUTOMATIC_FALLBACKS,
@@ -24,27 +24,30 @@ import {
   ROUTING_POLICIES,
   workspaceMeta,
 } from "@/shared/api/queryKeys"
+import { useIsDeploymentScope } from "@/shared/hooks/DeploymentScope"
 
-// Which of the two routing surfaces this caller may read, the `useKeysScope`
+// Which of the two routing surfaces this page reads, the `useKeysScope`
 // construction over the same pair of endpoints. `/routing/policies` and
 // `/aliases` are deployment-wide and refuse anyone who does not operate the
 // deployment; the `/organizations/me/*` two answer the same shapes for the
 // caller's own organization (otari-ai#1942, otari-ai#1969). The bases are part
-// of every query key they feed, so a demotion cannot serve the wider list from
-// cache, and an errored context takes the wider one, as every operator gate
-// does (`useDeploymentOperator`).
+// of every query key they feed, so the two scopes never share cached rows.
 export function useRoutingScope(): {
   policies: string
   aliases: string
   isReady: boolean
 } {
-  const { isOperator: isDeploymentWide, isSettled } = useDeploymentOperator()
+  const isDeploymentWide = useIsDeploymentScope()
+  // Outside the deployment's pages, held until the organization context has
+  // answered: the shell's selected workspace resolves from it, and a read sent
+  // before it would go out unfiltered across every workspace (otari-ai#2087).
+  const organization = useOrganizationContext()
   return {
     policies: isDeploymentWide
       ? "/routing/policies"
       : "/organizations/me/routing-policies",
     aliases: isDeploymentWide ? "/aliases" : "/organizations/me/aliases",
-    isReady: isSettled,
+    isReady: isDeploymentWide || !organization.isPending,
   }
 }
 

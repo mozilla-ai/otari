@@ -57,6 +57,7 @@ import {
   formatPct,
   formatUsd,
 } from "@/shared/helpers/format"
+import { useIsDeploymentScope } from "@/shared/hooks/DeploymentScope"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -111,14 +112,16 @@ function useWindows() {
 // The queries every overview variant is built on: the three summary windows
 // behind the usage tiles, and the newest few requests. Every filter carries the
 // shell's selected workspace, so the tiles, the sparklines and the
-// recent-requests strip narrow together with whatever sits beside them. The
-// usage hooks pick the surface for the caller (deployment-wide for an operator,
-// organization-scoped otherwise; see useUsageScope), which is what lets the
-// operator page and the organization page share this derivation.
+// recent-requests strip narrow together with whatever sits beside them, except
+// on the deployment's page, which reports every workspace. The usage hooks pick
+// the surface for the page (deployment-wide there, organization-scoped
+// otherwise; see useUsageScope), which is what lets the two overviews share
+// this derivation.
 function useUsageOverview() {
   const w = useWindows()
   const { selected: workspace } = useSelectedWorkspace()
-  const scope = workspace?.workspace_id
+  const isDeploymentWide = useIsDeploymentScope()
+  const scope = isDeploymentWide ? undefined : workspace?.workspace_id
 
   const todayFilters = useMemo(
     () => ({ workspace_id: scope, start_date: w.today }),
@@ -332,30 +335,12 @@ function UsageKpiCells({
 /**
  * The landing route, which is the one page nobody navigates to on purpose.
  *
- * The operator page's status panels read deployment-wide endpoints (provider
- * health, budgets, keys, accounts), and since otari-ai#1880 those answer 403
- * to anyone who is not an operator of the deployment. The gate is here rather
- * than on the queries because the hooks do not all take an `enabled` flag, and
- * a component that is not rendered runs none of them: that is what keeps a
- * tenant's first page from being a row of failed requests.
+ * The organization's overview for everyone, operator included. The
+ * deployment's own overview, whose panels read deployment-wide endpoints, is
+ * `DeploymentOverview`, on the deployment's rail.
  *
- * Decided from the organization context, which is where `useUsageScope` and the
- * nav rail take the same answer from, so nothing on screen can hold a different
- * one (otari-ai#1936). Two sources compose into a page that reports nothing
- * while being wrong: the deployment-wide panels beside usage tiles quietly
- * reading `/organizations/me/usage`, every number disagreeing with its
- * neighbor and each query happy with its own. It also costs no request, since
- * the shell reads this context before it paints.
- *
- * So an errored context lands on the operator page, as it does for the usage
- * hooks behind its tiles and for every other operator gate
- * (`useDeploymentOperator`): its panels report their own refusals, where the
- * reverse would hide the deployment's state from the one caller who owns it.
- * An errored context is an answer, not a wait: holding the page on a loading
- * state that no retry clears renders nothing at all.
- *
- * The one failure that is not sent there is a caller with no organization,
- * who has no deployment to operate and no organization to report on.
+ * A caller with no organization has no organization to report on, and is sent
+ * to their invitations or told how to get one.
  */
 export function OverviewIndex() {
   const { answer, isSettled } = useDeploymentOperator()
@@ -388,10 +373,7 @@ export function OverviewIndex() {
       <NoOrganizationOverview />
     )
   }
-  if (answer === "not-operator") {
-    return <OrganizationOverview />
-  }
-  return <OperatorOverviewIndex />
+  return <OrganizationOverview />
 }
 
 /**
@@ -443,7 +425,7 @@ function NoOrganizationOverview() {
 }
 
 /**
- * The landing page for a signed-in caller who does not operate the deployment.
+ * The landing page for a signed-in caller in an organization.
  *
  * The 11 Aug roles matrix has Overview as "my usage" for every role
  * (otari-ai#1946), so this is a real page rather than a card apologizing for
@@ -454,11 +436,8 @@ function NoOrganizationOverview() {
  * organization for an admin, the workspaces they belong to for a member;
  * otari#837), so nothing here re-derives roles for them.
  *
- * Two things the operator page has are deliberately absent. The attention strip
- * reads provider health and the deployment's budgets, neither of which is this
- * caller's to see. And there is no `useDeploymentOperator` anywhere below this
- * line: this *is* the non-operator branch, so asking again is how otari-ai#2080
- * happened.
+ * The attention strip the deployment page has is deliberately absent: it reads
+ * provider health and the deployment's budgets, which belong to that page.
  */
 function OrganizationOverview() {
   const { scope, today, period, previous, recent } = useUsageOverview()
@@ -643,11 +622,12 @@ function OrganizationOverview() {
   )
 }
 
-// The operator index uses the provider lists to make the empty gateway a
+// The deployment's overview uses the provider lists to make the empty gateway a
 // useful getting-started page: the `config.yml` instances and the deployment's
 // hosted providers, either of which serves a request. Both queries are
-// operator-gated, so this only runs once the gate above has answered.
-function OperatorOverviewIndex() {
+// operator-gated, and only the deployment's rail, which is operator-only,
+// renders this.
+export function DeploymentOverview() {
   const providers = useProviders()
   const hosted = useHostedProviders()
   if (providers.isLoading || hosted.isLoading) {
@@ -881,9 +861,10 @@ export function OverviewPage({
         recent={recent}
         activeKeys={summary.data ? activeKeys : null}
         activeMembers={summary.data ? activeMembers : null}
-        // An operator reaches every one of these; the rail on the tenant page
-        // drops the two the organization rail withholds from a member.
-        links={RAIL_LINKS}
+        // The summary is unfiltered here, so the rail counts the deployment
+        // and links to the deployment's own pages.
+        title="This deployment"
+        links={DEPLOYMENT_RAIL_LINKS}
       />
     </div>
   )
@@ -962,7 +943,7 @@ function GetStartedStrip({
                 // anyone else to `OrganizationOverview`), so it goes to the
                 // deployment's own keys.
                 action === "provider"
-                  ? "/admin/hosted-providers"
+                  ? "/deployment/hosted-providers"
                   : "/organization/provider-keys",
             })
           }
@@ -1032,31 +1013,31 @@ function AttentionStrip({
     if (down > 0) {
       problems.push({
         text: `${down} provider${down === 1 ? "" : "s"} unreachable`,
-        to: "/admin/hosted-providers",
+        to: "/deployment/hosted-providers",
       })
     }
     if (degraded > 0) {
       problems.push({
         text: `${degraded} provider${degraded === 1 ? "" : "s"} without model discovery`,
-        to: "/admin/hosted-providers",
+        to: "/deployment/hosted-providers",
       })
     }
   }
   if (budget.overCount > 0) {
     problems.push({
       text: `${budget.overCount} budget${budget.overCount === 1 ? "" : "s"} over limit`,
-      to: "/budgets",
+      to: "/deployment/budgets",
     })
   } else if (budget.nearCount > 0) {
     problems.push({
       text: `${budget.nearCount} budget${budget.nearCount === 1 ? "" : "s"} near limit`,
-      to: "/budgets",
+      to: "/deployment/budgets",
     })
   }
   if (errStatus === "alert" && errRate !== null) {
     problems.push({
       text: `error rate ${formatPct(errRate)}`,
-      to: "/activity",
+      to: "/deployment/activity",
       search: { status: "error" },
     })
   }
@@ -1123,6 +1104,7 @@ function SpendChart({
   series: { bucket_start: string; cost: number }[]
   isReady: boolean
 }) {
+  const isDeploymentWide = useIsDeploymentScope()
   const [hovered, setHovered] = useState<number>()
   if (!isReady || series.length < 2) {
     return null
@@ -1139,10 +1121,10 @@ function SpendChart({
       <div className="flex items-baseline justify-between">
         <h2 className="text-title">Spend, last 30 days</h2>
         <Link
-          to="/usage"
+          to={isDeploymentWide ? "/deployment/activity" : "/usage"}
           className="text-sm text-muted underline underline-offset-2 hover:text-foreground"
         >
-          View usage →
+          {isDeploymentWide ? "View activity →" : "View usage →"}
         </Link>
       </div>
       <div className="mt-4 flex">
@@ -1333,12 +1315,13 @@ function RecentActivity({
   loading: boolean
   error: unknown
 }) {
+  const isDeploymentWide = useIsDeploymentScope()
   return (
     <section className="flex flex-col pt-6 lg:pr-6">
       <div className="flex items-baseline justify-between pb-3">
         <h2 className="text-title">Recent activity</h2>
         <Link
-          to="/activity"
+          to={isDeploymentWide ? "/deployment/activity" : "/activity"}
           className="text-sm text-muted underline underline-offset-2 hover:text-foreground"
         >
           View all →
@@ -1372,12 +1355,14 @@ function ActivitySplit({
   activeKeys,
   activeMembers,
   links,
+  title = "This workspace",
   hasNoWorkspace = false,
 }: {
   recent: ReturnType<typeof useUsageLogs>
   activeKeys: number | null
   activeMembers: number | null
   links: readonly RailDestination[]
+  title?: string
   /** A member in no workspace yet, whose rail has no workspace to count. */
   hasNoWorkspace?: boolean
 }) {
@@ -1395,6 +1380,7 @@ function ActivitySplit({
           activeKeys={activeKeys}
           activeMembers={activeMembers}
           links={links}
+          title={title}
           hasNoWorkspace={hasNoWorkspace}
         />
       </div>
@@ -1414,6 +1400,13 @@ const RAIL_LINKS: readonly RailDestination[] = [
   { to: "/organization/members", label: "Members", organization: true },
   { to: "/budgets", label: "Budgets", organization: true },
   { to: "/activity", label: "Activity" },
+]
+
+const DEPLOYMENT_RAIL_LINKS: readonly RailDestination[] = [
+  { to: "/deployment/keys", label: "API keys" },
+  { to: "/deployment/accounts", label: "Accounts" },
+  { to: "/deployment/budgets", label: "Budgets" },
+  { to: "/deployment/activity", label: "Activity" },
 ]
 
 /**
@@ -1439,11 +1432,13 @@ function WorkspaceRail({
   activeKeys,
   activeMembers,
   links,
+  title,
   hasNoWorkspace,
 }: {
   activeKeys: number | null
   activeMembers: number | null
   links: readonly RailDestination[]
+  title: string
   hasNoWorkspace: boolean
 }) {
   return (
@@ -1460,7 +1455,7 @@ function WorkspaceRail({
         </div>
       ) : (
         <div>
-          <h2 className="text-title">This workspace</h2>
+          <h2 className="text-title">{title}</h2>
           <dl className="mt-3 flex gap-8 lg:flex-col lg:gap-4">
             <RailStat
               label="Active keys"

@@ -155,8 +155,7 @@ function renderShell(
       <Provider>
         <DeploymentProvider value={deployment}>
           <EntitlementProvider value={entitlements}>
-            {/* The shell reads the selected workspace for its switcher and its
-                way back out of the organization rail. */}
+            {/* The shell reads the selected workspace for its switcher. */}
             <SelectedWorkspaceProvider>
               <AppShell />
             </SelectedWorkspaceProvider>
@@ -191,6 +190,27 @@ const SETTINGS_NEEDING_PRICING: GatewaySettings = {
   ...SETTINGS_WITH_PRICING,
   default_pricing: false,
   require_pricing: true,
+}
+
+// The scope switcher heads every rail and is the one way between them, so a
+// case that crosses rails opens it. Its trigger reads "Switch workspace" on the
+// workspace rail and "Switch scope" on the other two.
+async function openScopeMenu(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    await screen.findByRole("button", { name: /^Switch (workspace|scope),/ }),
+  )
+  return screen.findByRole("dialog", {
+    name: "Switch workspace or organization",
+  })
+}
+
+// The "Manage organization" row arrives with the membership context, since it
+// gates on the caller's role, so it is awaited rather than assumed.
+async function enterOrganizationRail(user: ReturnType<typeof userEvent.setup>) {
+  const menu = await openScopeMenu(user)
+  await user.click(
+    await within(menu).findByRole("button", { name: "Manage organization" }),
+  )
 }
 
 describe("AppShell responsive layout", () => {
@@ -282,7 +302,7 @@ describe("AppShell responsive layout", () => {
       "page",
     )
 
-    await user.click(await screen.findByRole("link", { name: "Organization" }))
+    await enterOrganizationRail(user)
     const providers = await screen.findByRole("link", { name: "Providers" })
     expect(providers).not.toHaveAttribute("aria-current")
 
@@ -324,18 +344,13 @@ describe("AppShell responsive layout", () => {
     expect(container.querySelector("aside")?.className).toContain("w-[4.5rem]")
   })
 
-  it("resets the submenu and preserves focus across the mobile breakpoint", async () => {
+  it("closes the drawer and keeps focus in the rail across the mobile breakpoint", async () => {
     const { listeners } = mockMatchMedia(true)
     const user = userEvent.setup()
     const { container } = await renderShell()
 
     await user.click(screen.getByRole("button", { name: "Open navigation" }))
-    await user.click(
-      await screen.findByRole("button", { name: "Organization" }),
-    )
-    expect(
-      await screen.findByRole("link", { name: "Members & roles" }),
-    ).toBeInTheDocument()
+    expect(container.querySelector("aside")).toHaveFocus()
 
     // Simulate crossing to a desktop viewport.
     act(() => {
@@ -347,23 +362,9 @@ describe("AppShell responsive layout", () => {
     expect(
       screen.getByRole("button", { name: "Open navigation" }),
     ).toHaveAttribute("aria-expanded", "false")
-    // The focused submenu control unmounted, but focus stays on the navigation
-    // landmark rather than falling back to the document body.
+    // Focus stays on the navigation landmark rather than moving to a toggle
+    // that is now hidden or falling back to the document body.
     expect(container.querySelector("aside")).toHaveFocus()
-
-    // Returning to mobile and reopening starts at the workspace level. The
-    // submenu belongs to the drawer that framed it and cannot survive the
-    // breakpoint transition.
-    act(() => {
-      listeners.forEach((cb) => {
-        cb({ matches: true } as MediaQueryListEvent)
-      })
-    })
-    await user.click(screen.getByRole("button", { name: "Open navigation" }))
-    expect(
-      await screen.findByRole("link", { name: "API keys" }),
-    ).toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "Members & roles" })).toBeNull()
   })
 
   it("closes the drawer on Escape and restores focus to the toggle", async () => {
@@ -552,7 +553,14 @@ describe("AppShell for a caller with no organization", () => {
     // A 404 is no organization, not an unavailable context, which would fail
     // open onto the operator rows and the organization rail.
     expect(within(sidebar).getAllByRole("link")).toHaveLength(1)
-    expect(screen.queryByRole("link", { name: "Organization" })).toBeNull()
+
+    // And the switcher offers no organization to manage. The inbox row is what
+    // a caller with no organization is shown instead, so it is awaited first.
+    const menu = await openScopeMenu(userEvent.setup())
+    await within(menu).findByRole("button", { name: "Invitations" })
+    expect(
+      within(menu).queryByRole("button", { name: "Manage organization" }),
+    ).toBeNull()
   })
 })
 
@@ -590,40 +598,6 @@ describe("the invitations page in the chrome", () => {
     expect(
       screen.getByRole("button", { name: "Open navigation" }),
     ).toHaveAttribute("aria-expanded", "false")
-  })
-})
-
-describe("the rail's closing rules", () => {
-  // The footer block and the closing band each draw a rule. Between them sits
-  // one row, the way onto the organization rail, and on that rail it is gated
-  // out: the two rules then land 4px apart and read as a single doubled
-  // hairline, which is what a reader reported. The band's rule is the
-  // unconditional one, mirroring the scope band at the head of the rail, so the
-  // footer's is the one that gives way.
-  const footerOf = (container: HTMLElement) =>
-    container.querySelector('[class*="pb-[env(safe-area-inset-bottom)]"]')
-
-  it("keeps the footer rule where a row sits below it", async () => {
-    mockMatchMedia(false)
-    const { container } = await renderShell(bootstrap(), { url: "/" })
-
-    expect(
-      await screen.findByRole("link", { name: "Organization" }),
-    ).toBeInTheDocument()
-    expect(footerOf(container)).toHaveClass("border-t")
-  })
-
-  it("drops it on the organization rail, where that row is gone", async () => {
-    mockMatchMedia(false)
-    const { container } = await renderShell(bootstrap(), {
-      url: "/organization/members",
-    })
-
-    expect(
-      await screen.findByRole("link", { name: /^Back to/ }),
-    ).toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "Organization" })).toBeNull()
-    expect(footerOf(container)).not.toHaveClass("border-t")
   })
 })
 
@@ -820,7 +794,7 @@ describe("AppShell entitlement gating", () => {
     // this deployment does serve and that refuses them in its own words, which
     // the shell's panel would contradict.
     await renderShell(bootstrap(), {
-      url: "/admin/accounts",
+      url: "/deployment/accounts",
       operator: false,
     })
 
@@ -835,7 +809,7 @@ describe("AppShell entitlement gating", () => {
     // declares `surface: "admin"`, so a deployment that does not host it never
     // reaches the page at all, and the caller axis is never asked.
     await renderShell(bootstrap({ surfaces: ["models"] }), {
-      url: "/admin/accounts",
+      url: "/deployment/accounts",
       operator: true,
     })
 
@@ -858,9 +832,12 @@ describe("AppShell entitlement gating", () => {
     // a row losing its gate is a registry edit that says nothing about this
     // file. So the premise is asserted rather than assumed.
     expect(
-      navItemForPath("/admin/hosted-providers")?.operatorOnly,
+      navItemForPath("/deployment/hosted-providers")?.operatorOnly,
     ).toBeDefined()
-    await renderShell(bootstrap(), { operator: true, url: "/settings" })
+    await renderShell(bootstrap(), {
+      operator: true,
+      url: "/deployment/settings",
+    })
 
     expect(
       await within(
@@ -909,7 +886,7 @@ describe("AppShell entitlement gating", () => {
 
   it("still renders a destination that passes every axis", async () => {
     mockMatchMedia(false)
-    await renderShell(bootstrap(), { url: "/settings" })
+    await renderShell(bootstrap(), { url: "/deployment/settings" })
 
     expect(await screen.findByText("PAGE CONTENT")).toBeInTheDocument()
   })
@@ -939,144 +916,39 @@ describe("AppShell entitlement gating", () => {
     expect(screen.queryByRole("link", { name: "Activity" })).toBeNull()
   })
 
-  it("offers a way into the organization rail, and a way back out", async () => {
+  it("offers the organization rail from the scope switcher and nowhere else", async () => {
     mockMatchMedia(false)
+    const user = userEvent.setup()
     await renderShell()
 
-    // In: a footer entry, not a nav section.
-    const enter = await screen.findByRole("link", { name: "Organization" })
-    expect(enter).toHaveAttribute("href", "/organization/members")
-    // A link on the desk, where the rail it swaps to stays on screen to read.
-    // The drawer's submenu trigger is the mobile shape of this row and must not
-    // turn up beside it.
-    expect(screen.queryByRole("button", { name: "Organization" })).toBeNull()
-    // Out only exists on the other rail.
+    const menu = await openScopeMenu(user)
+    expect(
+      await within(menu).findByRole("button", { name: "Manage organization" }),
+    ).toBeInTheDocument()
+    // The switcher is the one way between rails, so the footer row that used to
+    // cross into this one and the band that led back out are both gone.
+    expect(screen.queryByRole("link", { name: "Organization" })).toBeNull()
     expect(screen.queryByText(/^Back to /)).toBeNull()
   })
 
-  it("opens the organization rail inside the mobile drawer rather than navigating", async () => {
+  it("dismisses the mobile drawer once the switcher moves to another scope", async () => {
     mockMatchMedia(true)
     const user = userEvent.setup()
     await renderShell()
 
     await user.click(screen.getByRole("button", { name: "Open navigation" }))
-    await user.click(
-      await screen.findByRole("button", { name: "Organization" }),
-    )
+    await enterOrganizationRail(user)
 
-    // The rail swapped, one level down inside the drawer: the organization's
-    // destinations are all there to choose from, and the workspace's are not.
-    expect(
-      await screen.findByRole("link", { name: "Members & roles" }),
-    ).toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "API keys" })).toBeNull()
-    // Nothing navigated, so the page behind the drawer is the one the menu was
-    // opened from, and the drawer is still over it.
-    expect(screen.getByText("PAGE CONTENT")).toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: "Close navigation" }),
-    ).toHaveAttribute("aria-expanded", "true")
-    // Focus follows the level, onto the control that leaves it again: the row
-    // that opened it is gone, so without this a keyboard or AT cursor would be
-    // dropped to the top of the document.
-    expect(screen.getByRole("button", { name: /^Back to / })).toHaveFocus()
-  })
-
-  it("dismisses the drawer once a destination on that submenu is chosen", async () => {
-    mockMatchMedia(true)
-    const user = userEvent.setup()
-    await renderShell()
-
-    await user.click(screen.getByRole("button", { name: "Open navigation" }))
-    await user.click(
-      await screen.findByRole("button", { name: "Organization" }),
-    )
-    await user.click(
-      await screen.findByRole("link", { name: "Members & roles" }),
-    )
-
-    // This is the tap that navigates, so this is the tap that closes.
+    // The tap that navigates is the tap that closes, so the page it landed on is
+    // not hidden behind the drawer.
     expect(
       screen.getByRole("button", { name: "Open navigation" }),
     ).toHaveAttribute("aria-expanded", "false")
     expect(screen.queryByText("PAGE CONTENT")).toBeNull()
-    // And the rail is now the organization one because the route says so, which
-    // is what the way back out belongs to.
+    // And the rail is the organization one because the route says so.
     expect(
-      await screen.findByRole("link", { name: /^Back to / }),
+      await screen.findByRole("link", { name: "Members & roles" }),
     ).toBeInTheDocument()
-  })
-
-  it("returns to the workspace menu from the submenu, without navigating", async () => {
-    mockMatchMedia(true)
-    const user = userEvent.setup()
-    await renderShell()
-
-    await user.click(screen.getByRole("button", { name: "Open navigation" }))
-    await user.click(
-      await screen.findByRole("button", { name: "Organization" }),
-    )
-    // A button, not the link the organization rail's own head is: the page
-    // under the drawer never left the workspace, so there is nowhere to go.
-    await user.click(screen.getByRole("button", { name: /^Back to / }))
-
-    expect(
-      await screen.findByRole("link", { name: "API keys" }),
-    ).toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "Members & roles" })).toBeNull()
-    expect(screen.getByText("PAGE CONTENT")).toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: "Close navigation" }),
-    ).toHaveAttribute("aria-expanded", "true")
-    // Focus comes back to the row that opened the level.
-    expect(screen.getByRole("button", { name: "Organization" })).toHaveFocus()
-  })
-
-  it("unwinds one level at a time on Escape", async () => {
-    mockMatchMedia(true)
-    const user = userEvent.setup()
-    await renderShell()
-
-    await user.click(screen.getByRole("button", { name: "Open navigation" }))
-    await user.click(
-      await screen.findByRole("button", { name: "Organization" }),
-    )
-
-    // The submenu first: taking the whole drawer would be the wrong amount of
-    // dismissal when the row you were after is the level above.
-    await user.keyboard("{Escape}")
-    expect(
-      await screen.findByRole("link", { name: "API keys" }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: "Close navigation" }),
-    ).toHaveAttribute("aria-expanded", "true")
-
-    await user.keyboard("{Escape}")
-    expect(
-      screen.getByRole("button", { name: "Open navigation" }),
-    ).toHaveAttribute("aria-expanded", "false")
-  })
-
-  it("reopens the drawer on the workspace menu, not on the level it was left in", async () => {
-    mockMatchMedia(true)
-    const user = userEvent.setup()
-    await renderShell()
-
-    await user.click(screen.getByRole("button", { name: "Open navigation" }))
-    await user.click(
-      await screen.findByRole("button", { name: "Organization" }),
-    )
-    await user.click(screen.getByRole("button", { name: "Close navigation" }))
-    await user.click(screen.getByRole("button", { name: "Open navigation" }))
-
-    // The submenu belongs to the drawer that framed it. Surviving the close
-    // would show the organization's rows to someone reopening the menu from a
-    // workspace page, with no tap of theirs to explain it.
-    expect(
-      await screen.findByRole("link", { name: "API keys" }),
-    ).toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "Members & roles" })).toBeNull()
   })
 
   it("offers Create workspace to a role the server would let create one", async () => {
@@ -1119,17 +991,44 @@ describe("AppShell entitlement gating", () => {
     ).toBeNull()
   })
 
-  it("leaves the organization rail by its own way back", async () => {
+  it("heads the organization rail with the switcher, naming that scope", async () => {
     mockMatchMedia(false)
-    await renderShell(bootstrap(), { url: "/organization/members" })
+    const user = userEvent.setup()
+    await renderShell(bootstrap(), {
+      url: "/organization/members",
+      context: {
+        workspace_memberships: [
+          {
+            name: "Default workspace",
+            role: "owner",
+            workspace_id: "44444444-4444-4444-4444-444444444444",
+          },
+        ],
+      },
+    })
 
-    // The organization rail has no switcher; it has the one link back to where
-    // the shell opened. ("Organization" is a destination *on* this rail, so its
-    // absence is not what distinguishes the two.)
-    expect(await screen.findByText(/^Back to /)).toBeInTheDocument()
+    const trigger = await screen.findByRole("button", {
+      name: "Switch scope, currently Default Organization",
+    })
+    expect(trigger).toHaveTextContent("Default Organization")
+    expect(screen.queryByText(/^Back to /)).toBeNull()
+
+    // Choosing a workspace from here is how you leave, and it lands on the
+    // workspace rail rather than only changing the selection under this one.
+    const menu = await openScopeMenu(user)
+    await user.click(
+      await within(menu).findByRole("button", { name: /^Default workspace/ }),
+    )
+
     expect(
-      screen.queryByRole("button", { name: "Switch workspace" }),
-    ).toBeNull()
+      await screen.findByRole("link", { name: "API keys" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", {
+        name: "Switch workspace, currently Default workspace in Default Organization",
+      }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Members & roles" })).toBeNull()
   })
 
   it("returns you to where you were on each rail rather than to its landing", async () => {
@@ -1141,22 +1040,26 @@ describe("AppShell entitlement gating", () => {
       "otari.dashboard.lastOrganizationLocation",
       "/budgets",
     )
+    const user = userEvent.setup()
     await renderShell()
+    await enterOrganizationRail(user)
 
     expect(
-      await screen.findByRole("link", { name: "Organization" }),
-    ).toHaveAttribute("href", "/budgets")
+      await screen.findByRole("link", { name: "Spend & budgets" }),
+    ).toHaveAttribute("aria-current", "page")
   })
 
   it("lands on the rail's own first page when there is nothing to resume", async () => {
     mockMatchMedia(false)
     // The solo-operator path: nothing remembered, so the way in must still be one
     // click to somewhere useful rather than a dead control.
+    const user = userEvent.setup()
     await renderShell()
+    await enterOrganizationRail(user)
 
     expect(
-      await screen.findByRole("link", { name: "Organization" }),
-    ).toHaveAttribute("href", "/organization/members")
+      await screen.findByRole("link", { name: "Members & roles" }),
+    ).toHaveAttribute("aria-current", "page")
   })
 
   it("does not resume onto a destination this deployment gates off", async () => {
@@ -1167,13 +1070,18 @@ describe("AppShell entitlement gating", () => {
     // "not available here" panel.
     window.localStorage.setItem(
       "otari.dashboard.lastOrganizationLocation",
-      "/settings",
+      "/budgets",
     )
-    await renderShell(bootstrap({ surfaces: ["organizations", "budgets"] }))
+    const user = userEvent.setup()
+    await renderShell(bootstrap({ surfaces: ["organizations"] }))
+    await enterOrganizationRail(user)
 
     expect(
-      await screen.findByRole("link", { name: "Organization" }),
-    ).toHaveAttribute("href", "/organization/members")
+      await screen.findByRole("link", { name: "Members & roles" }),
+    ).toHaveAttribute("aria-current", "page")
+    expect(
+      screen.queryByText("Spend & budgets is not available here"),
+    ).toBeNull()
   })
 
   it("does not record a gated-off route it answered with the panel", async () => {
@@ -1181,12 +1089,12 @@ describe("AppShell entitlement gating", () => {
     // Reached by URL, refused by the shell. Recording it would make the panel
     // the page the rail resumes to.
     await renderShell(bootstrap({ surfaces: ["organizations"] }), {
-      url: "/settings",
+      url: "/deployment/settings",
     })
     await screen.findByText("Settings is not available here")
 
     expect(
-      window.localStorage.getItem("otari.dashboard.lastOrganizationLocation"),
+      window.localStorage.getItem("otari.dashboard.lastDeploymentLocation"),
     ).toBeNull()
   })
 
@@ -1282,44 +1190,75 @@ describe("AppShell entitlement gating", () => {
     // The control and the rail agree because the shell resolves one through the
     // same predicate as the other: a non-operator sees no Deployment row, and
     // would find no rows if they reached it. Absent rather than disabled, since
-    // `/admin/accounts` is gated `unlisted` precisely so the shell does not
+    // `/deployment/accounts` is gated `unlisted` precisely so the shell does not
     // admit it exists.
+    const user = userEvent.setup()
     await renderShell(bootstrap(), { operator: false })
 
-    await screen.findByRole("button", { name: /^Account:/ })
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: /^Account:/ }))
-
+    const menu = await openScopeMenu(user)
+    // Awaited first: it arrives with the same context read, so the absence
+    // below is a refused row rather than one whose answer had not landed.
+    await within(menu).findByRole("button", { name: "Manage organization" })
     expect(
-      await screen.findByRole("link", { name: "Account settings" }),
-    ).toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "Deployment" })).toBeNull()
+      within(menu).queryByRole("button", { name: "Deployment" }),
+    ).toBeNull()
   })
 
-  it("offers the Organization switch on the workspace rail and on neither other", async () => {
+  it("opens the deployment rail from the switcher for an operator", async () => {
     mockMatchMedia(false)
-    // Stated as a rule about the workspace rail rather than as "not the
-    // organization one". Written as a negation, a third rail inherits the row by
-    // being merely not-the-organization, and the deployment rail would carry a
-    // way into a context it is a sibling of rather than a way out of itself.
-    // Queried on the whole shell, not inside the Sidebar landmark: the switch
-    // row sits in the rail's footer, below the nav rather than in it.
+    const user = userEvent.setup()
+    await renderShell(bootstrap(), { operator: true })
+
+    const menu = await openScopeMenu(user)
+    await user.click(
+      await within(menu).findByRole("button", { name: "Deployment" }),
+    )
+
+    // Nothing remembered, so it lands on the deployment's own Overview.
+    const rail = screen.getByRole("navigation", { name: "Sidebar" })
+    const overview = await within(rail).findByRole("link", { name: "Overview" })
+    expect(overview).toHaveAttribute("href", "/deployment")
+    expect(overview).toHaveAttribute("aria-current", "page")
+    expect(
+      await screen.findByRole("button", {
+        name: "Switch scope, currently Deployment",
+      }),
+    ).toHaveTextContent("All organizations")
+  })
+
+  it("heads every rail with the scope switcher", async () => {
+    mockMatchMedia(false)
+    // Stated per rail, because the switcher is now the only way between them:
+    // a rail that drew something else in its head would be a rail you could
+    // not leave.
     const rail = () => screen.getByRole("navigation", { name: "Sidebar" })
     await renderShell(bootstrap(), { url: "/" })
     expect(
-      await screen.findByRole("link", { name: "Organization" }),
+      await screen.findByRole("button", {
+        name: /^Switch workspace, currently/,
+      }),
     ).toBeInTheDocument()
 
     cleanup()
-    await renderShell(bootstrap(), { url: "/settings", operator: true })
+    await renderShell(bootstrap(), {
+      url: "/deployment/settings",
+      operator: true,
+    })
     await within(rail()).findByRole("link", { name: "Accounts" })
-    expect(screen.queryByRole("link", { name: "Organization" })).toBeNull()
+    expect(
+      screen.getByRole("button", {
+        name: "Switch scope, currently Deployment",
+      }),
+    ).toBeInTheDocument()
 
     cleanup()
     await renderShell(bootstrap(), { url: "/organization/members" })
     await within(rail()).findByRole("link", { name: "Members & roles" })
-    expect(screen.queryByRole("link", { name: "Organization" })).toBeNull()
+    expect(
+      await screen.findByRole("button", {
+        name: "Switch scope, currently Default Organization",
+      }),
+    ).toBeInTheDocument()
   })
 
   it("names the deployment as the scope of its own pages", async () => {
@@ -1340,7 +1279,7 @@ describe("AppShell entitlement gating", () => {
       ],
     }
     await renderShell(bootstrap(), {
-      url: "/settings",
+      url: "/deployment/settings",
       operator: true,
       context: inWorkspace,
     })
@@ -1359,8 +1298,9 @@ describe("AppShell entitlement gating", () => {
     expect(
       within(rail).getByRole("link", { name: "Accounts" }),
     ).toBeInTheDocument()
-    // And neither of the other two rails is showing.
-    expect(within(rail).queryByRole("link", { name: "Overview" })).toBeNull()
+    // And neither of the other two rails is showing. Not asked of Overview,
+    // which the deployment rail draws too, for its own front page.
+    expect(within(rail).queryByRole("link", { name: "Models" })).toBeNull()
     expect(
       within(rail).queryByRole("link", { name: "Members & roles" }),
     ).toBeNull()
@@ -1562,10 +1502,55 @@ describe("the telemetry the sidebar records", () => {
     })
   })
 
+  it("records entering the organization rail from the scope switcher", async () => {
+    // A move between rails does not go through a rail row, so the switcher
+    // reports it itself, under the rail it landed on.
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell(bootstrap(), { url: "/models" })
+
+    await enterOrganizationRail(user)
+
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
+      tab_name: "members",
+      context: "organization_settings",
+    })
+  })
+
+  it("records leaving the organization rail by choosing a workspace", async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell(bootstrap(), {
+      url: "/organization/members",
+      context: {
+        workspace_memberships: [
+          {
+            name: "Default workspace",
+            role: "owner",
+            workspace_id: "44444444-4444-4444-4444-444444444444",
+          },
+        ],
+      },
+    })
+
+    const menu = await openScopeMenu(user)
+    await user.click(
+      await within(menu).findByRole("button", { name: /^Default workspace/ }),
+    )
+
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
+      tab_name: "index",
+      context: "workspace_sidebar",
+    })
+  })
+
   it("records a deployment page under its own context, not the workspace one", async () => {
     mockMatchMedia(false)
     const user = userEvent.setup()
-    await renderShell(bootstrap(), { url: "/settings", operator: true })
+    await renderShell(bootstrap(), {
+      url: "/deployment/settings",
+      operator: true,
+    })
 
     const rail = screen.getByRole("navigation", { name: "Sidebar" })
     await user.click(
@@ -1575,37 +1560,6 @@ describe("the telemetry the sidebar records", () => {
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
       tab_name: "accounts",
       context: "deployment_settings",
-    })
-  })
-
-  it("records entering the organization rail from the footer row", async () => {
-    // The row that crosses into the other rail does not go through
-    // `NavRowLink`, so tracking the rows alone left every entry to and exit
-    // from that rail unrecorded while every row inside it was recorded.
-    mockMatchMedia(false)
-    const user = userEvent.setup()
-    await renderShell()
-
-    // `findByRole`, as the sibling test above does: this row appears only once
-    // the organization context resolves, since it gates on the caller's role.
-    await user.click(await screen.findByRole("link", { name: "Organization" }))
-
-    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
-      tab_name: "members",
-      context: "organization_settings",
-    })
-  })
-
-  it("records leaving it by the way back", async () => {
-    mockMatchMedia(false)
-    const user = userEvent.setup()
-    await renderShell(bootstrap(), { url: "/organization/members" })
-
-    await user.click(await screen.findByRole("link", { name: /^Back to/ }))
-
-    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
-      tab_name: "index",
-      context: "workspace_sidebar",
     })
   })
 })

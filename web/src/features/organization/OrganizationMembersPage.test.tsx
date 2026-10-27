@@ -153,7 +153,9 @@ function mockApi(opts: {
     if (url.endsWith(`${API_ROOT}/models`)) {
       return jsonResponse({ object: "list", data: catalogModels })
     }
-    if (url.includes(`${API_ROOT}/aliases`)) {
+    // Either surface: the deployment's `/aliases`, or the organization's, which
+    // is what the model-access picker reads on this organization page.
+    if (url.endsWith("/aliases")) {
       return jsonResponse([])
     }
     if (url.includes(`${API_ROOT}/budgets`)) {
@@ -1143,7 +1145,8 @@ describe("OrganizationMembersPage", () => {
           }),
         ],
       },
-      budgets: [
+      // The organization's budgets, which the picker offers an operator too.
+      organizationBudgets: [
         budget({ budget_id: "bud-small", name: "Small", max_budget: 50 }),
         budget({ budget_id: "bud-large", name: "Large", max_budget: 125 }),
       ],
@@ -1189,12 +1192,17 @@ describe("OrganizationMembersPage", () => {
     )
     expect(join).toBeDefined()
 
+    // On the organization's surface, operator or not: this is the
+    // organization's page, and the deployment's budgets are assigned on its own.
     const ceiling = requests.find(
       (r) =>
         r.method === "PATCH" &&
-        r.url.includes(`${API_ROOT}/scoped-budgets/ceiling-1`),
+        r.url.includes(`${API_ROOT}/organizations/me/spend-ceilings/ceiling-1`),
     )
     expect(ceiling?.body).toEqual({ budget_id: "bud-large" })
+    expect(
+      requests.some((r) => r.url.includes(`${API_ROOT}/scoped-budgets`)),
+    ).toBe(false)
 
     // The ordering, not just the presence of both: a ceiling names a membership,
     // so a workspace just joined has no id to name until the server answers.
@@ -1224,7 +1232,8 @@ describe("OrganizationMembersPage", () => {
           }),
         ],
       },
-      budgets: [
+      // The organization's budgets, which the picker offers an operator too.
+      organizationBudgets: [
         budget({ budget_id: "bud-small", name: "Small", max_budget: 50 }),
         budget({ budget_id: "bud-large", name: "Large", max_budget: 125 }),
       ],
@@ -1449,6 +1458,65 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     expect(selectTrigger("Budget in Default Workspace")).toHaveTextContent(
       "Set by the deployment",
     )
+  })
+
+  it("offers an operator the same picker, on the organization's budgets", async () => {
+    // The page decides the surface, not the role: an operator editing a member
+    // here picks among the organization's budgets, and a ceiling on a
+    // deployment budget reads as set by the deployment for them too.
+    const requests = mockApi({
+      members: [OWNER, ANALYST],
+      users: [user({ user_id: ANALYST.attribution_user_id as string })],
+      workspaces: [workspace()],
+      workspaceMembers: {
+        "44444444-4444-4444-4444-444444444444": [
+          workspaceMember({
+            id: "membership-1",
+            user_id: ANALYST.user_id as string,
+            role: "member",
+          }),
+        ],
+      },
+      budgets: [budget({ budget_id: "deployment-bud", name: "Deployment" })],
+      organizationBudgets: [
+        budget({ budget_id: "org-bud", name: "Team cap", max_budget: 40 }),
+      ],
+      scopedBudgets: [
+        scopedBudget({
+          id: "ceiling-1",
+          scope_type: "workspace_member",
+          scope_id: "membership-1",
+          budget_id: "deployment-bud",
+          max_budget: 50,
+        }),
+      ],
+      context: organizationContext({ deployment_operator: true }),
+    })
+    const actor = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    await actor.click(
+      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
+    )
+    await screen.findByText("Workspace access")
+    expect(selectTrigger("Budget in Default Workspace")).toHaveTextContent(
+      "Set by the deployment",
+    )
+    await waitFor(() =>
+      expect(
+        requests.some(
+          (r) =>
+            r.method === "GET" &&
+            r.url.includes(`${API_ROOT}/organizations/me/budgets`),
+        ),
+      ).toBe(true),
+    )
+    expect(
+      requests.some(
+        (r) => r.method === "GET" && /\/api\/v1\/budgets(\?|$)/.test(r.url),
+      ),
+    ).toBe(false)
   })
 
   it("withholds model access in the editor rather than denying it exists", async () => {

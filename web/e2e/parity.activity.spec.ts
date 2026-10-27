@@ -237,7 +237,12 @@ test.describe("activity log", () => {
     page,
   }) => {
     await login(page)
-    await gotoRoute(page, `${SCOPED}&model=${PARITY.models.unpriced.model}`)
+    // The deployment's own log: a price is the deployment's to set, so only its
+    // page offers one, and a workspace's says who sets it instead.
+    await gotoRoute(
+      page,
+      `/deployment${SCOPED}&model=${PARITY.models.unpriced.model}`,
+    )
     await openDetail(page, rows(page).first())
 
     const detail = detailPanel(page)

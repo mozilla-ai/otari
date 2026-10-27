@@ -11,6 +11,7 @@ import type {
 } from "@/client"
 import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
 import * as apiClient from "@/shared/api/client"
+import { DeploymentScope } from "@/shared/hooks/DeploymentScope"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import {
   organizationContext,
@@ -72,7 +73,10 @@ function renderBanner() {
   render(
     <QueryClientProvider client={client}>
       <SelectedWorkspaceProvider>
-        <UnpricedUsageWarning />
+        {/* As the shell mounts it: an alarm over the whole deployment. */}
+        <DeploymentScope>
+          <UnpricedUsageWarning />
+        </DeploymentScope>
       </SelectedWorkspaceProvider>
     </QueryClientProvider>,
     { wrapper: withRouter() },
@@ -107,7 +111,7 @@ describe("UnpricedUsageWarning", () => {
       screen.getByRole("link", { name: "View unpriced requests" }),
     ).toHaveAttribute(
       "href",
-      "/activity?status=success&priced=false&range=24h&source=gateway",
+      "/deployment/activity?status=success&priced=false&range=24h&source=gateway",
     )
 
     const params = summaryParams(spy)

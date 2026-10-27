@@ -60,7 +60,10 @@ describe("rail location memory", () => {
     // Registered, and reachable by URL, but the shell answers it with the "not
     // available here" panel. The page someone was just told they cannot have is
     // not the page to send them back to.
-    rememberLocation("/settings", withoutSurface("settings"))
+    rememberLocation(
+      "/organization/usage",
+      withoutSurface("organization_usage"),
+    )
 
     expect(lastLocation("organization", showsEverything)).toEqual({
       to: "/budgets",
@@ -105,10 +108,10 @@ describe("rail location memory", () => {
   })
 
   it("remembers a deployment page under its own rail, and only there", () => {
-    rememberLocation("/settings", showsEverything)
+    rememberLocation("/deployment/settings", showsEverything)
 
     expect(lastLocation("deployment", showsEverything)).toEqual({
-      to: "/settings",
+      to: "/deployment/settings",
     })
     expect(lastLocation("workspace", showsEverything)).toBeUndefined()
     expect(lastLocation("organization", showsEverything)).toBeUndefined()
@@ -120,7 +123,7 @@ describe("rail location memory", () => {
     // "deployment" as the place to come back to, which is the answer the back
     // link is about to read. A state that destroys its own input.
     rememberLocation("/organization/members", showsEverything)
-    rememberLocation("/settings", showsEverything)
+    rememberLocation("/deployment/settings", showsEverything)
 
     expect(lastRailContext(showsEverything)).toBe("organization")
   })

@@ -320,7 +320,7 @@ async def test_the_alert_list_hears_when_a_provider_fails_and_when_it_is_back(
     # The second run found bedrock still down, which the list already knew.
     assert outbox.subjects[2] == "Otari health on otari.example.com: bedrock is answering again"
     assert "  bedrock:claude  failed for 10 minutes, 2 runs in a row" in outbox.sent[2][1].text
-    assert "https://otari.example.com/#/health-checks" in outbox.sent[0][1].text
+    assert "https://otari.example.com/#/deployment/health" in outbox.sent[0][1].text
 
 
 @pytest.mark.asyncio

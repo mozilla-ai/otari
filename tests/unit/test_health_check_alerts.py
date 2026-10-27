@@ -37,7 +37,7 @@ def _render(
         down_for=down_for or {},
         checked_at=_AT,
         deployment="us.otari.example",
-        health_link="https://us.otari.example/#/health-checks",
+        health_link="https://us.otari.example/#/deployment/health",
         asset_root=None,
     )
     return message.subject, message.text
@@ -84,7 +84,7 @@ def test_a_provider_with_nothing_answering_is_called_down() -> None:
     assert subject == "Otari health on us.otari.example: flakyco is down"
     assert "flakyco: 0 of 2 models answer" in text
     assert "  flakyco:a  HTTP 503 · upstream overloaded" in text
-    assert "https://us.otari.example/#/health-checks" in text
+    assert "https://us.otari.example/#/deployment/health" in text
 
 
 def test_a_provider_with_some_models_failing_names_how_many() -> None:

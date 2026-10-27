@@ -1,5 +1,6 @@
 /**
- * Which usage surface the Usage page reads, and for whom (otari#837).
+ * Which usage surface the Usage page reads, and where (otari#837): the page's
+ * scope decides it, not the caller's role.
  *
  * A file of its own rather than a describe inside `UsagePage.test.tsx`: a case
  * there drives a router navigation, and the tree it leaves behind lands a stray
@@ -14,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { UsageSummary } from "@/client"
 import { UsagePage } from "@/features/usage/UsagePage"
 import { API_ROOT } from "@/shared/api/client"
+import { DeploymentScope } from "@/shared/hooks/DeploymentScope"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext, usageTotals } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
@@ -111,7 +113,9 @@ describe("UsagePage scope", () => {
     }
   })
 
-  it("reads the deployment-wide routes for an operator, so the case above is not vacuous", async () => {
+  it("reads the organization-scoped routes for an operator too", async () => {
+    // Outside the deployment's rail the page is the organization's, whoever is
+    // looking: `/usage` would put every tenant's totals under its title.
     const fetchMock = mockApi(true)
     renderPage(<UsagePage />)
     await screen.findByText("$1,240.50")
@@ -119,7 +123,40 @@ describe("UsagePage scope", () => {
     const reads = usageReads(fetchMock)
     expect(reads).not.toHaveLength(0)
     for (const url of reads) {
+      expect(url).toContain(`${API_ROOT}/organizations/me/usage/`)
+    }
+  })
+
+  it("reads the deployment-wide routes on the deployment's rail, so the cases above are not vacuous", async () => {
+    const fetchMock = mockApi(true)
+    renderPage(
+      <DeploymentScope>
+        <UsagePage />
+      </DeploymentScope>,
+    )
+    await screen.findByText("$1,240.50")
+
+    const reads = usageReads(fetchMock)
+    expect(reads).not.toHaveLength(0)
+    for (const url of reads) {
+      expect(url).toContain(`${API_ROOT}/usage/`)
       expect(url).not.toContain(`${API_ROOT}/organizations/me/usage/`)
+    }
+  })
+
+  it("keeps a page pinned to the organization narrow even on the deployment's rail", async () => {
+    const fetchMock = mockApi(true)
+    renderPage(
+      <DeploymentScope>
+        <UsagePage scope="organization" />
+      </DeploymentScope>,
+    )
+    await screen.findByText("$1,240.50")
+
+    const reads = usageReads(fetchMock)
+    expect(reads).not.toHaveLength(0)
+    for (const url of reads) {
+      expect(url).toContain(`${API_ROOT}/organizations/me/usage/`)
     }
   })
 })

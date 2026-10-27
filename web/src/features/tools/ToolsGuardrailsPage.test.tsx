@@ -405,8 +405,8 @@ describe("ToolsGuardrailsPage", () => {
   })
 
   it.each([
-    ["web_search", "/admin/web-search", "Web search pricing"],
-    ["sandbox", "/admin/code-execution", "Code execution pricing"],
+    ["web_search", "/deployment/web-search-pricing", "Web search pricing"],
+    ["sandbox", "/deployment/code-execution-pricing", "Code execution pricing"],
   ] as const)(
     "sends an operator on %s to the deployment's pricing page rather than pricing here",
     async (only, href, name) => {

@@ -153,7 +153,9 @@ interface GroupSpec {
   docsAnchor: string
   keys: string[]
   /** Where the service's per-call prices are set, linked from this group. */
-  pricingPage?: "/admin/web-search" | "/admin/code-execution"
+  pricingPage?:
+    | "/deployment/web-search-pricing"
+    | "/deployment/code-execution-pricing"
   /** Where a key the backend added but this page has not been told about goes. */
   catchAll?: boolean
   /** Keys collapsed under an Advanced row at the end of the group. */
@@ -212,7 +214,7 @@ const SERVICES: ServiceSpec[] = [
           "web_search_extract",
           "web_search_intercept",
         ],
-        pricingPage: "/admin/web-search",
+        pricingPage: "/deployment/web-search-pricing",
         catchAll: true,
         isOperatorOnly: true,
       },
@@ -242,7 +244,7 @@ const SERVICES: ServiceSpec[] = [
         docsAnchor: "code-execution",
         keys: ["sandbox_url"],
         advanced: ["sandbox_session_image", "code_execution_executor"],
-        pricingPage: "/admin/code-execution",
+        pricingPage: "/deployment/code-execution-pricing",
         catchAll: true,
         isOperatorOnly: true,
       },
@@ -294,7 +296,7 @@ function SandboxProviderRow({ provider }: { provider: "protocol" | "e2b" }) {
 function PricingLinkRow({
   to,
 }: {
-  to: "/admin/web-search" | "/admin/code-execution"
+  to: "/deployment/web-search-pricing" | "/deployment/code-execution-pricing"
 }) {
   return (
     <SettingRow
@@ -302,7 +304,7 @@ function PricingLinkRow({
       help="Set for the whole deployment, beside its other tool rates."
       control={
         <Link to={to} className="font-medium text-link hover:text-link-hover">
-          {to === "/admin/web-search"
+          {to === "/deployment/web-search-pricing"
             ? "Web search pricing"
             : "Code execution pricing"}
         </Link>

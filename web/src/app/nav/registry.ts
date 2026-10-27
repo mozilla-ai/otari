@@ -313,13 +313,12 @@ const ORGANIZATION_NAV_SECTIONS = [
     id: "org-money",
     label: "Cost & billing",
     items: [
-      // No `operatorOnly`, because the destination is two pages now: an
-      // operator gets the deployment's budgets and an organization owner or
-      // admin gets their own organization's (otari-ai#1943). The roles matrix
-      // has this row at Edit for an admin, and `/organizations/me/budgets`
-      // plus `/organizations/me/spend-ceilings` are what it edits. A plain
-      // member is not offered it, because the organization rail opens only to a
-      // caller who manages the organization.
+      // The organization's own budgets for everyone who reaches this rail,
+      // operator included (otari-ai#1943): `/organizations/me/budgets` plus
+      // `/organizations/me/spend-ceilings` are what it edits. The deployment's
+      // budgets are a row on the deployment's rail. A plain member is not
+      // offered it, because the organization rail opens only to a caller who
+      // manages the organization.
       {
         to: "/budgets",
         label: "Spend & budgets",
@@ -360,36 +359,85 @@ const ORGANIZATION_NAV_SECTIONS = [
 ] as const satisfies readonly NavSection[]
 
 /**
- * The deployment's own rail: what the gateway process is, rather than what any
- * tenant on it has.
+ * The deployment's own rail: what the gateway process is and everything on it
+ * across tenants, rather than what any one tenant has.
  *
- * A third context rather than a section in either rail, because that is the
- * distinction these two pages were always making and neither other rail could
- * hold. `/settings` is the running process (its master key, its safety toggles,
- * its defaults) and `/admin/accounts` reaches an account in any organization on
- * it, or in none that still admits it, which is a wider scope than the
- * organization rail's own roster.
- *
- * Headingless on purpose. One section with no siblings needs nothing to
- * separate it from, and a heading inside a context already named Deployment
- * would read as "Deployment, Deployment, Settings".
+ * The first three sections are the deployment-wide versions of pages the other
+ * rails also have (Overview, Activity, API keys, Budgets, Routing). They live
+ * under `/deployment`, whose layout marks them so the same page components read
+ * the deployment-wide routes there, which is how a page means one thing to
+ * whoever is looking at it instead of swapping on the caller's role. Unlisted,
+ * because their reads answer a non-operator 403.
  *
  * Every row keeps the refusal it declares, which is the axis the server
  * enforces and not a property of which rail draws them.
  */
 const DEPLOYMENT_SECTIONS = [
   {
-    id: "deployment-general",
+    id: "deployment-observe",
+    label: "Observe",
     items: [
       {
-        to: "/settings",
+        to: "/deployment",
+        label: "Overview",
+        icon: FiHome,
+        operatorOnly: "unlisted",
+      },
+      {
+        to: "/deployment/activity",
+        label: "Activity",
+        surface: "usage",
+        icon: FiActivity,
+        operatorOnly: "unlisted",
+      },
+    ],
+  },
+  {
+    id: "deployment-access",
+    label: "Access & spend",
+    items: [
+      {
+        to: "/deployment/keys",
+        label: "API keys",
+        surface: "keys",
+        icon: FiKey,
+        operatorOnly: "unlisted",
+      },
+      {
+        to: "/deployment/budgets",
+        label: "Budgets",
+        surface: "budgets",
+        icon: FiDollarSign,
+        operatorOnly: "unlisted",
+      },
+    ],
+  },
+  {
+    id: "deployment-build",
+    label: "Build",
+    items: [
+      {
+        to: "/deployment/routing",
+        label: "Routing",
+        surface: "routing",
+        icon: FiRepeat,
+        operatorOnly: "unlisted",
+      },
+    ],
+  },
+  {
+    id: "deployment-general",
+    label: "General",
+    items: [
+      {
+        to: "/deployment/settings",
         label: "Settings",
         surface: "settings",
         icon: FiSliders,
         operatorOnly: "refused",
       },
       {
-        to: "/admin/accounts",
+        to: "/deployment/accounts",
         label: "Accounts",
         surface: "admin",
         operatorOnly: "unlisted",
@@ -399,7 +447,7 @@ const DEPLOYMENT_SECTIONS = [
       // none of its own. Unlisted like Accounts, because its API refuses a
       // non-operator with the same 404.
       {
-        to: "/admin/hosted-providers",
+        to: "/deployment/hosted-providers",
         label: "Hosted providers",
         surface: "hosted_providers",
         operatorOnly: "unlisted",
@@ -409,21 +457,21 @@ const DEPLOYMENT_SECTIONS = [
       // Hosted providers is for its models. Refused rather than unlisted:
       // `/pricing` answers a non-operator 403.
       {
-        to: "/admin/web-search",
+        to: "/deployment/web-search-pricing",
         label: "Web search pricing",
         surface: "pricing",
         operatorOnly: "refused",
         icon: FiGlobe,
       },
       {
-        to: "/admin/code-execution",
+        to: "/deployment/code-execution-pricing",
         label: "Code execution pricing",
         surface: "pricing",
         operatorOnly: "refused",
         icon: FiCode,
       },
       {
-        to: "/health-checks",
+        to: "/deployment/health",
         label: "Health",
         surface: "health_checks",
         icon: FiActivity,

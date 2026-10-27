@@ -50,7 +50,6 @@ import {
 } from "@/features/models/ModelScopeControl"
 import { ToolScopeControl } from "@/features/tools/ToolScopeControl"
 import {
-  useBudgets,
   useMemberCeilingWriter,
   useOrganizationBudgets,
 } from "@/shared/api/budgets"
@@ -496,8 +495,8 @@ function InviteMemberForm({
  * default budget materializes a ceiling server-side that this form then has to
  * edit rather than duplicate.
  *
- * Ceilings go through the deployment's surface for an operator and the
- * organization's for anyone else who may edit, so an organization's owners and
+ * Ceilings go through the organization's surface for everyone who may edit,
+ * operator included, so an organization's owners and
  * admins cap their members here with the organization's own budgets.
  */
 function MemberEditor({
@@ -513,7 +512,7 @@ function MemberEditor({
   member: OrganizationMember
   spendRow: MemberAttribution | undefined
   workspaces: Workspace[]
-  // The deployment's budgets for an operator, the organization's otherwise.
+  // The organization's budgets.
   budgets: LabelableBudget[]
   // What each workspace hands a new member, used both to say what someone would
   // get and to give a ceiling created here the same cadence.
@@ -533,9 +532,7 @@ function MemberEditor({
   const addMember = useAddWorkspaceMember()
   const removeMember = useRemoveWorkspaceMember()
   const updateRole = useUpdateWorkspaceMemberRole()
-  const ceilingWriter = useMemberCeilingWriter(
-    isOperator ? "deployment" : "organization",
-  )
+  const ceilingWriter = useMemberCeilingWriter("organization")
 
   const initial = useMemo(() => {
     const byWorkspace = new Map(
@@ -583,8 +580,7 @@ function MemberEditor({
     // A ceiling on a budget this list does not hold (one set at the deployment
     // level, seen from the organization's surface) is kept as an option, so the
     // picker shows it rather than a blank, and picking another budget moves it.
-    ...(!isOperator &&
-    current !== "" &&
+    ...(current !== "" &&
     !budgets.some((budget) => budget.budget_id === current)
       ? [{ value: current, label: "Set by the deployment" }]
       : []),
@@ -888,9 +884,9 @@ export function OrganizationMembersPage() {
     [workspaces.data],
   )
   const workspaceDefaults = useAllWorkspaceBudgetDefaults(workspaceIds)
-  const deploymentBudgets = useBudgets(isOperator && isEditing)
-  const organizationBudgets = useOrganizationBudgets(!isOperator && isEditing)
-  const budgets = isOperator ? deploymentBudgets : organizationBudgets
+  // The organization's budgets for everyone: a member's deployment-wide budget
+  // is assigned on the deployment's Budgets page.
+  const budgets = useOrganizationBudgets(isEditing)
 
   const rows = useMemo(() => members.data?.data ?? [], [members.data])
 

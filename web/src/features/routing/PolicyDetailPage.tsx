@@ -34,7 +34,7 @@ export function PolicyDetailPage({ name }: { name: string }) {
     isLoading,
     isFetching,
     error,
-    isOperator,
+    isDeploymentWide,
     canEdit,
     writeWorkspaceId,
   } = useRoutingRows()
@@ -44,7 +44,10 @@ export function PolicyDetailPage({ name }: { name: string }) {
 
   const back = (
     <nav aria-label="Breadcrumb" className="text-caption">
-      <Link to="/routing" className="text-link hover:text-link-hover">
+      <Link
+        to={isDeploymentWide ? "/deployment/routing" : "/routing"}
+        className="text-link hover:text-link-hover"
+      >
         ← Routing
       </Link>
     </nav>
@@ -73,7 +76,7 @@ export function PolicyDetailPage({ name }: { name: string }) {
   const sectionProps = {
     row,
     stored,
-    isDeploymentWide: isOperator,
+    isDeploymentWide,
     fallbackWorkspaceId: writeWorkspaceId,
   }
   // Each section remounts when its own part of the stored policy changes, so
@@ -137,11 +140,13 @@ export function PolicyDetailPage({ name }: { name: string }) {
           <PolicyNameGroup
             key={rowKeyOf(row)}
             row={row}
-            isDeploymentWide={isOperator}
+            isDeploymentWide={isDeploymentWide}
             fallbackWorkspaceId={writeWorkspaceId}
             onRenamed={(next) =>
               void navigate({
-                to: "/routing/$name",
+                to: isDeploymentWide
+                  ? "/deployment/routing/$name"
+                  : "/routing/$name",
                 params: { name: next },
                 search: userId ? { user: userId } : {},
                 replace: true,

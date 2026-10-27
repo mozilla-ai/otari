@@ -61,39 +61,46 @@ export async function login(page: Page): Promise<void> {
   await expect(nav(page).getByRole("link", { name: "Overview" })).toBeVisible()
 }
 
-// The dashboard authenticates with a session cookie, but the seeding and
-// assertion helpers below talk to the management API directly as the master key,
-// which the auth dependencies prefer over the cookie. That keeps them usable
-// before `login` has run.
 /**
- * Cross from the workspace rail onto the organization one.
+ * Open the scope switcher at the top of the sidebar.
  *
- * The two sidebars never render together, so a spec about an organization
- * destination has to enter that context first; the footer entry is the only way
- * in, matching the navigation prototype.
+ * The one way between the three rails (workspace, organization, deployment):
+ * the rails never render together, so a spec about another rail's destination
+ * enters it here first. The trigger's accessible name carries the current
+ * scope, so it is matched on the prefix it always starts with.
  */
+export async function openScopeSwitcher(page: Page): Promise<Locator> {
+  await page
+    .getByRole("button", { name: /^Switch (workspace|scope), currently / })
+    .click()
+  const menu = page.getByRole("dialog", {
+    name: "Switch workspace or organization",
+  })
+  await expect(menu).toBeVisible()
+  return menu
+}
+
+/** Cross onto the organization rail, as an owner or admin. */
 export async function openOrganization(page: Page): Promise<void> {
-  await page.getByRole("link", { name: "Organization", exact: true }).click()
+  const menu = await openScopeSwitcher(page)
+  await menu.getByRole("button", { name: "Manage organization" }).click()
+  // Gone before anything else is pressed: while it animates out, its own
+  // "Create workspace" row is still on the page beside the one a page offers.
+  await expect(menu).toBeHidden()
   await expect(
     nav(page).getByRole("link", { name: "Members & roles" }),
   ).toBeVisible()
 }
 
-/**
- * Open the account menu at the foot of the sidebar.
- *
- * The one way to the deployment's own pages: they are registry entries like any
- * other, but the shell draws them here rather than as rail rows, so a spec that
- * only walks the rails never reaches them.
- *
- * The trigger's accessible name carries whoever is signed in, so it is matched
- * on the prefix it always starts with rather than in full.
- */
-export async function openAccountMenu(page: Page): Promise<Locator> {
-  await page.getByRole("button", { name: /^Account:/ }).click()
-  const menu = page.getByRole("dialog", { name: "Account" })
-  await expect(menu).toBeVisible()
-  return menu
+/** Cross onto the deployment rail, as an operator. */
+export async function openDeployment(page: Page): Promise<void> {
+  const menu = await openScopeSwitcher(page)
+  await menu.getByRole("button", { name: "Deployment", exact: true }).click()
+  // Closed first, as in `openOrganization`.
+  await expect(menu).toBeHidden()
+  await expect(
+    nav(page).getByRole("link", { name: "Hosted providers", exact: true }),
+  ).toBeVisible()
 }
 
 /**
@@ -115,6 +122,10 @@ export async function openNested(
   await nav(page).getByRole("link", { name: child, exact: true }).click()
 }
 
+// The dashboard authenticates with a session cookie, but the seeding and
+// assertion helpers below talk to the management API directly as the master key,
+// which the auth dependencies prefer over the cookie. That keeps them usable
+// before `login` has run.
 export const authHeaders = {
   Authorization: `Bearer ${MASTER_KEY}`,
   "Content-Type": "application/json",
@@ -227,14 +238,21 @@ export async function dismissComboBox(box: Locator): Promise<void> {
 // And the Escape is sent only when there is a popover to close. Otherwise it
 // reaches the dialog, and a dirty form answers that by arming its
 // unsaved-changes guard, which takes the submit out of the footer, so the next
-// lookup fails on a missing button rather than on the real cause. The wait
-// cannot prevent that: a closed popover satisfies it instantly, by which point
-// the keystroke has already landed. It is kept for what it does cover, a
-// popover that closes asynchronously.
+// lookup fails on a missing button rather than on the real cause.
+//
+// Checked and sent in one task inside the page, not as a read and then a
+// `press`: a popover whose filtered list comes back empty closes on its own, and
+// one that did so in the round trip between the two calls let the key through
+// to the dialog. A dispatched keydown is what React's handlers read, so the
+// popover closes as it does for a real key.
 export async function dismissComboBoxInDialog(box: Locator): Promise<void> {
-  if ((await box.getAttribute("aria-expanded")) === "true") {
-    await box.press("Escape")
-  }
+  await box.evaluate((element) => {
+    if (element.getAttribute("aria-expanded") === "true") {
+      element.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      )
+    }
+  })
   await expect(box).not.toHaveAttribute("aria-expanded", "true")
 }
 

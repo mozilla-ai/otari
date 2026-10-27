@@ -4,24 +4,12 @@ import { clsx } from "clsx"
 import type { MouseEvent as ReactMouseEvent } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { IconType } from "react-icons"
-import {
-  FiArrowLeft,
-  FiChevronDown,
-  FiChevronRight,
-  FiMenu,
-  FiSettings,
-  FiSidebar,
-  FiX,
-} from "react-icons/fi"
+import { FiChevronDown, FiMenu, FiSidebar, FiX } from "react-icons/fi"
 import { AutoUpdate } from "@/app/AutoUpdate"
 import { ConnectionStatus } from "@/app/ConnectionStatus"
 import { AccountMenu } from "@/app/nav/AccountMenu"
 import { Breadcrumbs } from "@/app/nav/Breadcrumbs"
-import {
-  lastLocation,
-  lastRailContext,
-  rememberLocation,
-} from "@/app/nav/navigationHistory"
+import { lastLocation, rememberLocation } from "@/app/nav/navigationHistory"
 import {
   DEPLOYMENT_NAV_SECTIONS,
   isPathVisible,
@@ -62,7 +50,7 @@ import {
   isNoOrganizationError,
   useOrganizationContext,
 } from "@/shared/api/organizations"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { DeploymentScope } from "@/shared/hooks/DeploymentScope"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useDocumentTitle } from "@/shared/hooks/useDocumentTitle"
 import { useEntitlements } from "@/shared/hooks/useEntitlements"
@@ -113,18 +101,6 @@ function tabNameForPath(to: NavPath): string {
 }
 
 /**
- * The rails the drawer can open as a level inside itself, which is not every
- * context: the workspace rail is the one the drawer starts on, so it is
- * something you come back to rather than open into.
- *
- * Narrowed rather than reusing `NavContext`, so a fourth context that does want
- * a level is a compile error at the call site instead of a silent fall-through
- * in the focus restore below. Saying no more than the value can be is what the
- * telemetry record on this page had to learn the expensive way.
- */
-type MobileLevel = Exclude<NavContext, "workspace">
-
-/**
  * Which sections each rail draws. A record rather than a ternary, so adding a
  * context is a line here instead of an edit at every site that asks which rail
  * is showing.
@@ -171,16 +147,7 @@ function navTrackContext(to: NavPath): string {
   return TRACK_CONTEXTS[navContextForPath(to)]
 }
 
-/**
- * Records a move between sidebar destinations.
- *
- * A hook rather than a call inside `NavRowLink`, because the rows inside a rail
- * are not the only way to move within the sidebar: the two footer rows that
- * cross between the rails navigate to a registry destination without going
- * through `NavRowLink` at all, and tracking only the rows meant every entry to
- * and exit from the organization rail went unrecorded while every row inside it
- * was recorded.
- */
+/** Records a move between sidebar destinations. */
 function useRecordNavigation(): (to: NavPath, isActive: boolean) => void {
   const { recordEvent } = useTelemetry()
 
@@ -540,121 +507,50 @@ function AppShellChrome() {
     routeIsGatedOff &&
     entitlementsResolving &&
     isPathVisible(pathname, hostsRouteSurface)
-  // Which of the two sidebars this path belongs under. The organization context
-  // is a separate rail reached from the footer, not a section inside the
-  // workspace one, so the two never render together.
+  // Which sidebar this path belongs under: the scope switcher at the top of
+  // every rail is the one way between them.
   const navContext = navContextForPath(pathname)
-  const inOrganization = navContext === "organization"
-  const inDeployment = navContext === "deployment"
   const organization = useOrganizationContext()
-  const { selected: selectedWorkspace } = useSelectedWorkspace()
   // True for the local operator, who owns the organization the gateway
   // provisioned for itself, and load-bearing for every account that signs in
-  // without managing it (otari-ai#1716).
-  // Fails open when the context errors rather than resolving false: Users,
-  // budgets and settings are reachable only through this entry, the routes still
-  // work by URL, and the server authorizes every request behind it regardless.
-  // Hiding the way there because one query failed strands three destinations.
-  // A 404 is not a failure but the answer that there is no organization to
-  // manage.
+  // without managing it (otari-ai#1716). Fails open when the context errors
+  // rather than resolving false: the routes still work by URL, and the server
+  // authorizes every request behind them regardless. A 404 is not a failure but
+  // the answer that there is no organization to manage.
   const managesOrganization =
     canManage(organization.data) ||
     (organization.isError && !isNoOrganizationError(organization.error))
 
-  // Both rails remember where you were, so the controls that cross between them
-  // return you rather than resetting you. Recorded here rather than on those
-  // controls' clicks, so leaving a rail by a link on a page or by a bookmark
-  // updates the memory too.
+  // Each rail remembers where you were, so the switcher returns you rather than
+  // resetting you. Recorded here rather than on the switcher's clicks, so
+  // leaving a rail by a link on a page or by a bookmark updates the memory too.
   // Both halves take the visibility predicate: a gated-off destination is
   // registered and reachable by URL, so without it the memory would both record
   // the visit that landed on "not available here" and resume onto it.
   useEffect(() => {
     rememberLocation(pathname, isVisible)
   }, [pathname, isVisible])
-  const organizationLanding = lastLocation("organization", isVisible)
-  const workspaceLanding = lastLocation("workspace", isVisible)
-  const deploymentLanding = lastLocation("deployment", isVisible)
-  // Which rail the deployment one returns to. It is reached from a control that
-  // renders on both of the others, so "back" has no static answer and this is
-  // the only thing that remembers which one you were on.
-  const returnContext = lastRailContext(isVisible)
-  // Named once: the same string is the row's visible text, its accessible name
-  // when collapsed, and its tooltip, and three copies of it is three chances for
-  // the name a screen reader hears to drift from the one on screen.
-  // Both fallbacks are load-bearing: either name can be absent while its query
-  // is in flight, and "Back to undefined" for a frame is worse than a generic
-  // word. The deployment rail's label follows `returnContext`, so it must take
-  // the same fallback the link does or the two describe different places.
-  const returnsToOrganization = inDeployment && returnContext === "organization"
-  const backLabel = returnsToOrganization
-    ? `Back to ${organization.data?.organization?.name ?? "organization"}`
-    : `Back to ${selectedWorkspace?.name ?? "workspace"}`
-  const backTo = returnsToOrganization
-    ? (organizationLanding?.to ?? "/organization/members")
-    : (workspaceLanding?.to ?? "/")
+  const organizationLanding = managesOrganization
+    ? (lastLocation("organization", isVisible)?.to ?? "/organization/members")
+    : undefined
+  const workspaceLanding = lastLocation("workspace", isVisible)?.to ?? "/"
+  // Absent when that rail has no rows this caller may have, so the switcher and
+  // the rail it opens cannot disagree: the same `isVisible` answers both.
+  const deploymentLanding =
+    visibleNavSections(DEPLOYMENT_NAV_SECTIONS, isVisible).length > 0
+      ? (lastLocation("deployment", isVisible)?.to ?? "/deployment")
+      : undefined
 
   const asideRef = useRef<HTMLElement>(null)
   const mainRef = useRef<HTMLElement>(null)
   const toggleRef = useRef<HTMLButtonElement>(null)
-  const orgNavTriggerRef = useRef<HTMLButtonElement>(null)
-  const railBackRef = useRef<HTMLButtonElement>(null)
-  // Which level was last open, read on the way out when the level itself is
-  // already gone from state.
-  const lastMobileLevelRef = useRef<MobileLevel | null>(null)
-  const accountTriggerRef = useRef<HTMLButtonElement>(null)
   const restoreSidebarFocusRef = useRef(false)
   const [collapsed, setCollapsed] = useState<boolean>(readStoredCollapsed)
   const [isMobile, setIsMobile] = useState<boolean>(readIsMobile)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  // The organization rail, opened as a level *inside* the drawer rather than by
-  // going to a page. Mobile only, and it exists because the two rails are a
-  // context switch rather than a section: on the desk the footer row can change
-  // the whole rail and leave you looking at it, while on a phone the same row
-  // navigated and the drawer closed over the result, so the rail it opened was
-  // never a thing you got to read. Here the row opens that rail in place, and
-  // choosing a destination in it is what dismisses the drawer.
-  const [mobileRailLevel, setMobileRailLevel] = useState<MobileLevel>()
-  // Set alongside the state rather than derived from it: the effect that
-  // restores focus runs after the level has already been cleared, so the state
-  // can no longer say which level it was.
-  const openMobileLevel = useCallback((context: MobileLevel) => {
-    lastMobileLevelRef.current = context
-    setMobileRailLevel(context)
-  }, [])
+  const closeMobileNav = useCallback(() => setMobileNavOpen(false), [])
 
-  // Every control that leaves the drawer goes through this rather than lowering
-  // the one flag it knows about, so the submenu cannot outlive the drawer that
-  // framed it: reopening the menu from a workspace page would otherwise land
-  // back on the organization rows the last tap left showing.
-  const closeMobileNav = useCallback(() => {
-    setMobileNavOpen(false)
-    setMobileRailLevel(undefined)
-  }, [])
-
-  // Which of the two rails is drawn. The route decides it, except on mobile,
-  // where the drawer can be one level down inside the organization rail while
-  // the page behind it is still a workspace page.
-  // Which rail is drawn. The route decides it, except on mobile, where the
-  // drawer can be a level inside another rail while the page behind it is still
-  // the one you were on. Asked as "which", not as a stack of "is it the X rail"
-  // booleans: a third context turns every such boolean into a three-way answer
-  // that can silently stay two-way, which is how a rail ends up rendering for a
-  // page it does not own.
-  const railContext: NavContext =
-    (isMobile ? mobileRailLevel : undefined) ?? navContext
-  const showOrganizationRail = railContext === "organization"
-  const showDeploymentRail = railContext === "deployment"
-  // Whether the footer holds a row above its closing band. The organization row
-  // is the only one left in there, so when it is gated out the footer's own rule
-  // and the band's rule land 4px apart and read as one doubled hairline. The
-  // band's rule is the unconditional one (it mirrors the scope band at the top
-  // of the rail), so it is the footer's that gives way.
-  // A switch row belongs to the workspace rail alone. The other two are leaf
-  // contexts whose way out is the back row at the top, so stating the rule
-  // positively is what keeps a third rail from inheriting the row by being
-  // merely "not the organization one".
-  const footerHasRowAboveBand =
-    railContext === "workspace" && managesOrganization
+  const railContext: NavContext = navContext
   // Filtered before it is indexed, so the divider and top margin below key off
   // the first *rendered* section rather than the first registered one.
   const visibleSections = visibleNavSections(
@@ -691,20 +587,15 @@ function AppShellChrome() {
     return () => query.removeListener(onChange)
   }, [closeMobileNav])
 
-  // Escape closes the drawer, matching the dismissible-overlay convention. The
-  // organization submenu first when it is open, so one press unwinds one level
-  // rather than taking the whole menu with it when the row you were after is
-  // the level above.
+  // Escape closes the drawer, matching the dismissible-overlay convention.
   useEffect(() => {
     if (!mobileNavOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return
-      if (mobileRailLevel) setMobileRailLevel(undefined)
-      else setMobileNavOpen(false)
+      if (event.key === "Escape") setMobileNavOpen(false)
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [mobileNavOpen, mobileRailLevel])
+  }, [mobileNavOpen])
 
   // Focus management for the mobile drawer, which is a modal overlay: move focus
   // into it when it opens and restore focus to the toggle when it closes, so
@@ -726,38 +617,6 @@ function AppShellChrome() {
       toggleRef.current?.focus()
     }
   }, [isMobile, mobileNavOpen])
-
-  // A level inside the drawer rather than a second overlay, so it moves focus
-  // the way the drawer does: onto the control that leaves the level when it
-  // opens, and back onto whatever opened it when it closes. Both unmount when
-  // the level changes, so without this a tap leaves focus on an element that is
-  // gone and drops a keyboard or AT cursor to the top of the document.
-  //
-  // Where it goes on the way out depends on which level it was, and this is the
-  // one thing the deployment level cannot copy from the organization one. The
-  // organization level is opened by a row inside the drawer, so that row is
-  // still mounted to return to. The deployment level is opened from the account
-  // menu's popover, which has closed by the time the level is on screen, so
-  // aiming at the row that opened it would aim at nothing. Focus goes to the
-  // account band's trigger instead, which is the control that is still there and
-  // the one the reader pressed to start with.
-  useEffect(() => {
-    if (!isMobile || !mobileNavOpen) return
-    if (mobileRailLevel) {
-      railBackRef.current?.focus()
-      return
-    }
-    // Only when the control that closed the level has left focus behind it. On
-    // the render that opens the drawer, focus is on the panel itself, and
-    // pulling it down to the footer would skip the whole rail.
-    if (document.activeElement === document.body) {
-      const returnTo =
-        lastMobileLevelRef.current === "deployment"
-          ? accountTriggerRef.current
-          : orgNavTriggerRef.current
-      returnTo?.focus()
-    }
-  }, [isMobile, mobileNavOpen, mobileRailLevel])
 
   useEffect(() => {
     try {
@@ -813,8 +672,12 @@ function AppShellChrome() {
       <TelemetryIdentity />
       <AutoUpdate />
       <ConnectionStatus />
-      <PricingWarning />
-      <UnpricedUsageWarning />
+      {/* The operator's alarms over the whole deployment's traffic, whichever
+          rail is showing, so they read the deployment-wide routes. */}
+      <DeploymentScope>
+        <PricingWarning />
+        <UnpricedUsageWarning />
+      </DeploymentScope>
       {/* `relative` so the mobile drawer can be offset from *this row* rather
           than from the viewport. The row's top edge is the header's top edge,
           and the pricing alarm above it is a band in flow, so a
@@ -889,75 +752,26 @@ function AppShellChrome() {
                 ),
           )}
         >
-          {/* The scope the rail below belongs to. In the workspace context that
-              is the switcher; in the organization context it is the way back
-              out, which is how the prototype leaves that rail. */}
-          {/* The scope band, and its height and rule are load-bearing rather
-              than decorative: 56px with a `border-b` on the section tier means
-              it lands on exactly the same y as the top bar's own bottom rule,
-              so the two meet at the rail's vertical rule and read as one
-              unbroken line across the viewport. `h-14` and not `min-h-14`,
-              because a row that can grow is a row that can miss it. */}
+          {/* The scope band: the switcher between the deployment, the
+              organization and its workspaces, in the same place on every rail.
+              Its height and rule are load-bearing rather than decorative: 56px
+              with a `border-b` on the section tier lands on exactly the same y
+              as the top bar's own bottom rule, so the two meet at the rail's
+              vertical rule and read as one unbroken line across the viewport.
+              `h-14` and not `min-h-14`, because a row that can grow is a row
+              that can miss it. */}
           <div className="flex h-14 shrink-0 items-center border-b border-border">
-            {showOrganizationRail || showDeploymentRail ? (
-              <div className="flex h-full w-full items-center">
-                {inOrganization || inDeployment ? (
-                  <Link
-                    to={backTo}
-                    onClick={() => {
-                      // Leaving a leaf rail is a sidebar move like any other; it
-                      // just does not go through `NavRowLink`.
-                      recordNavigation(backTo, pathname === backTo)
-                      closeMobileNav()
-                    }}
-                    className={navRowClass({
-                      isCollapsed: effectiveCollapsed,
-                      isBand: true,
-                    })}
-                    aria-label={effectiveCollapsed ? backLabel : undefined}
-                    title={effectiveCollapsed ? backLabel : undefined}
-                  >
-                    <FiArrowLeft
-                      aria-hidden="true"
-                      className={NAV_ICON_CLASS}
-                    />
-                    {effectiveCollapsed ? null : (
-                      <span className="min-w-0 flex-1 truncate">
-                        {backLabel}
-                      </span>
-                    )}
-                  </Link>
-                ) : (
-                  // The submenu's way back, which closes a level rather than
-                  // navigating: the page under the drawer is still the workspace
-                  // page you opened the menu from, so there is nothing to go back
-                  // *to* yet. Same row and same name as the link above, because it
-                  // means the same thing to whoever reads it and differs only in
-                  // whether the route has moved yet. `cursor-pointer` because a
-                  // bare button resolves to the default arrow, which is the one
-                  // thing `navRowClass` leaves to its call sites.
-                  <button
-                    type="button"
-                    ref={railBackRef}
-                    onClick={() => setMobileRailLevel(undefined)}
-                    className={`${navRowClass({ isBand: true })} cursor-pointer`}
-                  >
-                    <FiArrowLeft
-                      aria-hidden="true"
-                      className={NAV_ICON_CLASS}
-                    />
-                    <span className="min-w-0 flex-1 truncate text-left">
-                      {backLabel}
-                    </span>
-                  </button>
-                )}
-              </div>
-            ) : (
-              <WorkspaceSwitcher
-                isCollapsed={effectiveCollapsed}
-                onNavigate={closeMobileNav}
-              />
-            )}
+            <WorkspaceSwitcher
+              isCollapsed={effectiveCollapsed}
+              onNavigate={closeMobileNav}
+              scope={railContext}
+              workspaceLanding={workspaceLanding}
+              organizationLanding={organizationLanding}
+              deploymentLanding={deploymentLanding}
+              // A move between rails is a sidebar move like any other; it just
+              // does not go through `NavRowLink`.
+              onScopeChange={(to) => recordNavigation(to, pathname === to)}
+            />
           </div>
           {/* No bottom padding: the account band closes the rail, so it sits on
               the viewport's edge the way the scope band sits on the top. */}
@@ -1029,87 +843,10 @@ function AppShellChrome() {
                 )
               })}
             </nav>
-            {/* The account block, set off by a rule as in the navigation prototype:
-              the way onto the organization rail, the documentation, and the
-              account control whose menu carries appearance and sign-out. */}
-            {/* `-mx-3 px-3` so the rule runs the rail's full width and meets its
-              right border, while the rows inside keep the rail's padding. A
-              divider that stops short of the edge reads as a box's top border
-              rather than as a division of the rail. */}
-            <div
-              className={`-mx-3 flex flex-col gap-1 px-3 pt-1 pb-[env(safe-area-inset-bottom)] ${
-                footerHasRowAboveBand ? "border-t border-border" : ""
-              }`}
-            >
-              {/* The way into the organization rail. Only in the workspace
-                context, since the organization one has its own way back, and
-                only for someone who manages the organization: it is the single
-                destination the design hides outright rather than degrading to
-                read-only (artboard A2 is the member variant, and this row is
-                what it drops).
-
-                Drawn as an ordinary nav row, which is how the design draws it.
-                It used to be a bordered box with a trailing chevron, on the
-                argument that a context switch should not look like a page and
-                that an operator whose sidebar used to list Users, Budgets and
-                Settings needed to find where they went. Both were true and
-                neither survives the design: the box makes the footer read as a
-                button bar under the rail rather than as the end of it.
-
-                Two controls for one entry, because the rail behaves differently
-                under the two layouts. On the desk it navigates, and the rail it
-                swaps to is left on screen to read. On a phone the drawer closes
-                over whatever it navigated to, so the same tap would show the
-                organization's first page and never the rail that lists the
-                rest; there the row opens that rail inside the drawer instead,
-                and a destination in it is what dismisses the drawer. That is
-                also what earns the trailing chevron back: it promises a submenu
-                only where one now opens. */}
-              {footerHasRowAboveBand ? (
-                isMobile ? (
-                  // `cursor-pointer` because a bare button resolves to the default
-                  // arrow, which is the one thing `navRowClass` leaves to its call
-                  // sites (its other rows are links or HeroUI buttons).
-                  <button
-                    type="button"
-                    ref={orgNavTriggerRef}
-                    onClick={() => openMobileLevel("organization")}
-                    className={`${navRowClass()} cursor-pointer`}
-                  >
-                    <FiSettings aria-hidden="true" className={NAV_ICON_CLASS} />
-                    <span className="min-w-0 flex-1 truncate text-left">
-                      Organization
-                    </span>
-                    <FiChevronRight
-                      aria-hidden="true"
-                      className={NAV_ICON_CLASS}
-                    />
-                  </button>
-                ) : (
-                  <Link
-                    to={organizationLanding?.to ?? "/organization/members"}
-                    onClick={() => {
-                      const to =
-                        organizationLanding?.to ?? "/organization/members"
-                      recordNavigation(to, pathname === to)
-                    }}
-                    className={navRowClass({ isCollapsed: effectiveCollapsed })}
-                    aria-label={effectiveCollapsed ? "Organization" : undefined}
-                    title={
-                      effectiveCollapsed
-                        ? "Organization: members, spend and budgets, users, settings"
-                        : undefined
-                    }
-                  >
-                    <FiSettings aria-hidden="true" className={NAV_ICON_CLASS} />
-                    {effectiveCollapsed ? null : (
-                      <span className="min-w-0 flex-1 truncate">
-                        Organization
-                      </span>
-                    )}
-                  </Link>
-                )
-              ) : null}
+            {/* The account block: the account control whose menu carries
+              appearance and sign-out. `-mx-3 px-3` so the band's rule runs the
+              rail's full width and meets its right border. */}
+            <div className="-mx-3 flex flex-col gap-1 px-3 pt-1 pb-[env(safe-area-inset-bottom)]">
               {/* One control, not a stack of links: the guide, appearance, and
                 sign-out all live in its menu, which is how the prototype ends
                 the rail. Sign-out used to sit in the page header. */}
@@ -1132,23 +869,6 @@ function AppShellChrome() {
                     closeMobileNav()
                     setFeedbackOpen(true)
                   }}
-                  triggerRef={accountTriggerRef}
-                  // Below `md` the Deployment row opens a level inside the
-                  // drawer instead of navigating: the popover it lives in is
-                  // gone by the time the level renders, so the rail has to take
-                  // over rather than the route.
-                  onOpenDeploymentLevel={
-                    isMobile ? () => openMobileLevel("deployment") : undefined
-                  }
-                  // Absent when that rail has no rows this caller may have, so
-                  // the control and the rail it opens cannot disagree: the same
-                  // `isVisible` answers both.
-                  deploymentLanding={
-                    visibleNavSections(DEPLOYMENT_NAV_SECTIONS, isVisible)
-                      .length > 0
-                      ? (deploymentLanding?.to ?? "/settings")
-                      : undefined
-                  }
                 />
               </div>
             </div>

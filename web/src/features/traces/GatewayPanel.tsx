@@ -1,9 +1,11 @@
 import { Skeleton } from "@/design-system/feedback/Skeleton"
 import { Chip } from "@/design-system/indicators/Chip"
 import { SpendMeter } from "@/design-system/metrics/SpendMeter"
-import { useApiKeyCeiling } from "@/shared/api/budgets"
-import { useDeploymentOperator } from "@/shared/api/organizations"
+import { canManage } from "@/features/organization/roles"
+import { useApiKeyCeiling, useApiKeyCeilings } from "@/shared/api/budgets"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { formatPct, formatUsd } from "@/shared/helpers/format"
+import { useIsDeploymentScope } from "@/shared/hooks/DeploymentScope"
 
 import { CostByTool } from "./CostByTool"
 import { formatRelativeTime } from "./format"
@@ -11,6 +13,28 @@ import { SessionAtAGlance } from "./SessionAtAGlance"
 import type { Trace } from "./types"
 
 type Gateway = NonNullable<Trace["gateway"]>
+
+/**
+ * The key's own ceiling over all of its spend, from the surface of the page
+ * this renders on: the deployment's on a deployment page, the organization's
+ * spend ceilings otherwise. The organization's list is for its owners and
+ * admins, so a member is not asked and sees no ceiling sentence.
+ */
+function useKeyCeiling(apiKeyId: string) {
+  const isDeploymentWide = useIsDeploymentScope()
+  const managesOrganization = canManage(useOrganizationContext().data)
+  const deployment = useApiKeyCeiling(apiKeyId, isDeploymentWide)
+  const organization = useApiKeyCeilings(
+    "organization",
+    !isDeploymentWide && managesOrganization && apiKeyId !== "",
+  )
+  if (isDeploymentWide) return deployment
+  return {
+    data: organization.data?.find((row) => row.scope_id === apiKeyId),
+    isSuccess: organization.isSuccess,
+    isLoading: organization.isLoading,
+  }
+}
 
 function Spend({
   cost,
@@ -21,9 +45,7 @@ function Spend({
   apiKeyId: string
   isAtApiPrices: boolean
 }) {
-  // The ceilings read is deployment-wide, so only an operator asks for it.
-  const { isOperator } = useDeploymentOperator()
-  const ceiling = useApiKeyCeiling(apiKeyId, isOperator)
+  const ceiling = useKeyCeiling(apiKeyId)
   const limit = ceiling.data?.max_budget ?? null
   // At a glance states the total; this says what it means for the key.
   const sentences = [

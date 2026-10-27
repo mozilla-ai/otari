@@ -87,6 +87,11 @@ describe("nav registry", () => {
       "Providers",
       "Guardrails",
       "Org settings",
+      "Overview",
+      "Activity",
+      "API keys",
+      "Budgets",
+      "Routing",
       "Settings",
       "Accounts",
       "Hosted providers",
@@ -127,15 +132,25 @@ describe("nav registry", () => {
     // organization's own for an owner or admin, so there is no caller the
     // destination refuses. That is the shape to copy for the rows still on this
     // list, not a loosened gate.
+    //
+    // The deployment rail's own Overview, Activity, API keys, Budgets and
+    // Routing are on it for the opposite reason: they are the deployment-wide
+    // reads of pages the other rails also draw, so every caller they would
+    // serve is an operator.
     expect(
       NAV_ITEMS.filter((item) => item.operatorOnly).map((item) => item.to),
     ).toEqual([
-      "/settings",
-      "/admin/accounts",
-      "/admin/hosted-providers",
-      "/admin/web-search",
-      "/admin/code-execution",
-      "/health-checks",
+      "/deployment",
+      "/deployment/activity",
+      "/deployment/keys",
+      "/deployment/budgets",
+      "/deployment/routing",
+      "/deployment/settings",
+      "/deployment/accounts",
+      "/deployment/hosted-providers",
+      "/deployment/web-search-pricing",
+      "/deployment/code-execution-pricing",
+      "/deployment/health",
     ])
   })
 
@@ -152,24 +167,24 @@ describe("nav registry", () => {
         section.items.map((item) => item.to),
       ),
     ).toEqual([
-      "/settings",
-      "/admin/accounts",
-      "/admin/hosted-providers",
-      "/admin/web-search",
-      "/admin/code-execution",
-      "/health-checks",
+      "/deployment",
+      "/deployment/activity",
+      "/deployment/keys",
+      "/deployment/budgets",
+      "/deployment/routing",
+      "/deployment/settings",
+      "/deployment/accounts",
+      "/deployment/hosted-providers",
+      "/deployment/web-search-pricing",
+      "/deployment/code-execution-pricing",
+      "/deployment/health",
     ])
     // And on neither of the others. A destination drawn on two rails would
     // resolve to whichever came first in NAV_ITEMS and be gated by that one.
     const others = [...NAV_SECTIONS, ...ORG_NAV_SECTIONS].flatMap((section) =>
       section.items.map((item) => item.to),
     )
-    expect(others).not.toContain("/settings")
-    expect(others).not.toContain("/admin/accounts")
-    expect(others).not.toContain("/admin/hosted-providers")
-    expect(others).not.toContain("/admin/web-search")
-    expect(others).not.toContain("/admin/code-execution")
-    expect(others).not.toContain("/health-checks")
+    for (const to of others) expect(to.startsWith("/deployment")).toBe(false)
   })
 
   it("keeps a deployment destination registered, and therefore gated", () => {
@@ -180,12 +195,16 @@ describe("nav registry", () => {
     // refusing them. Nothing about the rail being empty says so, which is why
     // it is asserted here rather than left to the rail tests.
     for (const [to, surface, operatorOnly] of [
-      ["/settings", "settings", "refused"],
-      ["/admin/accounts", "admin", "unlisted"],
-      ["/admin/hosted-providers", "hosted_providers", "unlisted"],
-      ["/admin/web-search", "pricing", "refused"],
-      ["/admin/code-execution", "pricing", "refused"],
-      ["/health-checks", "health_checks", "refused"],
+      ["/deployment/activity", "usage", "unlisted"],
+      ["/deployment/keys", "keys", "unlisted"],
+      ["/deployment/budgets", "budgets", "unlisted"],
+      ["/deployment/routing", "routing", "unlisted"],
+      ["/deployment/settings", "settings", "refused"],
+      ["/deployment/accounts", "admin", "unlisted"],
+      ["/deployment/hosted-providers", "hosted_providers", "unlisted"],
+      ["/deployment/web-search-pricing", "pricing", "refused"],
+      ["/deployment/code-execution-pricing", "pricing", "refused"],
+      ["/deployment/health", "health_checks", "refused"],
     ] as const) {
       const item = navItemForPath(to)
       expect(item?.to).toBe(to)
@@ -203,16 +222,23 @@ describe("nav registry", () => {
   })
 
   it("sorts a pathname onto the rail that declares it", () => {
-    // Not a URL-prefix rule: /workspaces and /settings are organization
-    // destinations whose paths look like anything else, and /members is a
-    // workspace one directly under the root.
+    // Not a URL-prefix rule: /workspaces is an organization destination whose
+    // path looks like anything else, and /members is a workspace one directly
+    // under the root.
     expect(navContextForPath("/members")).toBe("workspace")
     expect(navContextForPath("/workspaces")).toBe("organization")
     // Its own context, not the organization's: the deployment's pages describe
     // the process every tenant shares. This line said "organization" while that
     // was merely what the code did, and an asserted value is indistinguishable
     // from a considered one.
-    expect(navContextForPath("/settings")).toBe("deployment")
+    expect(navContextForPath("/deployment/settings")).toBe("deployment")
+    // The deployment-wide reads of pages the workspace rail also draws, sorted
+    // by their own path rather than by the page component they share.
+    expect(navContextForPath("/deployment/keys")).toBe("deployment")
+    expect(navContextForPath("/keys")).toBe("workspace")
+    // A redirect-only path is no longer a destination, so it opens in the
+    // context the shell starts in rather than claiming the deployment rail.
+    expect(navContextForPath("/settings")).toBe("workspace")
     expect(navContextForPath("/organization/members")).toBe("organization")
     // Unregistered paths open in the context the shell starts in.
     expect(navContextForPath("/account")).toBe("workspace")

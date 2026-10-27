@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { GatewaySettings, OrganizationContext } from "@/client"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { API_ROOT } from "@/shared/api/client"
+import { DeploymentScope } from "@/shared/hooks/DeploymentScope"
 import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
@@ -75,9 +76,14 @@ function renderPage(
   ui: ReactElement,
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
 ) {
-  render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>, {
-    wrapper: withRouter(),
-  })
+  // Inside DeploymentScope, as the shell mounts it: the alarm counts the whole
+  // deployment's traffic whichever rail is showing.
+  render(
+    <QueryClientProvider client={client}>
+      <DeploymentScope>{ui}</DeploymentScope>
+    </QueryClientProvider>,
+    { wrapper: withRouter() },
+  )
   return client
 }
 
@@ -150,7 +156,10 @@ describe("PricingWarning", () => {
     // on reports the same number the banner just claimed.
     expect(
       screen.getByRole("link", { name: "View failed requests" }),
-    ).toHaveAttribute("href", "/activity?status=error&range=1h&source=gateway")
+    ).toHaveAttribute(
+      "href",
+      "/deployment/activity?status=error&range=1h&source=gateway",
+    )
 
     // Counted from the error rows of the last hour, not from all usage.
     const countUrl = String(

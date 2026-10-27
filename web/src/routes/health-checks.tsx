@@ -1,6 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { HealthChecksPage } from "@/features/health/HealthChecksPage"
+import { createFileRoute, redirect } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/health-checks")({
-  component: HealthChecksPage,
+  // Moved under /deployment with the rest of the deployment's own pages. The
+  // old path redirects so bookmarks and links in sent mail keep working.
+  beforeLoad: () => {
+    throw redirect({ to: "/deployment/health", search: true, replace: true })
+  },
 })
