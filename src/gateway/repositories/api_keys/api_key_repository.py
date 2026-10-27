@@ -41,13 +41,14 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         """Switch off the keys billed to ``user_id`` in these workspaces.
 
         ``self_service_only`` narrows it to keys the user minted for themselves;
-        ``by_operator`` marks the ones it switches off as not theirs to switch back on.
+        ``by_operator`` marks them as not theirs to switch back on, including the
+        ones they had already switched off themselves.
         """
         if not workspace_ids:
             return
-        statement = update(APIKey).where(
-            APIKey.user_id == user_id, APIKey.workspace_id.in_(workspace_ids), APIKey.is_active.is_(True)
-        )
+        statement = update(APIKey).where(APIKey.user_id == user_id, APIKey.workspace_id.in_(workspace_ids))
+        if not by_operator:
+            statement = statement.where(APIKey.is_active.is_(True))
         if self_service_only:
             statement = statement.where(APIKey.self_service.is_(True))
         values: dict[str, bool] = {"is_active": False}

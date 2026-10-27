@@ -909,12 +909,17 @@ def test_removing_someone_from_the_organization_switches_off_every_key_billed_to
     issued = _issue_directly(db_session_factory, world, "alpha_member", self_service=False)
     code, theirs = _create(client, world, "alpha_colleague", {"key_name": "theirs"})
     assert code == status.HTTP_200_OK, theirs
+    # One they had already switched off themselves is locked as well.
+    code, off = _create(client, world, "alpha_member", {"key_name": "off"})
+    assert code == status.HTTP_200_OK, off
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{off['id']}", json={"is_active": False})
+    assert code == status.HTTP_200_OK, body
 
     member_id = _organization_member_id(db_session_factory, world, "alpha_member")
     code, body = _request(client, world, "alpha_owner", "DELETE", f"{API_ROOT}/organizations/me/members/{member_id}")
     assert code in {status.HTTP_200_OK, status.HTTP_204_NO_CONTENT}, body
 
-    for key_id in (minted["id"], issued):
+    for key_id in (minted["id"], issued, off["id"]):
         row = _key_row(db_session_factory, key_id)
         assert row.is_active is False
         assert row.operator_disabled is True
@@ -933,6 +938,13 @@ def test_a_key_an_operator_switched_off_stays_off_for_its_owner(client: TestClie
 
     code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": True})
     assert code == status.HTTP_403_FORBIDDEN, body
+    # A refusal changes nothing else sent with it.
+    code, body = _request(
+        client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": True, "key_name": "y"}
+    )
+    assert code == status.HTTP_403_FORBIDDEN, body
+    code, listed = _request(client, world, "alpha_member", "GET", _PREFIX)
+    assert next(row for row in listed if row["id"] == minted["id"])["key_name"] == "mine"
     # Their other edits, and keeping it off, are still theirs.
     code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"key_name": "x"})
     assert code == status.HTTP_200_OK, body

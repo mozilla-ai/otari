@@ -423,6 +423,11 @@ async def update_own_key(
     await organizations.hold_workspace_write_access(
         user=identity, organization_id=organization.id, workspace_id=key.workspace_id, revoking=switching_off
     )
+    if request.is_active is True and key.operator_disabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="An operator switched this key off; ask them to switch it back on.",
+        )
 
     # Tri-state via model_fields_set: both columns are nullable and the
     # dashboard's edit form sends null to clear them, so "absent" and "null"
@@ -430,11 +435,6 @@ async def update_own_key(
     # is the whole distinction there.
     if "key_name" in request.model_fields_set:
         key.key_name = request.key_name
-    if request.is_active is True and key.operator_disabled:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="An operator switched this key off; ask them to switch it back on.",
-        )
     if request.is_active is not None:
         key.is_active = request.is_active
     if "expires_at" in request.model_fields_set:
