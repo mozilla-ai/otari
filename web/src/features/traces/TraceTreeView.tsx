@@ -16,7 +16,12 @@ import { LevelChip } from "./LevelChip"
 import { OBSERVATION_TYPES, TypeMark } from "./observationTypes"
 import { moveRowFocus } from "./rowFocus"
 import { matchesSearch } from "./search"
-import { buildTree, type FlatItem, flattenTreeOrder } from "./tree"
+import {
+  buildTree,
+  type FlatItem,
+  flattenTreeOrder,
+  type TreeNode,
+} from "./tree"
 import { type Observation, summarizeTrace, type Trace } from "./types"
 
 function Metrics({
@@ -60,45 +65,54 @@ const MARK =
 // Holds a childless row's text where a chevron would be, so names align.
 const CHEVRON_SLOT = <span aria-hidden="true" className="size-11 shrink-0" />
 
-// A connector that starts continuing when a sibling arrives fades in, timed with
-// the arriving row's branch so the two read as one line.
-const LINE =
-  "border-l transition-[border-color] duration-200 ease-out-fluid motion-reduce:transition-none"
-
-// The step between rows that arrive together, and the most rows it applies to,
-// so a whole turn arriving at once still lands in about a third of a second.
+// Rows that arrive together enter 45ms apart, capped so a whole turn still lands
+// in about a third of a second.
 const ARRIVAL_STAGGER_MS = 45
 const ARRIVAL_STAGGER_ROWS = 6
-// Longer than the slowest entrance (the wash) plus the largest stagger.
+// Longer than the wash plus the largest stagger.
 const ARRIVAL_MS = 1_400
-const NO_ARRIVALS: ReadonlySet<string> = new Set()
+const NO_ARRIVALS: ReadonlyMap<string, number> = new Map()
 
-// The spans a live session added since the panel opened on it. Whatever is there
-// when the panel opens, or when the session first loads, is not news, so the
-// first observations of a session never count. They stay arrivals only for as
-// long as their entrance plays, so a row shown again by expanding its parent
-// later does not enter twice.
-function useArrivals(trace: Trace): ReadonlySet<string> {
-  const [state, setState] = useState(() => ({
-    traceId: trace.id,
-    known: new Set(trace.observations.map((obs) => obs.id)),
+function settledOn(traceId: string, roots: TreeNode[]) {
+  return {
+    traceId,
+    known: new Set(flattenTreeOrder(roots).map(({ node }) => node.obs.id)),
     arrivals: NO_ARRIVALS,
-  }))
-  if (state.traceId !== trace.id) {
-    setState({
-      traceId: trace.id,
-      known: new Set(trace.observations.map((obs) => obs.id)),
-      arrivals: NO_ARRIVALS,
-    })
+  }
+}
+
+// The rows a live session added since the panel opened on it, each with its place
+// in the order its batch enters. What is there when the panel opens, or when a
+// session's spans first load, is not news, and neither is a new row that wraps
+// rows already on screen: the first turn row only appears once a second turn
+// does. Arrivals clear once their entrance has played, so a row shown again by
+// expanding its parent later does not enter twice.
+function useArrivals(
+  traceId: string,
+  roots: TreeNode[],
+): ReadonlyMap<string, number> {
+  const [state, setState] = useState(() => settledOn(traceId, roots))
+  if (state.traceId !== traceId) {
+    setState(settledOn(traceId, roots))
   } else {
-    const fresh = trace.observations
-      .map((obs) => obs.id)
-      .filter((id) => !state.known.has(id))
+    const fresh = flattenTreeOrder(roots)
+      .map(({ node }) => node)
+      .filter((node) => !state.known.has(node.obs.id))
     if (fresh.length > 0) {
+      const news =
+        state.known.size === 0
+          ? []
+          : fresh.filter((node) =>
+              node.children.every((child) => !state.known.has(child.obs.id)),
+            )
+      // A batch landing while the last one still plays joins it, so neither is cut short.
       setState({
-        traceId: trace.id,
-        known: new Set([...state.known, ...fresh]),
-        arrivals: state.known.size > 0 ? new Set(fresh) : NO_ARRIVALS,
+        traceId,
+        known: new Set([...state.known, ...fresh.map((node) => node.obs.id)]),
+        arrivals: new Map([
+          ...state.arrivals,
+          ...news.map((node, slot) => [node.obs.id, slot] as const),
+        ]),
       })
     }
   }
@@ -137,7 +151,7 @@ function TreeRow({
   isOpen: boolean
   isSelected: boolean
   isTabStop: boolean
-  /** Where the row falls among those that just arrived, or null for one that was already there. */
+  /** The row's place in the batch that just arrived, or null for one that was already there. */
   arrival: number | null
   onSelect: (observationId: string) => void
   onToggle: (observationId: string) => void
@@ -184,20 +198,20 @@ function TreeRow({
           <span
             key={level}
             aria-hidden="true"
-            className={`w-4 shrink-0 ${LINE} ${continues ? "border-border" : "border-transparent"}`}
+            className={`w-4 shrink-0 ${continues ? "border-l border-border" : ""}`}
           />
         ))}
         <span aria-hidden="true" className="relative w-2 shrink-0">
-          <span className="otari-trace-branch absolute top-0 left-0 h-1/2 w-1.5 border-b border-l border-border" />
-          <span
-            className={`absolute top-1/2 bottom-0 left-0 ${LINE} ${isLast ? "border-transparent" : "border-border"}`}
-          />
+          <span className="absolute top-0 left-0 h-1/2 w-1.5 border-b border-l border-border" />
+          {!isLast ? (
+            <span className="absolute top-1/2 bottom-0 left-0 border-l border-border" />
+          ) : null}
         </span>
-        <span className={`otari-trace-node ${MARK}`}>
+        <span className={MARK}>
           <TypeMark type={obs.type} />
           {hasChildren && isOpen ? <DropLine /> : null}
         </span>
-        <span className={`otari-trace-leaf ${TEXT}`}>
+        <span className={TEXT}>
           <span className="flex min-w-0 items-center gap-2">
             <span className="truncate text-body">{obs.name}</span>
             <LevelChip level={obs.level} returnedError={obs.returnedError} />
@@ -211,7 +225,7 @@ function TreeRow({
         </span>
       </button>
       {hasChildren ? (
-        <span className="otari-trace-leaf otari-toolbar flex shrink-0 items-center">
+        <span className="otari-toolbar flex shrink-0 items-center">
           <IconButton
             label={isOpen ? "Collapse" : "Expand"}
             size="sm"
@@ -297,7 +311,7 @@ export function TraceTreeView({
     [roots, collapsed],
   )
   const summary = summarizeTrace(trace)
-  const arrivals = useArrivals(trace)
+  const arrivals = useArrivals(trace.id, roots)
 
   // A query turns the tree into a flat list of the matches: while searching, a
   // match's ancestors are in the way rather than context.
@@ -335,13 +349,6 @@ export function TraceTreeView({
   const tabStop = items.some(({ node }) => node.obs.id === selectedId)
     ? selectedId
     : null
-  // Rows that arrived together enter top to bottom, in the order they are drawn.
-  const arrivalOrder = new Map<string, number>()
-  for (const { node } of items) {
-    if (arrivals.has(node.obs.id)) {
-      arrivalOrder.set(node.obs.id, arrivalOrder.size)
-    }
-  }
 
   return (
     <ul
@@ -385,7 +392,7 @@ export function TraceTreeView({
           isOpen={!collapsed.has(item.node.obs.id)}
           isSelected={selectedId === item.node.obs.id}
           isTabStop={tabStop === item.node.obs.id}
-          arrival={arrivalOrder.get(item.node.obs.id) ?? null}
+          arrival={arrivals.get(item.node.obs.id) ?? null}
           onSelect={onSelect}
           onToggle={onToggle}
         />

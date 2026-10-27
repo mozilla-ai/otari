@@ -23,13 +23,19 @@ function trace(observations: Observation[], id = "session-1"): Trace {
   return { id, name: id, timestamp: "2026-10-27T10:00:00Z", observations }
 }
 
-function Tree({ value }: { value: Trace }) {
+function Tree({
+  value,
+  collapsed = new Set(),
+}: {
+  value: Trace
+  collapsed?: ReadonlySet<string>
+}) {
   return (
     <TraceTreeView
       trace={value}
       selectedId={null}
       onSelect={() => {}}
-      collapsed={new Set()}
+      collapsed={collapsed}
       onToggle={() => {}}
       query=""
     />
@@ -105,6 +111,66 @@ describe("TraceTreeView arrivals", () => {
     rerender(<Tree value={trace([obs("other")], "session-2")} />)
 
     expect(arriving("other")).toBe(false)
+  })
+
+  it("does not announce the first turn row, which wraps the steps already there", () => {
+    const { rerender } = render(
+      <Tree value={trace([obs("step-a"), obs("step-b")])} />,
+    )
+
+    rerender(
+      <Tree
+        value={trace([
+          obs("turn-0"),
+          obs("step-a", "turn-0"),
+          obs("step-b", "turn-0"),
+          obs("turn-1"),
+          obs("step-c", "turn-1"),
+        ])}
+      />,
+    )
+
+    expect(arriving("turn-0")).toBe(false)
+    expect(arriving("step-a")).toBe(false)
+    expect(rowOf("turn-1").style.getPropertyValue("--arrive-delay")).toBe("0ms")
+    expect(rowOf("step-c").style.getPropertyValue("--arrive-delay")).toBe(
+      "45ms",
+    )
+  })
+
+  it("lets a batch still entering finish when the next one lands", () => {
+    vi.useFakeTimers()
+    const { rerender } = render(<Tree value={trace([obs("turn-0")])} />)
+    rerender(<Tree value={trace([obs("turn-0"), obs("turn-1")])} />)
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+
+    rerender(
+      <Tree value={trace([obs("turn-0"), obs("turn-1"), obs("turn-2")])} />,
+    )
+
+    expect(arriving("turn-1")).toBe(true)
+    expect(rowOf("turn-1").style.getPropertyValue("--arrive-delay")).toBe("0ms")
+    expect(rowOf("turn-2").style.getPropertyValue("--arrive-delay")).toBe("0ms")
+  })
+
+  it("does not animate a row shown later by expanding its parent", () => {
+    vi.useFakeTimers()
+    const first = [obs("turn-0")]
+    const later = [...first, obs("turn-1"), obs("request", "turn-1")]
+    const hidden = new Set(["turn-1"])
+    const { rerender } = render(
+      <Tree value={trace(first)} collapsed={hidden} />,
+    )
+    rerender(<Tree value={trace(later)} collapsed={hidden} />)
+    act(() => {
+      vi.advanceTimersByTime(1_400)
+    })
+
+    rerender(<Tree value={trace(later)} collapsed={new Set()} />)
+
+    expect(arriving("request")).toBe(false)
   })
 
   it("stops marking rows as arrivals once their entrance has played", () => {

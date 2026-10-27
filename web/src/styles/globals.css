@@ -2670,27 +2670,19 @@ main {
 .otari-trace-mark--selected {
   outline: 1px solid var(--color-text);
 }
-/* A tree row a live session adds while the panel is open. Its branch draws down
-   from the line above, its mark settles where the branch lands, and its label
-   and chevron rise into place, while a wash fades from the row to say where it
-   landed. The wash starts lighter than the selected row's fill, so an arrival
-   never reads as a selection. `--arrive-delay` staggers rows that arrive
-   together; `backwards` holds each part at its start through the delay, so
-   nothing shows before its turn. */
+/* A tree row a live session adds while the panel is open: its contents, connectors
+   included, fade and rise into place while a wash fades from the row, so the eye
+   finds what just happened. The wash is a background-color, a repaint per frame on
+   a handful of rows, and lasts longer than an entrance because it is what the eye
+   follows; it starts lighter than the selected row's fill so an arrival never
+   reads as a selection. `backwards` holds both at their start through the
+   stagger delay. */
 .otari-trace-arrive {
   animation: otari-trace-wash 900ms ease-out var(--arrive-delay, 0ms) backwards;
 }
-.otari-trace-arrive .otari-trace-branch {
-  animation: otari-trace-draw 200ms var(--ease-out-fluid)
+.otari-trace-arrive > * {
+  animation: otari-trace-rise 250ms var(--ease-out-fluid)
     var(--arrive-delay, 0ms) backwards;
-}
-.otari-trace-arrive .otari-trace-node > svg {
-  animation: otari-trace-settle 220ms var(--ease-out-fluid)
-    calc(var(--arrive-delay, 0ms) + 120ms) backwards;
-}
-.otari-trace-arrive .otari-trace-leaf {
-  animation: otari-trace-rise 260ms var(--ease-out-fluid)
-    calc(var(--arrive-delay, 0ms) + 80ms) backwards;
 }
 @keyframes otari-trace-wash {
   from {
@@ -2701,31 +2693,15 @@ main {
     );
   }
 }
-/* A clip rather than a scale, so the elbow's foot appears where the line
-   reaches it instead of sliding down with it. */
-@keyframes otari-trace-draw {
-  from {
-    clip-path: inset(0 0 100% 0);
-  }
-}
-@keyframes otari-trace-settle {
-  from {
-    opacity: 0;
-    scale: 0.9;
-  }
-}
 @keyframes otari-trace-rise {
   from {
     opacity: 0;
     translate: 0 0.375rem;
-    filter: blur(2px);
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .otari-trace-arrive,
-  .otari-trace-arrive .otari-trace-branch,
-  .otari-trace-arrive .otari-trace-node > svg,
-  .otari-trace-arrive .otari-trace-leaf {
+  .otari-trace-arrive > * {
     animation: none;
   }
 }
