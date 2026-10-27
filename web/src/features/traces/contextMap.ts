@@ -6,6 +6,8 @@
 
 import { formatTokens } from "@/shared/helpers/format"
 
+import type { Observation } from "./types"
+
 /** The span attributes a gateway-served request's character weights are stored under. */
 const ATTRIBUTE_PREFIX = "otari.context."
 
@@ -166,7 +168,7 @@ export function formatUsedPercent(used: number, windowTokens: number): string {
   return `${Math.round(percent)}%`
 }
 
-const ESTIMATED = "Estimated from request size"
+export const ESTIMATED = "Estimated from request size"
 
 function plural(count: number, one: string, many: string): string {
   return `${count.toLocaleString("en-US")} ${count === 1 ? one : many}`
@@ -194,26 +196,23 @@ function composition(
     (typeof parts)[number]["kind"],
     [string, string, string[]]
   > = {
-    system: ["System prompt", "System", [ESTIMATED]],
+    system: ["System prompt", "System", []],
     tools: [
       "Tool definitions",
       "Tools",
-      [
-        plural(weights.toolCount, "tool definition", "tool definitions"),
-        ESTIMATED,
-      ],
+      [plural(weights.toolCount, "tool definition", "tool definitions")],
     ],
     files: [
       "Files",
       "Files",
-      ["Images and documents, at a flat allowance each", ESTIMATED],
+      ["Images and documents, at a flat allowance each"],
     ],
     messages: [
       "Messages",
       "Messages",
-      [plural(weights.messageCount, "message", "messages"), ESTIMATED],
+      [plural(weights.messageCount, "message", "messages")],
     ],
-    toolResults: ["Tool results", "Tool results", [ESTIMATED]],
+    toolResults: ["Tool results", "Tool results", []],
   }
   return parts.flatMap((part, index) => {
     if (tokens[index] <= 0) return []
@@ -327,6 +326,112 @@ export function buildContextMap(
   }
 }
 
+/** One model request's context window, from the token counts and weights its span kept. */
+export function requestContextMap(
+  request: Observation,
+): ContextMap | undefined {
+  return buildContextMap({
+    inputTokens: request.promptTokens,
+    cacheReadTokens: request.cachedTokens,
+    cacheWriteTokens: request.cacheWriteTokens,
+    windowTokens: request.contextWindow,
+    weights: request.context,
+  })
+}
+
+/** The requests a session's context is read from: the last to record any input, and the fullest. */
+export interface SessionRequests {
+  latest: Observation
+  fullest: Observation
+  /** How many requests recorded any input. */
+  count: number
+}
+
+const inputOf = (request: Observation) => request.promptTokens ?? 0
+
+export function sessionRequests(
+  observations: Observation[],
+): SessionRequests | undefined {
+  const requests = observations.filter(
+    (observation) =>
+      observation.type === "GENERATION" && inputOf(observation) > 0,
+  )
+  const [first, ...rest] = requests
+  if (!first) return undefined
+  let latest = first
+  let fullest = first
+  for (const request of rest) {
+    if (request.startMs >= latest.startMs) latest = request
+    if (inputOf(request) > inputOf(fullest)) fullest = request
+  }
+  return { latest, fullest, count: requests.length }
+}
+
+/** The band's figure: what the request held, against its window where that is known. */
+export function contextTotal(map: ContextMap): string {
+  const used = formatBlockTokens(map.used)
+  return map.windowTokens === undefined
+    ? used
+    : `${used} / ${formatWindow(map.windowTokens)}`
+}
+
+/** What the band counts across from its figure: how full the window is, and how full it got. */
+export function contextCounts(
+  map: ContextMap,
+  { latest, fullest }: SessionRequests,
+): string[] {
+  if (map.windowTokens === undefined) return ["Window unknown"]
+  if (map.isOverWindow) return ["Over the window"]
+  const full = `${formatUsedPercent(map.used, map.windowTokens)} full`
+  if (
+    fullest === latest ||
+    fullest.promptTokens === undefined ||
+    !fullest.contextWindow
+  )
+    return [full]
+  return [
+    full,
+    `fullest ${formatUsedPercent(fullest.promptTokens, fullest.contextWindow)}`,
+  ]
+}
+
+// A session's context is its last request's, since each request carries the
+// whole conversation so far. The fullest is named too, so a compaction late in
+// the session does not hide how close it came to the window.
+export function sessionNote({
+  latest,
+  fullest,
+  count,
+}: SessionRequests): string {
+  const from =
+    count > 1
+      ? `From the last of ${count.toLocaleString("en-US")} requests.`
+      : "From the session's only request."
+  if (fullest === latest || fullest.promptTokens === undefined) return from
+  const share = fullest.contextWindow
+    ? `, ${formatUsedPercent(fullest.promptTokens, fullest.contextWindow)} of its window`
+    : ""
+  return `${from} The fullest held ${formatBlockTokens(fullest.promptTokens)}${share}.`
+}
+
+/** What the map itself needs said: how exact its split is, what the cache held, and why free space may be missing. */
+export function mapNote(map: ContextMap): string {
+  const sentences = [
+    map.isEstimate
+      ? "The split is estimated from its size; the total is exact."
+      : "The split is the provider's own. One by prompt, tools and messages is kept only for requests Otari served.",
+  ]
+  if (map.isEstimate && map.cache && map.cache.read > 0)
+    sentences.push(
+      `${formatUsedPercent(map.cache.read, map.used)} of it was read from the cache.`,
+    )
+  if (map.windowTokens === undefined)
+    sentences.push(
+      "This model's window is unknown, so free space is not shown.",
+    )
+  return sentences.join(" ")
+}
+
 // Approximate width of one character of the block text, and the padding around it, in px.
 const CHAR_WIDTH = 7
 const TEXT_PADDING = 16
@@ -341,8 +446,6 @@ export interface BlockLabel {
   count: boolean
   /** The category appended to the count, on a block wide enough that has one to add. */
   category: boolean
-  /** Name and count are both drawn, so the block needs no entry in a legend. */
-  isComplete: boolean
 }
 
 function fits(text: string, width: number): boolean {
@@ -355,7 +458,7 @@ export function fitBlockLabel(
   width: number,
   height: number,
 ): BlockLabel {
-  const none = { count: false, category: false, isComplete: false }
+  const none = { count: false, category: false }
   if (height < MIN_LABEL_HEIGHT) return none
   const text = [block.title, block.category].find((name) => fits(name, width))
   if (text === undefined) return none
@@ -369,7 +472,6 @@ export function fitBlockLabel(
       text === block.title &&
       block.category !== block.title &&
       width >= MIN_CATEGORY_WIDTH,
-    isComplete: count,
   }
 }
 

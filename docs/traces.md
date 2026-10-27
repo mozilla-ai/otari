@@ -17,12 +17,15 @@ tokens went to reasoning.
 
 ## The context map
 
-Selecting an LLM call and opening its **Context** tab shows what filled the
+A session's **At a glance**, shown before a span is picked, maps what fills the
 model's context window, as blocks sized by tokens, with the unused part of the
-window as **Free**. The window comes from the model catalog when the model is
-listed there. Without it the tab shows the used tokens and says the window is
-unknown. The total is always the provider's exact input-token count. How it is
-split depends on what the call recorded:
+window as **Free**. It is read from the session's last LLM call that recorded
+input, since each call carries the whole conversation so far, and it also names
+the fullest call when that was an earlier one. Hover, focus or tap a block for its
+tokens and share of the window. The window comes from the model catalog when the
+model is listed there. Without it the map shows no free space and says the
+window is unknown. The total is always the provider's exact input-token count.
+How it is split depends on what the call recorded:
 
 - **Every call**, including those a coding agent exports over OTLP, is split into
   cache reads, cache writes and fresh input, from the cache counts the call
@@ -31,7 +34,7 @@ split depends on what the call recorded:
   also split into the system prompt, tool definitions, files, messages and tool
   results. Otari has no tokenizer, so it counts characters per part as the
   request arrives, and the dashboard scales those weights so they add up to the
-  exact input tokens. The split is an estimate and the tab says so. An image,
+  exact input tokens. The split is an estimate and the map says so. An image,
   audio clip, file or document counts for a flat allowance of 4,000 characters
   (about 1,000 tokens), because those are billed by size and format rather than
   by bytes. Tokens the provider adds itself, such as a hidden tool prompt, are
@@ -210,8 +213,9 @@ A session's header counts its tool calls and the gates its hooks ran, each
 broken down on hover: the calls by tool, and the gates by what they decided.
 **At a glance** opens a session with where its time and money went: how long
 it took, with its turns and tool calls, and what it cost, with its requests and
-tokens, each above one bar and a figure per part. Below them, the gates its
-hooks ran and what they decided.
+tokens, each above one bar and a figure per part. Below them, what fills the
+model's context window (see [The context map](#the-context-map)), then the gates
+its hooks ran and what they decided.
 
 - **Time** splits the session into model requests, hooks, running tools,
   waiting for you to approve a call, and idle between turns. When idle is more

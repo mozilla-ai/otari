@@ -5,7 +5,7 @@ import type {
   TraceSummary,
   TraceTurn,
 } from "@/client"
-import { contextWeightsOf } from "./contextMap"
+import { contextWeightsOf, sessionRequests } from "./contextMap"
 import {
   explainSpan,
   type GateTally,
@@ -440,6 +440,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
           ),
           toolCosts: toolCostBreakdown(detail, summary.cost),
           stats: sessionStats(summary, detail),
+          context: sessionRequests(observations),
         }
       : undefined,
   }

@@ -4,14 +4,20 @@ import {
   blockTransition,
   buildContextMap,
   type ContextWeights,
+  contextCounts,
+  contextTotal,
   contextWeightsOf,
   fitBlockLabel,
   formatBlockTokens,
   formatShare,
   formatUsedPercent,
   formatWindow,
+  mapNote,
   scaleToTotal,
+  sessionNote,
+  sessionRequests,
 } from "./contextMap"
+import type { Observation } from "./types"
 
 const WEIGHTS: ContextWeights = {
   system: 4_000,
@@ -373,6 +379,158 @@ describe("buildContextMap", () => {
   })
 })
 
+function request(overrides: Partial<Observation> = {}): Observation {
+  return {
+    id: "llm",
+    parentObservationId: null,
+    type: "GENERATION",
+    name: "chat",
+    startMs: 0,
+    endMs: 10,
+    level: "DEFAULT",
+    ...overrides,
+  }
+}
+
+describe("sessionRequests", () => {
+  it("reads the last request with any input, and the fullest", () => {
+    const early = request({ id: "early", startMs: 0, promptTokens: 160_000 })
+    const late = request({ id: "late", startMs: 50, promptTokens: 30_000 })
+    const failed = request({ id: "failed", startMs: 90 })
+    const tool = request({
+      id: "tool",
+      type: "TOOL",
+      startMs: 99,
+      promptTokens: 5,
+    })
+
+    expect(sessionRequests([late, early, failed, tool])).toEqual({
+      latest: late,
+      fullest: early,
+      count: 2,
+    })
+  })
+
+  it("is the same request when the last one is the fullest", () => {
+    const only = request({ promptTokens: 1_000 })
+
+    expect(sessionRequests([only])).toEqual({
+      latest: only,
+      fullest: only,
+      count: 1,
+    })
+  })
+
+  it("has nothing to read without a request that recorded input", () => {
+    expect(
+      sessionRequests([request(), request({ type: "SPAN" })]),
+    ).toBeUndefined()
+  })
+})
+
+describe("sessionNote", () => {
+  const latest = request({
+    id: "late",
+    promptTokens: 37_800,
+    contextWindow: 200_000,
+  })
+
+  it("names the fullest request when it is not the last", () => {
+    const fullest = request({
+      id: "early",
+      promptTokens: 164_700,
+      contextWindow: 200_000,
+    })
+
+    expect(sessionNote({ latest, fullest, count: 36 })).toBe(
+      "From the last of 36 requests. The fullest held 164.7k, 82% of its window.",
+    )
+  })
+
+  it("leaves the window out of the fullest when it is unknown", () => {
+    const fullest = request({ id: "early", promptTokens: 50_000 })
+
+    expect(sessionNote({ latest, fullest, count: 2 })).toBe(
+      "From the last of 2 requests. The fullest held 50.0k.",
+    )
+  })
+
+  it("says only which request it is when the last is the fullest", () => {
+    expect(sessionNote({ latest, fullest: latest, count: 1 })).toBe(
+      "From the session's only request.",
+    )
+  })
+})
+
+describe("contextTotal", () => {
+  it("states the input against the window", () => {
+    const map = buildContextMap({ inputTokens: 118_400, windowTokens: 200_000 })
+
+    expect(map && contextTotal(map)).toBe("118.4k / 200k")
+  })
+
+  it("is the input alone when the window is unknown", () => {
+    const map = buildContextMap({ inputTokens: 12_700 })
+
+    expect(map && contextTotal(map)).toBe("12.7k")
+  })
+})
+
+describe("contextCounts", () => {
+  const latest = request({ id: "late", promptTokens: 37_800 })
+  const fullest = request({
+    id: "early",
+    promptTokens: 164_700,
+    contextWindow: 200_000,
+  })
+  const at = (inputTokens: number, windowTokens?: number) => {
+    const map = buildContextMap({ inputTokens, windowTokens })
+    if (!map) throw new Error("expected a map")
+    return map
+  }
+
+  it("says how full the window is, and how full it got when that was earlier", () => {
+    expect(
+      contextCounts(at(37_800, 200_000), { latest, fullest, count: 2 }),
+    ).toEqual(["19% full", "fullest 82%"])
+    expect(
+      contextCounts(at(37_800, 200_000), { latest, fullest: latest, count: 1 }),
+    ).toEqual(["19% full"])
+  })
+
+  it("says the window is unknown or overrun instead of a share", () => {
+    const only = { latest, fullest: latest, count: 1 }
+
+    expect(contextCounts(at(12_700), only)).toEqual(["Window unknown"])
+    expect(contextCounts(at(237_900, 200_000), only)).toEqual([
+      "Over the window",
+    ])
+  })
+})
+
+describe("mapNote", () => {
+  it("says an estimated split is one, and how much of it the cache held", () => {
+    const map = buildContextMap({
+      inputTokens: 118_400,
+      cacheReadTokens: 112_900,
+      windowTokens: 200_000,
+      weights: WEIGHTS,
+    })
+
+    expect(map && mapNote(map)).toBe(
+      "The split is estimated from its size; the total is exact. 95% of it was read from the cache.",
+    )
+  })
+
+  it("calls the cache split the provider's own, and says when the window is unknown", () => {
+    const map = buildContextMap({ inputTokens: 1_000, cacheReadTokens: 900 })
+
+    expect(map && mapNote(map)).toBe(
+      "The split is the provider's own. One by prompt, tools and messages is kept only for requests Otari served. This model's window is unknown, so free space is not shown.",
+    )
+  })
+})
+
 describe("fitBlockLabel", () => {
   const block = {
     title: "Tool results",
@@ -394,15 +552,11 @@ describe("fitBlockLabel", () => {
     expect(fitBlockLabel(tools, 40, 80).text).toBeUndefined()
   })
 
-  it("is complete only with a count, and adds the category on a wide block", () => {
-    expect(fitBlockLabel(tools, 200, 40)).toMatchObject({
-      count: false,
-      isComplete: false,
-    })
+  it("writes a count only on a block tall enough, and adds the category on a wide one", () => {
+    expect(fitBlockLabel(tools, 200, 40)).toMatchObject({ count: false })
     expect(fitBlockLabel(tools, 200, 80)).toMatchObject({
       count: true,
       category: true,
-      isComplete: true,
     })
     expect(fitBlockLabel(block, 200, 80).category).toBe(false)
   })

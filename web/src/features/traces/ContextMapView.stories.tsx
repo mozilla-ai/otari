@@ -16,7 +16,7 @@ import {
  * also kept the size of each part in characters (never text), which the map
  * scales to that total and marks **Estimated**. Any other model request, such as
  * one a coding agent exported over OTLP, has only the cache split, which is
- * exact. Hover or tab to a block for its count and share.
+ * exact. Hover, tab to or tap a block for its count and share.
  */
 const meta = {
   title: "Dashboard/Traces/ContextMap",
@@ -62,7 +62,7 @@ function Frame({ children }: { children: ReactNode }) {
 
 /** A request Otari served: the whole composition, estimated, in a 200k window. */
 export const EstimatedComposition: Story = {
-  args: { map: buildContextMap(ESTIMATED), model: "claude-sonnet-4-5" },
+  args: { map: buildContextMap(ESTIMATED) },
   render: (args) => (
     <Frame>
       <ContextMapView {...args} />
@@ -72,7 +72,7 @@ export const EstimatedComposition: Story = {
 
 /** A model request from an OTLP exporter (Claude Code, Codex): only the cache split is known. */
 export const CacheSplitOnly: Story = {
-  args: { map: buildContextMap(CACHE_ONLY), model: "claude-sonnet-4-5" },
+  args: { map: buildContextMap(CACHE_ONLY) },
   render: (args) => (
     <Frame>
       <ContextMapView {...args} />
@@ -84,7 +84,6 @@ export const CacheSplitOnly: Story = {
 export const WindowUnknown: Story = {
   args: {
     map: buildContextMap({ ...ESTIMATED, windowTokens: undefined }),
-    model: "acme-internal-7b",
   },
   render: (args) => (
     <Frame>
@@ -101,7 +100,6 @@ export const OverWindow: Story = {
       inputTokens: 231_000,
       windowTokens: 200_000,
     }),
-    model: "claude-sonnet-4-5",
   },
   render: (args) => (
     <Frame>
@@ -125,7 +123,6 @@ export const SmallBlocks: Story = {
         assistant: 500,
       },
     }),
-    model: "gemini-2.5-pro",
   },
   render: (args) => (
     <Frame>
@@ -141,7 +138,7 @@ export const NoInput: Story = {
 
 /** Narrow, as in the panel on a phone. */
 export const Narrow: Story = {
-  args: { map: buildContextMap(ESTIMATED), model: "claude-sonnet-4-5" },
+  args: { map: buildContextMap(ESTIMATED) },
   render: (args) => (
     <div className="w-80">
       <ContextMapView {...args} />
@@ -153,8 +150,7 @@ export const Narrow: Story = {
 export const SidePanel: Story = {
   args: {
     map: buildContextMap(ESTIMATED),
-    model: "claude-sonnet-4-5",
-    outputTokens: 600,
+    lead: "From the last of 31 requests.",
   },
   render: (args) => (
     <div className="w-[280px]">
@@ -165,7 +161,7 @@ export const SidePanel: Story = {
 
 /** Both themes at once, each scoped by `data-theme`, so one screenshot shows both. */
 export const LightAndDark: Story = {
-  args: { map: buildContextMap(ESTIMATED), model: "claude-sonnet-4-5" },
+  args: { map: buildContextMap(ESTIMATED) },
   render: (args) => (
     <div className="grid w-full max-w-6xl gap-4 lg:grid-cols-2">
       {(["light", "dark"] as const).map((theme) => (
@@ -175,10 +171,7 @@ export const LightAndDark: Story = {
           className="flex flex-col gap-6 bg-background p-4 text-body"
         >
           <ContextMapView {...args} />
-          <ContextMapView
-            map={buildContextMap(CACHE_ONLY)}
-            model="claude-sonnet-4-5"
-          />
+          <ContextMapView map={buildContextMap(CACHE_ONLY)} />
         </div>
       ))}
     </div>

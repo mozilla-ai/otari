@@ -8,6 +8,14 @@ import {
   formatTokensCompact,
 } from "@/shared/helpers/format"
 
+import { ContextMapView } from "./ContextMapView"
+import {
+  contextCounts,
+  contextTotal,
+  requestContextMap,
+  type SessionRequests,
+  sessionNote,
+} from "./contextMap"
 import { formatDuration, formatShare, plural } from "./format"
 import type { GuardrailVerdict } from "./gateway"
 import {
@@ -553,15 +561,32 @@ function Gates({ gates }: { gates: SessionStats["gates"] }) {
   )
 }
 
+function Context({ requests }: { requests: SessionRequests }) {
+  const map = requestContextMap(requests.latest)
+  if (!map) return null
+  return (
+    <section aria-label="Context" className={BAND}>
+      <Head
+        verb="Context"
+        total={contextTotal(map)}
+        counts={contextCounts(map, requests)}
+      />
+      <ContextMapView map={map} lead={sessionNote(requests)} />
+    </section>
+  )
+}
+
 // What a session did, where its time went and what its money paid for, before
 // any span is picked.
 export function SessionAtAGlance({
   stats,
   cost,
+  context,
 }: {
   stats: SessionStats
   /** The session's total as recorded; the parts split what of it was priced. */
   cost: number
+  context?: SessionRequests
 }) {
   const time = timeBreakdown(stats)
   return (
@@ -570,6 +595,7 @@ export function SessionAtAGlance({
       <div className="flex flex-col divide-y divide-border">
         {time ? <Time stats={stats} time={time} /> : null}
         <Cost stats={stats} total={cost} />
+        {context ? <Context requests={context} /> : null}
         <Gates gates={stats.gates} />
       </div>
     </section>

@@ -1,22 +1,20 @@
 import { useCallback, useRef, useState } from "react"
 
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
-import { Chip } from "@/design-system/indicators/Chip"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 import {
   blockTransition,
-  buildContextMap,
   type ContextBlock,
   type ContextKind,
   type ContextMap,
+  ESTIMATED,
   fitBlockLabel,
   formatBlockTokens,
   formatShare,
-  formatUsedPercent,
   formatWindow,
+  mapNote,
 } from "./contextMap"
 import { type Placed, squarify } from "./squarify"
-import type { Observation } from "./types"
 
 // Each kind's color is a chart token. The tile and its border are that color
 // mixed into the surface, so the title keeps the page's own ink on both themes.
@@ -55,10 +53,9 @@ const GAP = 2
 // The container's own border, top and bottom, which the blocks do not lie on.
 const BORDER = 2
 const MIN_BORDERED = 4
-const TOOLTIP_CLEARANCE = 8
 
 function mapHeight(width: number): number {
-  return Math.round(Math.min(360, Math.max(200, width * 0.5)))
+  return Math.round(Math.min(240, Math.max(140, width * 0.37)))
 }
 
 // A block whose title is its category (Free, Tool results) would say it twice.
@@ -69,46 +66,29 @@ function summary(block: ContextBlock): string {
     : `${block.category} · ${amount}`
 }
 
-function BlockTooltip({ block }: { block: ContextBlock }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="font-semibold">{block.title}</span>
-      <span>{summary(block)}</span>
-      {block.notes.map((note) => (
-        <span key={note}>{note}</span>
-      ))}
-    </div>
-  )
-}
-
 function Swatch({ block }: { block: ContextBlock }) {
   return (
     <span
       aria-hidden="true"
-      className={`size-3 shrink-0 border ${block.kind === "free" ? HATCH : `${TONE[block.kind]} ${TILE}`}`}
+      className={`size-2 shrink-0 ${block.kind === "free" ? "border border-border-strong" : `${TONE[block.kind]} bg-(--tile)`}`}
     />
   )
 }
 
-/** The parts by name, for a map too small to write them all on its blocks. */
-function Legend({ blocks }: { blocks: ContextBlock[] }) {
+function BlockTooltip({ block }: { block: ContextBlock }) {
   return (
-    <ul
-      aria-label="Context parts"
-      className="m-0 flex list-none flex-col gap-1 p-0 text-caption"
-    >
-      {blocks.map((block) => (
-        <li key={block.kind} className="flex items-center gap-2">
-          <Swatch block={block} />
-          <span className="min-w-0 flex-1 truncate text-heading">
-            {block.title}
-          </span>
-          <span className="shrink-0 text-mono-caption">
-            {`${formatBlockTokens(block.tokens)} · ${formatShare(block.share)}`}
-          </span>
-        </li>
+    <div className="flex flex-col gap-0.5">
+      <span className="flex items-center gap-2">
+        <Swatch block={block} />
+        <span className="text-emphasis">{block.title}</span>
+      </span>
+      <span className="text-caption">{summary(block)}</span>
+      {block.notes.map((note) => (
+        <span key={note} className="text-caption text-subtle">
+          {note}
+        </span>
       ))}
-    </ul>
+    </div>
   )
 }
 
@@ -116,14 +96,17 @@ function Block({
   placed,
   index,
   animateGeometry,
+  isEstimate,
 }: {
   placed: Placed<ContextBlock>
   index: number
   animateGeometry: boolean
+  isEstimate: boolean
 }) {
   const block = placed.item
-  // Lift the tooltip clear of the whole map, so it never covers a neighbor's label.
-  const tooltipOffset = Math.round(placed.y + GAP / 2) + TOOLTIP_CLEARANCE
+  // A tap opens the card too: a touch screen has no hover, and a block too small
+  // to write on has its numbers nowhere else.
+  const [isOpen, setIsOpen] = useState(false)
   // A sliver of a block can come out smaller than the gap; a negative size is invalid CSS.
   const width = Math.max(0, placed.width - GAP)
   const height = Math.max(0, placed.height - GAP)
@@ -138,13 +121,22 @@ function Block({
       content={<BlockTooltip block={block} />}
       delay={0}
       placement="top"
-      offset={tooltipOffset}
+      isOpen={isOpen}
+      onOpenChange={setIsOpen}
     >
       {(props) => (
         <button
           type="button"
           {...props}
-          aria-label={`${block.title}: ${summary(block)}. ${block.notes.join(". ")}`}
+          onClick={(event) => {
+            props.onClick?.(event)
+            setIsOpen(true)
+          }}
+          aria-label={[
+            `${block.title}: ${summary(block)}`,
+            ...block.notes,
+            ...(isEstimate && !isFree ? [ESTIMATED] : []),
+          ].join(". ")}
           style={{
             left: placed.x + GAP / 2,
             top: placed.y + GAP / 2,
@@ -155,7 +147,7 @@ function Block({
           className={`absolute flex min-w-0 cursor-default flex-col items-start justify-start gap-0.5 overflow-hidden text-left ${hasRoom ? "border" : ""} ${showTitle ? "p-2" : ""} ${LIFT} ${MOTION} ${isFree ? HATCH : `${TONE[block.kind]} ${TILE}`}`}
         >
           {showTitle ? (
-            <span className="w-full truncate text-heading">{label.text}</span>
+            <span className="w-full truncate text-emphasis">{label.text}</span>
           ) : null}
           {label.count ? (
             <span className="w-full truncate text-caption">
@@ -204,46 +196,34 @@ function Treemap({ map }: { map: ContextMap }) {
     map.blocks.map((block) => ({ ...block, value: block.tokens })),
     { x: 0, y: 0, width, height: height - BORDER },
   ).map(({ item, ...rect }) => ({ ...rect, item: item as ContextBlock }))
-  // Once measured, a block with no room for its name and count sends every part to a list below.
-  const needsLegend =
-    width > 0 &&
-    placed.some(
-      ({ item, width: w, height: h }) =>
-        !fitBlockLabel(item, Math.max(0, w - GAP), Math.max(0, h - GAP))
-          .isComplete,
-    )
   return (
-    <div className="flex flex-col gap-3">
-      <fieldset
-        ref={measure}
-        aria-label="Context window map"
-        style={{ height }}
-        className="relative m-0 min-w-0 w-full overflow-hidden border border-border bg-surface-subtle"
-      >
-        {placed.map((block, index) => (
-          <Block
-            key={block.item.kind}
-            placed={block}
-            index={index}
-            animateGeometry={!isResizing}
-          />
-        ))}
-      </fieldset>
-      {needsLegend ? <Legend blocks={map.blocks} /> : null}
-    </div>
+    <fieldset
+      ref={measure}
+      aria-label="Context window map"
+      style={{ height }}
+      className="relative m-0 min-w-0 w-full overflow-hidden border border-border bg-surface-subtle"
+    >
+      {placed.map((block, index) => (
+        <Block
+          key={block.item.kind}
+          placed={block}
+          index={index}
+          animateGeometry={!isResizing}
+          isEstimate={map.isEstimate}
+        />
+      ))}
+    </fieldset>
   )
 }
 
-/** One request's context window as a treemap, sized by tokens. */
+/** One request's context window as a treemap, sized by tokens, and what its numbers mean. */
 export function ContextMapView({
   map,
-  model,
-  outputTokens,
+  lead,
 }: {
   map: ContextMap | undefined
-  model?: string
-  /** The completion tokens of the same request, named beside the input the map is of. */
-  outputTokens?: number
+  /** Which request the map is of, said before what its numbers mean. */
+  lead?: string
 }) {
   if (!map)
     return (
@@ -251,96 +231,17 @@ export function ContextMapView({
         This request recorded no input tokens, so there is nothing to map.
       </EmptyMessage>
     )
-  const { windowTokens } = map
-  const used = formatBlockTokens(map.used)
   return (
-    <section aria-label="Context" className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h3 className="flex flex-wrap items-baseline gap-x-2 text-overline">
-          Context
-          {model ? (
-            <span className="text-muted normal-case">
-              {windowTokens !== undefined
-                ? `${model} [${formatWindow(windowTokens)}]`
-                : model}
-            </span>
-          ) : null}
-        </h3>
-        <div className="flex items-center gap-2 text-mono-caption">
-          {windowTokens !== undefined ? (
-            <>
-              <span>{`${used} input / ${formatWindow(windowTokens)}`}</span>
-              <Chip
-                tone={map.used / windowTokens >= 0.9 ? "warning" : "neutral"}
-              >
-                {formatUsedPercent(map.used, windowTokens)}
-              </Chip>
-            </>
-          ) : (
-            <>
-              <span>{`${used} input tokens`}</span>
-              <Chip>Window unknown</Chip>
-            </>
-          )}
-          {outputTokens ? (
-            <span className="text-muted">{`+ ${formatBlockTokens(outputTokens)} output`}</span>
-          ) : null}
-        </div>
-      </div>
+    <>
       <Treemap map={map} />
-      <div className="flex flex-col gap-1 text-caption">
-        {outputTokens ? (
-          <p>
-            {`The map shows input tokens only. The ${formatBlockTokens(outputTokens)} output tokens of this request are counted in the span total, not here.`}
-          </p>
-        ) : null}
-        {map.cache ? (
-          <p>
-            {`Exact from the provider: ${formatBlockTokens(map.cache.read)} read from the cache, ${formatBlockTokens(map.cache.write)} written to it, ${formatBlockTokens(map.cache.fresh)} fresh input. These overlap the parts above and are not added to them.`}
-          </p>
-        ) : null}
-        {map.isEstimate ? (
-          <p>
-            <Chip size="sm">Estimated</Chip> Split estimated from request size,
-            scaled to the provider's exact input-token count. The total is
-            exact.
-          </p>
-        ) : (
-          <p>
-            The total and the cache split are the provider's own counts. A split
-            by prompt, tools and messages is only kept for requests Otari
-            served.
-          </p>
-        )}
-        {windowTokens === undefined ? (
-          <p>
-            The context window of this model is unknown, so free space is not
-            shown.
-          </p>
-        ) : null}
-        {map.isOverWindow && windowTokens !== undefined ? (
-          <p className="text-warning">
-            {`The input is larger than the ${formatWindow(windowTokens)} window recorded for this model. It may have been compacted, or the window may be wrong, so free space is not shown.`}
-          </p>
-        ) : null}
-      </div>
-    </section>
-  )
-}
-
-/** The Context tab of a model request. */
-export function ContextTab({ observation }: { observation: Observation }) {
-  return (
-    <ContextMapView
-      model={observation.model}
-      outputTokens={observation.completionTokens}
-      map={buildContextMap({
-        inputTokens: observation.promptTokens,
-        cacheReadTokens: observation.cachedTokens,
-        cacheWriteTokens: observation.cacheWriteTokens,
-        windowTokens: observation.contextWindow,
-        weights: observation.context,
-      })}
-    />
+      <p className="text-caption text-subtle">
+        {lead ? `${lead} ${mapNote(map)}` : mapNote(map)}
+      </p>
+      {map.isOverWindow && map.windowTokens !== undefined ? (
+        <p className="text-caption text-warning">
+          {`More than the ${formatWindow(map.windowTokens)} window the catalog lists for this model, so free space is not shown. The request may have run with a larger window.`}
+        </p>
+      ) : null}
+    </>
   )
 }

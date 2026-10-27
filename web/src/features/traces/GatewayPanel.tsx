@@ -74,7 +74,11 @@ export function GatewayPanel({
   const start = Date.parse(startedAt)
   return (
     <>
-      <SessionAtAGlance stats={gateway.stats} cost={gateway.cost} />
+      <SessionAtAGlance
+        stats={gateway.stats}
+        cost={gateway.cost}
+        context={gateway.context}
+      />
       <Spend
         cost={gateway.cost}
         apiKeyId={gateway.apiKeyId}

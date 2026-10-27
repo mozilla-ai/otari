@@ -53,7 +53,8 @@ export function Tooltip({
   content,
   placement = "top",
   delay = TOOLTIP_OPEN_DELAY_MS,
-  offset,
+  isOpen,
+  onOpenChange,
   children,
 }: {
   /** The label. A phrase, not a sentence, and never the only place it is said. */
@@ -64,12 +65,13 @@ export function Tooltip({
    * rather than a pointer passing a lane of icons on its way somewhere else.
    */
   delay?: number
-  /** Pixels between the trigger and the tooltip along `placement`, where the default would cover something beside it. */
-  offset?: number
+  /** Held by the caller, where something besides hover and focus opens it, such as a tap. */
+  isOpen?: boolean
+  onOpenChange?: (isOpen: boolean) => void
   children: ReactNode | ((props: TooltipTriggerProps) => ReactElement)
 }) {
   return (
-    <HeroTooltip.Root delay={delay}>
+    <HeroTooltip.Root delay={delay} isOpen={isOpen} onOpenChange={onOpenChange}>
       {typeof children === "function" ? (
         // The generic is what types the render function for a `button` rather
         // than for the `div` HeroUI's trigger defaults to. A control wanting a
@@ -86,9 +88,7 @@ export function Tooltip({
           {children}
         </HeroTooltip.Trigger>
       )}
-      <HeroTooltip.Content placement={placement} offset={offset}>
-        {content}
-      </HeroTooltip.Content>
+      <HeroTooltip.Content placement={placement}>{content}</HeroTooltip.Content>
     </HeroTooltip.Root>
   )
 }

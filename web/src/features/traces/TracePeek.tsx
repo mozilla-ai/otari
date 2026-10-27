@@ -18,7 +18,6 @@ import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
-import { ContextTab } from "./ContextMapView"
 import { CostCard } from "./CostCard"
 import { ExplainCard } from "./ExplainCard"
 import {
@@ -38,14 +37,12 @@ import { TraceTimelineView } from "./TraceTimelineView"
 import { TraceTreeView } from "./TraceTreeView"
 import { type Observation, summarizeTrace, type Trace } from "./types"
 
-type PeekTab = "preview" | "attributes" | "context" | "log" | "gates"
+type PeekTab = "preview" | "attributes" | "log" | "gates"
 
-// Attributes belong to a span, so that tab shows only while one is selected, and
-// Context only for a model request.
+// Attributes belong to a span, so that tab shows only while one is selected.
 const ALL_TABS: { id: PeekTab; label: string }[] = [
   { id: "preview", label: "Preview" },
   { id: "attributes", label: "Attributes" },
-  { id: "context", label: "Context" },
   { id: "log", label: "Log View" },
   { id: "gates", label: "Gates" },
 ]
@@ -414,7 +411,6 @@ export function TracePeek({
   const tabs = ALL_TABS.filter(
     (t) =>
       (t.id !== "attributes" || observation) &&
-      (t.id !== "context" || observation?.type === "GENERATION") &&
       (t.id !== "gates" || gates.length > 0),
   )
   const parentIds = useMemo(
@@ -896,8 +892,6 @@ export function TracePeek({
               </div>
               {activeTab === "attributes" && observation ? (
                 <Attributes trace={trace} observation={observation} />
-              ) : activeTab === "context" && observation ? (
-                <ContextTab observation={observation} />
               ) : !observation && trace.gateway ? (
                 <GatewayPanel
                   gateway={trace.gateway}

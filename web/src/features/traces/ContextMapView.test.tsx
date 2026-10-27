@@ -25,16 +25,8 @@ function estimated() {
 }
 
 describe("ContextMapView", () => {
-  it("heads the map with the model and its window, the tokens used and the share of it", () => {
-    render(<ContextMapView map={estimated()} model="claude-sonnet-4-5" />)
-
-    expect(screen.getByText("claude-sonnet-4-5 [200k]")).toBeInTheDocument()
-    expect(screen.getByText("39.6k input / 200k")).toBeInTheDocument()
-    expect(screen.getByText("20%")).toBeInTheDocument()
-  })
-
   it("draws a focusable block for each part and one for the free window", () => {
-    render(<ContextMapView map={estimated()} model="claude-sonnet-4-5" />)
+    render(<ContextMapView map={estimated()} />)
     const map = screen.getByRole("group", { name: "Context window map" })
 
     const blocks = within(map).getAllByRole("button")
@@ -101,9 +93,20 @@ describe("ContextMapView", () => {
     ).toBeInTheDocument()
     expect(tooltip).toHaveTextContent(/^Tool definitionsTools ·/)
     expect(within(tooltip).getByText("12 tool definitions")).toBeInTheDocument()
+    // The band's note says once that the split is estimated; the card does not repeat it.
     expect(
-      within(tooltip).getByText("Estimated from request size"),
-    ).toBeInTheDocument()
+      within(tooltip).queryByText("Estimated from request size"),
+    ).not.toBeInTheDocument()
+  })
+
+  it("opens a block's card on a click or a tap, which has no hover to open it", async () => {
+    const user = userEvent.setup()
+    render(<ContextMapView map={estimated()} />)
+
+    await user.click(screen.getByRole("button", { name: /^Messages/ }))
+
+    const tooltip = await screen.findByRole("tooltip")
+    expect(within(tooltip).getByText("41 messages")).toBeInTheDocument()
   })
 
   it("does not repeat a title that is its own category in the tooltip", async () => {
@@ -125,31 +128,32 @@ describe("ContextMapView", () => {
     ).toBeInTheDocument()
   })
 
-  it("says the map is of input tokens and names the output beside it", () => {
-    render(<ContextMapView map={estimated()} outputTokens={600} />)
+  it("leads its note with which request the map is of", () => {
+    render(
+      <ContextMapView map={estimated()} lead="From the last of 3 requests." />,
+    )
 
-    expect(screen.getByText("+ 600 output")).toBeInTheDocument()
-    expect(screen.getByText(/shows input tokens only/)).toBeInTheDocument()
-  })
-
-  it("names no output when the request has none", () => {
-    render(<ContextMapView map={estimated()} />)
-
-    expect(screen.queryByText(/output/)).not.toBeInTheDocument()
+    expect(
+      screen.getByText(/^From the last of 3 requests\. The split is estimated/),
+    ).toBeInTheDocument()
   })
 
   it("says the split is an estimate and the total is not", () => {
     render(<ContextMapView map={estimated()} />)
 
-    expect(screen.getByText("Estimated")).toBeInTheDocument()
     expect(
       screen.getByText(
-        /Split estimated from request size, scaled to the provider's exact input-token count/,
+        "The split is estimated from its size; the total is exact.",
       ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", {
+        name: /^Tool results: .*Estimated from request size$/,
+      }),
     ).toBeInTheDocument()
   })
 
-  it("states the exact cache counts in text beside an estimated map, with no tiles for them", () => {
+  it("says how much of an estimated map was read from the cache, with no tiles for it", () => {
     render(
       <ContextMapView
         map={buildContextMap({
@@ -163,14 +167,11 @@ describe("ContextMapView", () => {
     )
 
     expect(
-      screen.getByText(
-        /Exact from the provider: 31\.2k read from the cache, 2\.4k written to it, 6\.0k fresh input/,
-      ),
+      screen.getByText(/79% of it was read from the cache\.$/),
     ).toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: /^Cache read/ }),
     ).not.toBeInTheDocument()
-    expect(screen.getByText("Estimated")).toBeInTheDocument()
   })
 
   it("does not call counts that overrun the input exact", () => {
@@ -186,10 +187,8 @@ describe("ContextMapView", () => {
       />,
     )
 
-    expect(
-      screen.queryByText(/Exact from the provider/),
-    ).not.toBeInTheDocument()
-    expect(screen.getByText("Estimated")).toBeInTheDocument()
+    expect(screen.queryByText(/from the cache/)).not.toBeInTheDocument()
+    expect(screen.getByText(/The split is estimated/)).toBeInTheDocument()
   })
 
   it("draws the cache split with the provider's own counts, and no estimate marker", () => {
@@ -204,10 +203,10 @@ describe("ContextMapView", () => {
       />,
     )
 
-    expect(screen.queryByText("Estimated")).not.toBeInTheDocument()
+    expect(screen.queryByText(/estimated/)).not.toBeInTheDocument()
     expect(
       screen.getByRole("button", {
-        name: /^Cache read: .*Read from the provider's cache/,
+        name: /^Cache read: .*Read from the provider's cache$/,
       }),
     ).toBeInTheDocument()
     expect(
@@ -216,22 +215,22 @@ describe("ContextMapView", () => {
     expect(
       screen.getByRole("button", { name: /^Fresh input/ }),
     ).toBeInTheDocument()
-    expect(screen.getByText(/the provider's own counts/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/^The split is the provider's own\./),
+    ).toBeInTheDocument()
   })
 
-  it("shows the used tokens and says the window is unknown when it is", () => {
+  it("says the window is unknown when it is, and draws no free space", () => {
     render(
       <ContextMapView
         map={buildContextMap({ inputTokens: 1_500, weights: WEIGHTS })}
-        model="mystery-1"
       />,
     )
 
-    expect(screen.getByText("mystery-1")).toBeInTheDocument()
-    expect(screen.getByText("1.5k input tokens")).toBeInTheDocument()
-    expect(screen.getByText("Window unknown")).toBeInTheDocument()
     expect(
-      screen.getByText(/context window of this model is unknown/),
+      screen.getByText(
+        /This model's window is unknown, so free space is not shown\.$/,
+      ),
     ).toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: /^Free/ }),
@@ -246,12 +245,12 @@ describe("ContextMapView", () => {
           windowTokens: 200_000,
           cacheReadTokens: 100_000,
         })}
-        model="m"
       />,
     )
 
-    expect(screen.getByText(">100%")).toBeInTheDocument()
-    expect(screen.getByText(/larger than the 200k window/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/^More than the 200k window the catalog lists/),
+    ).toHaveClass("text-warning")
     expect(
       screen.queryByRole("button", { name: /^Free/ }),
     ).not.toBeInTheDocument()
@@ -406,14 +405,6 @@ describe("ContextMapView motion", () => {
     )
     expect(geometry()).toBe(true)
   })
-
-  it("does not fade the legend in", () => {
-    measuredAt(280)
-    render(<ContextMapView map={estimated()} />)
-
-    const list = screen.getByRole("list", { name: "Context parts" })
-    expect(list.className).not.toMatch(/transition|starting:/)
-  })
 })
 
 function measuredAt(width: number) {
@@ -436,22 +427,6 @@ function measuredAt(width: number) {
 describe("ContextMapView in a narrow panel", () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it("lists every part with its tokens and share when a block cannot show its label", () => {
-    measuredAt(280)
-    render(<ContextMapView map={estimated()} />)
-
-    const list = screen.getByRole("list", { name: "Context parts" })
-    const items = within(list).getAllByRole("listitem")
-    expect(items.map((item) => item.textContent)).toEqual([
-      "System prompt2.7k · 1.4%",
-      "Tool definitions8.2k · 4.1%",
-      "Files2.7k · 1.4%",
-      "Messages5.5k · 2.7%",
-      "Tool results20.5k · 10.2%",
-      "Free160.4k · 80.2%",
-    ])
-  })
-
   it("writes the shorter category on a block too narrow for its title", () => {
     measuredAt(280)
     render(<ContextMapView map={estimated()} />)
@@ -459,29 +434,5 @@ describe("ContextMapView in a narrow panel", () => {
 
     const tools = within(map).getByRole("button", { name: /^Tool definitions/ })
     expect(tools.textContent).not.toContain("Tool definitions")
-  })
-
-  it("leaves the list out where every block is labeled", () => {
-    render(
-      <ContextMapView
-        map={buildContextMap({
-          inputTokens: 100_000,
-          windowTokens: 200_000,
-          weights: {
-            ...WEIGHTS,
-            system: 25_000,
-            tools: 25_000,
-            user: 25_000,
-            assistant: 25_000,
-            toolResults: 0,
-            files: 0,
-          },
-        })}
-      />,
-    )
-
-    expect(
-      screen.queryByRole("list", { name: "Context parts" }),
-    ).not.toBeInTheDocument()
   })
 })

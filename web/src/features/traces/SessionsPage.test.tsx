@@ -264,7 +264,7 @@ describe("SessionsPage", () => {
     expect(within(peek).getByText("Reasoning tokens")).toBeInTheDocument()
   })
 
-  it("maps what filled a model request's context window under its Context tab", async () => {
+  it("maps at a glance what fills the session's context window", async () => {
     const detail = traceDetail()
     const spans = detail.spans.map((span) =>
       span.span_id === "llm-1"
@@ -290,35 +290,31 @@ describe("SessionsPage", () => {
 
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession()
-    expect(
-      within(peek).queryByRole("button", { name: "Context" }),
-    ).not.toBeInTheDocument()
-    await userEvent.click(
-      within(peek).getAllByRole("button", {
-        name: /^Generation, claude-sonnet-4-5/,
-      })[0],
-    )
-    await userEvent.click(
-      await within(peek).findByRole("button", { name: "Context" }),
-    )
+    const context = await within(peek).findByRole("region", {
+      name: "Context",
+    })
 
+    expect(within(context).getByText("39.6k / 200k")).toBeInTheDocument()
+    expect(within(context).getByText("20% full")).toBeInTheDocument()
     expect(
-      within(peek).getByText("claude-sonnet-4-5 [200k]"),
-    ).toBeInTheDocument()
-    expect(within(peek).getByText("39.6k input / 200k")).toBeInTheDocument()
-    expect(within(peek).getByText("20%")).toBeInTheDocument()
+      within(context).queryByText(/claude-sonnet-4-5/),
+    ).not.toBeInTheDocument()
     expect(
-      within(peek).getByRole("button", {
+      within(context).getByRole("button", {
         name: /^Tool definitions: .*12 tool definitions/,
       }),
     ).toBeInTheDocument()
     expect(
-      within(peek).getByRole("button", { name: /^Free:/ }),
+      within(context).getByRole("button", { name: /^Free:/ }),
     ).toBeInTheDocument()
-    expect(within(peek).getByText("Estimated")).toBeInTheDocument()
+    expect(
+      within(context).getByText(
+        "From the session's only request. The split is estimated from its size; the total is exact.",
+      ),
+    ).toBeInTheDocument()
   })
 
-  it("falls back to the cache split for a request with no kept sizes, and has no tab for a step", async () => {
+  it("falls back to the cache split at a glance, and gives a model request no Context tab", async () => {
     const detail = traceDetail()
     const spans = detail.spans.map((span) =>
       span.span_id === "llm-1"
@@ -334,22 +330,26 @@ describe("SessionsPage", () => {
 
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession()
+    const context = await within(peek).findByRole("region", {
+      name: "Context",
+    })
+
+    expect(within(context).getByText("1.0k")).toBeInTheDocument()
+    expect(within(context).getByText("Window unknown")).toBeInTheDocument()
+    expect(
+      within(context).getByRole("button", { name: /^Cache read:/ }),
+    ).toBeInTheDocument()
+    expect(
+      within(context).getByText(
+        /The split is the provider's own\..*window is unknown/,
+      ),
+    ).toBeInTheDocument()
     await userEvent.click(
       within(peek).getAllByRole("button", { name: /^Generation, gpt-5/ })[0],
     )
-    await userEvent.click(
-      await within(peek).findByRole("button", { name: "Context" }),
-    )
-
-    expect(within(peek).getByText("1.0k input tokens")).toBeInTheDocument()
-    expect(within(peek).getByText("Window unknown")).toBeInTheDocument()
     expect(
-      within(peek).getByRole("button", { name: /^Cache read:/ }),
+      await within(peek).findByRole("button", { name: "Attributes" }),
     ).toBeInTheDocument()
-    expect(within(peek).queryByText("Estimated")).not.toBeInTheDocument()
-    await userEvent.click(
-      within(peek).getAllByRole("button", { name: /^Span, Request/ })[0],
-    )
     expect(
       within(peek).queryByRole("button", { name: "Context" }),
     ).not.toBeInTheDocument()
