@@ -28,3 +28,9 @@ def owner_enable_refusal(api_key: APIKey, is_active: bool | None) -> str | None:
     if is_active is True and api_key.operator_disabled:
         return "An operator switched this key off; ask them to switch it back on."
     return None
+
+
+def operator_set_active(api_key: APIKey, is_active: bool) -> None:
+    """Switch ``api_key`` on or off as an operator; a switch-off is then not the owner's to undo."""
+    api_key.is_active = is_active
+    api_key.operator_disabled = not is_active

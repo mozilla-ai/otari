@@ -29,6 +29,7 @@ from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
+from gateway.services.api_keys import operator_set_active
 from gateway.services.budgets import BudgetService, check_path_external_id
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
@@ -521,9 +522,7 @@ async def update_key(
     if "key_name" in request.model_fields_set:
         key.key_name = request.key_name
     if request.is_active is not None:
-        key.is_active = request.is_active
-        # An operator's switch-off is not the owner's to undo; their switch-on clears it.
-        key.operator_disabled = not request.is_active
+        operator_set_active(key, request.is_active)
     if "expires_at" in request.model_fields_set:
         key.expires_at = request.expires_at
     if request.exclude_from_budget is not None:
