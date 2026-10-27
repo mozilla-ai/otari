@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Collection, Sequence
 from typing import Never
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +29,14 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         """Return the IDs of the keys in these workspaces, in no particular order."""
         result = await self.db.execute(select(APIKey.id).where(APIKey.workspace_id.in_(workspace_ids)))
         return list(result.scalars().all())
+
+    async def deactivate_owned_in_workspace(self, user_id: str, workspace_id: uuid.UUID) -> None:
+        """Switch off every key billed to ``user_id`` in ``workspace_id``."""
+        await self.db.execute(
+            update(APIKey)
+            .where(APIKey.user_id == user_id, APIKey.workspace_id == workspace_id, APIKey.is_active.is_(True))
+            .values(is_active=False)
+        )
 
     async def names_defaulting_end_users_to(self, budget_id: str) -> list[str]:
         """Name each key that starts its end users on ``budget_id`` by default, by its name or else its id."""

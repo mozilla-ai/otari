@@ -188,7 +188,9 @@ a budget-exempt key. A viewer may list their keys there and is refused (`403`)
 every write: creating, editing, rotating or deleting a key takes organization
 owner or admin, or a caller who is a viewer neither of the organization nor of
 the key's workspace. To give a viewer a key, an
-operator issues it on `/api/v1/keys` and owns its changes.
+operator issues it on `/api/v1/keys` and owns its changes. Removing someone from
+a workspace switches off the keys billed to them there; they may still delete
+such a key or keep it off, but not turn it back on, edit or rotate it.
 
 ### Mismatched `user` fields
 

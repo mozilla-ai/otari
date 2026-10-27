@@ -418,12 +418,17 @@ class OrganizationService:
         user: User,
         organization_id: uuid.UUID,
         workspace_id: uuid.UUID,
+        membership_required: bool = True,
     ) -> None:
         """Allow an organization owner/admin, or a caller who is a viewer neither of the organization nor here.
 
         The more restrictive of the two roles wins. Invitations have given
         organization viewers ``member`` in their workspaces, so letting the
         workspace role override would leave those viewers writable.
+
+        ``membership_required`` also refuses a caller with no active membership
+        here. Pass ``False`` only where losing the workspace should not stop
+        the write, as when a removed member switches off or deletes their key.
         """
         organization_membership = await self.members.get_active_by_organization_and_user(organization_id, user.id)
         if organization_membership is not None and organization_membership.role in MANAGEMENT_ROLES:
@@ -431,7 +436,11 @@ class OrganizationService:
         if organization_membership is None or organization_membership.role not in _CONTRIBUTOR_ROLES:
             raise NotAuthorizedError(_READ_ONLY_DETAIL)
         membership = await self.workspaces.get_active_by_workspace_and_user(workspace_id, user.id)
-        if membership is not None and membership.role not in _CONTRIBUTOR_ROLES:
+        if membership is None:
+            if membership_required:
+                raise NotAuthorizedError("You are no longer a member of this workspace")
+            return
+        if membership.role not in _CONTRIBUTOR_ROLES:
             raise NotAuthorizedError(_READ_ONLY_DETAIL)
 
     async def user_has_active_membership(self, *, organization_id: uuid.UUID, user_id: uuid.UUID) -> bool:

@@ -378,6 +378,44 @@ def test_a_viewer_outside_the_default_workspace_hears_403_not_409(
     assert code == status.HTTP_409_CONFLICT, body
 
 
+def test_removing_a_member_from_a_workspace_switches_their_keys_there_off(client: TestClient, world: _World) -> None:
+    """The removed member keeps nothing that still spends, and may only take the key further away."""
+    workspace = str(world.workspaces["alpha_one"])
+    code, mine = _create(client, world, "alpha_member", {"key_name": "mine", "workspace_id": workspace})
+    assert code == status.HTTP_200_OK, mine
+    code, theirs = _create(client, world, "alpha_colleague", {"key_name": "theirs", "workspace_id": workspace})
+    assert code == status.HTTP_200_OK, theirs
+
+    code, body = _request(
+        client,
+        world,
+        "alpha_owner",
+        "DELETE",
+        f"{API_ROOT}/workspaces/{workspace}/members/{world.users['alpha_member']}",
+    )
+    assert code == status.HTTP_200_OK, body
+
+    code, listed = _request(client, world, "alpha_member", "GET", _PREFIX)
+    assert code == status.HTTP_200_OK
+    assert next(row for row in listed if row["id"] == mine["id"])["is_active"] is False
+    # A colleague who stays keeps their key.
+    code, listed = _request(client, world, "alpha_colleague", "GET", _PREFIX)
+    assert next(row for row in listed if row["id"] == theirs["id"])["is_active"] is True
+
+    for method, path, body in (
+        ("PATCH", f"{_PREFIX}/{mine['id']}", {"is_active": True}),
+        ("PATCH", f"{_PREFIX}/{mine['id']}", {"key_name": "renamed"}),
+        ("POST", f"{_PREFIX}/{mine['id']}/rotate", None),
+    ):
+        code, refused = _request(client, world, "alpha_member", method, path, json=body)
+        assert code == status.HTTP_403_FORBIDDEN, (method, body, refused)
+
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{mine['id']}", json={"is_active": False})
+    assert code == status.HTTP_200_OK, body
+    code, _ = _request(client, world, "alpha_member", "DELETE", f"{_PREFIX}/{mine['id']}")
+    assert code == status.HTTP_204_NO_CONTENT
+
+
 def test_a_viewer_lists_but_cannot_change_a_key_issued_to_them(
     client: TestClient, world: _World, db_session_factory: Callable[[], Session]
 ) -> None:

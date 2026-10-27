@@ -179,18 +179,24 @@ async def _caller_context(db: AsyncSession, identity: TenancyUser) -> tuple[uuid
 
 
 async def _load_own_writable_key(
-    db: AsyncSession, organizations: OrganizationService, identity: TenancyUser, key_id: str
+    db: AsyncSession,
+    organizations: OrganizationService,
+    identity: TenancyUser,
+    key_id: str,
+    *,
+    revoking: bool = False,
 ) -> APIKey:
     """One of the caller's own keys, or 404, refused with 403 to a viewer of its workspace.
 
     A viewer still lists their keys; changing, rotating or revoking one is a
     write, and an operator who issued a key to a read-only member is the one
-    who changes it.
+    who changes it. A caller removed from the key's workspace may still
+    ``revoking`` it, switching it off or deleting it, and nothing else.
     """
     organization = await organizations.get_active_organization_for_user(identity)
     key = await _load_key_in_organization(db, key_id, organization.id, owner_user_id=str(identity.id))
     await organizations.require_workspace_contributor_access(
-        user=identity, organization_id=organization.id, workspace_id=key.workspace_id
+        user=identity, organization_id=organization.id, workspace_id=key.workspace_id, membership_required=not revoking
     )
     return key
 
@@ -246,7 +252,7 @@ async def create_own_key(
             # A viewer is refused whichever workspace they name, so they hear
             # that rather than advice to name one.
             await organizations.require_workspace_contributor_access(
-                user=identity, organization_id=organization.id, workspace_id=resolved
+                user=identity, organization_id=organization.id, workspace_id=resolved, membership_required=False
             )
             # The caller named nothing, so "not found" would point them at a
             # parameter they did not send; say what to do instead.
@@ -392,7 +398,8 @@ async def update_own_key(
     organizations: OrganizationServiceDep,
 ) -> KeyInfo:
     """Update one of the caller's own API keys."""
-    key = await _load_own_writable_key(db, organizations, identity, key_id)
+    switching_off = request.model_fields_set == {"is_active"} and request.is_active is False
+    key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=switching_off)
 
     # Before the key is changed, and narrow-only against the caller's own lists
     # (see keys.update_key).
@@ -484,7 +491,7 @@ async def delete_own_key(
     organizations: OrganizationServiceDep,
 ) -> None:
     """Delete (revoke) one of the caller's own API keys."""
-    key = await _load_own_writable_key(db, organizations, identity, key_id)
+    key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=True)
 
     await db.delete(key)
     try:

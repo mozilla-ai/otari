@@ -21,6 +21,7 @@ from gateway.services.api_keys._federation import (
     rule_matches,
     unverified_issuer,
 )
+from gateway.services.api_keys._membership import ApiKeyMembershipListener
 from gateway.services.api_keys._secrets import declared_secret_problem, refuse_unusable_declared_secrets
 from gateway.services.api_keys._service import ApiKeyService
 from gateway.services.api_keys._token_exchange import FederationTokenExchange, OrganizationOfWorkspace
@@ -28,6 +29,7 @@ from gateway.services.api_keys._token_exchange import FederationTokenExchange, O
 __all__ = [
     "JWT_BEARER_GRANT",
     "AccessTokenClaims",
+    "ApiKeyMembershipListener",
     "ApiKeyService",
     "FederatedIdentity",
     "FederatedTokenVerifier",
