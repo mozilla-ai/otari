@@ -170,6 +170,7 @@ class TraceService:
         if definition_digest(gates) != digest:
             raise GuardrailDigestMismatchError()
         async with self._uow:
+            await self._definitions.lock_workspace(workspace_id)
             if (
                 not await self._definitions.for_digests(workspace_id, (digest,))
                 and await self._definitions.count_for_workspace(workspace_id) >= MAX_GUARDRAIL_VERSIONS_PER_WORKSPACE

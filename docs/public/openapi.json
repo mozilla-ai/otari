@@ -30866,6 +30866,9 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "description": "The workspace already keeps the most guardrail versions it may, and this one is new."
+          },
           "422": {
             "content": {
               "application/json": {

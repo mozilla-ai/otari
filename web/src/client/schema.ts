@@ -21536,6 +21536,13 @@ export interface operations {
                     "application/json": components["schemas"]["GuardrailDefinitionResponse"];
                 };
             };
+            /** @description The workspace already keeps the most guardrail versions it may, and this one is new. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {

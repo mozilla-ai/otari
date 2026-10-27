@@ -18,7 +18,14 @@ from otari_agent.domain.definitions import gates_from_body
 router = APIRouter(prefix="/hooks", tags=["hooks"], dependencies=[Depends(verify_api_key_or_master_key)])
 
 
-@router.post("/guardrails")
+@router.post(
+    "/guardrails",
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "description": "The workspace already keeps the most guardrail versions it may, and this one is new."
+        }
+    },
+)
 async def record_guardrail_definition(
     request: GuardrailDefinitionRequest,
     auth: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],

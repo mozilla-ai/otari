@@ -23,16 +23,18 @@ from sqlmodel import col
 from gateway.core.config import GatewayConfig
 from gateway.core.database import dispose_db, init_db
 from gateway.core.unit_of_work import create_unit_of_work
-from gateway.exceptions.traces_exceptions import TraceAmbiguousError
-from gateway.models.traces import TraceSpan
+from gateway.exceptions.traces_exceptions import GuardrailVersionLimitError, TraceAmbiguousError
+from gateway.models.traces import TraceGuardrailDefinition, TraceSpan
 from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
 from gateway.repositories.traces import TracesRepositories
+from gateway.repositories.traces.definition_repository import GuardrailDefinitionRepository
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.traces import TraceService
 from gateway.services.traces import _service as trace_service_module
 from gateway.services.traces._collector import call_id_digest
 from gateway.types.traces import SpanRecord, TraceFilter, TraceScope, TraceWrite
+from otari_agent.domain.definitions import GateDefinition, definition_digest
 
 pytestmark = pytest.mark.asyncio
 
@@ -629,3 +631,56 @@ async def test_without_a_key_what_a_span_was_about_is_not_stored(
         await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.span_id) == "tool-1"))
     ).scalar_one()
     assert sealed is None
+
+
+async def test_concurrent_new_guardrail_versions_never_pass_the_workspace_cap(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(trace_service_module, "MAX_GUARDRAIL_VERSIONS_PER_WORKSPACE", 2)
+    workspace, _ = tenants
+
+    def gates(message: str) -> tuple[GateDefinition, ...]:
+        return (
+            GateDefinition(
+                gate_id="no-changelog",
+                gate_type="path",
+                enforcement="required",
+                origin="repo",
+                runs=("pre_tool_use.edit_target",),
+                message=message,
+            ),
+        )
+
+    first = gates("version 0")
+    await store.record_definition(workspace, first, definition_digest(first))
+
+    # Widen the window between the count and the insert, so writers that are not serialized all pass the count.
+    count_for_workspace = GuardrailDefinitionRepository.count_for_workspace
+
+    async def slow_count(self: GuardrailDefinitionRepository, workspace_id: uuid.UUID) -> int:
+        count = await count_for_workspace(self, workspace_id)
+        await asyncio.sleep(0.1)
+        return count
+
+    monkeypatch.setattr(GuardrailDefinitionRepository, "count_for_workspace", slow_count)
+
+    async def record(index: int) -> bool:
+        version = gates(f"version {index}")
+        async with create_unit_of_work() as uow:
+            try:
+                await TraceService(uow, TracesRepositories.on(uow)).record_definition(
+                    workspace, version, definition_digest(version)
+                )
+            except GuardrailVersionLimitError:
+                return False
+        return True
+
+    stored = await asyncio.gather(*(record(index) for index in range(1, 6)))
+
+    assert stored.count(True) == 1
+    digests = (
+        await async_db.execute(
+            select(TraceGuardrailDefinition.digest).where(col(TraceGuardrailDefinition.workspace_id) == workspace)
+        )
+    ).all()
+    assert len(digests) == 2
