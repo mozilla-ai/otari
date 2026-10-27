@@ -37,6 +37,7 @@ class ApplicableCeiling:
     scoped_budget_id: str
     scope_type: ScopeType
     provider_key_id: str | None
+    model: str | None
     reset_cycle: str | None
     reset_every_n: int | None
     reset_anchor_at: datetime | None
@@ -86,11 +87,14 @@ def _in_scopes(scopes: ScopeIdSets) -> ColumnElement[bool]:
     )
 
 
-def _for_provider(provider_key_id: str | None) -> ColumnElement[bool]:
-    """Match a ceiling's provider, where None matches the ceiling that caps every provider."""
-    if provider_key_id is None:
-        return ScopedBudget.provider_key_id.is_(None)
-    return ScopedBudget.provider_key_id == provider_key_id
+def _for_provider(provider_key_id: str | None, model: str | None = None) -> ColumnElement[bool]:
+    """Match a ceiling's provider and model, where None matches the ceiling that caps every one."""
+    provider = (
+        ScopedBudget.provider_key_id.is_(None)
+        if provider_key_id is None
+        else ScopedBudget.provider_key_id == provider_key_id
+    )
+    return provider & (ScopedBudget.model.is_(None) if model is None else ScopedBudget.model == model)
 
 
 def _member_scope_ids(member_ids: Sequence[uuid.UUID]) -> list[str]:
@@ -114,10 +118,14 @@ def _release_expression(amount: Decimal) -> object:
     )
 
 
-def _scope_match(scope_type: str, scope_id: str, provider_key_id: str | None) -> ColumnElement[bool]:
-    """Match a ceiling on the scope and provider that the two partial unique indexes key on."""
+def _scope_match(
+    scope_type: str, scope_id: str, provider_key_id: str | None, model: str | None = None
+) -> ColumnElement[bool]:
+    """Match a ceiling on the entity the unique index keys on: scope, provider and model."""
     return (
-        (ScopedBudget.scope_type == scope_type) & (ScopedBudget.scope_id == scope_id) & _for_provider(provider_key_id)
+        (ScopedBudget.scope_type == scope_type)
+        & (ScopedBudget.scope_id == scope_id)
+        & _for_provider(provider_key_id, model)
     )
 
 
@@ -219,9 +227,11 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
         ).first()
         return None if row is None else CeilingUsage(**row._asdict())
 
-    async def has_ceiling(self, scope_type: ScopeType, scope_id: str, provider_key_id: str | None) -> bool:
-        """Report whether a ceiling caps this scope for this provider, where None means every provider."""
-        return await self._exists(_scope_match(scope_type, scope_id, provider_key_id))
+    async def has_ceiling(
+        self, scope_type: ScopeType, scope_id: str, provider_key_id: str | None, model: str | None = None
+    ) -> bool:
+        """Report whether a ceiling caps this scope for this provider and model, where None means every one."""
+        return await self._exists(_scope_match(scope_type, scope_id, provider_key_id, model))
 
     async def hold(
         self,
@@ -307,7 +317,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
         staged: list[ScopedBudget] = []
         for ceiling in ceilings:
             # A failed flush expires the row, so the scope is read before it.
-            collision = _scope_match(ceiling.scope_type, ceiling.scope_id, ceiling.provider_key_id)
+            collision = _scope_match(ceiling.scope_type, ceiling.scope_id, ceiling.provider_key_id, ceiling.model)
             try:
                 async with self.db.begin_nested():
                     self.db.add(ceiling)
@@ -326,6 +336,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 ScopedBudget.id,
                 ScopedBudget.scope_type,
                 ScopedBudget.provider_key_id,
+                ScopedBudget.model,
                 Budget.reset_cycle,
                 Budget.reset_every_n,
                 Budget.reset_anchor_at,
@@ -345,6 +356,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 scoped_budget_id=scoped_budget_id,
                 scope_type=cast(ScopeType, scope_type),
                 provider_key_id=provider_key_id,
+                model=model,
                 reset_cycle=reset_cycle,
                 reset_every_n=reset_every_n,
                 reset_anchor_at=reset_anchor_at,
@@ -359,6 +371,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 scoped_budget_id,
                 scope_type,
                 provider_key_id,
+                model,
                 reset_cycle,
                 reset_every_n,
                 reset_anchor_at,

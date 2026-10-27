@@ -72,11 +72,13 @@ class BudgetScopeRequest:
     master-key caller, which bills to the deployment's default workspace and has
     no API-key ceiling. ``provider_instance`` is the resolved provider the call
     is about to go to (``openai``, or a named instance), which is what a
-    provider-narrowed ceiling matches on.
+    provider-narrowed ceiling matches on, and ``model`` is the model id as that
+    provider names it, which a model-narrowed ceiling matches on.
     """
 
     api_key: APIKey | None
     provider_instance: str | None = None
+    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -86,6 +88,7 @@ class ApplicableBudget:
     budget_id: str
     scope_type: ScopeType
     provider_key_id: str | None
+    model: str | None = None
     # The non-USD caps of the budget this ceiling names, carried so a caller can
     # tell whether an axis is capped anywhere without reading every budget again.
     # The reserve path reads them from the row instead, inside its one conditional
@@ -100,8 +103,13 @@ class ApplicableBudget:
 
     @property
     def subject(self) -> str:
-        """The scope's name in a refusal message."""
-        return _SCOPE_SUBJECT.get(self.scope_type, "Budget")
+        """The scope's name in a refusal message, marked when the ceiling narrows to the model.
+
+        The model is not named: for a request through an alias or a routing policy it is the target the caller is
+        not shown, and the caller already knows the model it asked for.
+        """
+        subject = _SCOPE_SUBJECT.get(self.scope_type, "Budget")
+        return subject if self.model is None else f"{subject} (this model)"
 
 
 def _identity_uuid(user_id: str) -> uuid.UUID | None:
@@ -226,21 +234,24 @@ async def roll_and_list_applicable(
 
 
 def get_provider_ceilings(
-    ceilings: Sequence[ApplicableCeiling], provider_instance: str | None
+    ceilings: Sequence[ApplicableCeiling], provider_instance: str | None, model: str | None = None
 ) -> tuple[ApplicableCeiling, ...]:
-    """Return the ceilings among ``ceilings`` that cap every provider or ``provider_instance``, in reservation order.
+    """Return the ceilings among ``ceilings`` that bind a call to ``model`` on ``provider_instance``, in hold order.
 
-    Most specific first, provider-narrowed before aggregate within a scope, then the ID, so the order is total.
+    A ceiling binds when it caps every provider, caps ``provider_instance`` on every model, or caps ``model`` on it.
+    Most specific first: by scope, then model-narrowed before provider-narrowed before aggregate, then the ID, so the
+    order is total.
     """
     bound = [
         ceiling
         for ceiling in ceilings
-        if ceiling.provider_key_id is None or ceiling.provider_key_id == provider_instance
+        if ceiling.provider_key_id is None
+        or (ceiling.provider_key_id == provider_instance and ceiling.model in (None, model))
     ]
     bound.sort(
         key=lambda ceiling: (
             _SCOPE_PRECEDENCE.get(ceiling.scope_type, len(_SCOPE_PRECEDENCE)),
-            0 if ceiling.provider_key_id is not None else 1,
+            0 if ceiling.model is not None else 1 if ceiling.provider_key_id is not None else 2,
             ceiling.scoped_budget_id,
         )
     )
@@ -253,6 +264,7 @@ def to_applicable_budget(ceiling: ApplicableCeiling) -> ApplicableBudget:
         budget_id=ceiling.scoped_budget_id,
         scope_type=ceiling.scope_type,
         provider_key_id=ceiling.provider_key_id,
+        model=ceiling.model,
         token_limit=ceiling.token_limit,
         request_limit=ceiling.request_limit,
     )

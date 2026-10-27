@@ -452,7 +452,10 @@ Two budget forms exist:
 
 - A per-user budget limits each attached user independently.
 - A scoped budget limits an organization, workspace, membership, or API key and
-  can optionally narrow the limit to one provider.
+  can optionally narrow the limit to one provider, or to one model of a provider.
+  A model-narrowed limit is checked first, and its refusal says the limit is
+  the model's (`Workspace (this model) has exceeded request limit`) without
+  naming it, so a request through an alias never learns the alias's target.
 
 A routing fallback to another provider must also pass that provider's budgets, as [Routing](routing.md#what-is-billed-and-what-the-caller-sees) describes.
 

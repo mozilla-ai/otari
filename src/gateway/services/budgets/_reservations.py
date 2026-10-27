@@ -708,7 +708,9 @@ async def reserve_budget(
     scoped: tuple[ApplicableBudget, ...] = ()
     if scope is not None:
         ceilings = await get_scope_ceilings(db, user_id=user_id, scope=scope)
-        scoped = await roll_and_list_applicable(db, get_provider_ceilings(ceilings, scope.provider_instance))
+        scoped = await roll_and_list_applicable(
+            db, get_provider_ceilings(ceilings, scope.provider_instance, scope.model)
+        )
     no_reservation = ReservationHandle(
         user_id=user_id,
         estimate=ZERO,
