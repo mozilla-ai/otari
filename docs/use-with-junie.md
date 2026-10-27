@@ -40,7 +40,7 @@ Any model in your catalog works in `id`, `primaryModel` and `fasterModel`, using
 
 ### Junie sends a `user` field
 
-Junie CLI puts `"user": "primary"` in every chat completion body, for every internal role it runs, including the main agent, the step summarizer and the chat title creator. Otari reads `user` as naming the Otari user to bill, so by default a key other than the master key refuses a request that names anyone but its own user, with HTTP 403.
+Junie CLI puts a `user` field in every chat completion body, for every internal role it runs, including the main agent, the step summarizer and the chat title creator. You do not set that value and it is not stable: it is whatever the role making the call uses. Otari reads the field as naming a user, so an ordinary key refuses a request naming anyone but its own user, with HTTP 403.
 
 The CLI does not surface that refusal. The task stops with a message about an artifact it could not build, and the real reason appears only under `~/.junie/logs/`:
 
@@ -48,11 +48,13 @@ The CLI does not surface that refusal. The task stops with a message about an ar
 LLMBadResponseException: 'user' field does not match the authenticated API key's user
 ```
 
-There are two ways to accept it, and they differ in what you get back.
+There are two ways to accept the field, and they differ in what you get back.
 
-**Make the key a [service key](access-control.md#service-keys-and-end-users).** This is the better option, and it needs no setting relaxed: leave `reject_user_mismatch` on the deployment default. On a service key a name other than the key's own user names one of its end users, so Otari creates an end user for the name Junie sends and records that end user's spend separately. You get per-client spend instead of one undifferentiated total, and you can give the end user a budget of its own.
+**Make the key a [service key](access-control.md#service-keys-and-end-users).** This is the better option and it needs no setting relaxed, so leave `reject_user_mismatch` on the deployment default. On a service key, a name other than the key's own user names one of that key's end users, so Otari creates an end user for the value Junie sends and records its spend on its own. That gives you spend per client rather than one combined total, and the service key can then put that end user on a budget itself with `PUT /api/v1/end-users?external_id=...`.
 
-**Or set `reject_user_mismatch=false` on the key.** Simpler, and it is a per-key override so the deployment-wide default stays as it is. Spend binds to the key's own user, so the whole of Junie's usage lands in one place. Nothing is weakened either way, because spend binds to the key's own user whenever the key is not a service key.
+**Or set `reject_user_mismatch=false` on the key.** Simpler, and a per-key override, so the deployment-wide default stays as it is. Spend binds to the key's own user, so the whole of Junie's usage lands in one place.
+
+Either way the spend stays inside the key owner's account, so accepting the field never lets a key draw on another account's budget.
 
 See [Mismatched `user` fields](access-control.md#mismatched-user-fields) for the full picture.
 
