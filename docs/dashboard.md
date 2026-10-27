@@ -266,7 +266,8 @@ Two things are worth knowing about how it is billed and what it stores.
 A Playground request carries no API key. It is authorized by the dashboard
 session and billed to whoever sent it, in the workspace the switcher has
 selected, against that person's own budget and rate limit; its usage row
-therefore has no key attached. Picking a different model changes which provider
+therefore has no key attached. A viewer cannot send one, since it spends like a
+key, so the page tells them so instead of offering a composer. Picking a different model changes which provider
 credential the gateway resolves, never who pays. A request made here also does
 not count as the workspace's first request, so the setup guide keeps waiting for
 one from outside the product, which is the milestone it exists to mark.

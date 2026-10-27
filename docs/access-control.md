@@ -89,7 +89,7 @@ Organization and workspace memberships use four roles:
 | Owner | Full management, including organization administration |
 | Admin | Manage most organization or workspace resources |
 | Member | Use the workspace and read permitted resources |
-| Viewer | Read-only on API keys: sees the ones billed to them, cannot create, change, rotate or delete one |
+| Viewer | Read-only: sees the API keys billed to them but cannot create, change, rotate or delete one, and cannot run Playground completions or uploads |
 
 The API key that authenticates a request determines its workspace. A caller
 cannot select another workspace with a header. Master-key inference uses the
@@ -582,7 +582,9 @@ is a separate endpoint rather than a relaxation of that rule.
 `POST /api/v1/playground/chat/completions` resolves the caller's own attribution
 user and proves their membership of the workspace it will bill before the
 request reaches the pipeline, so the request is billed to the person who sent it
-in a workspace that is theirs. No credential is minted for the browser and none
+in a workspace that is theirs. A viewer of the organization or of that workspace
+is refused (`403`), because a completion spends as a key would; the same holds
+for a Playground file upload. No credential is minted for the browser and none
 is held there. The usage row it writes carries no `api_key_id` and its own
 endpoint label, which is what keeps in-product traffic separable from a
 customer's integration.

@@ -2,7 +2,9 @@ import type { FormEvent, KeyboardEvent } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { PlaygroundComparisonPreference, PlaygroundFile } from "@/client"
+import { canContributeToWorkspace } from "@/features/organization/roles"
 import { useCatalog } from "@/shared/api/models"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   fetchPlaygroundConversation,
   useDeletePlaygroundComparison,
@@ -84,6 +86,7 @@ export type PendingAttachment = {
 export function usePlayground() {
   const { selected, isLoading: isLoadingWorkspace } = useSelectedWorkspace()
   const workspaceId = selected?.workspace_id
+  const organizationContext = useOrganizationContext()
 
   // The grouped catalog, not the flat `/models` listing; playgroundModels.ts
   // says why.
@@ -628,9 +631,13 @@ export function usePlayground() {
   }
 
   const gate = derivePlaygroundGate({
-    isLoading: isLoadingWorkspace || (catalog.isPending && !catalog.data),
+    isLoading:
+      isLoadingWorkspace ||
+      organizationContext.isPending ||
+      (catalog.isPending && !catalog.data),
     isCatalogError: catalog.isError,
     hasWorkspace: workspaceId !== undefined,
+    canRun: canContributeToWorkspace(organizationContext.data, selected?.role),
     modelCount: models.length,
   })
 

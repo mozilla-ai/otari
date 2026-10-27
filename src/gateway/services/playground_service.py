@@ -148,6 +148,12 @@ async def resolve_playground_principal(
     completion and the request's transaction boundary is that route's.
     """
     resolved_workspace_id = await resolve_playground_workspace(db, identity=identity, workspace_id=workspace_id)
+    # A viewer is read-only: a completion or an upload here spends, as a key would.
+    organizations = OrganizationService(db, membership_listener=None)
+    organization = await organizations.get_active_organization_for_user(identity)
+    await organizations.require_workspace_contributor_access(
+        user=identity, organization_id=organization.id, workspace_id=resolved_workspace_id
+    )
 
     # Deleting a spend identity is an operator's revocation
     # (``DELETE /api/v1/users`` soft-deletes the row and deactivates every key it
