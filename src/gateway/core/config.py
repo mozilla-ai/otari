@@ -30,6 +30,7 @@ from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings.providers import ProviderSettings
 from gateway.core.settings.tools import ToolSettings
 from gateway.core.settings.traces import TraceSettings
+from gateway.core.settings.update_check import UpdateCheckSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
@@ -573,6 +574,7 @@ class GatewayConfig(
     OrganizationSettings,
     ToolSettings,
     TraceSettings,
+    UpdateCheckSettings,
     BaseSettings,
 ):
     """Gateway configuration with support for YAML files and environment variables."""

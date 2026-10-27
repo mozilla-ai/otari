@@ -77,9 +77,9 @@ def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.json() == {
-        # The trace explorer and the Health page are core features, published on top of the declared surfaces
-        # while they are on.
-        "surfaces": sorted({*SURFACES, "health_checks", "traces"}),
+        # The trace explorer, the Health page and the update check are core features, published on top of the
+        # declared surfaces while they are on.
+        "surfaces": sorted({*SURFACES, "health_checks", "traces", "update_check"}),
         "sign_in_methods": ["master_key"],
         "docs_url": None,
         "terms_url": None,
@@ -287,6 +287,7 @@ def test_open_signup_is_published_only_with_mail_to_carry_the_verification(tmp_p
 SURFACE_ROUTE_PREFIXES = {
     "hosted_providers": f"{API_ROOT}/hosted-providers",
     "health_checks": f"{API_ROOT}/health-checks",
+    "update_check": f"{API_ROOT}/update-check",
     "organization_guardrails": f"{API_ROOT}/organizations/me/guardrails",
     "organization_providers": f"{API_ROOT}/organizations/me/provider-keys",
     "organization_usage": f"{API_ROOT}/organizations/me/usage",

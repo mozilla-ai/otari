@@ -6103,6 +6103,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/update-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Update Check
+         * @description Whether checks are on and who decided, what a check sends, and what the last one heard.
+         */
+        get: operations["update-check-get_update_check"];
+        /**
+         * Answer Update Check
+         * @description Turn the checks on or off. A yes is checked within a minute.
+         *
+         *     Refused with 409 when the deployment's configuration answers instead.
+         */
+        put: operations["update-check-answer_update_check"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage": {
         parameters: {
             query?: never;
@@ -17384,6 +17410,84 @@ export interface components {
              * @description Tokens per minute for each user on this budget, counted on what requests used: a request is admitted while the user's minute is under the limit. Null is unlimited
              */
             tpm_limit?: number | null;
+        };
+        /**
+         * UpdateCheckAdvisory
+         * @description A published security advisory for otari that covers the version this deployment ran when it checked.
+         */
+        UpdateCheckAdvisory: {
+            /** Fixed In */
+            fixed_in?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "low" | "medium" | "high" | "critical";
+            /** Summary */
+            summary: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * UpdateCheckAnswer
+         * @description An operator's answer to whether this deployment checks for new releases.
+         * @example {
+         *       "enabled": true
+         *     }
+         */
+        UpdateCheckAnswer: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /**
+         * UpdateCheckStatus
+         * @description Whether this deployment checks for new releases, who decided, what it sends, and what it last heard.
+         */
+        UpdateCheckStatus: {
+            /**
+             * Advisories
+             * @description Security advisories that affect the version running now, as of the last check.
+             */
+            advisories: components["schemas"]["UpdateCheckAdvisory"][];
+            /**
+             * Answered By
+             * @description Who decided: config.yml or the environment (the dashboard cannot change it), an operator in the dashboard, or nobody yet.
+             */
+            answered_by: ("config" | "operator") | null;
+            /**
+             * Checkable
+             * @description Whether this build carries a release version. A development build is never checked.
+             */
+            checkable: boolean;
+            /** Current Version */
+            current_version: string;
+            /**
+             * Enabled
+             * @description Whether checks are sent. Null until an operator answers.
+             */
+            enabled: boolean | null;
+            /**
+             * Endpoint
+             * @description Where checks are sent.
+             */
+            endpoint: string;
+            /**
+             * Install Id
+             * @description The random id sent with each check.
+             */
+            install_id: string;
+            /** Last Checked At */
+            last_checked_at: string | null;
+            /** Latest Version */
+            latest_version: string | null;
+            /** Next Check At */
+            next_check_at: string | null;
+            /** Release Url */
+            release_url: string | null;
+            /** Update Available */
+            update_available: boolean;
         };
         /**
          * UpdateKeyRequest
@@ -29071,6 +29175,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TraceDetailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "update-check-get_update_check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateCheckStatus"];
+                };
+            };
+        };
+    };
+    "update-check-answer_update_check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateCheckAnswer"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateCheckStatus"];
                 };
             };
             /** @description Validation Error */

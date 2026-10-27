@@ -87,6 +87,7 @@ the corresponding startup value after the database is available.
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting. See [Product feedback](#product-feedback). |
+| `update_check` | Check otari.ai daily for new releases and security fixes, sending the version and a random install id. Unset (the default) asks an operator in the dashboard; `true` or `false` answers for them. See [Update check](update-check.md). |
 | `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |

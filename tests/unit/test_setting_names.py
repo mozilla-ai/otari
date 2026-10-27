@@ -173,6 +173,8 @@ _SETTING_NAMES = frozenset(
         "trace_shutdown_flush_s",
         "trace_write_timeout_s",
         "ui_base_url",
+        "update_check",
+        "update_check_url",
         "vision_describe_max_tokens",
         "vision_describe_model",
         "vision_strategy",

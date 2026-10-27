@@ -57,6 +57,7 @@ from gateway.api.routes import (
     settings,
     tool_settings,
     tools,
+    update_check,
     usage,
     users,
 )
@@ -80,6 +81,7 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
     ("search_tools", search_tools.router),
     ("settings", settings.router),
     ("tool_settings", tool_settings.operator_router),
+    ("update_check", update_check.router),
     ("usage", usage.operator_router),
     ("users", users.router),
 ]
