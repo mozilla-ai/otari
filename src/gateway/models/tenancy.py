@@ -109,6 +109,9 @@ MAX_BULK_INVITATIONS = 100
 # Roles that may manage an organization or a workspace. Fixed roles are the
 # settled OSS line; anything finer-grained is overlay depth.
 MANAGEMENT_ROLES = frozenset({"owner", "admin"})
+# Roles that may change a workspace's resources, such as minting their own key in
+# it. Everything but "viewer", which is read-only.
+CONTRIBUTOR_ROLES = frozenset({"owner", "admin", "member"})
 
 
 def _validate_membership(value: str, *, allowed: set[str], kind: str) -> str:
@@ -1671,6 +1674,7 @@ __all__ = [
     "MAX_CREDENTIAL_ID_LENGTH",
     "MAX_WEBAUTHN_CREDENTIAL_NAME",
     "OAUTH_STATE_TTL_SECONDS",
+    "CONTRIBUTOR_ROLES",
     "MANAGEMENT_ROLES",
     "MAX_ORGANIZATION_DOMAINS",
     "MAX_WORKSPACE_ASSIGNMENTS",

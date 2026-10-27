@@ -55,6 +55,7 @@ def _identity(
     organization_id: uuid.UUID,
     role: str = "member",
     workspace_ids: tuple[uuid.UUID, ...] = (),
+    workspace_role: str = "member",
     membership: bool = True,
     is_superuser: bool = False,
 ) -> tuple[uuid.UUID, str]:
@@ -83,7 +84,7 @@ def _identity(
             WorkspaceMember(
                 workspace_id=workspace_id,
                 user_id=user.id,
-                role="member",
+                role=workspace_role,
                 status="active",
             )
         )
@@ -148,6 +149,33 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
                 session,
                 email="colleague@alpha.test",
                 organization_id=alpha.id,
+                workspace_ids=(alpha_one.id,),
+            ),
+            # Read-only in the organization and in alpha one.
+            "alpha_viewer": _identity(
+                session,
+                email="viewer@alpha.test",
+                organization_id=alpha.id,
+                role="viewer",
+                workspace_ids=(alpha_one.id,),
+                workspace_role="viewer",
+            ),
+            # A member of the organization made a viewer of alpha one: the
+            # workspace role is the one that decides.
+            "alpha_workspace_viewer": _identity(
+                session,
+                email="workspace-viewer@alpha.test",
+                organization_id=alpha.id,
+                workspace_ids=(alpha_one.id,),
+                workspace_role="viewer",
+            ),
+            # The other way round: a viewer of the organization given member in
+            # alpha one may contribute there.
+            "alpha_viewer_promoted": _identity(
+                session,
+                email="promoted@alpha.test",
+                organization_id=alpha.id,
+                role="viewer",
                 workspace_ids=(alpha_one.id,),
             ),
             # In the organization, in none of its workspaces.
@@ -318,6 +346,77 @@ def test_a_revoked_spend_identity_cannot_mint_its_way_back(client: TestClient, w
     )
     assert code == status.HTTP_404_NOT_FOUND, body
     assert "has been deleted" in body["detail"]
+
+
+@pytest.mark.parametrize("who", ["alpha_viewer", "alpha_workspace_viewer"])
+def test_a_viewer_cannot_mint_a_key(client: TestClient, world: _World, who: str) -> None:
+    """Viewer is read-only, whether the role is held in the organization or only in the workspace."""
+    for body in ({"key_name": "named", "workspace_id": str(world.workspaces["alpha_one"])}, {"key_name": "default"}):
+        code, refused = _create(client, world, who, body)
+        assert code == status.HTTP_403_FORBIDDEN, refused
+
+    code, listed = _request(client, world, who, "GET", _PREFIX)
+    assert code == status.HTTP_200_OK
+    assert listed == []
+
+
+def test_an_organization_viewer_who_is_a_workspace_member_mints_there(client: TestClient, world: _World) -> None:
+    code, body = _create(
+        client,
+        world,
+        "alpha_viewer_promoted",
+        {"key_name": "mine", "workspace_id": str(world.workspaces["alpha_one"])},
+    )
+    assert code == status.HTTP_200_OK, body
+
+
+def test_a_viewer_lists_but_cannot_change_a_key_issued_to_them(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """The operator issues a viewer's key and the viewer may read it, but not edit, rotate or revoke it."""
+    raw = DefaultApiKeyFormatAdapter(None).mint()
+    key_id = str(uuid.uuid4())
+    owner_id = str(world.users["alpha_viewer"])
+    session = db_session_factory()
+    try:
+        session.add(BillingUser(user_id=owner_id, alias="Viewer"))
+        session.commit()
+        session.add(
+            APIKey(
+                id=key_id,
+                workspace_id=world.workspaces["alpha_one"],
+                key_hash=hash_key(raw),
+                key_prefix=DefaultApiKeyFormatAdapter(None).fingerprint(raw),
+                key_name="issued",
+                user_id=owner_id,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    code, listed = _request(client, world, "alpha_viewer", "GET", _PREFIX)
+    assert code == status.HTTP_200_OK
+    assert key_id in {row["id"] for row in listed}
+
+    for method, path, body in (
+        ("PATCH", f"{_PREFIX}/{key_id}", {"key_name": "renamed"}),
+        ("PATCH", f"{_PREFIX}/{key_id}", {"is_active": False}),
+        ("POST", f"{_PREFIX}/{key_id}/rotate", None),
+        ("DELETE", f"{_PREFIX}/{key_id}", None),
+    ):
+        code, refused = _request(client, world, "alpha_viewer", method, path, json=body)
+        assert code == status.HTTP_403_FORBIDDEN, (method, path, refused)
+
+    # Somebody else's key still answers 404, not 403: the role check runs on the
+    # caller's own key only, so it reveals nothing about other ids.
+    code, _ = _request(client, world, "alpha_workspace_viewer", "DELETE", f"{_PREFIX}/{key_id}")
+    assert code == status.HTTP_404_NOT_FOUND
+
+    code, listed = _request(client, world, "alpha_viewer", "GET", _PREFIX)
+    row = next(row for row in listed if row["id"] == key_id)
+    assert row["key_name"] == "issued"
+    assert row["is_active"] is True
 
 
 def test_a_stale_organization_pointer_grants_nothing(client: TestClient, world: _World) -> None:

@@ -28,6 +28,7 @@ export function KeyActionsMenu({
   onRegenerate,
   onDelete,
   onWorkloadIdentity,
+  isReadOnly = false,
 }: {
   apiKey: ApiKey
   triggerRef?: RefObject<HTMLButtonElement | null>
@@ -52,10 +53,12 @@ export function KeyActionsMenu({
   onDelete: () => void
   /** Absent where the deployment lets no one manage this key's federation rules. */
   onWorkloadIdentity?: () => void
+  /** A viewer's menu: the key's details, and none of the actions that change it. */
+  isReadOnly?: boolean
 }) {
   const trigger = useRef<HTMLButtonElement>(null)
   const name = apiKey.key_name ?? "(unnamed)"
-  const actions = [
+  const writeActions = [
     {
       id: "toggle",
       label: apiKey.is_active ? "Disable" : "Enable",
@@ -101,6 +104,9 @@ export function KeyActionsMenu({
       run: onDelete,
     },
   ]
+  const actions = isReadOnly
+    ? writeActions.filter((action) => action.id === "workload-identity")
+    : writeActions
   return (
     <Dropdown>
       {/* HeroUI reads `--tooltip-delay` off the root, which this app never

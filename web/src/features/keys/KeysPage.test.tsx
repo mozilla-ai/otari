@@ -861,6 +861,32 @@ describe("KeysPage", () => {
     },
   )
 
+  it("offers a viewer their keys to read and nothing that changes one", async () => {
+    mockApi({
+      keys: [apiKey({ id: "key-1", key_name: "issued" })],
+      deploymentOperator: false,
+      role: "viewer",
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("issued")).closest("tr")!
+    expect(
+      screen.queryByRole("button", { name: "Create key" }),
+    ).not.toBeInTheDocument()
+    expect(within(row).queryByRole("checkbox")).not.toBeInTheDocument()
+
+    await user.click(
+      within(row).getByRole("button", { name: "Actions for issued" }),
+    )
+    const menu = await screen.findByRole("menu")
+    for (const action of ["Disable", "Edit…", "Regenerate…", "Delete…"]) {
+      expect(
+        within(menu).queryByRole("menuitem", { name: new RegExp(action) }),
+      ).not.toBeInTheDocument()
+    }
+  })
+
   it("regenerates a secret after an explicit confirm", async () => {
     mockApi({
       keys: [apiKey({ id: "key-1", key_name: "ci-bot", is_active: true })],

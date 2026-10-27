@@ -22,6 +22,10 @@ established for usage reads (otari#837), applied to a write surface:
   organization, or one in this organization the caller is not a member of,
   answers 404 exactly as one that does not exist. Omitting it targets the
   organization's default workspace, put through the same check.
+* **A viewer is read-only.** Creating, changing, rotating or revoking a key
+  takes a role above ``viewer`` in the key's workspace (or organization
+  owner/admin), through ``require_workspace_contributor_access``. A viewer
+  still lists the keys billed to them, so an operator can issue them one.
 * **No budget bypass.** The operator's create takes ``exclude_from_budget``;
   this one does not, and always mints an enforced key: a member exempting their
   own key from budget would be minting their own unlimited spend.
@@ -80,7 +84,10 @@ from gateway.services.model_access import (
 )
 from gateway.services.organizations import AccessLists
 from gateway.services.tenancy import DeploymentUserService, OrganizationService
-from gateway.services.tenancy.authorization import resolve_workspace_in_organization
+from gateway.services.tenancy.authorization import (
+    require_workspace_contributor_access,
+    resolve_workspace_in_organization,
+)
 from gateway.services.workspace_scope import organization_default_workspace_id
 
 router = APIRouter(
@@ -173,6 +180,22 @@ async def _caller_context(db: AsyncSession, identity: TenancyUser) -> tuple[uuid
     return organization.id, str(identity.id)
 
 
+async def _load_own_writable_key(db: AsyncSession, identity: TenancyUser, key_id: str) -> APIKey:
+    """One of the caller's own keys, or 404, refused with 403 to a viewer of its workspace.
+
+    A viewer still lists their keys; changing, rotating or revoking one is a
+    write, and an operator who issued a key to a read-only member is the one
+    who changes it.
+    """
+    organizations = OrganizationService(db, membership_listener=None)
+    organization = await organizations.get_active_organization_for_user(identity)
+    key = await _load_key_in_organization(db, key_id, organization.id, owner_user_id=str(identity.id))
+    await require_workspace_contributor_access(
+        db, user=identity, organization_id=organization.id, workspace_id=key.workspace_id, organizations=organizations
+    )
+    return key
+
+
 @router.post("")
 async def create_own_key(
     request: CreateOwnKeyRequest,
@@ -188,7 +211,8 @@ async def create_own_key(
     The member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the
     caller's own attribution user, the key is always budget-enforced, and the
     workspace must be visible to the caller (a member of it, or an organization
-    owner/admin, who see every workspace). The secret is returned once.
+    owner/admin, who see every workspace). A viewer of the workspace is refused
+    with 403. The secret is returned once.
     """
     organizations = OrganizationService(db, membership_listener=None)
     organization = await organizations.get_active_organization_for_user(identity)
@@ -228,6 +252,9 @@ async def create_own_key(
                 "pass workspace_id naming a workspace you belong to.",
             ) from None
         workspace_id = workspace.id
+    await require_workspace_contributor_access(
+        db, user=identity, organization_id=organization.id, workspace_id=workspace_id, organizations=organizations
+    )
 
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)
@@ -360,8 +387,7 @@ async def update_own_key(
     api_keys: ApiKeyServiceDep,
 ) -> KeyInfo:
     """Update one of the caller's own API keys."""
-    organization_id, owner_user_id = await _caller_context(db, identity)
-    key = await _load_key_in_organization(db, key_id, organization_id, owner_user_id=owner_user_id)
+    key = await _load_own_writable_key(db, identity, key_id)
 
     # Before the key is changed, and narrow-only against the caller's own lists
     # (see keys.update_key).
@@ -375,7 +401,7 @@ async def update_own_key(
                 request.allowed_tools if "allowed_tools" in fields else stored.tools,
             ),
             stored=stored,
-            owner_id=owner_user_id,
+            owner_id=str(identity.id),
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -422,8 +448,7 @@ async def rotate_own_key(
     raw key is returned once, and the previous secret stops authenticating
     immediately with no grace window.
     """
-    organization_id, owner_user_id = await _caller_context(db, identity)
-    key = await _load_key_in_organization(db, key_id, organization_id, owner_user_id=owner_user_id)
+    key = await _load_own_writable_key(db, identity, key_id)
 
     new_api_key = key_format.mint()
     key.key_hash = hash_key(new_api_key)
@@ -452,8 +477,7 @@ async def delete_own_key(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Delete (revoke) one of the caller's own API keys."""
-    organization_id, owner_user_id = await _caller_context(db, identity)
-    key = await _load_key_in_organization(db, key_id, organization_id, owner_user_id=owner_user_id)
+    key = await _load_own_writable_key(db, identity, key_id)
 
     await db.delete(key)
     try:

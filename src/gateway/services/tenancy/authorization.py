@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
-from gateway.models.tenancy import MANAGEMENT_ROLES, Organization, User, Workspace
+from gateway.models.tenancy import CONTRIBUTOR_ROLES, MANAGEMENT_ROLES, Organization, User, Workspace
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
 from gateway.services.tenancy.organization_service import OrganizationService
 
@@ -110,6 +110,31 @@ async def require_workspace_management_access(
         raise NotAuthorizedError
 
 
+async def require_workspace_contributor_access(
+    db: AsyncSession,
+    *,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    organizations: OrganizationService,
+) -> None:
+    """Allow an organization owner/admin, or an owner, admin or member of this workspace.
+
+    A workspace viewer is read-only, so it is refused here where
+    :func:`resolve_workspace_in_organization` would have let it see the
+    workspace. The workspace role decides where the caller holds one, so an
+    organization viewer given ``member`` in a workspace may contribute there;
+    with no workspace membership the organization role decides.
+    """
+    organization_membership = await organizations.members.get_active_by_organization_and_user(organization_id, user.id)
+    if organization_membership is not None and organization_membership.role in MANAGEMENT_ROLES:
+        return
+    membership = await WorkspaceMemberRepository(db).get_active_by_workspace_and_user(workspace_id, user.id)
+    deciding = membership if membership is not None else organization_membership
+    if deciding is None or deciding.role not in CONTRIBUTOR_ROLES:
+        raise NotAuthorizedError("Viewers have read-only access to this workspace")
+
+
 class WorkspaceAccess:
     """The workspace visibility and management checks, for a domain whose services do not hold the session."""
 
@@ -196,6 +221,7 @@ __all__ = [
     "VisibleWorkspaceScope",
     "WorkspaceAccess",
     "has_workspace_management_access",
+    "require_workspace_contributor_access",
     "require_workspace_management_access",
     "resolve_visible_workspace",
     "resolve_visible_workspace_scope",
