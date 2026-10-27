@@ -26,9 +26,7 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """Add the two columns; existing keys are of unrecorded origin and not operator-disabled."""
     op.add_column("api_keys", sa.Column("self_service", sa.Boolean(), nullable=True))
-    op.add_column(
-        "api_keys", sa.Column("operator_disabled", sa.Boolean(), nullable=False, server_default=sa.false())
-    )
+    op.add_column("api_keys", sa.Column("operator_disabled", sa.Boolean(), nullable=False, server_default=sa.false()))
 
 
 def downgrade() -> None:
