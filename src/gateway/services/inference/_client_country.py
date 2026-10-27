@@ -2,13 +2,16 @@
 
 A trusted proxy's header (``client_country_header``, such as Cloudflare's
 ``CF-IPCountry``) is read first, then the client address is looked up in a
-MaxMind-format file (``client_country_database``). The address is the one
+MaxMind-format file: ``client_country_database`` when it is set, else the
+country file an operator stored in the database. The address is the one
 uvicorn resolved behind ``forwarded_allow_ips``.
 """
 
+import contextlib
 import io
 import ipaddress
 import os
+import tempfile
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -133,12 +136,89 @@ class _Database:
 _database = _Database()
 
 
-def _looked_up(database: str, client_host: str) -> str | None:
+class _StoredDatabase:
+    """The stored country file this process has open, from a temporary file of its own.
+
+    Swapped whole when the stored file changes, so a lookup sees the old file or
+    the new one. The old reader is left to close when nothing holds it, since a
+    lookup on another thread may still be reading it.
+    """
+
+    def __init__(self) -> None:
+        self.opened: tuple[str, str, Reader] | None = None
+        # The SHA-256 that failed to open, so a bad file is opened and logged once.
+        self.failed: str | None = None
+
+    @property
+    def sha256(self) -> str | None:
+        return self.opened[0] if self.opened is not None else None
+
+    @property
+    def reader(self) -> "Reader | None":
+        return self.opened[2] if self.opened is not None else None
+
+    def swap(self, opened: "tuple[str, str, Reader] | None") -> None:
+        """Put ``opened`` (SHA-256, temporary path, reader) in place of the file open before, and delete that file."""
+        previous, self.opened, self.failed = self.opened, opened, None
+        if previous is not None:
+            # Deleting an open file is safe on POSIX; elsewhere it stays until the temporary directory is cleared.
+            with contextlib.suppress(OSError):
+                os.unlink(previous[1])
+
+
+_stored = _StoredDatabase()
+
+
+def open_stored_country_database(sha256: str, content: bytes) -> "tuple[str, str, Reader]":
+    """Write ``content`` to a temporary file and open it, so the C reader can map it rather than copy it.
+
+    Raises:
+        CountryDatabaseError: ``content`` cannot be opened.
+        OSError: the temporary file cannot be written, which may pass.
+    """
+    maxminddb = _maxminddb("The stored country file")
+    file = tempfile.NamedTemporaryFile(prefix="otari-country-", suffix=".mmdb", delete=False)
+    try:
+        with file:
+            file.write(content)
+    except OSError:
+        os.unlink(file.name)
+        raise
+    try:
+        reader: Reader = maxminddb.open_database(file.name)
+    except (OSError, ValueError, maxminddb.InvalidDatabaseError) as exc:
+        os.unlink(file.name)
+        msg = f"The stored country file cannot be read as a MaxMind DB file: {type(exc).__name__}"
+        raise CountryDatabaseError(msg) from exc
+    return sha256, file.name, reader
+
+
+def stored_country_database_seen(sha256: str) -> bool:
+    """Whether ``sha256`` is the stored file this process has open, or the one it failed to open."""
+    return sha256 in (_stored.sha256, _stored.failed)
+
+
+def use_stored_country_database(opened: "tuple[str, str, Reader] | None") -> None:
+    """Look addresses up in ``opened`` from now on, or in no stored file."""
+    _stored.swap(opened)
+
+
+def stored_country_database_failed(sha256: str) -> None:
+    """Note that the stored file ``sha256`` failed to open, keeping the file open before."""
+    _stored.failed = sha256
+
+
+def reset_stored_country_database() -> None:
+    """Close the stored file, so the next load starts clean (startup and tests)."""
+    _stored.swap(None)
+
+
+def _looked_up(database: str | None, client_host: str) -> str | None:
     try:
         address = ipaddress.ip_address(client_host)
     except ValueError:
         return None
-    reader = _database.get(database)
+    reader = _database.get(database) if database is not None else _stored.reader
     if reader is None:
         return None
     from maxminddb import InvalidDatabaseError  # noqa: PLC0415 - installed, since a reader is open
@@ -150,7 +230,8 @@ def _looked_up(database: str, client_host: str) -> str | None:
         return None
     except InvalidDatabaseError as exc:
         # The file opened, but the record this address points at is damaged.
-        logger.warning("client_country_database %r: %s; the address has no country", database, exc)
+        source = f"client_country_database {database!r}" if database is not None else "The stored country file"
+        logger.warning("%s: %s; the address has no country", source, exc)
         return None
     if not isinstance(record, Mapping):
         return None
@@ -166,13 +247,14 @@ def client_country(
     ``headers`` is keyed in lower case, as Starlette's are. A header that is
     present decides on its own, so a value that is no country code (Cloudflare's
     ``T1`` for Tor, ``XX`` for unknown) gives None rather than a lookup of the
-    proxy's view of the address.
+    proxy's view of the address. With no ``database``, the address is looked
+    up in the stored country file, where one is open.
     """
     if header is not None:
         value = headers.get(header.lower())
         if value is not None:
             return _country_code(value)
-    if database is not None and client_host is not None:
+    if client_host is not None:
         return _looked_up(database, client_host)
     return None
 

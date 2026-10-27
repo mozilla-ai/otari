@@ -5,6 +5,11 @@ from gateway.services.inference._client_country import (
     client_country,
     open_country_database,
     request_country_gate,
+    reset_stored_country_database,
+)
+from gateway.services.inference._country_database import (
+    load_stored_country_database_at_startup,
+    run_stored_country_database_refresher,
 )
 from gateway.services.inference._decisions import (
     DecisionProvider,
@@ -157,6 +162,9 @@ __all__ = [
     "rerank_usage",
     "resolve_decision_provider",
     "run_idempotency_sweeper",
+    "load_stored_country_database_at_startup",
+    "reset_stored_country_database",
+    "run_stored_country_database_refresher",
     "reasoning_signature",
     "serves_responses",
     "strip_gateway_minted_items",

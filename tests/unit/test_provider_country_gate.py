@@ -59,9 +59,20 @@ def test_kosovo_is_a_country_code() -> None:
     assert _config(provider_supported_countries={"openai": ["xk"]}).provider_supported_countries == {"openai": ["XK"]}
 
 
-def test_a_list_with_no_country_source_is_refused() -> None:
-    with pytest.raises(ValidationError, match="client_country_header or client_country_database"):
-        _config(client_country_header=None)
+def test_a_list_with_no_configured_country_source_needs_a_stored_file() -> None:
+    # The config loads: whether a file is stored is checked at startup, where the database is reachable.
+    assert _config(client_country_header=None).country_gate_needs_stored_database()
+
+
+@pytest.mark.parametrize(
+    "source", [{"client_country_header": _HEADER}, {"client_country_header": None, "client_country_database": "c.mmdb"}]
+)
+def test_a_configured_country_source_needs_no_stored_file(source: dict[str, str | None]) -> None:
+    assert not _config(**source).country_gate_needs_stored_database()
+
+
+def test_no_list_needs_no_stored_file() -> None:
+    assert not _config(client_country_header=None, provider_supported_countries={}).country_gate_needs_stored_database()
 
 
 @pytest.mark.parametrize(

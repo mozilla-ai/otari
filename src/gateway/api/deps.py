@@ -907,7 +907,12 @@ def build_inference_service(uow: UnitOfWork, config: GatewayConfig) -> Inference
 
     It receives the Unit of Work and its own domain's repositories over it, never the session.
     """
-    return InferenceService(uow, InferenceRepositories.on(uow), config)
+    return InferenceService(
+        uow,
+        InferenceRepositories.on(uow),
+        config,
+        country_limited_providers=build_hosted_provider_service(uow, config=config).names_limited_to_countries,
+    )
 
 
 def build_sandbox_file_bridge(

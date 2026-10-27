@@ -2,7 +2,7 @@
 
 from fastapi import status
 
-from gateway.exceptions import TenancyError, TenancyNotFoundError, TenancyValidationError
+from gateway.exceptions import TenancyConflictError, TenancyError, TenancyNotFoundError, TenancyValidationError
 
 
 class EmbeddingOptionUnsupportedError(TenancyValidationError):
@@ -36,3 +36,13 @@ class CountryDatabaseNotFoundError(TenancyNotFoundError):
 
     def __init__(self) -> None:
         super().__init__("No country file is stored")
+
+
+class CountryDatabaseInUseError(TenancyConflictError):
+    """The stored country file is the only country source a list of supported countries has."""
+
+    def __init__(self, needed_by: str) -> None:
+        super().__init__(
+            f"The stored country file is the only country source for {needed_by}: set client_country_header or "
+            "client_country_database before removing it"
+        )

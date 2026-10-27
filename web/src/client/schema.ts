@@ -5675,13 +5675,18 @@ export interface paths {
          * @description Store a country file in place of the one stored before.
          *
          *     A file larger than 32 MiB answers 413, and one that is no MaxMind DB
-         *     country file answers 400. Either way the file stored before stays.
+         *     country file answers 400. Either way the file stored before stays. While
+         *     ``client_country_database`` is set, the stored file is kept but not read.
          */
         put: operations["settings-upload_country_database"];
         post?: never;
         /**
          * Delete Country Database
-         * @description Remove the stored country file. Answers 404 when none is stored.
+         * @description Remove the stored country file.
+         *
+         *     Answers 404 when none is stored, and 409 when it is the only country source
+         *     for ``provider_supported_countries`` or for the supported countries of an
+         *     enabled hosted provider.
          */
         delete: operations["settings-delete_country_database"];
         options?: never;

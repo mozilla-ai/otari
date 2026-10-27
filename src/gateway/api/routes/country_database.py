@@ -1,7 +1,8 @@
 """The country file stored in the database (``/api/v1/settings/country-database``). Operator-gated.
 
 An operator uploads a MaxMind DB country file from the dashboard instead of
-mounting one into every container, and every replica reads the stored file.
+mounting one into every container. The replica that served the upload reads it
+at once, and every other replica within 30 seconds.
 """
 
 from collections.abc import AsyncIterator
@@ -75,7 +76,8 @@ async def upload_country_database(request: Request, service: InferenceServiceDep
     """Store a country file in place of the one stored before.
 
     A file larger than 32 MiB answers 413, and one that is no MaxMind DB
-    country file answers 400. Either way the file stored before stays.
+    country file answers 400. Either way the file stored before stays. While
+    ``client_country_database`` is set, the stored file is kept but not read.
     """
     # Read here rather than as a File parameter, which FastAPI parses before the operator gate runs.
     try:
@@ -90,6 +92,11 @@ async def upload_country_database(request: Request, service: InferenceServiceDep
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_country_database(service: InferenceServiceDep) -> Response:
-    """Remove the stored country file. Answers 404 when none is stored."""
+    """Remove the stored country file.
+
+    Answers 404 when none is stored, and 409 when it is the only country source
+    for ``provider_supported_countries`` or for the supported countries of an
+    enabled hosted provider.
+    """
     await service.remove_country_database()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

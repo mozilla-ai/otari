@@ -34,7 +34,7 @@ from gateway.log_config import logger
 from gateway.models.inference import IdempotencyRecord, IdempotencyState
 from gateway.repositories.inference import InferenceRepositories
 from gateway.schemas.inference import CountryDatabaseStatus, EmbeddingResponse, RerankResponse
-from gateway.services.inference._country_database import CountryDatabaseStore
+from gateway.services.inference._country_database import CountryDatabaseStore, CountryLimitedProviders
 from gateway.services.inference._embeddings import embedding_provider_options
 from gateway.services.inference._passthrough_responses import embeddings_response, rerank_response
 from gateway.services.pricing_service import ResolvedPricing
@@ -181,11 +181,15 @@ class InferenceService:
         uow: UnitOfWork,
         repositories: InferenceRepositories,
         config: GatewayConfig,
+        *,
+        country_limited_providers: CountryLimitedProviders,
     ) -> None:
         self._uow = uow
         self._keys = repositories.idempotency
         self._config = config
-        self._country_database = CountryDatabaseStore(uow, repositories.country_database, config)
+        self._country_database = CountryDatabaseStore(
+            uow, repositories.country_database, config, country_limited_providers=country_limited_providers
+        )
 
     async def country_database_status(self) -> CountryDatabaseStatus:
         """The stored country file, and whether ``client_country_database`` is read instead."""
@@ -204,6 +208,7 @@ class InferenceService:
         """Remove the stored country file.
 
         Raises:
+            CountryDatabaseInUseError: a list of supported countries has no other country source.
             CountryDatabaseNotFoundError: no file is stored.
         """
         await self._country_database.remove()

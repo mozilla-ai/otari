@@ -1,5 +1,6 @@
 """The country a request comes from: a trusted proxy's header, else the address looked up in a local file."""
 
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -183,3 +184,32 @@ def test_a_file_that_is_no_country_file_is_refused(tmp_path: Path, database_type
 def test_bytes_that_are_no_database_are_refused(content: bytes) -> None:
     with pytest.raises(CountryDatabaseError, match="MaxMind DB"):
         _client_country.inspect_country_database(content)
+
+
+def test_a_stored_file_that_cannot_be_flushed_leaves_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The buffered tail is written on close, so a full disk can fail there rather than in ``write``."""
+    real = tempfile.NamedTemporaryFile
+
+    class _FullDisk:
+        def __init__(self, *, prefix: str, suffix: str, delete: bool) -> None:
+            self._file = real(dir=tmp_path, prefix=prefix, suffix=suffix, delete=delete)
+            self.name = self._file.name
+
+        def __enter__(self) -> "_FullDisk":
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            self._file.close()
+            raise OSError(28, "No space left on device")
+
+        def write(self, content: bytes) -> int:
+            return len(content)
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", _FullDisk)
+
+    with pytest.raises(OSError, match="No space left"):
+        _client_country.open_stored_country_database("sha", b"content")
+
+    assert list(tmp_path.iterdir()) == []

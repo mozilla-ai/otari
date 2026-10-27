@@ -50,6 +50,7 @@ async def test_a_claim_that_keeps_changing_does_not_spin() -> None:
         _NoUnitOfWork(),  # type: ignore[arg-type]
         MagicMock(idempotency=keys),
         GatewayConfig(),
+        country_limited_providers=AsyncMock(return_value=[]),
     )
     request = IdempotentRequest(scope="master:u", key="k", request_hash="0" * 64, user_id="u", api_key_id=None)
 
@@ -66,6 +67,7 @@ async def test_a_sweep_needs_a_positive_batch_size(batch_size: int) -> None:
         _NoUnitOfWork(),  # type: ignore[arg-type]
         MagicMock(idempotency=MagicMock()),
         GatewayConfig(),
+        country_limited_providers=AsyncMock(return_value=[]),
     )
 
     with pytest.raises(ValueError, match="batch"):
@@ -92,6 +94,7 @@ async def test_a_retry_of_a_running_request_is_answered_at_once() -> None:
         _NoUnitOfWork(),  # type: ignore[arg-type]
         MagicMock(idempotency=keys),
         GatewayConfig(),
+        country_limited_providers=AsyncMock(return_value=[]),
     )
     request = IdempotentRequest(scope="master:u", key="k", request_hash="0" * 64, user_id="u", api_key_id=None)
 

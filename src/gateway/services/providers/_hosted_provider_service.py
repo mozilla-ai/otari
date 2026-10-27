@@ -769,6 +769,11 @@ class HostedProviderService:
             )
         return dials
 
+    async def names_limited_to_countries(self) -> list[str]:
+        """The enabled hosted providers that serve only some countries, by name."""
+        async with self.uow:
+            return await self.sources.names_limited_to_countries()
+
     async def audit_config(self) -> HostedConfigAudit:
         """What boot reports about the ``hosted_providers:`` block: shadowed entries and unknown restrictions."""
         async with self.uow:

@@ -10684,7 +10684,7 @@
         {
           "name": "Upload Country Database",
           "request": {
-            "description": "Store a country file in place of the one stored before.\n\nA file larger than 32 MiB answers 413, and one that is no MaxMind DB\ncountry file answers 400. Either way the file stored before stays.",
+            "description": "Store a country file in place of the one stored before.\n\nA file larger than 32 MiB answers 413, and one that is no MaxMind DB\ncountry file answers 400. Either way the file stored before stays. While\n``client_country_database`` is set, the stored file is kept but not read.",
             "header": [],
             "method": "PUT",
             "url": {
@@ -10704,7 +10704,7 @@
         {
           "name": "Delete Country Database",
           "request": {
-            "description": "Remove the stored country file. Answers 404 when none is stored.",
+            "description": "Remove the stored country file.\n\nAnswers 404 when none is stored, and 409 when it is the only country source\nfor ``provider_supported_countries`` or for the supported countries of an\nenabled hosted provider.",
             "header": [],
             "method": "DELETE",
             "url": {

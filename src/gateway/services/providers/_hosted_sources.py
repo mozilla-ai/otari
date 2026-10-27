@@ -9,6 +9,7 @@ configuration on every use and never written to the database.
 """
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Literal
 
@@ -69,6 +70,11 @@ class HostedSource:
         return self._entry.restricted_to_organization_id
 
     @property
+    def supported_countries(self) -> Collection[str] | None:
+        """The countries whose requests it serves, or None for every country."""
+        return self.row.supported_countries if self.row is not None else self._entry.supported_countries
+
+    @property
     def declared_models(self) -> tuple[str, ...]:
         """The model ids configuration offers when the provider cannot list them; none for a row."""
         return () if self.entry is None else self.entry.models
@@ -124,6 +130,10 @@ class HostedSources:
         for name, entry in entries.items():
             merged.setdefault(name, HostedSource(entry=entry))
         return [merged[name] for name in sorted(merged)]
+
+    async def names_limited_to_countries(self) -> list[str]:
+        """The enabled hosted providers that serve only some countries, by name."""
+        return [source.name for source in await self.all() if source.enabled and source.supported_countries]
 
     async def get(self, name: str) -> HostedSource | None:
         """One hosted provider by name, with the accepted aliases folded, or None."""

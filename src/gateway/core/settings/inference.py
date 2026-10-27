@@ -2,10 +2,10 @@
 
 import re
 from collections.abc import Iterable
-from typing import Annotated, Self
+from typing import Annotated
 
 from any_llm import LLMProvider
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 from gateway.core.country_codes import COUNTRY_CODES
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
@@ -74,8 +74,8 @@ class InferenceSettings(BaseModel):
         description=(
             "The ISO country codes each provider type serves, such as openai: [US, DE]. A request from "
             "another country, or from one no source knows, skips that provider's candidates. A provider "
-            "type with no entry serves every country. Needs client_country_header or "
-            "client_country_database."
+            "type with no entry serves every country. Needs client_country_header, "
+            "client_country_database or a country file stored from the Settings page."
         ),
     )
 
@@ -93,8 +93,8 @@ class InferenceSettings(BaseModel):
         default=None,
         description=(
             "Path to a MaxMind DB country file (GeoLite2 Country, DB-IP Lite Country) in which the "
-            "client address is looked up. A replaced file is read again without a restart. Needs the "
-            "geoip extra."
+            "client address is looked up. A replaced file is read again without a restart. When set, "
+            "a country file stored from the Settings page is not read. Needs the geoip extra."
         ),
     )
 
@@ -173,16 +173,14 @@ class InferenceSettings(BaseModel):
                 raise ValueError(msg) from None
         return normalized
 
-    @model_validator(mode="after")
-    def _country_gate_has_a_source(self) -> Self:
-        if (
-            self.provider_supported_countries
+    def country_gate_needs_stored_database(self) -> bool:
+        """Whether ``provider_supported_countries`` has no country source but a stored country file.
+
+        Checked at startup and when the stored file is removed, since config
+        validation cannot see the database.
+        """
+        return (
+            bool(self.provider_supported_countries)
             and self.client_country_header is None
             and self.client_country_database is None
-        ):
-            msg = (
-                "provider_supported_countries needs client_country_header or client_country_database: "
-                "without one no request has a country, and every listed provider would be refused"
-            )
-            raise ValueError(msg)
-        return self
+        )
