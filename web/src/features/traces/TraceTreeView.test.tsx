@@ -165,7 +165,7 @@ describe("TraceTreeView arrivals", () => {
     )
     rerender(<Tree value={trace(later)} collapsed={hidden} />)
     act(() => {
-      vi.advanceTimersByTime(1_400)
+      vi.advanceTimersByTime(1_000)
     })
 
     rerender(<Tree value={trace(later)} collapsed={new Set()} />)
@@ -180,7 +180,7 @@ describe("TraceTreeView arrivals", () => {
     expect(arriving("turn-1")).toBe(true)
 
     act(() => {
-      vi.advanceTimersByTime(1_400)
+      vi.advanceTimersByTime(1_000)
     })
 
     expect(arriving("turn-1")).toBe(false)

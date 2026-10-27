@@ -70,7 +70,7 @@ const CHEVRON_SLOT = <span aria-hidden="true" className="size-11 shrink-0" />
 const ARRIVAL_STAGGER_MS = 45
 const ARRIVAL_STAGGER_ROWS = 6
 // Longer than the wash plus the largest stagger.
-const ARRIVAL_MS = 1_400
+const ARRIVAL_MS = 1_000
 const NO_ARRIVALS: ReadonlyMap<string, number> = new Map()
 
 function settledOn(traceId: string, roots: TreeNode[]) {
