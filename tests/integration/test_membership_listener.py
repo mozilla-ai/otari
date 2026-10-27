@@ -18,6 +18,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
+    OrganizationMember,
     Workspace,
     WorkspaceAssignmentRequest,
     WorkspaceCreate,
@@ -124,6 +125,14 @@ class RecordingListener:
 
     async def member_removed(self, member: WorkspaceMember) -> None:
         self.removed.append(member.id)
+
+    async def member_role_changed(self, member: WorkspaceMember) -> None:
+        return None
+
+    async def organization_member_changed(
+        self, membership: OrganizationMember, workspace_ids: Sequence[uuid.UUID]
+    ) -> None:
+        return None
 
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         self.deleted.append((workspace_id, sorted(member_ids)))

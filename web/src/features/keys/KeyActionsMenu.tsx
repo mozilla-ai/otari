@@ -29,6 +29,7 @@ export function KeyActionsMenu({
   onDelete,
   onWorkloadIdentity,
   isReadOnly = false,
+  isEnableLocked = false,
 }: {
   apiKey: ApiKey
   triggerRef?: RefObject<HTMLButtonElement | null>
@@ -55,6 +56,8 @@ export function KeyActionsMenu({
   onWorkloadIdentity?: () => void
   /** A viewer's popover: the key's details, and no actions. */
   isReadOnly?: boolean
+  /** Switched off by an operator, so its owner may not switch it back on. */
+  isEnableLocked?: boolean
 }) {
   const trigger = useRef<HTMLButtonElement>(null)
   const name = apiKey.key_name ?? "(unnamed)"
@@ -62,9 +65,13 @@ export function KeyActionsMenu({
     {
       id: "toggle",
       label: apiKey.is_active ? "Disable" : "Enable",
-      hint: apiKey.is_active ? "Callers get 401" : "Allow requests",
+      hint: apiKey.is_active
+        ? "Callers get 401"
+        : isEnableLocked
+          ? "Switched off by an operator"
+          : "Allow requests",
       icon: apiKey.is_active ? FiPause : FiPlay,
-      isDisabled: isPending,
+      isDisabled: isPending || (!apiKey.is_active && isEnableLocked),
       run: onToggle,
     },
     {

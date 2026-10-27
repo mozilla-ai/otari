@@ -861,6 +861,33 @@ describe("KeysPage", () => {
     },
   )
 
+  it("keeps a member from switching back on a key an operator switched off", async () => {
+    mockApi({
+      keys: [
+        apiKey({
+          id: "key-1",
+          key_name: "locked",
+          is_active: false,
+          operator_disabled: true,
+        }),
+      ],
+      deploymentOperator: false,
+      role: "member",
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("locked")).closest("tr")!
+    await user.click(
+      within(row).getByRole("button", { name: "Actions for locked" }),
+    )
+    const enable = await screen.findByRole("menuitem", { name: /^Enable/ })
+    expect(enable).toHaveAttribute("aria-disabled", "true")
+    expect(
+      within(enable).getByText("Switched off by an operator"),
+    ).toBeInTheDocument()
+  })
+
   it("offers a viewer their keys to read and nothing that changes one", async () => {
     mockApi({
       keys: [apiKey({ id: "key-1", key_name: "issued" })],

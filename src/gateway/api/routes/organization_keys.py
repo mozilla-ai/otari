@@ -337,6 +337,7 @@ async def create_own_key(
         allowed_models=allowed_models,
         allowed_tools=allowed_tools,
         exclude_from_budget=False,
+        self_service=True,
         reject_user_mismatch=request.reject_user_mismatch,
         capture_agent_telemetry=request.capture_agent_telemetry,
         metadata_=request.metadata,
@@ -444,6 +445,11 @@ async def update_own_key(
     # is the whole distinction there.
     if "key_name" in request.model_fields_set:
         key.key_name = request.key_name
+    if request.is_active is True and key.operator_disabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="An operator switched this key off; ask them to switch it back on.",
+        )
     if request.is_active is not None:
         key.is_active = request.is_active
     if "expires_at" in request.model_fields_set:

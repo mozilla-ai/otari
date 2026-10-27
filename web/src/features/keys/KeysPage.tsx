@@ -1378,6 +1378,7 @@ export function KeysPage() {
           canFederate ? () => setFederating(apiKey) : undefined
         }
         isReadOnly={isReadOnly}
+        isEnableLocked={!isDeploymentWide && apiKey.operator_disabled === true}
       />
     ),
     [

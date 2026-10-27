@@ -10478,6 +10478,11 @@
             "title": "Metadata",
             "type": "object"
           },
+          "operator_disabled": {
+            "default": false,
+            "title": "Operator Disabled",
+            "type": "boolean"
+          },
           "reject_user_mismatch": {
             "anyOf": [
               {
