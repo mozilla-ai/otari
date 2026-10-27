@@ -3,9 +3,9 @@
 from pathlib import Path
 
 import pytest
-from _mmdb_support import write_country_database
 from pydantic import ValidationError
 
+from _mmdb_support import write_country_database
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.main import _validate_client_country_database
