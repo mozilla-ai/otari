@@ -40,7 +40,7 @@ Any model in your catalog works in `id`, `primaryModel` and `fasterModel`, using
 
 ### Junie sends a `user` field
 
-Junie CLI puts a `user` field in every chat completion body, for every internal role it runs, including the main agent, the step summarizer and the chat title creator. You do not set that value and it is not stable: it is whatever the role making the call uses. Otari reads the field as naming a user, so an ordinary key refuses a request naming anyone but its own user, with HTTP 403.
+Junie CLI puts a `user` field in every chat completion body, for every internal role it runs, including the main agent, the step summarizer and the chat title creator. You do not set that value, and it has not been the same in every Junie build, so do not count on it being any particular string. Otari reads the field as naming a user, so an ordinary key refuses a request naming anyone but its own user, with HTTP 403.
 
 The CLI does not surface that refusal. The task stops with a message about an artifact it could not build, and the real reason appears only under `~/.junie/logs/`:
 
@@ -64,7 +64,7 @@ See [Mismatched `user` fields](access-control.md#mismatched-user-fields) for the
 
 Two more things about the CLI model picker:
 
-- It has a tab per provider. A custom profile appears under its own `providerName`, not under the JetBrains AI tab.
+- It is split into tabs, which `tab` and `shift+tab` move between. A custom profile is not on the JetBrains AI tab, so a reader who checks only the tab that opens first will conclude the profile did not load.
 - A model whose price Otari does not know is shown as $0.00, rather than as unknown.
 
 ## JetBrains AI Assistant
