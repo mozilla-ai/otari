@@ -180,14 +180,15 @@ async def _caller_context(db: AsyncSession, identity: TenancyUser) -> tuple[uuid
     return organization.id, str(identity.id)
 
 
-async def _load_own_writable_key(db: AsyncSession, identity: TenancyUser, key_id: str) -> APIKey:
+async def _load_own_writable_key(
+    db: AsyncSession, organizations: OrganizationService, identity: TenancyUser, key_id: str
+) -> APIKey:
     """One of the caller's own keys, or 404, refused with 403 to a viewer of its workspace.
 
     A viewer still lists their keys; changing, rotating or revoking one is a
     write, and an operator who issued a key to a read-only member is the one
     who changes it.
     """
-    organizations = OrganizationService(db, membership_listener=None)
     organization = await organizations.get_active_organization_for_user(identity)
     key = await _load_key_in_organization(db, key_id, organization.id, owner_user_id=str(identity.id))
     await require_workspace_contributor_access(
@@ -385,9 +386,10 @@ async def update_own_key(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     api_keys: ApiKeyServiceDep,
+    organizations: OrganizationServiceDep,
 ) -> KeyInfo:
     """Update one of the caller's own API keys."""
-    key = await _load_own_writable_key(db, identity, key_id)
+    key = await _load_own_writable_key(db, organizations, identity, key_id)
 
     # Before the key is changed, and narrow-only against the caller's own lists
     # (see keys.update_key).
@@ -441,6 +443,7 @@ async def rotate_own_key(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
     key_format: ApiKeyFormatPortDep,
+    organizations: OrganizationServiceDep,
 ) -> CreateKeyResponse:
     """Rotate the secret of one of the caller's own API keys, in place.
 
@@ -448,7 +451,7 @@ async def rotate_own_key(
     raw key is returned once, and the previous secret stops authenticating
     immediately with no grace window.
     """
-    key = await _load_own_writable_key(db, identity, key_id)
+    key = await _load_own_writable_key(db, organizations, identity, key_id)
 
     new_api_key = key_format.mint()
     key.key_hash = hash_key(new_api_key)
@@ -475,9 +478,10 @@ async def delete_own_key(
     key_id: str,
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organizations: OrganizationServiceDep,
 ) -> None:
     """Delete (revoke) one of the caller's own API keys."""
-    key = await _load_own_writable_key(db, identity, key_id)
+    key = await _load_own_writable_key(db, organizations, identity, key_id)
 
     await db.delete(key)
     try:

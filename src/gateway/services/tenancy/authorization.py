@@ -11,9 +11,13 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
-from gateway.models.tenancy import CONTRIBUTOR_ROLES, MANAGEMENT_ROLES, Organization, User, Workspace
+from gateway.models.tenancy import MANAGEMENT_ROLES, Organization, User, Workspace
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
 from gateway.services.tenancy.organization_service import OrganizationService
+
+# Roles that may change a workspace's resources, such as minting their own key in
+# it: everything but "viewer", which is read-only.
+_CONTRIBUTOR_ROLES = frozenset({"owner", "admin", "member"})
 
 
 async def resolve_visible_workspace(
@@ -131,7 +135,7 @@ async def require_workspace_contributor_access(
         return
     membership = await WorkspaceMemberRepository(db).get_active_by_workspace_and_user(workspace_id, user.id)
     deciding = membership if membership is not None else organization_membership
-    if deciding is None or deciding.role not in CONTRIBUTOR_ROLES:
+    if deciding is None or deciding.role not in _CONTRIBUTOR_ROLES:
         raise NotAuthorizedError("Viewers have read-only access to this workspace")
 
 
