@@ -36,11 +36,7 @@ from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.routing import MAX_CANDIDATES, PolicySpec, WhenClause
 from gateway.services.model_access import is_model_allowed, organization_key_refusal
-from gateway.services.provider_kwargs import (
-    credential_ladder_exhausted,
-    resolve_catalog_fallback,
-    resolve_provider_selector,
-)
+from gateway.services.provider_kwargs import resolve_catalog_fallback, resolve_provider_selector
 from gateway.services.providers import CountryGate
 from gateway.types.attempt import Attempt
 from gateway.types.budget_state import BudgetState
@@ -381,8 +377,8 @@ def compile_catalog_plan(
 
     Each offering is filtered as a policy candidate is.
     ``None`` leaves the request to resolve as a plain model does: for a name an alias or a static policy claims,
-    for a name with fewer than two offerings, when the filters leave no offering,
-    and when an offering has no stored credential.
+    for a name with fewer than two offerings, and when the filters leave no offering. An offering with no
+    stored credential stays in the plan, and the walk asks the hosted-credential port for it.
     """
     offerings = resolve_catalog_fallback(config, model_selector, user_id, workspace_id=workspace_id)
     if len(offerings) < 2:
@@ -405,12 +401,6 @@ def compile_catalog_plan(
             "; ".join(f"{item.selector} ({item.reason})" for item in dropped),
         )
     if not attempts:
-        return None
-    # NOTE: Only the plain path asks the hosted-credential port, so an offering that needs it leaves the plan.
-    if any(
-        credential_ladder_exhausted(attempt.provider, attempt.kwargs, declared=attempt.instance in config.providers)
-        for attempt in attempts
-    ):
         return None
     # The first offering that survives the filters is the catalog's choice, and the rest follow it.
     attempts = [attempts[0], *(replace(attempt, selection_reason="on_failure") for attempt in attempts[1:])]

@@ -2879,7 +2879,7 @@
               },
               "raw": "{\n  \"digest\": \"string\",\n  \"gates\": [\n    {\n      \"gate_id\": \"string\",\n      \"gate_type\": \"command\",\n      \"enforcement\": \"required\",\n      \"origin\": \"repo\",\n      \"runs\": [\n        \"pre_tool_use.edit_target\"\n      ],\n      \"message\": \"string\"\n    }\n  ]\n}"
             },
-            "description": "Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.\n\n`otari hook` sends this once per version, the first time it reports a check\nagainst it. The fingerprint is recomputed from the gates, and one that does\nnot match the one sent is refused, so a version cannot be stored under\nanother's name. Sending a version again changes nothing. It is stored in the\nAPI key's workspace, beside that key's traces, and takes the same key a trace\nexport does: a budget-exempt API key, never the master key.",
+            "description": "Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.\n\n`otari hook` sends this once per version, the first time it reports a check\nagainst it. The fingerprint is recomputed from the gates, and one that does\nnot match the one sent is refused, so a version cannot be stored under\nanother's name. Sending a version again changes nothing. A workspace keeps at\nmost 1,000 versions, and a new one past that is refused with a 409. It is stored in the\nAPI key's workspace, beside that key's traces, and takes the same key a trace\nexport does: a budget-exempt API key, never the master key.",
             "header": [
               {
                 "key": "Content-Type",
@@ -10658,6 +10658,66 @@
                 "settings"
               ],
               "raw": "{{baseUrl}}/api/v1/settings"
+            }
+          }
+        },
+        {
+          "name": "Get Country Database",
+          "request": {
+            "description": "Describe the stored country file, and say whether ``client_country_database`` is read instead.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "settings",
+                "country-database"
+              ],
+              "raw": "{{baseUrl}}/api/v1/settings/country-database"
+            }
+          }
+        },
+        {
+          "name": "Upload Country Database",
+          "request": {
+            "description": "Store a country file in place of the one stored before.\n\nA file larger than 32 MiB answers 413, and one that is no MaxMind DB\ncountry file answers 400. Either way the file stored before stays. While\n``client_country_database`` is set, the stored file is kept but not read.",
+            "header": [],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "settings",
+                "country-database"
+              ],
+              "raw": "{{baseUrl}}/api/v1/settings/country-database"
+            }
+          }
+        },
+        {
+          "name": "Delete Country Database",
+          "request": {
+            "description": "Remove the stored country file.\n\nAnswers 404 when none is stored, and 409 when it is the only country source\nfor ``provider_supported_countries`` or for the supported countries of an\nenabled hosted provider.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "settings",
+                "country-database"
+              ],
+              "raw": "{{baseUrl}}/api/v1/settings/country-database"
             }
           }
         },

@@ -83,7 +83,7 @@ from gateway.api.routes._attempts import (
     PrepareKwargs,
     walk_attempts,
 )
-from gateway.api.routes._helpers import apply_input_guardrails, country_gate_for, resolve_user_id
+from gateway.api.routes._helpers import apply_input_guardrails, country_gate_for, country_not_supported, resolve_user_id
 from gateway.api.routes._idempotency import (
     IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL,
     IDEMPOTENCY_KEY_REUSED_DETAIL,
@@ -288,6 +288,7 @@ from gateway.services.providers import (
     CountryNotServedError,
     UnknownHostedUpstreamError,
     dispatch_on_hosted_credential,
+    ensure_hosted_country,
     ensure_provider_country,
     hosted_credential_for,
     hosted_models_for,
@@ -1207,6 +1208,7 @@ class RequestContext:
         upstream_user: str | None = None,
         trace: RequestTrace | None = None,
         source_label: str | None = None,
+        country_gate: CountryGate | None = None,
     ) -> None:
         self.config = config
         # The request's trace while it is served; None where nothing records one.
@@ -1229,6 +1231,8 @@ class RequestContext:
         self.user_id = user_id
         # The end-user identifier each provider call carries.
         self.upstream_user = upstream_user
+        # The country the request comes from, which a hosted provider's own list is checked against.
+        self.country_gate = country_gate
         # The caller's request tags, written onto every usage row the request
         # writes once this context exists.
         self.tags = tags
@@ -1823,13 +1827,21 @@ def _hosted_candidate(
         )
         try:
             served = await serve_on_hosted_provider(
-                ctx.config, port, candidate, organization_id=ctx.organization_id, workspace_id=ctx.workspace_id
+                ctx.config,
+                port,
+                candidate,
+                organization_id=ctx.organization_id,
+                workspace_id=ctx.workspace_id,
+                country_gate=ctx.country_gate,
             )
         except HostedAccessDeniedError as exc:
             selector = attempt.display_model or f"{attempt.instance}:{attempt.model}"
             raise CandidateCannotServe(
                 HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=model_not_allowed_detail(selector))
             ) from exc
+        except CountryNotServedError as exc:
+            selector = attempt.display_model or f"{attempt.instance}:{attempt.model}"
+            raise CandidateCannotServe(country_not_supported(exc.gate, selector)) from exc
         except Exception as exc:
             logger.error(
                 "ModelProviderPort failed to resolve a credential for %s:%s: %s",
@@ -2038,6 +2050,29 @@ async def _serve_from_hosted_credential(
         await _refuse_if_hosted_model_switched_off(ctx, resolved, adapter=adapter, port=port)
     if credential is None or not lookup.accepts(credential.response_provider, resolved.instance):
         raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
+    try:
+        ensure_hosted_country(ctx.country_gate, credential.supported_countries)
+    except CountryNotServedError as exc:
+        detail = exc.gate.refusal_detail(resolved.alias or f"{resolved.instance}:{resolved.model}")
+        await release_reservation(ctx)
+        await log_gateway_rejection(
+            db=ctx.db,
+            log_writer=ctx.log_writer,
+            api_key_id=ctx.api_key_id,
+            user_id=ctx.user_id,
+            model=resolved.model,
+            provider=resolved.instance,
+            endpoint=adapter.endpoint,
+            detail=detail,
+            status_code=status.HTTP_403_FORBIDDEN,
+            started_at=ctx.started_at,
+            request_id=ctx.request_id,
+            tags=ctx.tags,
+            safety_identifier=ctx.upstream_user,
+        )
+        raise adapter.error(
+            status.HTTP_403_FORBIDDEN, detail, ErrorKind.PERMISSION, headers=error_headers(COUNTRY_NOT_SUPPORTED)
+        ) from exc
 
     try:
         served = dispatch_on_hosted_credential(credential, model=resolved.model, alias=resolved.alias)
@@ -3113,6 +3148,8 @@ async def resolve_request_context(
             )
             if hosted is None or hosted.api_key is None:
                 return None
+            # Before an attachment is uploaded on it, as dispatch would refuse it after.
+            ensure_hosted_country(country_gate, hosted.supported_countries)
             return ResolvedCredential(
                 api_key=hosted.api_key, api_base=hosted.api_base, client_args=dict(hosted.client_args or {})
             )
@@ -3138,7 +3175,7 @@ async def resolve_request_context(
                     ),
                     upstream_user=upstream_user,
                     hosted_credential=_hosted_credential,
-                    client_country=country_gate.country if country_gate is not None else None,
+                    client_country=country_gate.country,
                 )
             )
             # Bill the vision describe side-call before the reservation
@@ -3196,6 +3233,27 @@ async def resolve_request_context(
         except TenancyError as exc:
             await refund_reservation(db, reservation)
             raise domain_error(adapter, exc) from exc
+        except CountryNotServedError as exc:
+            await refund_reservation(db, reservation)
+            detail = exc.gate.refusal_detail(model)
+            await log_gateway_rejection(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                user_id=user_id,
+                model=gate_model,
+                provider=gate_instance,
+                endpoint=adapter.endpoint,
+                detail=detail,
+                status_code=status.HTTP_403_FORBIDDEN,
+                started_at=started_at,
+                request_id=request_id,
+                tags=tags,
+                safety_identifier=upstream_user,
+            )
+            raise adapter.error(
+                status.HTTP_403_FORBIDDEN, detail, ErrorKind.PERMISSION, headers=error_headers(COUNTRY_NOT_SUPPORTED)
+            ) from exc
         except Exception as exc:
             await refund_reservation(db, reservation)
             logger.error("Request setup failed after reservation: %s", exc)
@@ -3272,6 +3330,7 @@ async def resolve_request_context(
         end_user_budget_id=end_user_budget_id,
         tags=tags,
         upstream_user=upstream_user,
+        country_gate=country_gate,
         trace=trace,
         source_label=_session_trace_id(session, workspace_id, user_id, api_key_id),
     )

@@ -36,3 +36,10 @@ class GuardrailDigestMismatchError(TenancyValidationError):
 
     def __init__(self) -> None:
         super().__init__("The digest does not match these gates.")
+
+
+class GuardrailVersionLimitError(TenancyConflictError):
+    """A workspace that already keeps as many guardrail versions as it may, sent a new one."""
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(f"This workspace already keeps {limit} guardrail versions; no more are stored.")

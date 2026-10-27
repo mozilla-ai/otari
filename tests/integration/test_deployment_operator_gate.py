@@ -56,6 +56,7 @@ _DEPLOYMENT_WIDE_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/settings"),
     ("GET", f"{API_ROOT}/settings/mail"),
     ("GET", f"{API_ROOT}/settings/maintenance-mode"),
+    ("GET", f"{API_ROOT}/settings/country-database"),
     ("GET", f"{API_ROOT}/health-checks"),
     # A run spends the deployment's provider credit.
     ("POST", f"{API_ROOT}/health-checks/run"),

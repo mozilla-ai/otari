@@ -59,9 +59,20 @@ def test_kosovo_is_a_country_code() -> None:
     assert _config(provider_supported_countries={"openai": ["xk"]}).provider_supported_countries == {"openai": ["XK"]}
 
 
-def test_a_list_with_no_country_source_is_refused() -> None:
-    with pytest.raises(ValidationError, match="client_country_header or client_country_database"):
-        _config(client_country_header=None)
+def test_a_list_with_no_configured_country_source_needs_a_stored_file() -> None:
+    # The config loads: whether a file is stored is checked at startup, where the database is reachable.
+    assert _config(client_country_header=None).country_gate_needs_stored_database()
+
+
+@pytest.mark.parametrize(
+    "source", [{"client_country_header": _HEADER}, {"client_country_header": None, "client_country_database": "c.mmdb"}]
+)
+def test_a_configured_country_source_needs_no_stored_file(source: dict[str, str | None]) -> None:
+    assert not _config(**source).country_gate_needs_stored_database()
+
+
+def test_no_list_needs_no_stored_file() -> None:
+    assert not _config(client_country_header=None, provider_supported_countries={}).country_gate_needs_stored_database()
 
 
 @pytest.mark.parametrize(
@@ -145,3 +156,20 @@ def test_the_lists_are_settable_as_json_in_the_environment(tmp_path: Path, monke
 
     assert config.provider_supported_countries == {"openai": ["US"]}
     assert config.client_country_header == _HEADER
+
+
+@pytest.mark.parametrize(
+    ("country", "countries", "excluded"),
+    [
+        ("US", ("US", "DE"), False),
+        ("FR", ("US", "DE"), True),
+        (None, ("US",), True),
+        ("FR", (), True),
+        ("FR", None, False),
+        (None, None, False),
+    ],
+)
+def test_a_hosted_providers_own_list_excludes_the_countries_it_leaves_out(
+    country: str | None, countries: tuple[str, ...] | None, excluded: bool
+) -> None:
+    assert CountryGate(country).excludes(countries) is excluded

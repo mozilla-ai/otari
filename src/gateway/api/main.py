@@ -19,6 +19,7 @@ from gateway.api.routes import (
     budgets,
     catalog,
     chat,
+    country_database,
     decisions,
     embeddings,
     end_users,
@@ -224,6 +225,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     rate_limits.router,
     mail.router,
     maintenance_mode.router,
+    country_database.router,
     # All three prefixed /tool-settings, split by who may call them. Operator
     # first, matching the pairs above, though none ends with a catch-all.
     tool_settings.operator_router,

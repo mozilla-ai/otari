@@ -432,7 +432,9 @@ read. What each gate is and says goes separately, once per version of the
 guardrail, to the server `OTARI_URL` names: its id, type, enforcement, when it
 runs, whether it is yours or the repository's, and its `message`. That includes
 your own gates in `~/.otari/`, and the server keeps it, so set `OTARI_URL` only
-for a server you would show your guardrails to. A session then
+for a server you would show your guardrails to. A workspace keeps at most
+1,000 versions; past that a new one is refused, and its gates show by id
+alone. A session then
 shows each gate's message where it blocked, and lists the gates the guardrail
 declares that never ran. When the agent also exports its own spans, as
 [Claude Code can](traces.md#claude-code-without-routing), a gate shows under

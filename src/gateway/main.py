@@ -70,7 +70,14 @@ from gateway.services.code_execution.container_sweeper import run_sandbox_contai
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import FileBackends, run_file_sweeper
-from gateway.services.inference import close_decision_client, open_country_database, run_idempotency_sweeper
+from gateway.services.inference import (
+    close_decision_client,
+    load_stored_country_database_at_startup,
+    open_country_database,
+    reset_stored_country_database,
+    run_idempotency_sweeper,
+    run_stored_country_database_refresher,
+)
 from gateway.services.log_writer import (
     LogWriter,
     TracingLogWriter,
@@ -485,6 +492,14 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     ),
     # No reset: the stored rules live on the config, which the startup load rebuilds.
     _LifespanWorker("rate limit rule", lambda config, _container: run_rate_limit_refresher(config)),
+    # Not run where client_country_database is set: that file wins, and the stored one is not read.
+    _LifespanWorker(
+        "stored country file",
+        lambda config, _container: (
+            run_stored_country_database_refresher() if config.client_country_database is None else None
+        ),
+        reset_stored_country_database,
+    ),
     _LifespanWorker("price snapshot", lambda _config, _container: run_price_snapshot_refresher()),
     # Started whatever ``pricing_refresh`` says, because that policy is
     # runtime-settable and each tick re-reads it.
@@ -925,6 +940,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # vendor handshake.
         await load_guardrail_runner_at_startup()
         await load_provider_endpoints_at_startup()
+        await load_stored_country_database_at_startup(config)
         if config.effective_sandbox_provider() in SANDBOX_KEY_ENV:
             await load_sandbox_credentials_at_startup(config.effective_sandbox_provider())
         await _move_deployment_providers(config)

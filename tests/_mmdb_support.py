@@ -55,7 +55,7 @@ def _encode(value: Any) -> bytes:
     raise TypeError(type(value))
 
 
-def write_country_database(path: Path, countries: dict[str, str]) -> Path:
+def write_country_database(path: Path, countries: dict[str, str], *, database_type: str = "Test-Country") -> Path:
     """Write ``path`` mapping each IPv4 network (``"192.0.2.0/24"``) to the country code given for it."""
     # A binary trie over the address bits: a node is a two-item list, a leaf a data offset.
     root: list[Any] = [None, None]
@@ -101,7 +101,7 @@ def write_country_database(path: Path, countries: dict[str, str]) -> Path:
         "binary_format_major_version": _uint16(2),
         "binary_format_minor_version": _uint16(0),
         "build_epoch": _uint64(1),
-        "database_type": "Test-Country",
+        "database_type": database_type,
         "description": {"en": "Test country database"},
         "ip_version": _uint16(4),
         "languages": ["en"],

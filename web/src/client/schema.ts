@@ -1673,7 +1673,8 @@ export interface paths {
          *     `otari hook` sends this once per version, the first time it reports a check
          *     against it. The fingerprint is recomputed from the gates, and one that does
          *     not match the one sent is refused, so a version cannot be stored under
-         *     another's name. Sending a version again changes nothing. It is stored in the
+         *     another's name. Sending a version again changes nothing. A workspace keeps at
+         *     most 1,000 versions, and a new one past that is refused with a 409. It is stored in the
          *     API key's workspace, beside that key's traces, and takes the same key a trace
          *     export does: a budget-exempt API key, never the master key.
          */
@@ -5658,6 +5659,42 @@ export interface paths {
         patch: operations["settings-update_settings"];
         trace?: never;
     };
+    "/api/v1/settings/country-database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Country Database
+         * @description Describe the stored country file, and say whether ``client_country_database`` is read instead.
+         */
+        get: operations["settings-get_country_database"];
+        /**
+         * Upload Country Database
+         * @description Store a country file in place of the one stored before.
+         *
+         *     A file larger than 32 MiB answers 413, and one that is no MaxMind DB
+         *     country file answers 400. Either way the file stored before stays. While
+         *     ``client_country_database`` is set, the stored file is kept but not read.
+         */
+        put: operations["settings-upload_country_database"];
+        post?: never;
+        /**
+         * Delete Country Database
+         * @description Remove the stored country file.
+         *
+         *     Answers 404 when none is stored, and 409 when it is the only country source
+         *     for ``provider_supported_countries`` or for the supported countries of an
+         *     enabled hosted provider.
+         */
+        delete: operations["settings-delete_country_database"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/mail": {
         parameters: {
             query?: never;
@@ -9206,6 +9243,19 @@ export interface components {
             /** Input Tokens */
             input_tokens: number;
         };
+        /**
+         * CountryDatabaseStatus
+         * @description The country file a request's address is looked up in.
+         */
+        CountryDatabaseStatus: {
+            /**
+             * Client Country Database Set
+             * @description Whether `client_country_database` names a file. That file is read, and a stored one is not.
+             */
+            client_country_database_set: boolean;
+            /** @description The stored file, or null when none is stored. */
+            stored: components["schemas"]["StoredCountryDatabasePublic"] | null;
+        };
         /** CreateBatchRequest */
         CreateBatchRequest: {
             /**
@@ -11489,7 +11539,9 @@ export interface components {
          *     every other one is served as if it were not configured.
          *     ``serves_unlisted_models`` serves a model the roster does not list, as a
          *     ``config.yml`` instance does, and switches on every model it offers
-         *     whether or not something prices it.
+         *     whether or not something prices it. ``supported_countries`` keeps the
+         *     provider to requests from those ISO country codes, checked as well as
+         *     ``provider_supported_countries``; null serves every country.
          * @example {
          *       "api_key": "<your OpenAI API key>",
          *       "provider": "openai"
@@ -11520,6 +11572,8 @@ export interface components {
              * @default false
              */
             serves_unlisted_models: boolean;
+            /** Supported Countries */
+            supported_countries?: string[] | null;
         };
         /**
          * HostedProviderPublic
@@ -11541,7 +11595,8 @@ export interface components {
          *     and ``decryptable`` false for one whose key or extras no configured
          *     ``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.
          *     ``serves_unlisted_models`` is true for one that serves a model its roster
-         *     does not list.
+         *     does not list. ``supported_countries`` is null for one that serves every
+         *     country.
          */
         HostedProviderPublic: {
             /** Api Base */
@@ -11590,6 +11645,8 @@ export interface components {
              * @enum {string}
              */
             source: "database" | "config";
+            /** Supported Countries */
+            supported_countries?: string[] | null;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -11655,7 +11712,8 @@ export interface components {
          *     without one. ``client_args`` omitted is left alone; an explicit
          *     null clears it, and an entry echoed back as the mask keeps the stored value.
          *     ``restricted_to_organization_id`` reads the same way: omitted keeps the
-         *     restriction, null lifts it.
+         *     restriction, null lifts it, and so does ``supported_countries``, where an
+         *     empty list closes the provider to every country.
          * @example {
          *       "enabled": false
          *     }
@@ -11675,6 +11733,8 @@ export interface components {
             restricted_to_organization_id?: string | null;
             /** Serves Unlisted Models */
             serves_unlisted_models?: boolean | null;
+            /** Supported Countries */
+            supported_countries?: string[] | null;
         };
         /**
          * HostedProvidersPublic
@@ -16828,6 +16888,35 @@ export interface components {
             tool_type: string | null;
         };
         /**
+         * StoredCountryDatabasePublic
+         * @description The country file stored in the database, which every replica reads.
+         */
+        StoredCountryDatabasePublic: {
+            /**
+             * Built At
+             * Format: date-time
+             * @description When the file was built, from its metadata.
+             */
+            built_at: string;
+            /**
+             * Database Type
+             * @description The type the file's metadata names, such as `GeoLite2-Country` or `DBIP-Country-Lite`.
+             */
+            database_type: string;
+            /**
+             * Sha256
+             * @description The file's SHA-256, in hex.
+             */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Uploaded At
+             * Format: date-time
+             */
+            uploaded_at: string;
+        };
+        /**
          * StoredSearchToolSchema
          * @description A runtime-stored search or fetch instance. The API key is never returned, only ``last4``.
          */
@@ -21540,6 +21629,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["GuardrailDefinitionResponse"];
                 };
+            };
+            /** @description The workspace already keeps the most guardrail versions it may, and this one is new. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -28511,6 +28607,85 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    "settings-get_country_database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CountryDatabaseStatus"];
+                };
+            };
+        };
+    };
+    "settings-upload_country_database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** @description A MaxMind DB country file, such as GeoLite2 Country or DB-IP Lite Country. */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CountryDatabaseStatus"];
+                };
+            };
+            /** @description The file is larger than 32 MiB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body holds no file in the field ``file``. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "settings-delete_country_database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

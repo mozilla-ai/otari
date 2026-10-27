@@ -128,8 +128,8 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   },
   {
     route: "/admin/web-search",
-    name: "admin-web-search-pricing",
-    heading: /web search pricing/i,
+    name: "admin-web-search",
+    heading: /^web search$/i,
   },
   {
     route: "/admin/code-execution",

@@ -236,8 +236,8 @@ Built in the target shape from the start.
 
 ### inference
 
-The request path: the completion dialects, the pass-through endpoints, batches
-and the Playground.
+The request path (the completion dialects, the pass-through endpoints, batches
+and the Playground), and the country file a request's address is looked up in.
 
 ### platform
 

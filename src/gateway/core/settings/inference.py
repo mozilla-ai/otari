@@ -1,17 +1,34 @@
 """Inference request settings."""
 
 import re
-from typing import Annotated, Self
+from collections.abc import Iterable
+from typing import Annotated
 
 from any_llm import LLMProvider
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 from gateway.core.country_codes import COUNTRY_CODES
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 
 # An RFC 9110 field name (a token).
 _HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
-_COUNTRY_CODE = re.compile(r"[A-Z]{2}")
+
+
+def country_codes(values: Iterable[object]) -> list[str]:
+    """``values`` as upper-case ISO 3166-1 alpha-2 codes, in order and without repeats.
+
+    Raises:
+        ValueError: a value is no country code.
+    """
+    codes: list[str] = []
+    for value in values:
+        code = str(value).strip().upper()
+        if code not in COUNTRY_CODES:
+            msg = f"{value!r} is not an ISO 3166-1 alpha-2 country code"
+            raise ValueError(msg)
+        if code not in codes:
+            codes.append(code)
+    return codes
 
 
 class InferenceSettings(BaseModel):
@@ -57,8 +74,8 @@ class InferenceSettings(BaseModel):
         description=(
             "The ISO country codes each provider type serves, such as openai: [US, DE]. A request from "
             "another country, or from one no source knows, skips that provider's candidates. A provider "
-            "type with no entry serves every country. Needs client_country_header or "
-            "client_country_database."
+            "type with no entry serves every country. Needs client_country_header, "
+            "client_country_database or a country file stored from the Settings page."
         ),
     )
 
@@ -76,8 +93,8 @@ class InferenceSettings(BaseModel):
         default=None,
         description=(
             "Path to a MaxMind DB country file (GeoLite2 Country, DB-IP Lite Country) in which the "
-            "client address is looked up. A replaced file is read again without a restart. Needs the "
-            "geoip extra."
+            "client address is looked up. A replaced file is read again without a restart. When set, "
+            "a country file stored from the Settings page is not read. Needs the geoip extra."
         ),
     )
 
@@ -149,30 +166,21 @@ class InferenceSettings(BaseModel):
             if not isinstance(raw_codes, list):
                 msg = f"provider_supported_countries.{provider_type} must be a list of country codes"
                 raise ValueError(msg)
-            codes: list[str] = []
-            for raw_code in raw_codes:
-                code = str(raw_code).strip().upper()
-                if code not in COUNTRY_CODES:
-                    msg = (
-                        f"provider_supported_countries.{provider_type}: {raw_code!r} is not an ISO 3166-1 "
-                        "alpha-2 country code"
-                    )
-                    raise ValueError(msg)
-                if code not in codes:
-                    codes.append(code)
-            normalized[provider_type] = codes
+            try:
+                normalized[provider_type] = country_codes(raw_codes)
+            except ValueError as exc:
+                msg = f"provider_supported_countries.{provider_type}: {exc}"
+                raise ValueError(msg) from None
         return normalized
 
-    @model_validator(mode="after")
-    def _country_gate_has_a_source(self) -> Self:
-        if (
-            self.provider_supported_countries
+    def country_gate_needs_stored_database(self) -> bool:
+        """Whether ``provider_supported_countries`` has no country source but a stored country file.
+
+        Checked at startup and when the stored file is removed, since config
+        validation cannot see the database.
+        """
+        return (
+            bool(self.provider_supported_countries)
             and self.client_country_header is None
             and self.client_country_database is None
-        ):
-            msg = (
-                "provider_supported_countries needs client_country_header or client_country_database: "
-                "without one no request has a country, and every listed provider would be refused"
-            )
-            raise ValueError(msg)
-        return self
+        )

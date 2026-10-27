@@ -909,7 +909,12 @@ def build_inference_service(uow: UnitOfWork, config: GatewayConfig) -> Inference
 
     It receives the Unit of Work and its own domain's repositories over it, never the session.
     """
-    return InferenceService(uow, InferenceRepositories.on(uow), config)
+    return InferenceService(
+        uow,
+        InferenceRepositories.on(uow),
+        config,
+        country_limited_providers=build_hosted_provider_service(uow, config=config).names_limited_to_countries,
+    )
 
 
 def build_sandbox_file_bridge(
@@ -994,6 +999,16 @@ def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
 
 
 MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_listener)]
+
+
+def get_inference_service(
+    uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]
+) -> InferenceService:
+    """Build the inference service on the request's unit of work."""
+    return build_inference_service(uow, config)
+
+
+InferenceServiceDep = Annotated[InferenceService, Depends(get_inference_service)]
 
 
 def get_workspace_code_execution_policy_service(
@@ -2028,6 +2043,7 @@ __all__ = [
     "GrowthSignalPortDep",
     "IdentityProviderPortDep",
     "IdentityServiceDep",
+    "InferenceServiceDep",
     "ModelProviderPortDep",
     "HostedProviderServiceDep",
     "OrgProviderModelServiceDep",

@@ -14,6 +14,7 @@ from typing import Any
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.traces_exceptions import (
     GuardrailDigestMismatchError,
+    GuardrailVersionLimitError,
     RequestTraceNotFoundError,
     TraceAmbiguousError,
     TraceNotFoundError,
@@ -46,6 +47,8 @@ from otari_agent.domain.definitions import GateDefinition, definition_digest, ga
 # overlaps. A dashboard preset asks for at most 60; its "All", by the day, keeps
 # the newest two years.
 MAX_SERIES_BUCKETS = 720
+# Each request is bounded by its schema; this bounds how many a workspace keeps.
+MAX_GUARDRAIL_VERSIONS_PER_WORKSPACE = 1_000
 
 
 class TraceService:
@@ -160,11 +163,19 @@ class TraceService:
 
         The fingerprint is recomputed from the gates and must match the one sent,
         so a version is never stored under another's name. Raises
-        ``GuardrailDigestMismatchError`` when it does not.
+        ``GuardrailDigestMismatchError`` when it does not, and
+        ``GuardrailVersionLimitError`` for a new version once the workspace keeps
+        :data:`MAX_GUARDRAIL_VERSIONS_PER_WORKSPACE`.
         """
         if definition_digest(gates) != digest:
             raise GuardrailDigestMismatchError()
         async with self._uow:
+            await self._definitions.lock_workspace(workspace_id)
+            if (
+                not await self._definitions.for_digests(workspace_id, (digest,))
+                and await self._definitions.count_for_workspace(workspace_id) >= MAX_GUARDRAIL_VERSIONS_PER_WORKSPACE
+            ):
+                raise GuardrailVersionLimitError(MAX_GUARDRAIL_VERSIONS_PER_WORKSPACE)
             await self._definitions.insert_absent(workspace_id, digest, [dataclasses.asdict(gate) for gate in gates])
         return digest
 

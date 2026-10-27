@@ -2,7 +2,7 @@
 
 from collections.abc import Generator
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import DEFAULT, AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -165,6 +165,22 @@ def test_a_batch_is_refused_for_another_country(client: TestClient) -> None:
     assert resp.status_code == 403, resp.text
     assert resp.headers[ERROR_CODE_HEADER] == COUNTRY_NOT_SUPPORTED
     mock.assert_not_awaited()
+
+
+def test_a_batch_status_call_is_refused_for_another_country(client: TestClient) -> None:
+    with patch.multiple(
+        "gateway.api.routes.batches", new_callable=AsyncMock, aretrieve_batch=DEFAULT, aretrieve_batch_results=DEFAULT
+    ) as mocks:
+        resp = client.get(
+            f"{API_ROOT}/batches/batch_abc123/results",
+            params={"provider": "openai"},
+            headers={**HEADERS, _COUNTRY_HEADER: "FR"},
+        )
+
+    assert resp.status_code == 403, resp.text
+    assert resp.headers[ERROR_CODE_HEADER] == COUNTRY_NOT_SUPPORTED
+    for mock in mocks.values():
+        mock.assert_not_awaited()
 
 
 @pytest.fixture

@@ -6,6 +6,7 @@ answers allow extra fields, so a field a provider adds later reaches the caller
 instead of being dropped here.
 """
 
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -253,3 +254,24 @@ class AnthropicErrorResponse(BaseModel):
     type: Literal["error"] = "error"
     error: AnthropicError
     code: str | None = Field(default=None, description="The refusal's `Otari-Error-Code`, where it has one.")
+
+
+class StoredCountryDatabasePublic(BaseModel):
+    """The country file stored in the database, which every replica reads."""
+
+    database_type: str = Field(
+        description="The type the file's metadata names, such as `GeoLite2-Country` or `DBIP-Country-Lite`."
+    )
+    built_at: datetime = Field(description="When the file was built, from its metadata.")
+    size_bytes: int
+    sha256: str = Field(description="The file's SHA-256, in hex.")
+    uploaded_at: datetime
+
+
+class CountryDatabaseStatus(BaseModel):
+    """The country file a request's address is looked up in."""
+
+    stored: StoredCountryDatabasePublic | None = Field(description="The stored file, or null when none is stored.")
+    client_country_database_set: bool = Field(
+        description="Whether `client_country_database` names a file. That file is read, and a stored one is not."
+    )

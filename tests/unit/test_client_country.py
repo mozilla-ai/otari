@@ -1,11 +1,13 @@
 """The country a request comes from: a trusted proxy's header, else the address looked up in a local file."""
 
+import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from _mmdb_support import write_country_database
 from pydantic import ValidationError
 
+from _mmdb_support import write_country_database
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.main import _validate_client_country_database
@@ -157,3 +159,57 @@ def test_startup_refuses_a_database_it_cannot_read(tmp_path: Path) -> None:
 
 def test_startup_accepts_a_readable_database(database: str) -> None:
     _validate_client_country_database(GatewayConfig(client_country_database=database))
+
+
+def test_a_country_file_is_inspected_from_its_metadata(tmp_path: Path) -> None:
+    path = write_country_database(
+        tmp_path / "countries.mmdb", {"192.0.2.0/24": "DE"}, database_type="DBIP-Country-Lite"
+    )
+
+    inspected = _client_country.inspect_country_database(path.read_bytes())
+
+    assert inspected.database_type == "DBIP-Country-Lite"
+    assert inspected.built_at == datetime.fromtimestamp(1, UTC)
+
+
+@pytest.mark.parametrize("database_type", ["GeoLite2-City", "DBIP-City-Lite", "GeoLite2-ASN"])
+def test_a_file_that_is_no_country_file_is_refused(tmp_path: Path, database_type: str) -> None:
+    path = write_country_database(tmp_path / "other.mmdb", {"192.0.2.0/24": "DE"}, database_type=database_type)
+
+    with pytest.raises(CountryDatabaseError, match="not a country database"):
+        _client_country.inspect_country_database(path.read_bytes())
+
+
+@pytest.mark.parametrize("content", [b"", b"not a database", b"\xab\xcd\xefMaxMind.com"])
+def test_bytes_that_are_no_database_are_refused(content: bytes) -> None:
+    with pytest.raises(CountryDatabaseError, match="MaxMind DB"):
+        _client_country.inspect_country_database(content)
+
+
+def test_a_stored_file_that_cannot_be_flushed_leaves_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The buffered tail is written on close, so a full disk can fail there rather than in ``write``."""
+    real = tempfile.NamedTemporaryFile
+
+    class _FullDisk:
+        def __init__(self, *, prefix: str, suffix: str, delete: bool) -> None:
+            self._file = real(dir=tmp_path, prefix=prefix, suffix=suffix, delete=delete)
+            self.name = self._file.name
+
+        def __enter__(self) -> "_FullDisk":
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            self._file.close()
+            raise OSError(28, "No space left on device")
+
+        def write(self, content: bytes) -> int:
+            return len(content)
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", _FullDisk)
+
+    with pytest.raises(OSError, match="No space left"):
+        _client_country.open_stored_country_database("sha", b"content")
+
+    assert list(tmp_path.iterdir()) == []

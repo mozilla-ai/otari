@@ -43,6 +43,7 @@ from gateway.services.file_extractors import extract_text_from_file, ocr_image, 
 from gateway.services.files import FileScope, FileService, StagedFile, sandbox_path_for, uploads_attachments
 from gateway.services.model_capabilities import Capabilities
 from gateway.services.provider_kwargs import effective_credential, get_provider_kwargs
+from gateway.services.providers import CountryNotServedError
 from gateway.services.vision import describe_image
 from gateway.types.provider_account import ResolvedCredential
 
@@ -415,6 +416,8 @@ async def _within_inline_limit(
     if limit.upload is not None:
         try:
             uri = await limit.upload(src.data, src.mime, src.filename or "")
+        except CountryNotServedError:
+            raise
         except Exception as exc:  # noqa: BLE001 - counted as oversized and refused by the caller
             logger.warning(
                 "content normalizer: provider upload failed for a %d byte %s: %s", size, src.kind, type(exc).__name__
