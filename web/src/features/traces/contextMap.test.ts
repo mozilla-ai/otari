@@ -8,8 +8,8 @@ import {
   contextTotal,
   contextWeightsOf,
   fitBlockLabel,
+  formatBlockShare,
   formatBlockTokens,
-  formatShare,
   formatUsedPercent,
   formatWindow,
   mapNote,
@@ -92,8 +92,8 @@ describe("formatting", () => {
   })
 
   it("writes a tooltip share to one decimal and the header's to a whole number", () => {
-    expect(formatShare(0.088)).toBe("8.8%")
-    expect(formatShare(0.1)).toBe("10.0%")
+    expect(formatBlockShare(0.088)).toBe("8.8%")
+    expect(formatBlockShare(0.1)).toBe("10.0%")
     expect(formatUsedPercent(39_600, 200_000)).toBe("20%")
     expect(formatUsedPercent(100_000, 200_000)).toBe("50%")
     expect(formatUsedPercent(100, 200_000)).toBe("<1%")
@@ -426,6 +426,27 @@ describe("sessionRequests", () => {
       sessionRequests([request(), request({ type: "SPAN" })]),
     ).toBeUndefined()
   })
+
+  it("reads the agent's own requests, past a subagent's and a side call to another model", () => {
+    const main = (id: string, startMs: number, promptTokens: number) =>
+      request({ id, startMs, promptTokens, model: "claude-opus-5-5" })
+    const first = main("first", 0, 90_000)
+    const last = main("last", 40, 120_000)
+    const subagent = main("subagent", 50, 8_000)
+    const title = request({
+      id: "title",
+      startMs: 60,
+      promptTokens: 400,
+      model: "claude-haiku-5-5",
+    })
+
+    expect(
+      sessionRequests(
+        [first, last, subagent, title],
+        (id) => id === "subagent",
+      ),
+    ).toEqual({ latest: last, fullest: last, count: 2 })
+  })
 })
 
 describe("sessionNote", () => {
@@ -501,7 +522,7 @@ describe("contextCounts", () => {
   it("says the window is unknown or overrun instead of a share", () => {
     const only = { latest, fullest: latest, count: 1 }
 
-    expect(contextCounts(at(12_700), only)).toEqual(["Window unknown"])
+    expect(contextCounts(at(12_700), only)).toEqual([])
     expect(contextCounts(at(237_900, 200_000), only)).toEqual([
       "Over the window",
     ])

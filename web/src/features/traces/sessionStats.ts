@@ -111,17 +111,16 @@ function rates(
   return out as Record<(typeof METERS)[number], number>
 }
 
-// A session at a glance: what it did, where its time went and what its money
-// paid for, read off its spans.
-export function sessionStats(
-  summary: TraceSummary,
-  detail: TraceDetail,
-): SessionStats {
-  const byId = new Map(detail.spans.map((span) => [span.span_id, span]))
-  const inSubagent = (span: TraceSpan): boolean => {
+/** Whether a span of these ran inside a subagent: under a tool call that started one. */
+export function inSubagentOf(
+  spans: readonly TraceSpan[],
+): (spanId: string) => boolean {
+  const byId = new Map(spans.map((span) => [span.span_id, span]))
+  return (spanId) => {
     // Parent ids are as the exporter sent them, so a walk guards against a cycle.
-    const seen = new Set([span.span_id])
-    let parent = span.parent_span_id ? byId.get(span.parent_span_id) : undefined
+    const seen = new Set([spanId])
+    const parentId = byId.get(spanId)?.parent_span_id
+    let parent = parentId ? byId.get(parentId) : undefined
     while (parent && !seen.has(parent.span_id)) {
       seen.add(parent.span_id)
       if (parent.operation === EXECUTION) return true
@@ -131,6 +130,16 @@ export function sessionStats(
     }
     return false
   }
+}
+
+// A session at a glance: what it did, where its time went and what its money
+// paid for, read off its spans.
+export function sessionStats(
+  summary: TraceSummary,
+  detail: TraceDetail,
+): SessionStats {
+  const isInSubagent = inSubagentOf(detail.spans)
+  const inSubagent = (span: TraceSpan) => isInSubagent(span.span_id)
   const tools = detail.spans.filter(
     (span) => span.kind === "tool" && !NOT_A_TOOL.has(span.tool_name ?? ""),
   )

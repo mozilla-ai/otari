@@ -9,8 +9,8 @@ import {
   type ContextMap,
   ESTIMATED,
   fitBlockLabel,
+  formatBlockShare,
   formatBlockTokens,
-  formatShare,
   formatWindow,
   mapNote,
 } from "./contextMap"
@@ -60,7 +60,7 @@ function mapHeight(width: number): number {
 
 // A block whose title is its category (Free, Tool results) would say it twice.
 function summary(block: ContextBlock): string {
-  const amount = `${formatBlockTokens(block.tokens)} tokens · ${formatShare(block.share)}`
+  const amount = `${formatBlockTokens(block.tokens)} tokens · ${formatBlockShare(block.share)}`
   return block.category === block.title
     ? amount
     : `${block.category} · ${amount}`

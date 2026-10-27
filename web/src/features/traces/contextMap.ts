@@ -4,8 +4,9 @@
 // weights the gateway kept for a request it served, scaled to that count).
 // Only numbers are ever involved: no part of a prompt reaches this module.
 
-import { formatTokens } from "@/shared/helpers/format"
+import { formatNumber, formatTokens } from "@/shared/helpers/format"
 
+import { plural } from "./format"
 import type { Observation } from "./types"
 
 /** The span attributes a gateway-served request's character weights are stored under. */
@@ -155,8 +156,8 @@ export function formatWindow(value: number): string {
   return formatBlockTokens(value).replace(".0", "")
 }
 
-/** A share of the window, one decimal, for the tooltip. */
-export function formatShare(share: number): string {
+/** A block's share of the window, one decimal, for the tooltip. */
+export function formatBlockShare(share: number): string {
   return `${(share * 100).toFixed(1)}%`
 }
 
@@ -169,10 +170,6 @@ export function formatUsedPercent(used: number, windowTokens: number): string {
 }
 
 export const ESTIMATED = "Estimated from request size"
-
-function plural(count: number, one: string, many: string): string {
-  return `${count.toLocaleString("en-US")} ${count === 1 ? one : many}`
-}
 
 type Draft = Omit<ContextBlock, "share">
 
@@ -200,7 +197,7 @@ function composition(
     tools: [
       "Tool definitions",
       "Tools",
-      [plural(weights.toolCount, "tool definition", "tool definitions")],
+      [plural(weights.toolCount, "tool definition")],
     ],
     files: [
       "Files",
@@ -210,7 +207,7 @@ function composition(
     messages: [
       "Messages",
       "Messages",
-      [plural(weights.messageCount, "message", "messages")],
+      [plural(weights.messageCount, "message")],
     ],
     toolResults: ["Tool results", "Tool results", []],
   }
@@ -339,23 +336,40 @@ export function requestContextMap(
   })
 }
 
-/** The requests a session's context is read from: the last to record any input, and the fullest. */
+/** The requests a session's context is read from: the agent's last to record any input, and its fullest. */
 export interface SessionRequests {
   latest: Observation
   fullest: Observation
-  /** How many requests recorded any input. */
+  /** How many of the agent's own requests recorded any input. */
   count: number
 }
 
 const inputOf = (request: Observation) => request.promptTokens ?? 0
 
+/**
+ * Only the agent's own conversation carries the session's context. A subagent's
+ * requests hold its own, and a side call to another model (a title, a quota
+ * check) holds a few hundred tokens, so the agent's model is the one most of
+ * its requests ran on.
+ */
 export function sessionRequests(
   observations: Observation[],
+  inSubagent: (id: string) => boolean = () => false,
 ): SessionRequests | undefined {
-  const requests = observations.filter(
+  const candidates = observations.filter(
     (observation) =>
-      observation.type === "GENERATION" && inputOf(observation) > 0,
+      observation.type === "GENERATION" &&
+      inputOf(observation) > 0 &&
+      !inSubagent(observation.id),
   )
+  const runs = new Map<string | undefined, number>()
+  for (const request of candidates)
+    runs.set(request.model, (runs.get(request.model) ?? 0) + 1)
+  let model: string | undefined
+  let most = 0
+  for (const [name, count] of runs)
+    if (count > most) [model, most] = [name, count]
+  const requests = candidates.filter((request) => request.model === model)
   const [first, ...rest] = requests
   if (!first) return undefined
   let latest = first
@@ -380,7 +394,8 @@ export function contextCounts(
   map: ContextMap,
   { latest, fullest }: SessionRequests,
 ): string[] {
-  if (map.windowTokens === undefined) return ["Window unknown"]
+  // The note under the map says the window is unknown, and why that hides free space.
+  if (map.windowTokens === undefined) return []
   if (map.isOverWindow) return ["Over the window"]
   const full = `${formatUsedPercent(map.used, map.windowTokens)} full`
   if (
@@ -405,7 +420,7 @@ export function sessionNote({
 }: SessionRequests): string {
   const from =
     count > 1
-      ? `From the last of ${count.toLocaleString("en-US")} requests.`
+      ? `From the last of ${formatNumber(count)} requests.`
       : "From the session's only request."
   if (fullest === latest || fullest.promptTokens === undefined) return from
   const share = fullest.contextWindow

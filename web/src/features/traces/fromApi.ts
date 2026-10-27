@@ -21,7 +21,7 @@ import {
   guardrailVerdict,
   mcpServer,
 } from "./gateway"
-import { sessionStats } from "./sessionStats"
+import { inSubagentOf, sessionStats } from "./sessionStats"
 import { toolCostBreakdown } from "./toolCostBreakdown"
 import {
   buildTraceTree,
@@ -440,7 +440,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
           ),
           toolCosts: toolCostBreakdown(detail, summary.cost),
           stats: sessionStats(summary, detail),
-          context: sessionRequests(observations),
+          context: sessionRequests(observations, inSubagentOf(detail.spans)),
         }
       : undefined,
   }

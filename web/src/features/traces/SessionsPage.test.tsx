@@ -335,7 +335,15 @@ describe("SessionsPage", () => {
     })
 
     expect(within(context).getByText("1.0k")).toBeInTheDocument()
-    expect(within(context).getByText("Window unknown")).toBeInTheDocument()
+    // Said once, under the map, rather than also beside the total.
+    expect(
+      within(context).queryByText("Window unknown"),
+    ).not.toBeInTheDocument()
+    expect(
+      within(context).getByText(
+        /window is unknown, so free space is not shown/,
+      ),
+    ).toBeInTheDocument()
     expect(
       within(context).getByRole("button", { name: /^Cache read:/ }),
     ).toBeInTheDocument()
