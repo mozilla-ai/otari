@@ -356,7 +356,7 @@ describe("WebSearchPage", () => {
       web_search_default_tool: null,
     })
 
-    // The model cannot search with searxng yet, so it cannot be the default.
+    // The model cannot search with searxng, so it cannot be the default.
     expect(
       screen.getByRole("button", {
         name: /^Make local the default\. Unavailable/,
