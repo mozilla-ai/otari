@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { ReactNode } from "react"
 
-import { ContextMapView } from "./ContextMap"
+import { ContextMapView } from "./ContextMapView"
 import {
   buildContextMap,
   type ContextMapInput,

@@ -18,7 +18,7 @@ import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
-import { ContextTab } from "./ContextMap"
+import { ContextTab } from "./ContextMapView"
 import { CostCard } from "./CostCard"
 import { ExplainCard } from "./ExplainCard"
 import {

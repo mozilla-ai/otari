@@ -2,7 +2,7 @@ import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { ContextMapView } from "./ContextMap"
+import { ContextMapView } from "./ContextMapView"
 import { buildContextMap, type ContextWeights } from "./contextMap"
 
 const WEIGHTS: ContextWeights = {
