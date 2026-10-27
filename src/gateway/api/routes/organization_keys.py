@@ -204,6 +204,7 @@ async def create_own_key(
     config: Annotated[GatewayConfig, Depends(get_config)],
     growth: GrowthSignalPortDep,
     key_format: ApiKeyFormatPortDep,
+    organizations: OrganizationServiceDep,
 ) -> CreateKeyResponse:
     """Create an API key owned by the caller, in a workspace they may see.
 
@@ -213,7 +214,6 @@ async def create_own_key(
     owner/admin, who see every workspace). A viewer of the workspace is refused
     with 403. The secret is returned once.
     """
-    organizations = OrganizationService(db, membership_listener=None)
     organization = await organizations.get_active_organization_for_user(identity)
 
     if request.workspace_id is not None:
