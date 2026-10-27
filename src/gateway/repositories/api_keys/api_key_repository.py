@@ -30,6 +30,10 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         result = await self.db.execute(select(APIKey.id).where(APIKey.workspace_id.in_(workspace_ids)))
         return list(result.scalars().all())
 
+    async def reload_locked(self, key: APIKey) -> None:
+        """Re-read ``key`` from the database and lock its row until the commit."""
+        await self.db.refresh(key, with_for_update=True)
+
     async def deactivate_owned_in_workspaces(
         self,
         user_id: str,

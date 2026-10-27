@@ -1,6 +1,11 @@
 """Errors that the api-keys domain may raise."""
 
-from gateway.exceptions import TenancyConflictError, TenancyNotFoundError, TenancyValidationError
+from gateway.exceptions import (
+    TenancyConflictError,
+    TenancyForbiddenError,
+    TenancyNotFoundError,
+    TenancyValidationError,
+)
 
 
 class DeclaredKeySecretInUseError(TenancyConflictError):
@@ -52,3 +57,10 @@ class FederationRuleNotFoundError(TenancyNotFoundError):
 
     def __init__(self, rule_id: str):
         super().__init__(f"Federation rule '{rule_id}' not found")
+
+
+class OperatorDisabledKeyError(TenancyForbiddenError):
+    """A key's owner tried to switch on a key an operator switched off, which only an operator may undo."""
+
+    def __init__(self) -> None:
+        super().__init__("An operator switched this key off; ask them to switch it back on.")

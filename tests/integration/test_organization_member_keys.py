@@ -980,7 +980,7 @@ def _operator_edit_after_the_load(
     async def edit_after_the_load(self: OrganizationService, **kwargs: Any) -> None:
         await hold(self, **kwargs)
         calls[0] += 1
-        if calls[0] == 2:
+        if calls[0] == 1:
             session = db_session_factory()
             try:
                 row = session.get(APIKey, key_id)
@@ -1011,7 +1011,7 @@ def test_an_operator_switch_off_landing_mid_update_is_not_overwritten(
     calls = _operator_edit_after_the_load(monkeypatch, db_session_factory, minted["id"], switch_off)
     code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"is_active": True})
 
-    assert calls == [2]
+    assert calls == [1]
     assert code == status.HTTP_403_FORBIDDEN, body
     row = _key_row(db_session_factory, minted["id"])
     assert (row.is_active, row.operator_disabled) == (False, True)
@@ -1034,7 +1034,7 @@ def test_an_operator_narrowing_landing_mid_update_survives_an_unrelated_edit(
     calls = _operator_edit_after_the_load(monkeypatch, db_session_factory, minted["id"], narrow)
     code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{minted['id']}", json={"key_name": "x"})
 
-    assert calls == [2]
+    assert calls == [1]
     assert code == status.HTTP_200_OK, body
     row = _key_row(db_session_factory, minted["id"])
     assert (row.key_name, row.allowed_models, row.allowed_tools) == ("x", ["openai:gpt-4o-mini"], [])

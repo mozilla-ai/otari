@@ -75,7 +75,6 @@ from gateway.models.users import User
 from gateway.ports.growth_signal_port import GrowthActivationEvent
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
-from gateway.services.api_keys import owner_enable_refusal
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
     KEY_TOOLS_EXCEED_USER_DETAIL,
@@ -84,7 +83,6 @@ from gateway.services.model_access import (
     validate_allowed_models,
     validate_allowed_tools,
 )
-from gateway.services.organizations import AccessLists
 from gateway.services.tenancy import DeploymentUserService, OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
 from gateway.services.workspace_scope import organization_default_workspace_id
@@ -403,60 +401,21 @@ async def update_own_key(
     switching_off = request.model_fields_set == {"is_active"} and request.is_active is False
     key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=switching_off)
 
-    # Before the key is changed, and narrow-only against the caller's own lists
-    # (see keys.update_key).
-    fields = request.model_fields_set
-    stored = AccessLists(key.allowed_models, key.allowed_tools)
+    # Tri-state via model_fields_set: the nullable columns take null to clear
+    # them, so "absent" and "null" have to be told apart. ``is_active`` and
+    # ``metadata`` are not nullable, so ``is not None`` is the whole distinction there.
+    changes = request.model_dump(include=request.model_fields_set - {"is_active", "metadata"})
+    if request.is_active is not None:
+        changes["is_active"] = request.is_active
+    if request.metadata is not None:
+        changes["metadata_"] = request.metadata
+
     try:
-        access = await api_keys.check_access_lists(
-            config,
-            AccessLists(
-                request.allowed_models if "allowed_models" in fields else stored.models,
-                request.allowed_tools if "allowed_tools" in fields else stored.tools,
-            ),
-            stored=stored,
-            owner_id=str(identity.id),
-        )
+        await api_keys.update_owned(config, key, changes, owner_id=str(identity.id))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    # Again: a changed list is checked in a block whose commit released the lock.
-    organization = await organizations.get_active_organization_for_user(identity)
-    await organizations.hold_workspace_write_access(
-        user=identity, organization_id=organization.id, workspace_id=key.workspace_id, revoking=switching_off
-    )
-    # Re-read under the row's lock: the copy loaded above may predate an
-    # operator's switch-off or narrowing, and writing it back would undo either.
-    await db.refresh(key, with_for_update=True)
-    if (refusal := owner_enable_refusal(key, request.is_active)) is not None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=refusal)
-
-    # Tri-state via model_fields_set: both columns are nullable and the
-    # dashboard's edit form sends null to clear them, so "absent" and "null"
-    # have to be told apart. ``is_active`` is not nullable, so ``is not None``
-    # is the whole distinction there.
-    if "key_name" in request.model_fields_set:
-        key.key_name = request.key_name
-    if request.is_active is not None:
-        key.is_active = request.is_active
-    if "expires_at" in request.model_fields_set:
-        key.expires_at = request.expires_at
-    if "reject_user_mismatch" in request.model_fields_set:
-        key.reject_user_mismatch = request.reject_user_mismatch
-    if "capture_agent_telemetry" in request.model_fields_set:
-        key.capture_agent_telemetry = request.capture_agent_telemetry
-    if "allowed_models" in request.model_fields_set:
-        key.allowed_models = access.models
-    if "allowed_tools" in request.model_fields_set:
-        key.allowed_tools = access.tools
-    if request.metadata is not None:
-        key.metadata_ = request.metadata
-
-    try:
-        await db.commit()
     except DATABASE_ERRORS as exc:
-        await db.rollback()
         raise database_error("update own key", exc) from None
-    await db.refresh(key)
 
     return KeyInfo.from_model(key)
 
