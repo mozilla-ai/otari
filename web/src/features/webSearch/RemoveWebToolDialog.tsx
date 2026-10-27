@@ -9,7 +9,7 @@ import type { WebToolRow } from "./webTools"
 
 // Removing a tool leaves two things keyed by its name: its price, and its place
 // in the search tool access lists of API keys and users. A later tool of the
-// same name would inherit both. The price is offered for deletion here, ticked;
+// same name would inherit both. The price is offered for deletion here, checked;
 // the access lists are only named, since nothing here can edit them.
 export function RemoveWebToolDialog({
   tool,
@@ -23,7 +23,7 @@ export function RemoveWebToolDialog({
 }) {
   const remove = useDeleteSearchTool()
   const deletePrice = useDeletePricing()
-  // Not ticked for a tool that overrides config.yml's: the entry it gives way
+  // Not checked for a tool that overrides config.yml's: the entry it gives way
   // to has the same name, so the same price.
   const [alsoPrice, setAlsoPrice] = useState(!tool.overridesConfig)
   // Set once the tool is gone, so confirming again after a failed price
