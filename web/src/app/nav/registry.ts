@@ -405,10 +405,8 @@ const DEPLOYMENT_SECTIONS = [
         operatorOnly: "unlisted",
         icon: FiCpu,
       },
-      // The search and fetch tools the deployment runs for every workspace,
-      // with what each call costs, as Hosted providers is for its models. On
-      // `tools`, the surface whose routes the page mostly reads. Refused rather
-      // than unlisted: `/search-tools` answers a non-operator 403.
+      // The search and fetch tools the deployment runs for every workspace, and
+      // their prices.
       {
         to: "/admin/web-search",
         label: "Web search",
@@ -416,8 +414,6 @@ const DEPLOYMENT_SECTIONS = [
         operatorOnly: "refused",
         icon: FiGlobe,
       },
-      // What the deployment charges per call of code execution. Refused rather
-      // than unlisted: `/pricing` answers a non-operator 403.
       {
         to: "/admin/code-execution",
         label: "Code execution pricing",

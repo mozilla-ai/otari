@@ -51,9 +51,9 @@ export interface WebToolRow {
 /**
  * Every tool a call can be served by, in the order the table lists them.
  *
- * `builtin_fetch` first, then the config.yml tools, then the stored ones, as
- * the pricing page lists them. A config entry a stored tool shadows is left
- * out: the stored one is in effect under the same name.
+ * `builtin_fetch` first, then the config.yml tools, then the stored ones. A
+ * config entry a stored tool shadows is left out: the stored one is in effect
+ * under the same name.
  */
 export function listWebTools(
   kind: WebToolKind,
@@ -374,8 +374,8 @@ export function jsonOnlyOptions(
 
 /**
  * Whether the model can search with a tool on this provider. The catalog gives
- * a provider no tier when the search library has no adapter for it, which today
- * means `searxng`: the search API serves it through its own client, while the
+ * a provider no tier when the search library has no adapter for it, such as
+ * `searxng`: the search API serves it through its own client, while the
  * model's search needs the library.
  */
 export function servesTheModel(provider: SearchProviderInfo | undefined) {

@@ -34,7 +34,7 @@ import {
 // One kind's tools as a table, each beside its price, and the kind's fallback
 // rate as the last row, since it prices what no tool in the table prices.
 // Clicking a row opens its details in a band under it; the actions stay on the
-// row, as on Hosted providers.
+// row.
 
 /** A tool's row, or the fallback rate's. */
 export type WebToolTableRow =
@@ -82,7 +82,7 @@ function rowKey(row: WebToolTableRow): string {
   return row.type === "tool" ? row.tool.name : FALLBACK_ROW
 }
 
-/** A problem worth a mark: a square dot and a sentence, as Badge's stories show. */
+/** A problem worth a mark: a square dot and a sentence. */
 function StatusMark({ children }: { children: string }) {
   return (
     <span className="flex items-center gap-1.5 text-caption">
@@ -151,7 +151,7 @@ type DefaultAction =
   | { type: "stop"; onPress: () => void }
   | { type: "none" }
 
-/** The row's actions, and its last connection test, as a Hosted providers row has them. */
+/** The row's actions, and its last connection test. */
 function ToolActions({
   tool,
   price,
