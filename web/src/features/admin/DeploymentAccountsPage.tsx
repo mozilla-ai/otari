@@ -30,7 +30,7 @@ import {
 } from "@/shared/api/deployment"
 import { formatRelative } from "@/shared/helpers/format"
 import { useUrlState } from "@/shared/helpers/urlState"
-import { useDebounced } from "@/shared/hooks/useDebounced"
+import { useListSearch } from "@/shared/hooks/useListSearch"
 
 import {
   accountLabel,
@@ -54,11 +54,7 @@ import { PasswordLinkDialog } from "./PasswordLinkDialog"
 // is deleting one, because historical attribution resolves through rows that
 // hang off it.
 
-const URL_DEFAULTS = { q: "", page: "0", size: String(PAGE_SIZE_OPTIONS[0]) }
-
-// The route's `max_length` on `search`: a longer term from a hand-edited URL
-// would be refused with a 422 rather than searched.
-const MAX_SEARCH_LENGTH = 200
+const URL_DEFAULTS = { page: "0", size: String(PAGE_SIZE_OPTIONS[0]) }
 
 /**
  * The access mark, affirmative: an account that reaches more than the ordinary
@@ -92,8 +88,11 @@ export function DeploymentAccountsPage() {
   const pageSize =
     PAGE_SIZE_OPTIONS.find((size) => size === url.getNumber("size")) ??
     PAGE_SIZE_OPTIONS[0]
-  const search = useDebounced(url.get("q").trim().slice(0, MAX_SEARCH_LENGTH))
-  const accounts = useDeploymentUsers({ page, pageSize, search }, isGranted)
+  const search = useListSearch()
+  const accounts = useDeploymentUsers(
+    { page, pageSize, search: search.term },
+    isGranted,
+  )
   const update = useUpdateDeploymentUser()
   const [deactivating, setDeactivating] = useState<DeploymentUser>()
   const [linkFor, setLinkFor] = useState<DeploymentUser>()
@@ -302,8 +301,8 @@ export function DeploymentAccountsPage() {
       <SearchField
         label="Search accounts"
         placeholder="Search by name or email"
-        value={url.get("q")}
-        onChange={(value) => url.patch({ q: value, page: 0 })}
+        value={search.value}
+        onChange={search.onChange}
         className="mb-3 md:w-80"
       />
 
@@ -316,7 +315,7 @@ export function DeploymentAccountsPage() {
           getRowKey={(account) => account.id}
           isLoading={accounts.isLoading}
           emptyContent={
-            search ? "No accounts match this search." : "No accounts yet."
+            search.term ? "No accounts match this search." : "No accounts yet."
           }
         />
       </TableScrollFrame>
