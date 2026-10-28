@@ -30,31 +30,22 @@ from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Depends, Query, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     SearchToolServiceDep,
+    SearchToolTesterDep,
     WebProviderClientDep,
     catalog_reader_operates_deployment,
     get_config,
-    get_db,
     require_deployment_operator,
     verify_catalog_reader,
 )
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.database import DATABASE_ERRORS, release_session
-from gateway.core.settings.tools import (
-    BUILTIN_FETCH,
-    BUILTIN_FETCH_PROVIDER,
-    ToolInstance,
-    ToolKind,
-)
+from gateway.core.database import DATABASE_ERRORS
+from gateway.core.settings.tools import ToolInstance, ToolKind
 from gateway.inflight import track_request
-from gateway.log_config import logger
-from gateway.models.tools import SearchToolCredential
 from gateway.schemas.tools import (
-    ConfigSearchToolSchema,
     CreatedSearchToolSchema,
     CreateSearchToolRequest,
     ReencryptSearchToolsResponse,
@@ -66,23 +57,7 @@ from gateway.schemas.tools import (
     StoredSearchToolTestRequest,
     UpdateSearchToolRequest,
 )
-from gateway.services.search_tool_store_service import (
-    config_file_tools,
-    list_search_tools,
-    refresh_search_tool_cache,
-)
-from gateway.services.secret_box import (
-    SecretBoxUnavailableError,
-    SecretDecryptionError,
-    decrypt_secret,
-)
-from gateway.services.tools import (
-    check_test_input,
-    instance_to_test,
-    run_connection_test,
-    search_provider_catalog,
-    unsaved_instance_to_test,
-)
+from gateway.services.tools import check_test_input, run_connection_test, search_provider_catalog
 
 router = APIRouter(
     prefix="/search-tools",
@@ -100,17 +75,6 @@ catalog_router = APIRouter(
     tags=["search-tools"],
     dependencies=[Depends(verify_catalog_reader)],
 )
-
-
-def _is_decryptable(row: SearchToolCredential) -> bool:
-    """Whether the row's stored key can be read with the current OTARI_SECRET_KEY."""
-    if not row.encrypted_api_key:
-        return True
-    try:
-        decrypt_secret(row.encrypted_api_key)
-    except (SecretBoxUnavailableError, SecretDecryptionError):
-        return False
-    return True
 
 
 @catalog_router.get("/providers")
@@ -140,8 +104,7 @@ async def list_search_providers(
 
 @router.get("")
 async def list_all_search_tools(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
+    service: SearchToolServiceDep,
     kind: Annotated[ToolKind, Query(description="Which instances to list: 'search' (the default) or 'fetch'.")] = (
         "search"
     ),
@@ -153,35 +116,10 @@ async def list_all_search_tools(
     can see the whole set, ``builtin_fetch`` first among the fetch instances. Keys
     are never returned, only ``last4``.
     """
-    from_config = config_file_tools(config, kind)
-    stored = await list_search_tools(db, kind)
-    stored_names = {row.name for row in stored}
-    builtin = [
-        ConfigSearchToolSchema(name=BUILTIN_FETCH, kind="fetch", provider=BUILTIN_FETCH_PROVIDER, has_api_key=False)
-    ]
-    return SearchToolsResponse(
-        stored=[
-            StoredSearchToolSchema.from_model(
-                row,
-                decryptable=_is_decryptable(row),
-                shadows_config=row.name in from_config,
-            )
-            for row in stored
-        ],
-        config=(builtin if kind == "fetch" else [])
-        + [
-            ConfigSearchToolSchema(
-                name=name,
-                kind=kind,
-                provider=str(entry.get("provider") or name),
-                fetch_tool=entry.get("fetch_tool") if kind == "search" else None,
-                api_base=entry.get("api_base"),
-                has_api_key=bool(entry.get("api_key")),
-                shadowed=name in stored_names,
-            )
-            for name, entry in sorted(from_config.items())
-        ],
-    )
+    try:
+        return await service.list_tools(kind)
+    except DATABASE_ERRORS as exc:
+        raise database_error("list stored search tools", exc) from None
 
 
 @router.post("/reencrypt")
@@ -255,7 +193,6 @@ TEST_ENDPOINT = f"{API_ROOT}/search-tools/test"
 
 async def _dispatch_test(
     raw_request: Request,
-    db: AsyncSession,
     config: GatewayConfig,
     instance: ToolInstance,
     entry: Mapping[str, Any],
@@ -264,9 +201,8 @@ async def _dispatch_test(
     url: str | None,
     client: httpx.AsyncClient,
 ) -> SearchToolTestResponse:
-    """Run a connection test as a provider call: no pooled connection held across it, and seen in flight."""
+    """Run a connection test as a provider call, seen in flight."""
     check_test_input(instance, query=query, url=url)
-    await release_session(db)
     track_request(raw_request, endpoint=TEST_ENDPOINT, model=instance.name, provider=instance.provider)
     return await run_connection_test(config, instance, entry, query=query, url=url, client=client)
 
@@ -275,7 +211,7 @@ async def _dispatch_test(
 async def test_unsaved_search_tool(
     request: SearchToolTestRequest,
     raw_request: Request,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    service: SearchToolTesterDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     web_provider_client: WebProviderClientDep,
 ) -> SearchToolTestResponse:
@@ -287,11 +223,9 @@ async def test_unsaved_search_tool(
     an error, the error's tag when it did not, and how many hits or characters
     came back, never the results or the page.
     """
-    name = request.name.strip()
-    entry = request.to_entry()
-    instance = unsaved_instance_to_test(config, name, entry, kind=request.kind)
+    instance, entry = service.unsaved_instance_to_test(request)
     return await _dispatch_test(
-        raw_request, db, config, instance, entry, query=request.query, url=request.url, client=web_provider_client
+        raw_request, config, instance, entry, query=request.query, url=request.url, client=web_provider_client
     )
 
 
@@ -300,7 +234,7 @@ async def test_search_tool(
     name: str,
     request: StoredSearchToolTestRequest,
     raw_request: Request,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    service: SearchToolTesterDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     web_provider_client: WebProviderClientDep,
 ) -> SearchToolTestResponse:
@@ -310,12 +244,7 @@ async def test_search_tool(
     answers as ``POST /search-tools/test`` does. ``builtin_fetch``, the built-in
     fetcher, fetches as a fetch tool call does, with no domain policy.
     """
-    try:
-        # The instance may have been stored through another replica.
-        await refresh_search_tool_cache(db, config)
-    except DATABASE_ERRORS:
-        logger.warning("Search tool overlay refresh failed before testing '%s'; testing the loaded one", name)
-    instance, entry = instance_to_test(config, name)
+    instance, entry = await service.instance_to_test(name)
     return await _dispatch_test(
-        raw_request, db, config, instance, entry, query=request.query, url=request.url, client=web_provider_client
+        raw_request, config, instance, entry, query=request.query, url=request.url, client=web_provider_client
     )

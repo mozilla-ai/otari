@@ -28,6 +28,8 @@ from gateway.api.deps import (
     build_hosted_provider_service,
     build_inference_service,
     build_scheduled_catalog_update,
+    build_search_tool_refresh,
+    build_search_tool_service,
     build_trace_service,
     get_api_key_service,
     get_membership_listener,
@@ -132,11 +134,6 @@ from gateway.services.providers import (
 )
 from gateway.services.rate_limits import load_rate_limit_rules_at_startup, run_rate_limit_refresher
 from gateway.services.runtime_settings_service import apply_overrides_from_db
-from gateway.services.search_tool_store_service import (
-    load_search_tools_at_startup,
-    reset_search_tool_cache,
-    run_search_tool_refresher,
-)
 from gateway.services.secret_box import secret_box_configured, shares_secret_key, validate_secret_key
 from gateway.services.selector_index_service import run_selector_index_refresher
 from gateway.services.tenancy.org_provider_key_service import (
@@ -156,7 +153,9 @@ from gateway.services.tools import (
     load_sandbox_credentials_at_startup,
     register_builtin_fetcher,
     reset_sandbox_credential_cache,
+    reset_search_tool_cache,
     run_sandbox_credential_refresher,
+    run_search_tool_refresher,
     warn_about_tool_instances,
 )
 from gateway.services.traces import RequestTraces, SpanContent, TraceWriter
@@ -521,7 +520,9 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         reset_guardrail_runner,
     ),
     _LifespanWorker(
-        "search tool", lambda config, _container: run_search_tool_refresher(config), reset_search_tool_cache
+        "search tool",
+        lambda config, _container: run_search_tool_refresher(build_search_tool_refresh(config)),
+        reset_search_tool_cache,
     ),
     _LifespanWorker(
         "sandbox credential",
@@ -927,8 +928,10 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             await apply_tool_overrides_from_db(config, session)
             # Overlay dashboard-stored search tools before the checks below,
             # so a tool added through the dashboard is one the backend-URL
-            # warning and the flat-pricing warning can see.
-            await load_search_tools_at_startup(session, config)
+            # warning and the flat-pricing warning can see. On a session of its
+            # own, which only reads.
+            async with create_unit_of_work_with_session() as (search_tool_session, uow):
+                await build_search_tool_service(uow, search_tool_session, config=config).load_at_startup()
             # Before the first request, so a stored rule never lets a burst through at boot.
             await load_rate_limit_rules_at_startup(config)
             # After the overrides, not at config load: the web-search URL a

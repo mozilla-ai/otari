@@ -22,21 +22,22 @@ from sqlalchemy.orm import Session
 
 import any_fetch
 import any_search
-from gateway.api.deps import get_web_provider_client
+from gateway.api.deps import build_search_tool_service, get_web_provider_client
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.settings.tools import (
     ToolInstance,
     effective_fetch_instances,
     effective_search_instances,
 )
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
 from gateway.models.tools import SearchToolCredential
 from gateway.repositories.tools import SearchToolRepository
 from gateway.schemas.tools import SearchProviderOptionSchema
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.search_backend import SearchHit, SearchOutcome
-from gateway.services.search_tool_store_service import refresh_tool_instances, reset_search_tool_cache
 from gateway.services.secret_box import generate_secret_key
+from gateway.services.tools import reset_search_tool_cache
 from gateway.services.tools._web_search import in_loop_default
 from gateway.services.web_fetch_service import WebFetchHTTPStatusError, WebFetchResult, WebFetchService
 from gateway.services.web_retrieval_network import (
@@ -761,7 +762,7 @@ async def _refresh_replica(database_url: str, config: GatewayConfig) -> None:
     engine = create_async_engine(url)
     try:
         async with AsyncSession(engine) as session:
-            await refresh_tool_instances(session, config)
+            await build_search_tool_service(UnitOfWork(session), session, config=config).refresh()
     finally:
         await engine.dispose()
 

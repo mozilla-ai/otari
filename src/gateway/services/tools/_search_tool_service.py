@@ -2,17 +2,17 @@
 
 Each use case reads or writes the ``search_tool_credentials`` rows in a block
 of its own, then hands what it read to this worker's overlay
-(``search_tool_store_service``). The request path reads the config's instance maps
+(``_search_tool_overlay``). The request path reads the config's instance maps
 synchronously, so a write takes effect at once on the worker that served it,
 and on the others within the refresh interval.
 """
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
-from gateway.core.settings.tools import BUILTIN_FETCH, ToolKind
+from gateway.core.settings.tools import BUILTIN_FETCH, BUILTIN_FETCH_PROVIDER, ToolInstance, ToolKind
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.tools_exceptions import (
     SearchToolAlreadyStoredError,
@@ -22,22 +22,19 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.secret_fields import restore_redacted_values
+from gateway.models.tools import SearchToolCredential
 from gateway.repositories.tools import SearchToolConflict, SearchToolRepository
 from gateway.schemas.tools import (
+    ConfigSearchToolSchema,
     CreatedSearchToolSchema,
     CreateSearchToolRequest,
     ReencryptSearchToolsResponse,
+    SearchToolsResponse,
+    SearchToolTestRequest,
     StoredSearchToolSchema,
     UpdateSearchToolRequest,
 )
 from gateway.services.runtime_settings_service import SettingValue
-from gateway.services.search_tool_store_service import (
-    apply_stored_rows,
-    apply_stored_tools,
-    config_file_search_tools,
-    config_file_tools,
-    stored_tool_names,
-)
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
@@ -45,6 +42,18 @@ from gateway.services.secret_box import (
     encrypt_secret,
 )
 from gateway.services.tool_settings_service import WEB_SEARCH_DEFAULT_TOOL, apply_override
+from gateway.services.tools._search_tool_connection import instance_to_test, unsaved_instance_to_test
+from gateway.services.tools._search_tool_overlay import (
+    apply_at_startup,
+    apply_stored_rows,
+    apply_stored_tools,
+    config_file_search_tools,
+    config_file_tools,
+    record_read_settings,
+    report_startup,
+    reset_search_tool_cache,
+    stored_tool_names,
+)
 from gateway.services.tools._search_tool_writes import (
     check_kind_unchanged,
     check_tool_entry,
@@ -73,6 +82,17 @@ def _encrypted_key(api_key: str | None) -> tuple[str | None, str | None]:
         raise SearchToolKeyUnstorableError(str(exc)) from None
 
 
+def _is_decryptable(row: SearchToolCredential) -> bool:
+    """Whether the row's stored key can be read with the current OTARI_SECRET_KEY."""
+    if not row.encrypted_api_key:
+        return True
+    try:
+        decrypt_secret(row.encrypted_api_key)
+    except (SecretBoxUnavailableError, SecretDecryptionError):
+        return False
+    return True
+
+
 class SearchToolService:
     """Configure the deployment's stored search and fetch instances, and keep this worker's overlay of them."""
 
@@ -96,6 +116,39 @@ class SearchToolService:
         self.tools = tools
         self.read_settings = read_settings
         self.stage_setting = stage_setting
+
+    async def list_tools(self, kind: ToolKind) -> SearchToolsResponse:
+        """Every stored instance of ``kind`` beside every config-file one, ``builtin_fetch`` first among fetch ones."""
+        async with self.uow:
+            stored = await self.tools.list_by_kind(kind)
+        from_config = config_file_tools(self.config, kind)
+        stored_names = {row.name for row in stored}
+        builtin = [
+            ConfigSearchToolSchema(name=BUILTIN_FETCH, kind="fetch", provider=BUILTIN_FETCH_PROVIDER, has_api_key=False)
+        ]
+        return SearchToolsResponse(
+            stored=[
+                StoredSearchToolSchema.from_model(
+                    row,
+                    decryptable=_is_decryptable(row),
+                    shadows_config=row.name in from_config,
+                )
+                for row in stored
+            ],
+            config=(builtin if kind == "fetch" else [])
+            + [
+                ConfigSearchToolSchema(
+                    name=name,
+                    kind=kind,
+                    provider=str(entry.get("provider") or name),
+                    fetch_tool=entry.get("fetch_tool") if kind == "search" else None,
+                    api_base=entry.get("api_base"),
+                    has_api_key=bool(entry.get("api_key")),
+                    shadowed=name in stored_names,
+                )
+                for name, entry in sorted(from_config.items())
+            ],
+        )
 
     async def create(self, request: CreateSearchToolRequest) -> CreatedSearchToolSchema:
         """Store a search or fetch instance, pinning the in-loop default first when it adds a second one.
@@ -295,6 +348,49 @@ class SearchToolService:
         async with self.uow:
             rows = await self.tools.list_committed()
         return apply_stored_rows(self.config, rows)
+
+    async def refresh(self) -> set[str]:
+        """Reload the stored rows and the runtime tool settings, apply both, and return shadowed names."""
+        async with self.uow:
+            return await self._reload_stored_tools()
+
+    async def load_at_startup(self) -> None:
+        """Prime the overlay so the first request does not race the first refresh.
+
+        A failure here is logged rather than raised: stored tools are an addition to
+        the config ones, and a gateway that serves every config-file search tool is
+        better than one that refuses to start because a credential load failed.
+        """
+        reset_search_tool_cache()
+        try:
+            async with self.uow:
+                shadowed = apply_at_startup(self.config, await self.tools.list_committed())
+                record_read_settings(await self.read_settings())
+        except Exception:
+            logger.exception("Failed to load stored search tools; continuing with config search tools only")
+            shadowed = set()
+        report_startup(self.config, shadowed)
+
+    async def instance_to_test(self, name: str) -> tuple[ToolInstance, Mapping[str, Any]]:
+        """The configured or stored instance called ``name``, after reloading the rows another replica may have stored.
+
+        Raises:
+            SearchToolNotFoundError: no instance has the name.
+        """
+        try:
+            await self.refresh_rows()
+        except DATABASE_ERRORS:
+            logger.warning("Search tool overlay refresh failed before testing '%s'; testing the loaded one", name)
+        return instance_to_test(self.config, name)
+
+    def unsaved_instance_to_test(self, request: SearchToolTestRequest) -> tuple[ToolInstance, Mapping[str, Any]]:
+        """The instance a create request describes, held to the create's checks against the instances loaded here.
+
+        Raises:
+            SearchToolRefusedError: the create's checks refuse it.
+        """
+        entry = request.to_entry()
+        return unsaved_instance_to_test(self.config, request.name.strip(), entry, kind=request.kind), entry
 
     async def _reload_stored_tools(self) -> set[str]:
         """Read the stored rows and the runtime tool settings, apply both, and return shadowed names.

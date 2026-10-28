@@ -17,6 +17,9 @@ startup so it is never silent. The periodic refresh also re-reads the runtime
 tool settings, which name these instances, so a default set through another
 replica arrives with the rows it names.
 
+The overlay is this worker's copy, one per process: ``SearchToolService``
+reads the rows and the settings, and hands them here to apply.
+
 The API key is held encrypted and is optional (a ``searxng`` backend is normally
 keyless); it is decrypted here only to build the in-memory overlay. A row whose
 key cannot be decrypted (no or wrong ``OTARI_SECRET_KEY``) is skipped with a
@@ -24,25 +27,21 @@ warning rather than crashing the gateway.
 """
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from gateway.core.config import GatewayConfig
-from gateway.core.database import create_session
 from gateway.core.settings.tools import ToolKind, dangling_reference_warnings, warn_about_instances
 from gateway.log_config import logger
 from gateway.models.tools import SearchToolCredential
-from gateway.repositories.tools import SearchToolRepository
 from gateway.services.runtime_settings_service import SettingValue
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
     decrypt_secret,
 )
-from gateway.services.tool_settings_service import apply_override, load_overrides
+from gateway.services.tool_settings_service import apply_override
 
 # How long a worker may serve a stale search-tool overlay before refreshing, so
 # a newly added or edited tool reaches every replica within it.
@@ -227,43 +226,28 @@ def apply_stored_tools(
     return shadowed
 
 
-async def refresh_search_tool_cache(db: AsyncSession, config: GatewayConfig) -> set[str]:
-    """Reload the stored rows, apply them, and return shadowed names."""
-    return apply_stored_rows(config, await SearchToolRepository(db).list_committed())
-
-
-async def refresh_tool_instances(db: AsyncSession, config: GatewayConfig) -> set[str]:
-    """Reload the stored rows and the runtime tool settings in ``db``'s one transaction, the rows first, and apply both.
-
-    A create that adds a second search instance stores the default naming the
-    first in the same commit, so a read between the two statements gets at
-    worst that default with the rows before the create, never the second row
-    without the default.
-    """
-    rows = await SearchToolRepository(db).list_committed()
-    return apply_stored_tools(config, rows, await load_overrides(db, report_invalid=False))
-
-
-async def load_search_tools_at_startup(db: AsyncSession, config: GatewayConfig) -> None:
-    """Prime the overlay so the first request does not race the first refresh.
-
-    A failure here is logged rather than raised: stored tools are an addition to
-    the config ones, and a gateway that serves every config-file search tool is
-    better than one that refuses to start because a credential load failed.
+def apply_at_startup(config: GatewayConfig, rows: Sequence[SearchToolCredential]) -> set[str]:
+    """Prime the overlay so the first request does not race the first refresh, and return shadowed names.
 
     What the instance rules say is left to the lifespan's own check, which runs
-    next, once every setting has loaded; the dangling references it reports are
-    recorded here so the first refresh does not report them again.
+    next, once every setting has loaded.
     """
-    reset_search_tool_cache()
-    try:
-        shadowed = _overlay_rows(config, await SearchToolRepository(db).list_committed(), report_changes=False)
-        # The lifespan applied these just before; recorded so the first refresh
-        # applies only what changes after.
-        _read_settings.update(await load_overrides(db, report_invalid=False))
-    except Exception:
-        logger.exception("Failed to load stored search tools; continuing with config search tools only")
-        shadowed = set()
+    return _overlay_rows(config, rows, report_changes=False)
+
+
+def record_read_settings(overrides: dict[str, SettingValue]) -> None:
+    """Record the runtime tool settings the lifespan applied just before.
+
+    So the first refresh applies only what changes after.
+    """
+    _read_settings.update(overrides)
+
+
+def report_startup(config: GatewayConfig, shadowed: set[str]) -> None:
+    """Log what the startup load holds, and record the dangling references the lifespan's check reports.
+
+    Recorded so the first refresh does not report them again.
+    """
     _reported_references.update({key: value for key, (value, _) in dangling_reference_warnings(config).items()})
     if _cache or _fetch_cache:
         logger.info("Loaded %d stored search and %d stored fetch tool(s)", len(_cache), len(_fetch_cache))
@@ -275,7 +259,9 @@ async def load_search_tools_at_startup(db: AsyncSession, config: GatewayConfig) 
         )
 
 
-async def run_search_tool_refresher(config: GatewayConfig, interval: float = SEARCH_TOOL_CACHE_TTL_SECONDS) -> None:
+async def run_search_tool_refresher(
+    refresh: Callable[[], Awaitable[object]], interval: float = SEARCH_TOOL_CACHE_TTL_SECONDS
+) -> None:
     """Reload the stored rows and the runtime tool settings forever so other writers' changes arrive.
 
     A write refreshes the worker that served it; this covers sibling workers and
@@ -286,19 +272,8 @@ async def run_search_tool_refresher(config: GatewayConfig, interval: float = SEA
     while True:
         await asyncio.sleep(interval)
         try:
-            async with create_session() as db:
-                await refresh_tool_instances(db, config)
+            await refresh()
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.warning("Stored search tool refresh failed; retrying in %ss", interval, exc_info=True)
-
-
-# --------------------------------------------------------------------------- #
-# CRUD
-# --------------------------------------------------------------------------- #
-
-
-async def list_search_tools(db: AsyncSession, kind: ToolKind | None = None) -> list[SearchToolCredential]:
-    """Every stored row, or every one of ``kind``, ordered by name."""
-    return list(await SearchToolRepository(db).list_by_kind(kind))

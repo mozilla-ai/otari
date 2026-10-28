@@ -31,9 +31,8 @@ from gateway.api.deps import build_search_tool_service
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tools import SearchToolCredential
-from gateway.services.search_tool_store_service import reset_search_tool_cache
 from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
-from gateway.services.tools import _search_tool_service
+from gateway.services.tools import _search_tool_service, reset_search_tool_cache
 
 T = TypeVar("T")
 

@@ -35,13 +35,12 @@ class SearchToolCredential(Base):
 
     The database counterpart of a ``search_tools:`` or ``fetch_tools:`` entry in
     config.yml, as ``kind`` says: it is merged over the config-file entries of
-    its kind at runtime (see ``search_tool_store_service``), with the stored row
-    winning on a name collision, exactly as ``ProviderCredential`` does for
-    providers. ``kind`` is fixed when the row is created, and ``fetch_tool`` is a
-    search row's enrichment instance. The API key is held encrypted
-    (``secret_box``) and is optional, because a ``searxng`` backend is normally
-    keyless; ``last4`` is kept in clear only so the UI can show which key is set
-    without ever decrypting.
+    its kind at runtime (see ``services/tools/_search_tool_overlay``), with the
+    stored row winning on a name collision. ``kind`` is fixed when the row is
+    created, and ``fetch_tool`` is a search row's enrichment instance. The API
+    key is held encrypted (``secret_box``) and is optional, because a
+    ``searxng`` backend is normally keyless; ``last4`` is kept in clear only so
+    the UI can show which key is set without ever decrypting.
     """
 
     __tablename__ = "search_tool_credentials"

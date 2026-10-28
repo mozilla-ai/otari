@@ -238,8 +238,9 @@ for example, enforces the workspace search disable switch.
 
 ## Provider and search credential stores
 
-`search_tool_store_service.py` overlays encrypted stored rows on a preserved
-config baseline and refreshes them across workers. Stored values win over config
+`SearchToolService` (`services/tools/`) overlays encrypted stored rows on a
+preserved config baseline and refreshes them across workers; each worker's
+overlay is module state in `_search_tool_overlay.py`. Stored values win over config
 values of the same name; config entries remain read-only through the management
 API. A provider credential the deployment stores is a hosted provider (below);
 the `provider_credentials` rows the Deployment providers page used to store are
