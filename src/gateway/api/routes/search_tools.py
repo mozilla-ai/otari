@@ -26,7 +26,7 @@ sees.
 """
 
 from collections.abc import Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, NoReturn
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -132,19 +132,23 @@ def _is_decryptable(row: SearchToolCredential) -> bool:
     return True
 
 
+async def _rollback(
+    db: AsyncSession, operation: str, exc: BaseException, *, conflict_detail: str | None = None
+) -> NoReturn:
+    """Roll back a write the database refused, and answer for it."""
+    await db.rollback()
+    if conflict_detail is not None and isinstance(exc, IntegrityError):
+        # A concurrent create can slip past the pre-check and collide on the
+        # primary key, which is the create's 409.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict_detail) from None
+    raise database_error(operation, exc) from None
+
+
 async def _commit(db: AsyncSession, operation: str, *, conflict_detail: str | None = None) -> None:
     try:
         await db.commit()
-    except IntegrityError as exc:
-        # A concurrent create can slip past the pre-check and collide on the
-        # primary key here; surface that as the intended 409, not a 500.
-        await db.rollback()
-        if conflict_detail is not None:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict_detail) from None
-        raise database_error(operation, exc) from None
     except DATABASE_ERRORS as exc:
-        await db.rollback()
-        raise database_error(operation, exc) from None
+        await _rollback(db, operation, exc, conflict_detail=conflict_detail)
 
 
 async def _apply_write(db: AsyncSession, config: GatewayConfig, name: str) -> None:
@@ -297,6 +301,12 @@ async def create_search_tool(
     if await get_search_tool(db, name) is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict)
     pinned = default_to_pin(config, name, stored_names=stored_tool_names()) if kind == "search" else None
+    if pinned is not None:
+        # The default's row can collide too, with another create pinning at the same time.
+        conflict = (
+            f"'{name}' was not stored: a stored tool of that name exists, or another create changed the "
+            "search instances at the same time. Reload and retry."
+        )
     try:
         row = await save_search_tool(
             db,
@@ -313,13 +323,9 @@ async def create_search_tool(
             await stage_override(db, WEB_SEARCH_DEFAULT_TOOL, pinned.name)
     except SecretBoxUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except DATABASE_ERRORS as exc:
+        await _rollback(db, "create search tool", exc, conflict_detail=conflict)
 
-    if pinned is not None:
-        # The default's row can collide too, with another create pinning at the same time.
-        conflict = (
-            f"'{name}' was not stored: a stored tool of that name exists, or another create changed the "
-            "search instances at the same time. Reload and retry."
-        )
     await _commit(db, "create search tool", conflict_detail=conflict)
     if pinned is not None:
         apply_override(config, WEB_SEARCH_DEFAULT_TOOL, pinned.name)
@@ -333,7 +339,6 @@ async def create_search_tool(
             name,
         )
     await _apply_write(db, config, name)
-    await db.refresh(row)
     return CreatedSearchToolSchema(
         **row.to_public_dict(),
         shadows_config=shadows_config,
@@ -423,10 +428,11 @@ async def update_search_tool(
         )
     except SecretBoxUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except DATABASE_ERRORS as exc:
+        await _rollback(db, "update search tool", exc)
 
     await _commit(db, "update search tool")
     await _apply_write(db, config, name)
-    await db.refresh(row)
     from_config = config_file_tools(config, kind)
     return StoredSearchToolSchema.from_model(row, shadows_config=name in from_config)
 
@@ -438,7 +444,11 @@ async def delete_stored_search_tool(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> None:
     """Delete a stored search or fetch instance. A config-file one, or ``builtin_fetch``, cannot be deleted here."""
-    if not await delete_search_tool(db, name):
+    try:
+        deleted = await delete_search_tool(db, name)
+    except DATABASE_ERRORS as exc:
+        await _rollback(db, "delete stored search tool", exc)
+    if not deleted:
         detail = f"No stored search tool '{name}'."
         if name in config_file_search_tools(config):
             detail = f"Search tool '{name}' is defined in the config file and cannot be deleted through the API."

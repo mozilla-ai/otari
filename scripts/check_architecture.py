@@ -1691,7 +1691,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.tools.SearchToolCredential": {
         "repository": "gateway/repositories/tools/search_tool_repository.py",
-        "baseline": ("gateway/services/search_tool_store_service.py",),
+        "baseline": (),
     },
     "gateway.models.tools.WorkspaceCodeExecutionPolicy": {
         "repository": "gateway/repositories/tools/workspace_code_execution_policy_repository.py",

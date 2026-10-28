@@ -26,9 +26,8 @@ warning rather than crashing the gateway.
 import asyncio
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Final, cast
+from typing import Any, Final
 
-from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
@@ -307,15 +306,12 @@ async def run_search_tool_refresher(config: GatewayConfig, interval: float = SEA
 
 async def list_search_tools(db: AsyncSession, kind: ToolKind | None = None) -> list[SearchToolCredential]:
     """Every stored row, or every one of ``kind``, ordered by name."""
-    stmt = select(SearchToolCredential).order_by(SearchToolCredential.name)
-    if kind is not None:
-        stmt = stmt.where(SearchToolCredential.kind == kind)
-    return list((await db.execute(stmt)).scalars().all())
+    return list(await SearchToolRepository(db).list_by_kind(kind))
 
 
 async def get_search_tool(db: AsyncSession, name: str) -> SearchToolCredential | None:
     """The stored search tool called ``name``, or ``None``."""
-    return await db.get(SearchToolCredential, name)
+    return await SearchToolRepository(db).get(name)
 
 
 async def get_search_tool_for_update(db: AsyncSession, name: str) -> SearchToolCredential | None:
@@ -324,8 +320,7 @@ async def get_search_tool_for_update(db: AsyncSession, name: str) -> SearchToolC
     Used by the PATCH path so a version check and the write it guards run under
     the same row lock, exactly as the provider-credential path does.
     """
-    stmt = select(SearchToolCredential).where(SearchToolCredential.name == name).with_for_update()
-    return (await db.execute(stmt)).scalar_one_or_none()
+    return await SearchToolRepository(db).get_for_update(name)
 
 
 async def save_search_tool(
@@ -340,7 +335,7 @@ async def save_search_tool(
     timeout: float | None | _Unset = UNSET,
     options: dict[str, Any] | None | _Unset = UNSET,
 ) -> SearchToolCredential:
-    """Create or update a stored search or fetch instance (staged; caller commits).
+    """Create or update a stored search or fetch instance (flushed; caller commits).
 
     Each field is tri-state: left at ``UNSET`` it keeps the stored value; passed
     ``None`` it is cleared; passed a value it is set. ``kind`` is set at create
@@ -348,40 +343,40 @@ async def save_search_tool(
     is encrypted before storage and requires ``OTARI_SECRET_KEY`` (raises
     ``SecretBoxUnavailableError``); passing it ``None`` clears the stored key,
     which is the normal state for a keyless SearXNG backend. ``options`` is
-    normalised to ``{}`` when cleared, since the column is non-null. The
+    normalized to ``{}`` when cleared, since the column is non-null. The
     plaintext key is never logged.
+
+    Raises:
+        IntegrityError: a create collided with a row stored meanwhile.
     """
-    existing = await db.get(SearchToolCredential, name)
+    repository = SearchToolRepository(db)
+    existing = await repository.get(name)
+    changes: dict[str, Any] = {}
+    if not isinstance(provider, _Unset):
+        changes["provider"] = provider
+    if not isinstance(fetch_tool, _Unset):
+        changes["fetch_tool"] = fetch_tool
+    if not isinstance(api_base, _Unset):
+        changes["api_base"] = api_base
+    if not isinstance(timeout, _Unset):
+        changes["timeout_seconds"] = timeout
+    if not isinstance(options, _Unset):
+        # A value echoed back as the mask keeps the stored one.
+        changes["options"] = restore_redacted_values(options, existing.options if existing else None) or {}
+    if not isinstance(api_key, _Unset):
+        changes["encrypted_api_key"] = encrypt_secret(api_key) if api_key else None
+        changes["last4"] = _last4(api_key)
+
     if existing is None:
         # ``provider`` is non-null, so a create must supply it; the route
         # validates that before staging.
-        row = SearchToolCredential(
-            name=name, kind="search" if isinstance(kind, _Unset) else kind, provider="", options={}
-        )
-        db.add(row)
-    else:
-        row = existing
-
-    if not isinstance(provider, _Unset):
-        row.provider = provider
-    if not isinstance(fetch_tool, _Unset):
-        row.fetch_tool = fetch_tool
-    if not isinstance(api_base, _Unset):
-        row.api_base = api_base
-    if not isinstance(timeout, _Unset):
-        row.timeout_seconds = timeout
-    if not isinstance(options, _Unset):
-        # A value echoed back as the mask keeps the stored one.
-        row.options = restore_redacted_values(options, existing.options if existing else None) or {}
-    if not isinstance(api_key, _Unset):
-        if api_key:
-            row.encrypted_api_key = encrypt_secret(api_key)
-            row.last4 = _last4(api_key)
-        else:
-            row.encrypted_api_key = None
-            row.last4 = None
-
-    return row
+        defaults: dict[str, Any] = {
+            "kind": "search" if isinstance(kind, _Unset) else kind,
+            "provider": "",
+            "options": {},
+        }
+        return await repository.insert(name=name, **(defaults | changes))
+    return await repository.update(existing, changes)
 
 
 async def reencrypt_search_tools(db: AsyncSession) -> tuple[int, int, int]:
@@ -397,15 +392,11 @@ async def reencrypt_search_tools(db: AsyncSession) -> tuple[int, int, int]:
     skipped rather than retried: whoever wrote it already encrypted it with the
     primary key.
     """
-    rows = (
-        (await db.execute(select(SearchToolCredential).where(SearchToolCredential.encrypted_api_key.is_not(None))))
-        .scalars()
-        .all()
-    )
+    repository = SearchToolRepository(db)
     reencrypted = 0
     unreadable = 0
     skipped = 0
-    for row in rows:
+    for row in await repository.list_encrypted():
         original = row.encrypted_api_key
         if original is None:
             continue
@@ -414,17 +405,7 @@ async def reencrypt_search_tools(db: AsyncSession) -> tuple[int, int, int]:
         except SecretDecryptionError:
             unreadable += 1
             continue
-        # Core UPDATE rather than a mutation on the loaded row: the whole point
-        # is the WHERE, and an ORM flush would carry no condition at all.
-        result = await db.execute(
-            update(SearchToolCredential)
-            .where(SearchToolCredential.name == row.name, SearchToolCredential.encrypted_api_key == original)
-            .values(encrypted_api_key=encrypt_secret(plaintext))
-            .execution_options(synchronize_session=False)
-        )
-        # `execute` is typed as returning Result; an UPDATE always yields a
-        # CursorResult, which is where rowcount lives.
-        if cast(CursorResult[Any], result).rowcount == 1:
+        if await repository.swap_ciphertext(row.name, expected=original, replacement=encrypt_secret(plaintext)):
             reencrypted += 1
         else:
             skipped += 1
@@ -432,9 +413,10 @@ async def reencrypt_search_tools(db: AsyncSession) -> tuple[int, int, int]:
 
 
 async def delete_search_tool(db: AsyncSession, name: str) -> bool:
-    """Delete a stored search or fetch instance (staged; caller commits). Returns whether it existed."""
-    row = await db.get(SearchToolCredential, name)
+    """Delete a stored search or fetch instance (flushed; caller commits). Returns whether it existed."""
+    repository = SearchToolRepository(db)
+    row = await repository.get(name)
     if row is None:
         return False
-    await db.delete(row)
+    await repository.delete(row)
     return True
