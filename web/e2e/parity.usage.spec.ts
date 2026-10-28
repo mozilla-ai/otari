@@ -15,10 +15,9 @@ test.describe.configure({ mode: "serial" })
 
 async function openUsage(page: Page): Promise<void> {
   await login(page)
-  await nav(page).getByRole("link", { name: "Usage" }).click()
-  await expect(
-    page.getByRole("heading", { name: "Usage & analytics" }),
-  ).toBeVisible()
+  await nav(page).getByRole("link", { name: "Overview" }).click()
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible()
+  await expect(tileValue(page, "Tracked cost")).toBeVisible()
 }
 
 // A breakdown row, located by the name in its row-header cell. The tables are
@@ -133,7 +132,7 @@ test.describe("usage & analytics", () => {
 
     // The drill is the join between the two pages: analytics says where the money
     // went, the log says which requests spent it.
-    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible()
+    await expect(page).toHaveURL(/\/requests/)
     await expect(
       filterChip(page, "Model", PARITY.models.priced.model),
     ).toBeVisible()
@@ -149,7 +148,7 @@ test.describe("usage & analytics", () => {
       .getByRole("rowheader")
       .click()
 
-    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible()
+    await expect(page).toHaveURL(/\/requests/)
     await expect(
       filterChip(page, "Session", PARITY.sessions.light),
     ).toBeVisible()

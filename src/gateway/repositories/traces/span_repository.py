@@ -4,15 +4,29 @@ import uuid
 from collections.abc import Collection, Sequence
 from typing import Any, Never
 
-from sqlalchemy import func, select, tuple_, update
+from sqlalchemy import ColumnElement, exists, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import InstrumentedAttribute
 
 from gateway.core.sql import dialect_name
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import TraceSpan
 from gateway.repositories.base_repository import BaseRepository
-from gateway.repositories.traces.trace_repository import TraceKey
+from gateway.types.traces import TraceKey
+
+
+def has_span_on_models(
+    workspace_id: InstrumentedAttribute[uuid.UUID], trace_id: InstrumentedAttribute[str], models: Collection[str]
+) -> ColumnElement[bool]:
+    """Match a trace, keyed by the outer query's columns, that holds a span on any of ``models``.
+
+    The probe seeks on the ``(workspace_id, trace_id)`` prefix of ``ix_trace_spans_trace_start`` and
+    filters ``model`` on the rows it finds there.
+    """
+    return exists().where(
+        TraceSpan.workspace_id == workspace_id, TraceSpan.trace_id == trace_id, TraceSpan.model.in_(list(models))
+    )
 
 
 class SpanRepository(BaseRepository[TraceSpan, Never, Never]):

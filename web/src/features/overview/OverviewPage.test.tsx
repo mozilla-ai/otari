@@ -6,19 +6,16 @@ import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { AllocationHealth, OverviewSummary, UsageSummary } from "@/client"
-import {
-  localDayKey,
-  OverviewIndex,
-  OverviewPage,
-} from "@/features/overview/OverviewPage"
+import { localDayKey, OverviewIndex } from "@/features/overview/OverviewPage"
 import { API_ROOT, defaultQueryRetry } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,
   organizationContext,
+  organizationMember,
   pendingOrganizationInvitation,
-  seriesPoint,
+  SURFACES,
   usageTotals,
   workspaceActivation,
 } from "@/tests/fixtures"
@@ -99,9 +96,7 @@ interface Bodies {
   /** What GET /hosted-providers lists. */
   hostedProviders?: unknown[]
   today?: Partial<UsageSummary["totals"]>
-  period?: Partial<UsageSummary["totals"]>
-  prev?: Partial<UsageSummary["totals"]>
-  /** The 30-day daily series, which is what the spend chart draws. */
+  /** Today's hourly series, which the sparklines draw. */
   series?: UsageSummary["series"]
   health?: unknown
   /** The overview's own summary: the two rail counts and the budget strips. */
@@ -167,10 +162,7 @@ function mockApi(b: Bodies) {
       return jsonResponse(modelCatalog(b.models ?? ["openai:gpt-4o-mini"]))
     }
     if (url.includes(`${API_ROOT}/usage/summary`)) {
-      if (url.includes("bucket=hour"))
-        return jsonResponse(summary(b.today ?? {}))
-      if (url.includes("end_date=")) return jsonResponse(summary(b.prev ?? {}))
-      return jsonResponse(summary(b.period ?? {}, b.series))
+      return jsonResponse(summary(b.today ?? {}, b.series))
     }
     if (url.includes(`${API_ROOT}/overview`)) {
       // The workspace travels in the query, because the gateway is what scopes
@@ -212,13 +204,18 @@ function LocationProbe() {
   return <div data-testid="loc">{loc.pathname}</div>
 }
 
+// The fixture's roster plus traces, so every tab of the Overview is served.
+const ALL_SURFACES = [...SURFACES, "traces"]
+
 function renderPage(ui: ReactElement, initial = "/overview") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <DeploymentProvider value={bootstrap()}>{ui}</DeploymentProvider>
+      <DeploymentProvider value={bootstrap({ surfaces: ALL_SURFACES })}>
+        {ui}
+      </DeploymentProvider>
     </QueryClientProvider>,
     {
       wrapper: withRouter({
@@ -273,346 +270,193 @@ const TWO_WORKSPACES = {
   ],
 }
 
-describe("OverviewPage", () => {
+/** The operator's provider-health read, which only the operator's strip makes. */
+const asksHealth = (requested: string[]) =>
+  requested.some((url) => url.includes(`${API_ROOT}/providers/health`))
+
+describe("the Overview's layout", () => {
   afterEach(() => {
     vi.restoreAllMocks()
-    vi.useRealTimers()
-    window.localStorage.clear()
   })
 
-  // The rail is headed "This workspace", so its member count has to move with
-  // the switcher. It read the organization's roster before, which is a superset:
-  // an organization member need not be in the workspace, so the count both
-  // overcounted the rail and stayed put when the selection changed. Two
-  // workspaces with different rosters is the case that tells those apart, since
-  // one workspace alone cannot show a count failing to move.
-  it("counts the selected workspace's own active members in the rail", async () => {
-    mockApi({
-      context: TWO_WORKSPACES,
-      // Counted by the gateway, which scopes to the workspace in the query and
-      // leaves an invited membership out of "active".
-      overviewByWorkspace: {
-        [WORKSPACE_A]: { active_members: 2 },
-        [WORKSPACE_B]: { active_members: 1 },
-      },
-    })
+  const tabs = () =>
+    within(screen.getByRole("navigation", { name: "Overview views" }))
 
-    renderPageInWorkspace(<OverviewPage />, WORKSPACE_A)
+  const hrefOf = (name: string) =>
+    new URL(
+      tabs().getByRole("link", { name }).getAttribute("href") ?? "",
+      "http://localhost",
+    )
 
-    const rail = (await screen.findByText("This workspace")).closest("section")
-    expect(rail).not.toBeNull()
-    await waitFor(() => {
-      expect(
-        within(rail as HTMLElement).getByText("Active members").parentElement,
-      ).toHaveTextContent("2")
-    })
+  it("marks the tab the path renders", async () => {
+    mockApi({})
+    renderPage(<OverviewIndex />, "/requests")
+    await screen.findByRole("navigation", { name: "Overview views" })
+
+    expect(tabs().getByRole("link", { name: "Requests" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    )
+    expect(tabs().getByRole("link", { name: "Usage" })).not.toHaveAttribute(
+      "aria-current",
+    )
   })
 
-  it("moves that count when a different workspace is selected", async () => {
+  it("carries the shared filters to every other tab and drops the rest", async () => {
+    mockApi({})
+    renderPage(
+      <OverviewIndex />,
+      "/requests?range=7d&user_id=u1&user_id=u2&status=error&page=3",
+    )
+    await screen.findByRole("navigation", { name: "Overview views" })
+
+    const sessions = hrefOf("Sessions")
+    expect(sessions.pathname).toBe("/sessions")
+    expect(sessions.searchParams.get("range")).toBe("7d")
+    expect(sessions.searchParams.getAll("user_id")).toEqual(["u1", "u2"])
+    expect(sessions.searchParams.get("status")).toBe("error")
+    expect(sessions.searchParams.has("page")).toBe(false)
+    expect(hrefOf("Usage").pathname).toBe("/")
+  })
+
+  it("keeps the window when the tabs default to different ones", async () => {
+    // Usage opens on 30 days and Requests on 24 hours, so an unset range has
+    // to travel as the one the source tab was showing.
+    mockApi({})
+    renderPage(<OverviewIndex />, "/")
+    await screen.findByRole("navigation", { name: "Overview views" })
+
+    expect(hrefOf("Requests").searchParams.get("range")).toBe("30d")
+  })
+
+  it("puts the scope switch ahead of the tabs", async () => {
+    mockApi({})
+    renderPage(<OverviewIndex />, "/")
+
+    const mine = await screen.findByRole("button", { name: "Mine" })
+    const views = screen.getByRole("navigation", { name: "Overview views" })
+    expect(
+      mine.compareDocumentPosition(views) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it("puts what needs attention above the tabs", async () => {
     mockApi({
-      context: TWO_WORKSPACES,
-      overviewByWorkspace: {
-        [WORKSPACE_A]: { active_members: 2 },
-        [WORKSPACE_B]: { active_members: 1 },
+      health: { providers: [], healthy: 2, total: 3, checked_at: null },
+    })
+    renderPage(<OverviewIndex />, "/sessions")
+
+    const alert = await screen.findByRole("alert")
+    const views = screen.getByRole("navigation", { name: "Overview views" })
+    expect(
+      alert.compareDocumentPosition(views) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+})
+
+describe("the Overview's tabs by deployment", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function renderWith(surfaces: string[], url: string) {
+    mockApi({})
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    return render(
+      <QueryClientProvider client={client}>
+        <DeploymentProvider value={bootstrap({ surfaces })}>
+          <OverviewIndex />
+        </DeploymentProvider>
+      </QueryClientProvider>,
+      {
+        wrapper: withRouter({
+          url,
+          routes: [{ path: "/sessions", element: <LocationProbe /> }],
+        }),
       },
-    })
+    )
+  }
 
-    renderPageInWorkspace(<OverviewPage />, WORKSPACE_B)
+  it("offers no Sessions tab where traces are not recorded", async () => {
+    renderWith(["usage"], "/")
 
-    const rail = (await screen.findByText("This workspace")).closest("section")
-    expect(rail).not.toBeNull()
-    await waitFor(() => {
-      expect(
-        within(rail as HTMLElement).getByText("Active members").parentElement,
-      ).toHaveTextContent("1")
-    })
+    const tabs = within(
+      await screen.findByRole("navigation", { name: "Overview views" }),
+    )
+    expect(tabs.queryByRole("link", { name: "Sessions" })).toBeNull()
+    expect(tabs.getByRole("link", { name: "Requests" })).toBeVisible()
+  })
+
+  it("lands a tab it does not serve on Sessions where only traces are recorded", async () => {
+    renderWith(["traces"], "/")
+
+    expect(await screen.findByTestId("loc")).toHaveTextContent("/sessions")
+  })
+})
+
+describe("the Overview on a phone", () => {
+  const realMatchMedia = window.matchMedia
+
+  afterEach(() => {
+    window.matchMedia = realMatchMedia
+    vi.restoreAllMocks()
+  })
+
+  const covered = () =>
+    screen
+      .getByRole("button", { name: "Everyone", hidden: true })
+      .closest("[inert]")
+
+  async function renderOnPhone(url: string) {
+    window.matchMedia = vi.fn(() => ({
+      matches: true,
+      media: "",
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    })) as unknown as typeof window.matchMedia
+    mockApi({})
+    renderPage(<OverviewIndex />, url)
+    await screen.findByRole("button", { name: "Everyone", hidden: true })
+  }
+
+  it("takes the controls behind an open request out of reach", async () => {
+    await renderOnPhone("/requests?request=r1")
+
+    const region = covered()
+    expect(region).not.toBeNull()
+    expect(region).toContainElement(
+      screen.getByRole("navigation", { name: "Overview views", hidden: true }),
+    )
+  })
+
+  it("does the same behind an open session", async () => {
+    await renderOnPhone("/sessions?peek=t1")
+
+    expect(covered()).not.toBeNull()
+  })
+
+  it("leaves the controls alone with no panel open", async () => {
+    await renderOnPhone("/requests")
+
+    expect(covered()).toBeNull()
+  })
+})
+
+describe("the operator's status bands", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it("uses a zero-padded, one-based local calendar date as its refresh key", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 0, 5, 12))
-
     expect(localDayKey()).toBe("2026-01-05")
+    vi.useRealTimers()
   })
 
-  it("renders distinct today vs 30-day spend, request volume, and error rate", async () => {
-    mockApi({
-      today: { cost: 5, request_count: 100, error_count: 1 },
-      period: { cost: 200, request_count: 2000, error_count: 40 }, // 2% -> warn
-      prev: { cost: 100, request_count: 1000, error_count: 5 },
-    })
-    renderPage(<OverviewPage />)
-
-    expect(await screen.findByText("$5.00")).toBeInTheDocument()
-    expect(await screen.findByText("$200.00")).toBeInTheDocument()
-    expect(screen.getByText("2,000")).toBeInTheDocument()
-    expect(screen.getByText("2.0%")).toBeInTheDocument()
-    // The status word, paired with a dot so severity never rides on hue alone.
-    // Uppercased in the mark, so the assertion is on the rendered casing.
-    expect(screen.getByText("ELEVATED")).toBeInTheDocument()
-    // And the rate's denominator, which is what the cell states instead of a
-    // sparkline it has no series for.
-    expect(screen.getByText("40 of 2,000 requests")).toBeInTheDocument()
-  })
-
-  it("renders period-over-period change as a trend chip, not a glyph", async () => {
-    mockApi({
-      today: { cost: 5, request_count: 100, error_count: 1 },
-      period: { cost: 200, request_count: 2000, error_count: 40 },
-      prev: { cost: 100, request_count: 1600, error_count: 8 },
-    })
-    renderPage(<OverviewPage />)
-    // Await a chip, not "$200.00": every assertion below is about text derived
-    // from the *previous* window, while the value comes from the period query.
-    // Awaiting the value assumes the two land in one commit, so a skew between
-    // the responses would fail the sync assertions that follow.
-    await screen.findByText("+100.0% vs prev")
-
-    // The chip carries the caption the old plain-text hint carried, so the
-    // comparison still says what it is being compared against. Distinct
-    // percentages per tile, so each assertion is about one chip: spend doubled,
-    // requests rose a quarter, and the error rate went 0.5% -> 2.0%.
-    expect(screen.getByText("+100.0% vs prev")).toBeInTheDocument()
-    expect(screen.getByText("+25.0% vs prev")).toBeInTheDocument()
-    expect(screen.getByText("+300.0% vs prev")).toBeInTheDocument()
-    // And each announces a direction, which the glyph never did: "▲" is
-    // decoration a screen reader skips. TrendChip.test.tsx owns the direction
-    // and polarity mapping; this only asserts the three tiles go through it.
-    // Anchored and counted: unanchored, `up` and `down` also match this page's
-    // own prose, so the assertion would pass with the announcement deleted.
-    expect(
-      screen.getAllByText(/^(no change|up|down)(, (better|worse))?$/),
-    ).toHaveLength(3)
-    // The hand-rolled arrow glyphs are gone from the tiles. queryAllByText for
-    // the same reason as below: queryByText throws on a multiple match, so a
-    // regression restoring the glyph on all three tiles would report a broken
-    // test rather than a broken tile.
-    expect(screen.queryAllByText(/[▲▼]/)).toHaveLength(0)
-  })
-
-  it("reads a chip against the metric's own polarity, not the direction alone", async () => {
-    // Spend and the error rate both rose, and both improve by falling, so both
-    // are regressions and say so: direction plus judgment, because polarity puts
-    // good and bad in hue alone. Request volume rose too, but volume carries no
-    // polarity, so it announces the direction and nothing more.
-    mockApi({
-      today: { cost: 5, request_count: 100, error_count: 1 },
-      period: { cost: 200, request_count: 2000, error_count: 40 },
-      prev: { cost: 100, request_count: 1600, error_count: 8 },
-    })
-    renderPage(<OverviewPage />)
-
-    // The chip again, not the value: same previous-window dependency as above.
-    expect(await screen.findByText("+100.0% vs prev")).toBeInTheDocument()
-    expect(screen.getAllByText("up, worse")).toHaveLength(2)
-    expect(screen.getAllByText("up")).toHaveLength(1)
-  })
-
-  it("renders no delta chip for a cell with no comparable previous window", async () => {
-    // No previous window on the wire leaves every delta null, and TrendChip
-    // returns null for a null fraction, so no chip text reaches the strip.
-    mockApi({
-      today: { cost: 5 },
-      period: { cost: 200, request_count: 2000, error_count: 40 },
-      prev: { cost: 0, request_count: 0, error_count: 0 },
-    })
-    renderPage(<OverviewPage />)
-    await screen.findByText("$200.00")
-
-    // queryAllByText, not queryByText: a regression that renders all three
-    // chips makes queryByText throw on the multiple match rather than fail on
-    // the assertion, which reads as a broken test instead of a broken tile.
-    expect(screen.queryAllByText(/vs prev/)).toHaveLength(0)
-    expect(
-      screen.queryAllByText(/^(no change|up|down)(, (better|worse))?$/),
-    ).toHaveLength(0)
-    // No reserve to assert beside them: KpiCell holds its aside line open
-    // unconditionally, which is what keeps the five values on one baseline
-    // whether or not a cell has a delta to show.
-  })
-
-  it("renders spend and request-volume sparklines from the 30-day series", async () => {
-    const series = [
-      {
-        bucket_start: "2026-07-20T00:00:00Z",
-        cost: 10,
-        tokens: 1000,
-        requests: 100,
-      },
-      {
-        bucket_start: "2026-07-21T00:00:00Z",
-        cost: 20,
-        tokens: 2000,
-        requests: 150,
-      },
-      {
-        bucket_start: "2026-07-22T00:00:00Z",
-        cost: 15,
-        tokens: 1500,
-        requests: 120,
-      },
-    ]
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input)
-      // The shell reads this before it paints, and the usage hooks wait for it:
-      // it is what tells them whether this caller reads the deployment-wide
-      // routes or the organization-scoped ones (otari#837). Answered first, and
-      // on an exact match, so it cannot shadow /v1/organizations/me/usage.
-      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
-        return jsonResponse(organizationContext())
-      }
-      if (url.includes(`${API_ROOT}/usage/summary`)) {
-        if (url.includes("bucket=hour"))
-          return jsonResponse(summary({ cost: 5 }))
-        if (url.includes("end_date="))
-          return jsonResponse(summary({ cost: 100 }))
-        // The 30-day (day-bucket, unbounded) query carries the series the tiles chart.
-        return jsonResponse({
-          ...summary({ cost: 200, request_count: 2000 }),
-          series,
-        })
-      }
-      if (url.includes(`${API_ROOT}/providers/health`)) {
-        return jsonResponse({
-          providers: [],
-          healthy: 1,
-          total: 1,
-          checked_at: null,
-        })
-      }
-      return jsonResponse([])
-    })
-    renderPage(<OverviewPage />)
-
-    expect(
-      await screen.findByRole("img", {
-        name: "Spend trend over the last 30 days",
-      }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("img", {
-        name: "Request volume trend over the last 30 days",
-      }),
-    ).toBeInTheDocument()
-  })
-
-  it("shows a dash for error rate when there are no requests", async () => {
-    mockApi({ period: { request_count: 0, error_count: 0 } })
-    renderPage(<OverviewPage />)
-    // Scope to the error-rate tile: its value is a dash (not a percentage) and it
-    // carries no status word when the rate is neutral.
-    const label = await screen.findByText("Error rate, last 30 days")
-    const tile = label.closest("div")!
-    expect(within(tile).getByText("—")).toBeInTheDocument()
-    expect(within(tile).queryByText("Elevated")).not.toBeInTheDocument()
-    expect(within(tile).queryByText(/%/)).not.toBeInTheDocument()
-  })
-
-  it("renders the budget strip from the scan the gateway returned", async () => {
-    // The cap-times-users arithmetic is the gateway's now, so what is checked
-    // here is the wording and the share, which are this page's own.
-    mockApi({
-      overview: {
-        budgets: strip({
-          over_count: 1,
-          worst: {
-            budget_id: "team",
-            name: "team",
-            spent: 25,
-            allocated: 20,
-            scope_type: null,
-            scope_id: null,
-          },
-        }),
-      },
-    })
-    renderPage(<OverviewPage />)
-    expect(await screen.findByText("125.0%")).toBeInTheDocument()
-    expect(screen.getByText("OVER BUDGET")).toBeInTheDocument()
-    // The meter names the budget it is reporting on, so the graphic is not a
-    // decoration a screen reader has to skip past. `progressbar` and not `img`:
-    // it is the same `SpendMeter` the Budgets table uses now, which reports a
-    // value rather than being a picture of one, and it also says in words how
-    // far past the limit this budget is.
-    const meter = screen.getByRole("progressbar", {
-      name: /Worst budget usage/,
-    })
-    expect(meter).toBeInTheDocument()
-    expect(meter).toHaveAttribute(
-      "aria-valuetext",
-      "125% of limit — over budget",
-    )
-  })
-
-  it("tells budgets that cap no spend apart from no budgets at all", async () => {
-    // A budget limiting only tokens or requests has no spend share to show,
-    // and "no budgets set" beside it would contradict the Budgets page.
-    mockApi({
-      overview: {
-        budgets: strip({ capped_count: 0, total_count: 2, worst: null }),
-      },
-    })
-    renderPage(<OverviewPage />)
-    expect(await screen.findByText("no budget caps spend")).toBeInTheDocument()
-    expect(screen.queryByText("no budgets set")).not.toBeInTheDocument()
-  })
-
-  it("names an unnamed budget enforced through a scoped budget after what it caps", async () => {
-    // A deployment budget attached to an API key arrives with the scope it
-    // caps and no name of its own; the tile says "An API key" rather than an
-    // id fingerprint, the way the ceilings strip names its rows.
-    mockApi({
-      overview: {
-        budgets: strip({
-          near_count: 1,
-          worst: {
-            budget_id: "b-key-cap",
-            name: null,
-            spent: 9,
-            allocated: 10,
-            scope_type: "api_token",
-            scope_id: "eeecba57-49c3-4e40-b3c1-d170aeed55c8",
-          },
-        }),
-      },
-    })
-    renderPage(<OverviewPage />)
-    expect(await screen.findByText("90.0%")).toBeInTheDocument()
-    expect(
-      screen.getByRole("progressbar", {
-        name: "Worst budget usage: An API key (eeecba57…)",
-      }),
-    ).toBeInTheDocument()
-  })
-
-  it("does not name a deployment budget's organization ceiling after the caller's organization", async () => {
-    // A deployment budget can cap any tenant's organization, so the tile keeps
-    // the label generic instead of claiming the caller's own.
-    mockApi({
-      overview: {
-        budgets: strip({
-          near_count: 1,
-          worst: {
-            budget_id: "b-org-cap",
-            name: null,
-            spent: 9,
-            allocated: 10,
-            scope_type: "organization",
-            scope_id: "4c1f0e2a-7a77-4d0f-9b35-3c1b6f7c2d11",
-          },
-        }),
-      },
-    })
-    renderPage(<OverviewPage />)
-    expect(
-      await screen.findByRole("progressbar", {
-        name: "Worst budget usage: An organization (whole organization)",
-      }),
-    ).toBeInTheDocument()
-    expect(screen.queryByText(/This organization/)).not.toBeInTheDocument()
-  })
-
-  it("summarizes provider health and surfaces problems in the status strip", async () => {
+  it("summarizes provider health and budgets in the attention strip", async () => {
     mockApi({
       health: {
         providers: [],
@@ -620,23 +464,10 @@ describe("OverviewPage", () => {
         total: 3,
         checked_at: "2026-07-22T00:00:00Z",
       },
-      overview: {
-        budgets: strip({
-          over_count: 1,
-          worst: {
-            budget_id: "team",
-            name: "team",
-            spent: 25,
-            allocated: 20,
-            scope_type: null,
-            scope_id: null,
-          },
-        }),
-      },
+      overview: { budgets: strip({ over_count: 1 }) },
     })
-    renderPage(<OverviewPage />)
-    // Provider health has no tile of its own; a degraded state surfaces only via
-    // the attention strip, each problem a link.
+    renderPage(<OverviewIndex />)
+
     expect(
       await screen.findByText("1 provider unreachable"),
     ).toBeInTheDocument()
@@ -647,7 +478,7 @@ describe("OverviewPage", () => {
     mockApi({
       // 20% errors, past the alert threshold, so the error-rate problem appears
       // alongside the provider one and the strip carries both link shapes.
-      period: { request_count: 100, error_count: 20 },
+      today: { request_count: 100, error_count: 20 },
       health: {
         providers: [],
         healthy: 2,
@@ -655,128 +486,91 @@ describe("OverviewPage", () => {
         checked_at: "2026-07-22T00:00:00Z",
       },
     })
-    renderPage(<OverviewPage />)
+    renderPage(<OverviewIndex />)
 
-    // A bare destination, and one that has to carry a filter with it. The second
-    // is the one worth pinning: it is the only place the overview hands the
-    // activity log a query, so a link that dropped it would land on an unfiltered
-    // log and still look like it worked.
     expect(
       await screen.findByRole("link", { name: "1 provider unreachable" }),
     ).toHaveAttribute("href", "/admin/hosted-providers")
-    expect(screen.getByRole("link", { name: /^error rate/ })).toHaveAttribute(
-      "href",
-      "/activity?status=error",
+    // The one place the strip hands the request log a query, so a link that
+    // dropped it would land on an unfiltered log and still look like it worked.
+    const errors = new URL(
+      screen
+        .getByRole("link", { name: "error rate 20.0% today" })
+        .getAttribute("href") ?? "",
+      "http://localhost",
     )
+    expect(errors.pathname).toBe("/requests")
+    expect(errors.searchParams.get("status")).toBe("error")
+    expect(errors.searchParams.get("start_date")).toBeTruthy()
+    expect(errors.searchParams.get("scope")).toBe("everyone")
   })
 
-  it("hides the status strip when nothing needs attention", async () => {
-    mockApi({
-      health: {
-        providers: [],
-        healthy: 3,
-        total: 3,
-        checked_at: "2026-07-22T00:00:00Z",
-      },
+  it("is absent when nothing needs attention", async () => {
+    const fetchMock = mockApi({
+      health: { providers: [], healthy: 3, total: 3, checked_at: null },
     })
-    renderPage(<OverviewPage />)
+    renderPage(<OverviewIndex />)
 
-    // Wait for the tiles to resolve (spend today + last-30d both read $0.00 here),
-    // then confirm no neutral status strip renders when every source is healthy.
-    expect((await screen.findAllByText("$0.00")).length).toBeGreaterThan(0)
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes(`${API_ROOT}/providers/health`),
+        ),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
     expect(screen.queryByRole("status")).not.toBeInTheDocument()
   })
 
-  it("renders a recent-activity row with a null-cost entry, then empty state", async () => {
-    mockApi({
-      logs: [
-        {
-          id: "1",
-          user_id: null,
-          api_key_id: null,
-          timestamp: "2026-07-22T00:00:00Z",
-          model: "gpt-5.6",
-          provider: "openai",
-          endpoint: "/v1/chat/completions",
-          prompt_tokens: 10,
-          completion_tokens: 5,
-          total_tokens: 15,
-          cache_read_tokens: 0,
-          cache_write_tokens: 0,
-          cost: null,
-          status: "error",
-          error_message: "boom",
-          latency_ms: 120,
-        },
-      ],
-    })
-    renderPage(<OverviewPage />)
-    expect(await screen.findByText("gpt-5.6")).toBeInTheDocument()
-    // null cost renders as an em-dash, not a crash.
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0)
-  })
-
-  it("keeps the page up when one tile query fails (per-tile isolation)", async () => {
+  it("says so, without judging, when a status source fails", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      // The shell reads this before it paints, and the usage hooks wait for it:
-      // it is what tells them whether this caller reads the deployment-wide
-      // routes or the organization-scoped ones (otari#837). Answered first, and
-      // on an exact match, so it cannot shadow /v1/organizations/me/usage.
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(organizationContext())
       }
-      if (url.includes(`${API_ROOT}/overview`))
-        return jsonResponse({ detail: "boom" }, 500)
-      if (url.includes(`${API_ROOT}/usage/summary`))
-        return jsonResponse(summary({ cost: 200, request_count: 10 }))
-      if (url.includes(`${API_ROOT}/providers/health`))
+      if (url.includes(`${API_ROOT}/overview`)) {
+        return jsonResponse({ detail: "budgets exploded" }, 500)
+      }
+      if (url.includes(`${API_ROOT}/usage/summary`)) {
+        return jsonResponse(summary({ request_count: 100 }))
+      }
+      if (url.includes(`${API_ROOT}/providers/health`)) {
         return jsonResponse({
           providers: [],
           healthy: 1,
           total: 1,
           checked_at: null,
         })
+      }
+      if (url.includes(`${API_ROOT}/providers`)) {
+        return jsonResponse({ providers: [{ provider: "openai" }] })
+      }
       return jsonResponse([])
     })
-    renderPage(<OverviewPage />)
-    // The spend tiles still render even though budgets errored (per-tile isolation);
-    // both Today and Last-30d read $200.00 with this mock, hence findAllByText.
-    expect((await screen.findAllByText("$200.00")).length).toBeGreaterThan(0)
-    // ...and the status strip must NOT claim all-clear while a source query failed
-    // (it would contradict the error banner). It reads as a neutral load-failure line.
-    expect(screen.queryByText(/All systems normal/)).not.toBeInTheDocument()
-    expect(screen.getByText(/could not be loaded/)).toBeInTheDocument()
-  })
-
-  it("hides the status strip while status sources are still loading", async () => {
-    // A never-resolving fetch keeps the queries pending.
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      () => new Promise<Response>(() => {}),
-    )
-    renderPage(<OverviewPage />)
-    expect(await screen.findByText("Overview")).toBeInTheDocument()
-    expect(screen.queryByRole("status")).not.toBeInTheDocument()
-  })
-})
-
-describe("OverviewIndex routing", () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it("renders the overview when a provider is configured", async () => {
-    mockApi({
-      health: { providers: [], healthy: 1, total: 1, checked_at: null },
-    })
     renderPage(<OverviewIndex />)
-    expect(await screen.findByText("Overview")).toBeInTheDocument()
+
+    expect(await screen.findByText(/could not be loaded/)).toBeInTheDocument()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
-  it("shows a getting-started overview and links to providers on a fresh gateway", async () => {
-    // The deployment's own credentials: only a deployment operator is sent to
-    // Hosted providers, since `OrganizationOverview` links to the organization's
-    // provider-key page.
+  it("waits for its sources rather than showing a transient strip", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).endsWith(`${API_ROOT}/organizations/me`)
+        ? jsonResponse(organizationContext())
+        : new Promise<Response>(() => {}),
+    )
+    renderPage(<OverviewIndex />)
+    expect(
+      await screen.findByRole("heading", { name: "Overview" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+
+  it("shows a getting-started band and links to providers on a fresh gateway", async () => {
+    // The deployment's own credentials: only an operator is sent to Hosted
+    // providers, since the tenant band links to the organization's keys.
     mockApi({ providers: [] })
     const user = userEvent.setup()
     renderPage(<OverviewIndex />)
@@ -784,7 +578,6 @@ describe("OverviewIndex routing", () => {
     expect(
       await screen.findByText("Get started with Otari"),
     ).toBeInTheDocument()
-    expect(screen.getByText("Overview")).toBeInTheDocument()
     await user.click(
       screen.getByRole("button", { name: "Add your first provider" }),
     )
@@ -802,13 +595,10 @@ describe("OverviewIndex routing", () => {
     })
     renderPage(<OverviewIndex />)
 
-    expect(await screen.findByText("Overview")).toBeInTheDocument()
-    // Settled on the empty-state inputs (the provider lists and the recent
-    // log) before asserting what they decided.
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(([input]) =>
-          /\/api\/v1\/usage(\?|$)/.test(String(input)),
+          String(input).includes(`${API_ROOT}/hosted-providers`),
         ),
       ).toBe(true),
     )
@@ -816,13 +606,19 @@ describe("OverviewIndex routing", () => {
     expect(screen.queryByText("Get started with Otari")).toBeNull()
   })
 
-  it("reports a failed provider query instead of silently rendering a normal overview", async () => {
+  it("is not a fresh gateway when it already has usage", async () => {
+    // Imported OTLP usage needs no provider config.
+    mockApi({ providers: [], logs: [{ id: "1" }] })
+    renderPage(<OverviewIndex />)
+
+    await screen.findByRole("navigation", { name: "Overview views" })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByText("Get started with Otari")).toBeNull()
+  })
+
+  it("reports a failed provider query instead of calling the gateway fresh", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      // The shell reads this before it paints, and the usage hooks wait for it:
-      // it is what tells them whether this caller reads the deployment-wide
-      // routes or the organization-scoped ones (otari#837). Answered first, and
-      // on an exact match, so it cannot shadow /v1/organizations/me/usage.
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(organizationContext())
       }
@@ -842,24 +638,28 @@ describe("OverviewIndex routing", () => {
     })
     renderPage(<OverviewIndex />)
 
-    // The failure is surfaced, and the setup state stays neutral: no
-    // getting-started block claiming the gateway is fresh, and no silent success.
     expect(await screen.findByText(/providers exploded/)).toBeInTheDocument()
     expect(screen.queryByText("Get started with Otari")).not.toBeInTheDocument()
   })
+})
 
-  it("clears the provider-query banner when Refresh retries it", async () => {
-    // The providers query is cached for minutes and never refetches on focus, so
-    // the page's Refresh has to drive it or the banner outlives the outage.
-    let failProviders = true
+describe("OverviewIndex operator-ness", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function mockOperator(context: "ok" | "fails") {
+    const requested: string[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      // The shell reads this before it paints, and the usage hooks wait for it:
-      // it is what tells them whether this caller reads the deployment-wide
-      // routes or the organization-scoped ones (otari#837). Answered first, and
-      // on an exact match, so it cannot shadow /v1/organizations/me/usage.
+      requested.push(url)
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
-        return jsonResponse(organizationContext())
+        return context === "ok"
+          ? jsonResponse(organizationContext())
+          : jsonResponse({ detail: "context exploded" }, 500)
+      }
+      if (url.includes(`${API_ROOT}/usage/summary`)) {
+        return jsonResponse(summary({ cost: 200, request_count: 2000 }))
       }
       if (url.includes(`${API_ROOT}/providers/health`)) {
         return jsonResponse({
@@ -869,24 +669,43 @@ describe("OverviewIndex routing", () => {
           checked_at: null,
         })
       }
-      if (url.includes(`${API_ROOT}/usage/summary`))
-        return jsonResponse(summary({}))
       if (url.includes(`${API_ROOT}/providers`)) {
-        return failProviders
-          ? jsonResponse({ detail: "providers exploded" }, 500)
-          : jsonResponse({ providers: [{ provider: "openai" }] })
+        return jsonResponse({ providers: [{ provider: "openai" }] })
       }
       return jsonResponse([])
     })
-    const user = userEvent.setup()
+    return requested
+  }
+
+  it("shows the operator's strip off the context, without asking /v1/admin/access", async () => {
+    const requested = mockOperator("ok")
     renderPage(<OverviewIndex />)
 
-    expect(await screen.findByText(/providers exploded/)).toBeInTheDocument()
-    failProviders = false
-    await user.click(screen.getByRole("button", { name: /refresh/i }))
-    await waitFor(() =>
-      expect(screen.queryByText(/providers exploded/)).not.toBeInTheDocument(),
-    )
+    await waitFor(() => expect(asksHealth(requested)).toBe(true))
+    expect(
+      requested.some((url) => url.endsWith(`${API_ROOT}/admin/access`)),
+    ).toBe(false)
+  })
+
+  it("lands a failed context on the operator's strip, where its usage reads too", async () => {
+    // Every operator gate fails open on a failed read (otari#876), and the page
+    // and the usage hooks below it take that answer from one place, so the
+    // operator panels never sit above views serving the caller's organization.
+    const requested = mockOperator("fails")
+    renderPage(<OverviewIndex />)
+
+    await waitFor(() => expect(asksHealth(requested)).toBe(true))
+    expect(
+      requested.some((url) =>
+        url.includes(`${API_ROOT}/organizations/me/usage`),
+      ),
+    ).toBe(false)
+    // And it settled there: a page reading the context's transient pending
+    // state would flip back to its spinner and ask again without end.
+    expect(
+      requested.filter((url) => url.endsWith(`${API_ROOT}/organizations/me`))
+        .length,
+    ).toBeLessThan(4)
   })
 })
 
@@ -908,11 +727,13 @@ function mockScopedApi(b: Bodies): string[] {
         organizationContext({ deployment_operator: false, ...b.context }),
       )
     }
+    // The caller's usage identity, which a member's attention strip is judged on.
+    if (url.includes(`${API_ROOT}/organizations/me/members`)) {
+      const member = organizationMember({ attribution_user_id: "me-id" })
+      return jsonResponse({ data: [member], total: 1 })
+    }
     if (url.includes(`${API_ROOT}/organizations/me/usage/summary`)) {
-      if (url.includes("bucket=hour"))
-        return jsonResponse(summary(b.today ?? {}))
-      if (url.includes("end_date=")) return jsonResponse(summary(b.prev ?? {}))
-      return jsonResponse(summary(b.period ?? {}, b.series))
+      return jsonResponse(summary(b.today ?? {}, b.series))
     }
     if (url.includes(`${API_ROOT}/organizations/me/usage`)) {
       return jsonResponse(b.logs ?? [])
@@ -947,54 +768,38 @@ function mockScopedApi(b: Bodies): string[] {
   return requested
 }
 
-describe("OverviewIndex for a caller who does not operate the deployment", () => {
+describe("the Overview for a caller who does not operate the deployment", () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it("lands on their own usage, not an apology card", async () => {
-    mockScopedApi({
-      today: { cost: 5, request_count: 100, error_count: 1 },
-      period: { cost: 200, request_count: 2000, error_count: 40 },
-      prev: { cost: 100, request_count: 1000, error_count: 5 },
-    })
-    renderPage(<OverviewIndex />)
-
-    // The scoped summaries land as real tiles: today vs 30-day spend, volume,
-    // and the window's error rate, exactly as the operator page renders them.
-    expect(await screen.findByText("$5.00")).toBeInTheDocument()
-    expect(screen.getByText("$200.00")).toBeInTheDocument()
-    expect(screen.getByText("2,000")).toBeInTheDocument()
-    expect(screen.getByText("2.0%")).toBeInTheDocument()
-    // The dead-end card this page replaced (otari-ai#1929) stays gone.
-    expect(
-      screen.queryByText(/This overview is for deployment operators/),
-    ).not.toBeInTheDocument()
-  })
-
   it("reads only the organization-scoped surface", async () => {
     const requested = mockScopedApi({
-      period: { cost: 200, request_count: 2000 },
+      today: { cost: 200, request_count: 2000 },
     })
     renderPage(<OverviewIndex />)
-    await screen.findByText("$200.00")
+    await screen.findByRole("navigation", { name: "Overview views" })
+    await waitFor(() =>
+      expect(
+        requested.some((url) => url.includes("/organizations/me/usage")),
+      ).toBe(true),
+    )
 
     // Nothing left the scoped surface: beyond the context, every request this
     // page made is under /v1/organizations/me. A bare /v1/usage, /v1/budgets or
-    // /v1/keys read here would be a deployment-wide one the server refuses, so
-    // the page must not even attempt it, and neither must it ask the gate.
+    // /v1/providers read here would be a deployment-wide one the server
+    // refuses, so the page must not even attempt it, and neither must it ask
+    // the gate. /v1/overview and the catalog are scoped by the identity asking
+    // rather than by their prefix.
     expect(
       requested.some((url) => url.endsWith(`${API_ROOT}/admin/access`)),
     ).toBe(false)
-    // /v1/overview is the one exception and is scoped by the identity asking
-    // rather than by its prefix: it derives the caller's organization server
-    // side and withholds the deployment-budget strip from anyone who does not
-    // operate the deployment. It cannot sit under /organizations/me because for
-    // an operator it also answers for the deployment.
+    expect(asksHealth(requested)).toBe(false)
     const scoped = requested.filter(
       (url) =>
         !url.endsWith(`${API_ROOT}/organizations/me`) &&
-        !url.includes(`${API_ROOT}/overview`),
+        !url.includes(`${API_ROOT}/overview`) &&
+        !url.includes(`${API_ROOT}/models`),
     )
     expect(scoped.length).toBeGreaterThan(0)
     for (const url of scoped) {
@@ -1003,98 +808,20 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
   })
 
   it("shows no deployment-wide panel", async () => {
-    mockScopedApi({ period: { cost: 200, request_count: 2000 } })
+    mockScopedApi({ today: { cost: 200, request_count: 2000 } })
     renderPage(<OverviewIndex />)
-    await screen.findByText("$200.00")
+    await screen.findByRole("navigation", { name: "Overview views" })
+    await new Promise((resolve) => setTimeout(resolve, 50))
 
-    // Provider health and the deployment's budgets are the attention strip's
-    // two sources and both are operator surfaces, so the strip is correctly
-    // absent here rather than merely empty (otari-ai#2085).
+    // Provider health and the deployment's budgets are operator surfaces, so
+    // nothing here reports on them or on failing to read them (otari-ai#2085).
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
     expect(
       screen.queryByText("Some status data could not be loaded."),
     ).not.toBeInTheDocument()
-    // And the header is the tenant's, not the gateway's.
-    expect(
-      screen.queryByText(
-        "At-a-glance spend, traffic, and health across the gateway.",
-      ),
-    ).not.toBeInTheDocument()
   })
 
-  it("previews the caller's recent requests with a link to the full log", async () => {
-    mockScopedApi({
-      logs: [
-        {
-          id: "1",
-          user_id: null,
-          api_key_id: null,
-          timestamp: "2026-07-22T00:00:00Z",
-          model: "gpt-5.6",
-          provider: "openai",
-          endpoint: "/v1/chat/completions",
-          prompt_tokens: 10,
-          completion_tokens: 5,
-          total_tokens: 15,
-          cache_read_tokens: 0,
-          cache_write_tokens: 0,
-          cost: 0.5,
-          status: "success",
-          error_message: null,
-          latency_ms: 120,
-        },
-      ],
-    })
-    renderPage(<OverviewIndex />)
-
-    const row = (await screen.findByText("gpt-5.6")).closest("tr")!
-    // The Activity log's columns: input and output apart, not one total.
-    expect(
-      screen.getByRole("columnheader", { name: "Input" }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("columnheader", { name: "Output" }),
-    ).toBeInTheDocument()
-    expect(within(row).getByText("10")).toBeInTheDocument()
-    expect(within(row).getByText("5")).toBeInTheDocument()
-    expect(within(row).queryByText("15")).not.toBeInTheDocument()
-    // Activity serves this caller from the same scoped surface, so the preview
-    // may hand them off to it.
-    expect(screen.getByRole("link", { name: /view all/i })).toHaveAttribute(
-      "href",
-      "/activity",
-    )
-  })
-
-  it("reports a failed previous window instead of silently dropping the trends", async () => {
-    // The previous window's only reader is the trend chips, so its failure has
-    // no tile of its own to show it: without the banner it would just strip
-    // every "vs prev" chip and look like there was nothing to compare.
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input)
-      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
-        return jsonResponse(organizationContext({ deployment_operator: false }))
-      }
-      if (url.includes(`${API_ROOT}/organizations/me/usage/summary`)) {
-        if (url.includes("end_date="))
-          return jsonResponse({ detail: "previous window exploded" }, 500)
-        return jsonResponse(summary({ cost: 200, request_count: 2000 }))
-      }
-      if (url.includes(`${API_ROOT}/organizations/me/usage`)) {
-        return jsonResponse([])
-      }
-      return jsonResponse({ detail: "forbidden" }, 403)
-    })
-    renderPage(<OverviewIndex />)
-
-    // Both current windows read the same body here, hence findAllByText.
-    expect((await screen.findAllByText("$200.00")).length).toBeGreaterThan(0)
-    expect(
-      await screen.findByText(/previous window exploded/),
-    ).toBeInTheDocument()
-  })
-
-  it("reports a failed scoped summary instead of a silent wall of dashes", async () => {
+  it("reports a failed error-rate read instead of judging it", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
@@ -1110,387 +837,86 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     })
     renderPage(<OverviewIndex />)
 
-    expect(await screen.findByText(/usage exploded/)).toBeInTheDocument()
+    expect(
+      await screen.findByText("Some status data could not be loaded."),
+    ).toBeInTheDocument()
   })
 })
 
-// The parity gaps otari-ai#2085 is about, all on the page a caller who does not
-// operate the deployment lands on. Note what is *not* asserted anywhere below:
-// no entitlement (base otari has no entitlements server), no surface (nothing
-// publishes one for this), and no operator check, which is what this page is
-// the other branch of.
-describe("the tenant Overview's budget signal", () => {
+describe("the tenant Overview's attention strip", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     window.localStorage.clear()
   })
 
-  it("shows an organization admin their tightest spend ceiling", async () => {
-    const requested = mockScopedApi({
-      context: { role: "admin" },
-      period: { cost: 200, request_count: 2000 },
-      // 200 of 250, reserved included: a ceiling refuses on spend plus what is
-      // held against requests in flight, and the gateway sums the same two.
-      overview: {
-        ceilings: strip({
-          near_count: 1,
-          capped_count: 2,
-          total_count: 2,
-          worst: {
-            budget_id: "dddddddd-1111-2222-3333-444444444444",
-            name: "Staging cap",
-            spent: 200,
-            allocated: 250,
-            scope_type: null,
-            scope_id: null,
-          },
-        }),
-      },
-    })
-    renderPage(<OverviewIndex />)
-
-    expect(await screen.findByText("Budget health")).toBeInTheDocument()
-    expect(await screen.findByText("80.0%")).toBeInTheDocument()
-    expect(screen.getByText("NEAR LIMIT")).toBeInTheDocument()
-    // The same meter the Spend page's own rows draw, naming the row it is about.
-    expect(
-      screen.getByRole("progressbar", {
-        name: "Tightest spend ceiling: Staging cap",
-      }),
-    ).toBeInTheDocument()
-    // And never /api/v1/budgets, the operator cell's endpoint, which is
-    // deployment-wide and answers 403 to this caller.
-    expect(requested.some((url) => url.includes(`${API_ROOT}/budgets`))).toBe(
-      false,
-    )
+  const overCeiling = strip({
+    over_count: 1,
+    worst: {
+      budget_id: "eeeeeeee-1111-2222-3333-444444444444",
+      name: "Org cap",
+      spent: 300,
+      allocated: 250,
+      scope_type: null,
+      scope_id: null,
+    },
   })
 
-  it("counts a ceiling this organization cannot edit", async () => {
-    // `manageable` says whose figure it is, not whose spend. A ceiling naming a
-    // budget the organization does not own is enforcing against it today, so
-    // reading that field as a filter would let the page report "on track" while
-    // the tenant is over the cap that is actually refusing their requests.
+  it("shows a member only the error rate, linked at today's failed requests", async () => {
     mockScopedApi({
-      context: { role: "admin" },
-      overview: {
-        ceilings: strip({
-          over_count: 1,
-          worst: {
-            budget_id: "eeeeeeee-1111-2222-3333-444444444444",
-            name: "Deployment cap",
-            spent: 300,
-            allocated: 250,
-            scope_type: null,
-            scope_id: null,
-          },
-        }),
-      },
-    })
-    renderPage(<OverviewIndex />)
-
-    expect(await screen.findByText("120.0%")).toBeInTheDocument()
-    expect(screen.getByText("OVER BUDGET")).toBeInTheDocument()
-  })
-
-  it("withholds the cell from a member, without asking for it", async () => {
-    // The matrix has Spend & budgets Hidden for a member, and the server agrees:
-    // both halves of the organization budget surface go through
-    // `require_active_organization_management_access`. So the query is not made
-    // rather than made and its refusal painted.
-    const requested = mockScopedApi({
       context: { role: "member" },
-      period: { cost: 200, request_count: 2000 },
-    })
-    renderPage(<OverviewIndex />)
-    await screen.findByText("$200.00")
-
-    expect(screen.queryByText("Budget health")).not.toBeInTheDocument()
-    expect(
-      requested.some((url) =>
-        url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
-      ),
-    ).toBe(false)
-  })
-
-  it("reads a failed ceiling query as unknown, not as zero spend", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input)
-      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
-        return jsonResponse(
-          organizationContext({ deployment_operator: false, role: "admin" }),
-        )
-      }
-      if (url.includes(`${API_ROOT}/overview`)) {
-        return jsonResponse({ detail: "ceilings exploded" }, 500)
-      }
-      if (url.includes(`${API_ROOT}/organizations/me/usage/summary`)) {
-        return jsonResponse(summary({ cost: 200, request_count: 2000 }))
-      }
-      return jsonResponse([])
+      today: { request_count: 100, error_count: 20 },
+      overview: { ceilings: overCeiling },
     })
     renderPage(<OverviewIndex />)
 
-    expect(await screen.findByText(/ceilings exploded/)).toBeInTheDocument()
-    const cell = (await screen.findByText("Budget health")).parentElement
-    expect(cell).not.toBeNull()
-    // An em dash and "no data", never a percentage: a refused read that renders
-    // as 0% claims the tenant has spent nothing (otari-ai#1935, #1961).
-    expect(within(cell as HTMLElement).getByText("—")).toBeInTheDocument()
-    expect(within(cell as HTMLElement).getByText("no data")).toBeInTheDocument()
-    expect(
-      within(cell as HTMLElement).queryByRole("progressbar"),
-    ).not.toBeInTheDocument()
+    const link = await screen.findByRole("link", { name: /^error rate 20/ })
+    expect(link).toHaveAttribute(
+      "href",
+      expect.stringMatching(/^\/requests\?status=error&start_date=/),
+    )
+    expect(screen.getByRole("alert")).toBeInTheDocument()
+    expect(screen.queryByText(/spend ceiling/)).not.toBeInTheDocument()
   })
 
-  it("says so when the organization has capped nothing", async () => {
+  it("adds a ceiling at its limit for an owner or admin", async () => {
     mockScopedApi({
       context: { role: "admin" },
-      // Visible to this caller and empty, which is not the same as withheld.
-      overview: {
-        ceilings: {
-          over_count: 0,
-          near_count: 0,
-          capped_count: 0,
-          total_count: 0,
-          worst: null,
-        },
-      },
+      today: { request_count: 100, error_count: 20 },
+      overview: { ceilings: overCeiling },
     })
     renderPage(<OverviewIndex />)
 
-    // Awaited, not read off the first paint: an unresolved query and an empty
-    // list both leave the value an em dash, and only the subline tells them
-    // apart.
-    const subline = await screen.findByText("no spend ceilings set")
-    expect(subline.closest("div")).toHaveTextContent("Budget health")
-  })
-})
-
-describe("the tenant Overview's chart and rail", () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-    window.localStorage.clear()
-  })
-
-  it("draws the month's shape under the numbers", async () => {
-    mockScopedApi({
-      period: { cost: 200, request_count: 2000 },
-      series: [
-        seriesPoint({ bucket_start: "2026-07-01T00:00:00Z", cost: 10 }),
-        seriesPoint({ bucket_start: "2026-07-02T00:00:00Z", cost: 30 }),
-      ],
-    })
-    renderPage(<OverviewIndex />)
-
-    // The heading, not the KPI cell's label of the same words.
     expect(
-      await screen.findByRole("heading", { name: "Spend, last 30 days" }),
+      await screen.findByRole("link", { name: "1 spend ceiling over limit" }),
+    ).toHaveAttribute("href", "/budgets")
+    expect(
+      screen.getByRole("link", { name: /^error rate/ }),
     ).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /view usage/i })).toHaveAttribute(
-      "href",
-      "/usage",
-    )
   })
 
-  it("counts the tenant's own keys and the workspace's roster", async () => {
-    const requested = mockScopedApi({
-      context: { ...TWO_WORKSPACES, role: "admin" },
-      // Both counts come from one read, scoped to the workspace in the query.
-      // A revoked key and an invited membership are outside "active", which the
-      // gateway is what decides now.
-      overviewByWorkspace: {
-        [WORKSPACE_A]: { active_keys: 2, active_members: 2 },
-      },
-    })
-    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
-
-    const rail = (await screen.findByText("This workspace")).closest("section")
-    expect(rail).not.toBeNull()
-    await waitFor(() => {
-      expect(
-        within(rail as HTMLElement).getByText("Active keys").parentElement,
-      ).toHaveTextContent("2")
-    })
-    await waitFor(() => {
-      expect(
-        within(rail as HTMLElement).getByText("Active members").parentElement,
-      ).toHaveTextContent("2")
-    })
-    // The counts are asked for by workspace, and never off the deployment-wide
-    // /api/v1/keys the operator page used to read here.
-    expect(
-      requested.some((url) =>
-        url.includes(`${API_ROOT}/overview?workspace_id=${WORKSPACE_A}`),
-      ),
-    ).toBe(true)
-  })
-
-  it("offers a member only the destinations that will serve them", async () => {
+  it("names a ceiling near its limit", async () => {
     mockScopedApi({
-      context: { ...TWO_WORKSPACES, role: "member" },
-      period: { cost: 200 },
+      context: { role: "admin" },
+      overview: { ceilings: strip({ near_count: 2, capped_count: 2 }) },
     })
     renderPage(<OverviewIndex />)
-    await screen.findByText("$200.00")
 
-    const rail = (await screen.findByText("This workspace")).closest("section")
-    expect(rail).not.toBeNull()
-    const inRail = within(rail as HTMLElement)
-    expect(inRail.getByRole("link", { name: "API keys" })).toBeInTheDocument()
-    expect(inRail.getByRole("link", { name: "Activity" })).toBeInTheDocument()
-    // Members and Budgets are reached through the organization rail, which
-    // `AppShell` opens only to a caller who manages the organization, and both
-    // destinations refuse a member on the server too.
     expect(
-      inRail.queryByRole("link", { name: "Budgets" }),
-    ).not.toBeInTheDocument()
-    expect(
-      inRail.queryByRole("link", { name: "Members" }),
-    ).not.toBeInTheDocument()
-  })
-
-  it("offers an admin all four", async () => {
-    mockScopedApi({
-      context: { ...TWO_WORKSPACES, role: "admin" },
-      period: { cost: 200 },
-    })
-    renderPage(<OverviewIndex />)
-    await screen.findByText("$200.00")
-
-    const rail = (await screen.findByText("This workspace")).closest("section")
-    expect(rail).not.toBeNull()
-    const inRail = within(rail as HTMLElement)
-    expect(inRail.getByRole("link", { name: "Budgets" })).toBeInTheDocument()
-    expect(inRail.getByRole("link", { name: "Members" })).toBeInTheDocument()
-  })
-
-  // A member in no workspace used to read "This workspace" over counts for a
-  // workspace they are not in.
-  it("says so, rather than counting, for a member in no workspace", async () => {
-    mockScopedApi({
-      context: { role: "member", workspace_memberships: [] },
-      period: { cost: 200 },
-    })
-    renderPage(<OverviewIndex />)
-    await screen.findByText("$200.00")
-
-    const rail = (await screen.findByText("No workspace yet")).closest(
-      "section",
-    )
-    expect(rail).not.toBeNull()
-    const inRail = within(rail as HTMLElement)
-    expect(
-      inRail.getByText(/You do not belong to a workspace in this organization/),
+      await screen.findByRole("link", { name: "2 spend ceilings near limit" }),
     ).toBeInTheDocument()
-    expect(inRail.queryByText("Active keys")).not.toBeInTheDocument()
-    expect(screen.queryByText("This workspace")).not.toBeInTheDocument()
   })
 
-  it("keeps the counts when the context does not say which workspaces the member is in", async () => {
-    // Undefined is dropped when the mock serializes the body, so the field is absent.
+  it("is absent when nothing needs attention", async () => {
     mockScopedApi({
-      context: { role: "member", workspace_memberships: undefined },
-      period: { cost: 200 },
-    })
-    renderPage(<OverviewIndex />)
-    await screen.findByText("$200.00")
-
-    expect(await screen.findByText("This workspace")).toBeInTheDocument()
-    expect(screen.queryByText("No workspace yet")).not.toBeInTheDocument()
-  })
-})
-
-// One question, one source. The page picks its variant and the usage hooks pick
-// their surface off the same `deployment_operator` field, so the operator panels
-// can never end up beside tiles reading the other one (otari-ai#1936).
-describe("OverviewIndex operator-ness", () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it("renders the operator page off the context, without asking /v1/admin/access", async () => {
-    const requested: string[] = []
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input)
-      requested.push(url)
-      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
-        return jsonResponse(organizationContext())
-      }
-      if (url.includes(`${API_ROOT}/usage/summary`)) {
-        return jsonResponse(summary({ cost: 200, request_count: 2000 }))
-      }
-      if (url.includes(`${API_ROOT}/providers/health`)) {
-        return jsonResponse({
-          providers: [],
-          healthy: 1,
-          total: 1,
-          checked_at: null,
-        })
-      }
-      if (url.includes(`${API_ROOT}/providers`)) {
-        return jsonResponse({ providers: [{ provider: "openai" }] })
-      }
-      return jsonResponse([])
+      context: { role: "admin" },
+      today: { request_count: 100, error_count: 1 },
+      overview: { ceilings: strip() },
     })
     renderPage(<OverviewIndex />)
 
-    expect(
-      await screen.findByText(
-        "At-a-glance spend, traffic, and health across the gateway.",
-      ),
-    ).toBeInTheDocument()
-    expect(
-      requested.some((url) => url.endsWith(`${API_ROOT}/admin/access`)),
-    ).toBe(false)
-  })
-
-  it("lands a failed context on the operator page, where its tiles read too", async () => {
-    // Every operator gate fails open on a failed read (otari#876), and the page
-    // and the usage hooks behind its tiles take that answer from one place, so
-    // the operator panels never sit above tiles serving the caller's own
-    // organization.
-    const requested: string[] = []
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input)
-      requested.push(url)
-      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
-        return jsonResponse({ detail: "context exploded" }, 500)
-      }
-      if (url.includes(`${API_ROOT}/usage/summary`)) {
-        return jsonResponse(summary({ cost: 200, request_count: 2000 }))
-      }
-      if (url.includes(`${API_ROOT}/providers/health`)) {
-        return jsonResponse({
-          providers: [],
-          healthy: 1,
-          total: 1,
-          checked_at: null,
-        })
-      }
-      if (url.includes(`${API_ROOT}/providers`)) {
-        return jsonResponse({ providers: [{ provider: "openai" }] })
-      }
-      return jsonResponse([])
-    })
-    renderPage(<OverviewIndex />)
-
-    expect(
-      await screen.findByText(
-        "At-a-glance spend, traffic, and health across the gateway.",
-      ),
-    ).toBeInTheDocument()
-    expect(
-      requested.some((url) => url.includes(`${API_ROOT}/organizations/me/`)),
-    ).toBe(false)
-
-    // And it settled there. The usage hooks observe the same errored context,
-    // and their mount asks it to refetch; a page reading that transient pending
-    // state would flip back to its spinner, unmount them, and ask again
-    // without end.
-    expect(
-      requested.filter((url) => url.endsWith(`${API_ROOT}/organizations/me`))
-        .length,
-    ).toBeLessThan(4)
+    await screen.findByRole("navigation", { name: "Overview views" })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 })
 
@@ -1512,12 +938,6 @@ describe("the setup guide on either Overview", () => {
     expect(
       await screen.findByRole("heading", { name: "Send your first request" }),
     ).toBeInTheDocument()
-    // On the tenant page, rather than by falling through to the operator one.
-    expect(
-      screen.queryByText(
-        "At-a-glance spend, traffic, and health across the gateway.",
-      ),
-    ).not.toBeInTheDocument()
     // And its gate came from the catalog, which this caller may read, and not
     // from the operator-gated provider list.
     expect(requested.some((url) => url.includes(`${API_ROOT}/models`))).toBe(
@@ -1550,9 +970,7 @@ describe("the setup guide on either Overview", () => {
     await waitFor(() => {
       expect(requested.some((url) => url.includes("/activation"))).toBe(true)
     })
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /refresh/i })).toBeEnabled()
-    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
     expect(
       screen.queryByRole("heading", { name: "Send your first request" }),
     ).not.toBeInTheDocument()
@@ -1565,15 +983,11 @@ describe("the setup guide on either Overview", () => {
     const requested = mockScopedApi({ context: TWO_WORKSPACES, models: [] })
     renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
 
-    // Settled, not merely issued: the Refresh control is disabled while any of
-    // this page's queries is in flight, the catalog included, so an enabled one
-    // is the empty answer having landed rather than being on its way.
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /refresh/i })).toBeEnabled()
-    })
-    expect(requested.some((url) => url.includes(`${API_ROOT}/models`))).toBe(
-      true,
-    )
+    // Settled, not merely issued: the band the empty catalog decides is the
+    // answer having landed rather than being on its way.
+    expect(
+      await screen.findByText("Get started with Otari"),
+    ).toBeInTheDocument()
     expect(
       screen.queryByRole("heading", { name: "Send your first request" }),
     ).not.toBeInTheDocument()
@@ -1650,17 +1064,24 @@ describe("the first-steps strip on the tenant Overview", () => {
     })
     renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
 
-    expect(await screen.findByText("gpt-5.6")).toBeInTheDocument()
+    await screen.findByRole("navigation", { name: "Overview views" })
+    await new Promise((resolve) => setTimeout(resolve, 50))
     expect(screen.queryByText(GET_STARTED)).not.toBeInTheDocument()
   })
 
   it("stays out of the way when the catalog cannot be read", async () => {
-    mockScopedApi({ context: TWO_WORKSPACES, modelsFail: true })
+    const requested = mockScopedApi({
+      context: TWO_WORKSPACES,
+      modelsFail: true,
+    })
     renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /refresh/i })).toBeEnabled()
+      expect(requested.some((url) => url.includes(`${API_ROOT}/models`))).toBe(
+        true,
+      )
     })
+    await new Promise((resolve) => setTimeout(resolve, 50))
     expect(screen.queryByText(GET_STARTED)).not.toBeInTheDocument()
   })
 })
@@ -1744,9 +1165,7 @@ describe("OverviewIndex for an identity with no organization", () => {
       screen.getByRole("link", { name: "Open your invitations" }),
     ).toHaveAttribute("href", "/invitations")
     expect(
-      screen.queryByText(
-        "At-a-glance spend, traffic, and health across the gateway.",
-      ),
+      screen.queryByRole("navigation", { name: "Overview views" }),
     ).not.toBeInTheDocument()
   })
 
@@ -1759,9 +1178,7 @@ describe("OverviewIndex for an identity with no organization", () => {
     // The deployment-wide page fails open on an unreadable context, and a 404
     // is not one: it is the server saying there is no organization.
     expect(
-      screen.queryByText(
-        "At-a-glance spend, traffic, and health across the gateway.",
-      ),
+      screen.queryByRole("navigation", { name: "Overview views" }),
     ).toBeNull()
     expect(
       screen.getByRole("link", { name: /View invitations/ }),

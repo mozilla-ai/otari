@@ -80,6 +80,13 @@ def _filters(
     end: Annotated[datetime | None, Query(description="Sessions started before this instant (ISO 8601).")] = None,
     user_id: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description="Owning users.")] = None,
     api_key_id: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description="API keys.")] = None,
+    model: Annotated[
+        list[str] | None,
+        Query(
+            max_length=_MAX_FILTER_VALUES,
+            description="Sessions with an LLM call recorded under any of these model ids (exact match).",
+        ),
+    ] = None,
     harness: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description="Agent harnesses.")] = None,
     session_source: Annotated[
         list[Literal["client", "harness", "otlp", "none"]] | None,
@@ -99,6 +106,7 @@ def _filters(
         end=end,
         user_ids=tuple(user_id or ()),
         api_key_ids=tuple(api_key_id or ()),
+        models=tuple(model or ()),
         harnesses=tuple(harness or ()),
         session_sources=tuple(session_source or ()),
         has_error=has_error,

@@ -25,12 +25,12 @@ describe("rail location memory", () => {
   })
 
   it("files a destination under the rail that declares it", () => {
-    rememberLocation("/usage", showsEverything)
+    rememberLocation("/keys", showsEverything)
     rememberLocation("/budgets", showsEverything)
 
     // Two rails, two memories: recording an organization page must not overwrite
     // where you were on the workspace one, which is the whole point.
-    expect(lastLocation("workspace", showsEverything)).toEqual({ to: "/usage" })
+    expect(lastLocation("workspace", showsEverything)).toEqual({ to: "/keys" })
     expect(lastLocation("organization", showsEverything)).toEqual({
       to: "/budgets",
     })
@@ -46,13 +46,22 @@ describe("rail location memory", () => {
     })
   })
 
+  it("remembers which tab of a destination was open", () => {
+    // The Overview is one row with a URL per tab: coming back reopens the tab.
+    rememberLocation("/sessions", showsEverything)
+
+    expect(lastLocation("workspace", showsEverything)).toEqual({
+      to: "/sessions",
+    })
+  })
+
   it("ignores a path the registry does not declare", () => {
-    rememberLocation("/usage", showsEverything)
+    rememberLocation("/keys", showsEverything)
     rememberLocation("/account", showsEverything)
 
     // The account page and the 404 splat are not places to return to, so the last real
     // destination stands rather than being replaced by one.
-    expect(lastLocation("workspace", showsEverything)).toEqual({ to: "/usage" })
+    expect(lastLocation("workspace", showsEverything)).toEqual({ to: "/keys" })
   })
 
   it("ignores a destination this deployment gates off", () => {
@@ -152,7 +161,7 @@ describe("rail location memory", () => {
   it("drops a stored value that belongs to the other rail", () => {
     // Both keys are read through the same registry check, so a destination that
     // has since moved rails cannot land you on the wrong one.
-    window.localStorage.setItem(ORGANIZATION_KEY, "/usage")
+    window.localStorage.setItem(ORGANIZATION_KEY, "/keys")
 
     expect(lastLocation("organization", showsEverything)).toBeUndefined()
   })

@@ -1,16 +1,14 @@
 import { expect, test } from "@playwright/test"
 
 import { login, table, tableRows, tileValue } from "./helpers"
-import { COUNTS, PARITY } from "./parity-data"
+import { PARITY } from "./parity-data"
 
 // The seeded fixture is shared, and nothing here mutates it, but the suite runs
 // one worker against one gateway either way (see web/playwright.config.ts).
 test.describe.configure({ mode: "serial" })
 
-const SEEDED = COUNTS.priced + COUNTS.unpriced + COUNTS.errors
-
 test.describe("overview", () => {
-  test("reports the gateway's own totals once it has traffic", async ({
+  test("opens on the usage tab with the gateway's own totals", async ({
     page,
   }) => {
     await login(page)
@@ -23,67 +21,45 @@ test.describe("overview", () => {
     // local provider config still opened on a getting-started screen.
     await expect(page.getByText("Get started with Otari")).toBeHidden()
 
-    const requests = tileValue(page, "Requests, last 30 days")
-    await expect(requests).not.toHaveText("—")
-    // At least the fixture: the gateway also carries whatever the onboarding
-    // flows left behind, so this is a floor rather than an equality.
-    const counted = Number((await requests.innerText()).replaceAll(",", ""))
-    expect(counted).toBeGreaterThanOrEqual(SEEDED)
-
-    // The priced half of the fixture is the only costed traffic on this gateway,
-    // so a dash (or a zero) here means pricing never reached the tiles.
-    const spend = tileValue(page, "Spend, last 30 days")
-    await expect(spend).toHaveText(/^\$/)
-    await expect(spend).not.toHaveText("$0.00")
-
-    // Errors are seeded, so the rate is a real percentage rather than the
-    // "unknown" dash a failed summary would leave. Not anchored at the end: a
-    // non-neutral rate also carries a status word ("Elevated"), which is there so
-    // the tile never reports its health through color alone.
-    await expect(tileValue(page, "Error rate, last 30 days")).toHaveText(
-      /^\d+(\.\d+)?%/,
+    const tabs = page.getByRole("navigation", { name: "Overview views" })
+    await expect(tabs.getByRole("link", { name: "Usage" })).toHaveAttribute(
+      "aria-current",
+      "page",
     )
+    await expect(tileValue(page, "Tracked cost")).toHaveText(/^\$/)
   })
 
-  test("previews the newest requests and opens the full log", async ({
+  test("Today narrows the window to local midnight, and the tabs keep it", async ({
     page,
   }) => {
     await login(page)
 
-    const rows = tableRows(page, "Recent activity")
-    // The preview is capped at five rows (useUsageLogs({}, 0, 5)).
-    await expect(rows).toHaveCount(5)
+    await page.getByRole("button", { name: "Today", exact: true }).click()
+    await expect(page).toHaveURL(/\/\?.*start_date=/)
 
-    // Newest first, unfiltered. The fixture's priced rows are the most recent
-    // traffic on the gateway (the parity seed runs last, and spreads its densest
-    // set over the shortest step), so the top row naming that model is what
-    // "newest first" means here. An ordering regression would put an older row,
-    // or a row from an earlier flow, at the top instead.
-    await expect(rows.first()).toContainText(PARITY.models.priced.model)
-
-    await page.getByRole("link", { name: "View all" }).click()
-    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible()
+    await page
+      .getByRole("navigation", { name: "Overview views" })
+      .getByRole("link", { name: "Requests" })
+      .click()
+    await expect(page).toHaveURL(/\/requests\?.*start_date=/)
     await expect(table(page, "Activity log")).toBeVisible()
   })
 
-  test("a budget near its limit is a way into budgets, not just a number", async ({
-    page,
-  }) => {
+  test("the Requests tab lists the newest requests first", async ({ page }) => {
     await login(page)
-    // Deliberately not the tile. A KPI cell is a read-only figure: the counts
-    // that are navigation were moved out of the strip on purpose, and the
-    // cells' stray tab stops were removed as keyboard noise, so making the
-    // number clickable would reverse both decisions. Do not "fix" this back.
-    //
-    // Two paths carry the intent instead. General navigation is the rail, which
-    // is what this asserts because it is here on every load. The acted-on path
-    // is the attention strip, which renders "N budgets near limit" as a link
-    // beside the dot that flagged it, and appears only when a budget actually
-    // needs acting on: the parity fixture creates no budget, so that one is
-    // covered where it can be made to happen, in OverviewPage.test.tsx.
-    await page.getByRole("link", { name: "Budgets", exact: true }).click()
-    await expect(
-      page.getByRole("heading", { name: "Budgets", exact: true }),
-    ).toBeVisible()
+    await page
+      .getByRole("navigation", { name: "Overview views" })
+      .getByRole("link", { name: "Requests" })
+      .click()
+    await expect(page).toHaveURL(/\/requests/)
+
+    // The fixture's priced rows are the most recent traffic on the gateway (the
+    // parity seed runs last, and spreads its densest set over the shortest
+    // step), so the top row naming that model is what "newest first" means
+    // here. An ordering regression would put an older row, or a row from an
+    // earlier flow, at the top instead.
+    await expect(tableRows(page, "Activity log").first()).toContainText(
+      PARITY.models.priced.model,
+    )
   })
 })

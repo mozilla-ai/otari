@@ -38688,6 +38688,28 @@
             }
           },
           {
+            "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+              "title": "Model"
+            }
+          },
+          {
             "description": "Agent harnesses.",
             "in": "query",
             "name": "harness",
@@ -38980,6 +39002,28 @@
               ],
               "description": "API keys.",
               "title": "Api Key Id"
+            }
+          },
+          {
+            "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+              "title": "Model"
             }
           },
           {
@@ -39279,6 +39323,28 @@
               ],
               "description": "API keys.",
               "title": "Api Key Id"
+            }
+          },
+          {
+            "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+              "title": "Model"
             }
           },
           {
@@ -46462,6 +46528,28 @@
             }
           },
           {
+            "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+              "title": "Model"
+            }
+          },
+          {
             "description": "Agent harnesses.",
             "in": "query",
             "name": "harness",
@@ -46754,6 +46842,28 @@
               ],
               "description": "API keys.",
               "title": "Api Key Id"
+            }
+          },
+          {
+            "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+              "title": "Model"
             }
           },
           {
@@ -47053,6 +47163,28 @@
               ],
               "description": "API keys.",
               "title": "Api Key Id"
+            }
+          },
+          {
+            "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+              "title": "Model"
             }
           },
           {

@@ -24,7 +24,7 @@ import { Tooltip } from "./Tooltip"
  * passed as a function and spreads the props it is handed, which is what keeps
  * a real button from ending up inside something else the library also calls a
  * button. A HeroUI `Button` cannot take those props (they are the DOM's, its
- * are react-aria's) and so keeps the wrapper.
+ * are react-aria's) and, like `IconButton`, is rendered with no wrapper.
  */
 const meta = {
   title: "Design system/Overlays/Tooltip",

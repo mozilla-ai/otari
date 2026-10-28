@@ -469,7 +469,7 @@ test.describe("dashboard core flows", () => {
     expect(seeded.ok(), await seeded.text()).toBe(true)
 
     await login(page)
-    await nav(page).getByRole("link", { name: "Usage" }).click()
+    await nav(page).getByRole("link", { name: "Overview" }).click()
 
     // The affordance lives in the chart's own caption row and only exists when the
     // range has data to share.

@@ -34,6 +34,13 @@ export interface TraceFilters {
   // Optional, so a filter that names only a start reads to now.
   end?: string
   q: string
+  // Owning users, API keys and models, each matching any of its values. A model
+  // matches a session with a call on it.
+  userIds?: string[]
+  apiKeyIds?: string[]
+  models?: string[]
+  // "true" keeps sessions with an unrecovered error, "false" those without.
+  hasError?: "" | "true" | "false"
 }
 
 // An operator reads every workspace on the deployment, anyone else their own
@@ -79,6 +86,10 @@ export function traceParams(filters: TraceFilters): URLSearchParams {
   if (filters.start) params.set("start", filters.start)
   if (filters.end) params.set("end", filters.end)
   if (filters.q) params.set("q", filters.q)
+  for (const id of filters.userIds ?? []) params.append("user_id", id)
+  for (const id of filters.apiKeyIds ?? []) params.append("api_key_id", id)
+  for (const model of filters.models ?? []) params.append("model", model)
+  if (filters.hasError) params.set("has_error", filters.hasError)
   return params
 }
 

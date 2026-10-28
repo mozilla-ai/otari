@@ -83,7 +83,7 @@ curl http://localhost:8000/api/v1/chat/completions \
 ```
 
 The request is authenticated, checked against applicable budgets, routed with
-the provider credential held by Otari, and recorded in Activity and Usage.
+the provider credential held by Otari, and recorded on the dashboard's Overview.
 
 ## Self-hosted llama.cpp
 

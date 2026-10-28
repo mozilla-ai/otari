@@ -1,6 +1,7 @@
 import { Tooltip as HeroTooltip } from "@heroui/react"
 import { render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { IconButton } from "@/design-system/actions/IconButton"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 
 /**
@@ -29,6 +30,15 @@ describe("Tooltip", () => {
     // Reachable like a button, but not dressed as one: text under the pointer
     // stays text.
     expect(trigger).toHaveClass("cursor-default")
+  })
+
+  it("puts a Button's tooltip on the button itself, with no wrapper role", () => {
+    render(
+      <Tooltip content="Close">
+        <IconButton label="Close">x</IconButton>
+      </Tooltip>,
+    )
+    expect(screen.getAllByRole("button", { name: "Close" })).toHaveLength(1)
   })
 
   it("hands a control the trigger's props instead of wrapping it", () => {

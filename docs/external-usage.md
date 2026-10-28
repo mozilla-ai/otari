@@ -1,8 +1,8 @@
 # Importing external usage
 
 Otari can record usage that it did not proxy, such as subscription-backed coding
-agents or another instrumented application. Imported events appear in Activity
-and Usage with their source and an API-equivalent cost estimate.
+agents or another instrumented application. Imported events appear in the
+dashboard's Overview with their source and an API-equivalent cost estimate.
 
 ## Enforcement boundary
 

@@ -31,7 +31,7 @@ vi.mock("./overlayNavItems", () => ({
     // reads: one module for both is what a unique section id buys.
     {
       sectionId: "observe",
-      items: [{ to: "/usage", label: "Reports", icon: FiServer }],
+      items: [{ to: "/models", label: "Reports", icon: FiServer }],
     },
     // And the deployment rail, from that same list: the process every tenant
     // is served by, which is neither a workspace's scope nor a tenant's.
@@ -55,7 +55,7 @@ describe("a build that replaces the nav-item module", () => {
   it("appends into the workspace rail from that same list", () => {
     expect(
       section(NAV_SECTIONS, "observe")?.items.map((item) => item.label),
-    ).toEqual(["Activity", "Sessions", "Usage", "Reports"])
+    ).toEqual(["Reports"])
   })
 
   it("appends into the deployment rail from that same list", () => {

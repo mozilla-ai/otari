@@ -1,5 +1,13 @@
 import { Tooltip as HeroTooltip } from "@heroui/react"
-import type { JSX, ReactElement, ReactNode } from "react"
+import {
+  isValidElement,
+  type JSX,
+  type ReactElement,
+  type ReactNode,
+} from "react"
+
+import { Button } from "../actions/Button"
+import { IconButton } from "../actions/IconButton"
 
 /** The props HeroUI's trigger hands a control: focus and hover handlers, a ref, and the `aria-describedby` that names the tooltip. Spread them onto the element, all of them. */
 export type TooltipTriggerProps = JSX.IntrinsicElements["button"]
@@ -40,10 +48,12 @@ export const TOOLTIP_OPEN_DELAY_MS = 300
  *   stop of its own, and give every `getByRole("button")` two matches instead
  *   of one, which is a dozen assertions in this repo's e2e suite.
  *
- * A HeroUI `Button` (so `IconButton`) cannot use the function form and keeps the
- * wrapper: its props are react-aria's rather than the DOM's, so the trigger's
- * `onClick` and `onPointerEnter` do not even typecheck against it. That is why
- * the props are typed for a `button` here rather than generically.
+ * A `Button` or `IconButton` cannot use the function form: its props are
+ * react-aria's rather than the DOM's, so the trigger's `onClick` and
+ * `onPointerEnter` do not even typecheck against it. It is a react-aria control,
+ * though, so it reads the trigger state from the tooltip root directly, and it
+ * is rendered with no wrapper at all: one button, and the label on it. That is
+ * why the props are typed for a `button` here rather than generically.
  *
  * Either way the trigger keeps its own type, which is what a `trigger={<Button/>}`
  * prop could not have done: the tooltip would have been the parent of a node it
@@ -70,6 +80,23 @@ export function Tooltip({
   onOpenChange?: (isOpen: boolean) => void
   children: ReactNode | ((props: TooltipTriggerProps) => ReactElement)
 }) {
+  if (
+    isValidElement(children) &&
+    (children.type === Button || children.type === IconButton)
+  ) {
+    return (
+      <HeroTooltip.Root
+        delay={delay}
+        isOpen={isOpen}
+        onOpenChange={onOpenChange}
+      >
+        {children}
+        <HeroTooltip.Content placement={placement}>
+          {content}
+        </HeroTooltip.Content>
+      </HeroTooltip.Root>
+    )
+  }
   return (
     <HeroTooltip.Root delay={delay} isOpen={isOpen} onOpenChange={onOpenChange}>
       {typeof children === "function" ? (
