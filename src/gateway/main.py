@@ -48,7 +48,7 @@ from gateway.core.config import (
     X_API_KEY_HEADER,
     GatewayConfig,
 )
-from gateway.core.database import create_session, describe_database_error, dispose_db, init_db
+from gateway.core.database import create_session, describe_database_error, dispose_db, init_db, release_session
 from gateway.core.error_codes import INVALID_REQUEST, error_code_of, error_headers
 from gateway.core.feature import CoreFeature, Worker
 from gateway.core.unit_of_work import create_unit_of_work, create_unit_of_work_with_session
@@ -929,7 +929,9 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # Overlay dashboard-stored search tools before the checks below,
             # so a tool added through the dashboard is one the backend-URL
             # warning and the flat-pricing warning can see. On a session of its
-            # own, which only reads.
+            # own, once this one has handed its connection back, so startup
+            # holds one pooled connection at a time.
+            await release_session(session)
             async with create_unit_of_work_with_session() as (search_tool_session, uow):
                 await build_search_tool_service(uow, search_tool_session, config=config).load_at_startup()
             # Before the first request, so a stored rule never lets a burst through at boot.

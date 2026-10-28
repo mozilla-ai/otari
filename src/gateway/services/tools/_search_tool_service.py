@@ -357,9 +357,10 @@ class SearchToolService:
     async def load_at_startup(self) -> None:
         """Prime the overlay so the first request does not race the first refresh.
 
-        A failure here is logged rather than raised: stored tools are an addition to
-        the config ones, and a gateway that serves every config-file search tool is
-        better than one that refuses to start because a credential load failed.
+        A failure here is logged and the start goes on: stored tools are an
+        addition to the config ones, and a gateway that serves every config-file
+        search tool is better than one that refuses to start because a
+        credential load failed.
         """
         reset_search_tool_cache()
         try:
