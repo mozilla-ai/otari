@@ -457,6 +457,43 @@ describe("KeysPage", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("narrows the keys by name or prefix, and says so when nothing matches", async () => {
+    mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "prod-ingest", key_prefix: "gw-AbC" }),
+        apiKey({ id: "key-2", key_name: "staging-eval", key_prefix: "gw-Zz9" }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+    const search = await screen.findByRole("searchbox", {
+      name: "Search API keys",
+    })
+    await screen.findByText("prod-ingest")
+
+    await user.type(search, "PROD")
+    await waitFor(() =>
+      expect(screen.queryByText("staging-eval")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("prod-ingest")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("1 match")
+
+    await user.clear(search)
+    await user.type(search, "gw-zz")
+    expect(await screen.findByText("staging-eval")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.queryByText("prod-ingest")).not.toBeInTheDocument(),
+    )
+
+    await user.clear(search)
+    await user.type(search, "nothing-like-this")
+    expect(
+      await screen.findByText("No API keys match this search."),
+    ).toBeInTheDocument()
+    // An empty search is not an empty list: the onboarding panel stays away.
+    expect(screen.queryByText("No API keys yet")).not.toBeInTheDocument()
+  })
+
   it("lists key fingerprints and supports keys without stored suffixes", async () => {
     const tooltips = instantTooltips()
     mockApi({
