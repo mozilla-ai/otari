@@ -365,8 +365,10 @@ class SearchToolService:
         reset_search_tool_cache()
         try:
             async with self.uow:
-                shadowed = apply_at_startup(self.config, await self.tools.list_committed())
-                record_read_settings(await self.read_settings())
+                rows = await self.tools.list_committed()
+                overrides = await self.read_settings()
+            shadowed = apply_at_startup(self.config, rows)
+            record_read_settings(overrides)
         except DATABASE_ERRORS as exc:
             # By class only: a database error's message can carry the row it read.
             logger.error(

@@ -417,3 +417,31 @@ async def test_a_startup_load_the_database_refuses_is_logged_by_class(caplog: py
     assert "secret" not in logged
     assert not any(record.exc_info for record in caplog.records)
     assert set(config.search_tools) == {"from-file"}
+
+
+@pytest.mark.asyncio
+async def test_a_startup_load_whose_commit_fails_applies_no_stored_row() -> None:
+    """The log says config tools only, so no stored row may be in effect."""
+
+    class _FailingCommit(_UnitOfWork):
+        async def __aexit__(self, *exc: object) -> None:
+            if exc[0] is None:
+                raise _database_down()
+
+    async def read_settings() -> dict[str, Any]:
+        return {"web_search_default_tool": "stored"}
+
+    async def stage_setting(_key: str, value: Any) -> Any:
+        return value
+
+    config = GatewayConfig(search_tools={"from-file": {"provider": "fake"}})
+    service = SearchToolService(
+        _FailingCommit(),  # type: ignore[arg-type]
+        config=config,
+        tools=_Rows([]),  # type: ignore[arg-type]
+        read_settings=read_settings,
+        stage_setting=stage_setting,
+    )
+    await service.load_at_startup()
+    assert set(config.search_tools) == {"from-file"}
+    assert overlay._read_settings == {}
