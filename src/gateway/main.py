@@ -22,6 +22,7 @@ import any_search
 from gateway import features
 from gateway.api.deps import (
     build_budget_service,
+    build_deployment_pricing_service,
     build_file_service,
     build_hosted_discovery,
     build_hosted_provider_service,
@@ -924,7 +925,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # exists yet).
             await load_org_provider_keys_at_startup(session)
             await bootstrap_first_api_key(config, session, app.state.container.resolve(ApiKeyFormatPort, session))
-            await initialize_pricing_from_config(config, session)
+            async with create_unit_of_work() as pricing_uow:
+                await initialize_pricing_from_config(config, session, build_deployment_pricing_service(pricing_uow))
             await initialize_tool_prices_from_config(config, session)
             await warn_if_require_pricing_without_pricing(config, session)
             await warn_if_search_tools_lack_flat_pricing(config, session)

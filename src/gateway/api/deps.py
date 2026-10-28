@@ -1673,6 +1673,13 @@ def get_workspace_web_search_policies(
     )
 
 
+def build_deployment_pricing_service(uow: UnitOfWork) -> DeploymentPricingService:
+    """The one assembly, shared by the hosted-providers service and startup's config pricing seed."""
+    return DeploymentPricingService(
+        uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
+    )
+
+
 def build_hosted_provider_service(uow: UnitOfWork, *, config: GatewayConfig) -> HostedProviderService:
     """Build the hosted-providers service on ``uow``.
 
@@ -1690,9 +1697,7 @@ def build_hosted_provider_service(uow: UnitOfWork, *, config: GatewayConfig) -> 
         sources=HostedSources(config, providers),
         models=HostedProviderModelRepository(uow),
         endpoints=ProviderEndpointRepository(uow),
-        pricing=DeploymentPricingService(
-            uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
-        ),
+        pricing=build_deployment_pricing_service(uow),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
         organization_exists=OrganizationRepository(uow).exists,
     )

@@ -13,6 +13,7 @@ from gateway.log_config import logger
 from gateway.models.money import to_usd
 from gateway.models.pricing import MODEL_KIND, ModelPricing, PricingKind
 from gateway.repositories.pricing import OrganizationModelPricingRepository
+from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     gateway_tool_pricing_key,
@@ -176,14 +177,26 @@ async def warn_if_router_candidates_lack_pricing(config: GatewayConfig, db: Asyn
             )
 
 
-async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession) -> None:
-    """Initialize model pricing from configuration file."""
+async def initialize_pricing_from_config(
+    config: GatewayConfig, db: AsyncSession, pricing: DeploymentPricingService
+) -> None:
+    """Initialize model pricing from configuration file.
+
+    An entry with no ``effective_at`` is dated now, so it adds a version only
+    when its rates differ from the version in force: an unchanged file adds
+    nothing on a restart.
+    """
 
     if not config.pricing:
         logger.debug("No pricing configuration found in config file")
         return
 
     logger.info("Loading pricing configuration for %s model(s)", len(config.pricing))
+
+    undated_keys = [
+        normalize_pricing_key(config, key) for key, entry in config.pricing.items() if not entry.effective_at
+    ]
+    in_force = await pricing.current_versions(undated_keys, datetime.now(UTC)) if undated_keys else {}
 
     # A search or fetch instance's rate written here under its old
     # ``<provider>:<instance>`` key keeps loading, matched whole (the deprecation
@@ -230,6 +243,22 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         pricing_tiers = [tier.model_dump(exclude_none=True) for tier in pricing_config.pricing_tiers]
         effective_at = normalize_effective_at(pricing_config.effective_at)
 
+        new_pricing = ModelPricing(
+            model_key=model_key,
+            effective_at=effective_at,
+            input_price_per_million=input_price,
+            output_price_per_million=output_price,
+            cache_read_price_per_million=cache_read_price,
+            cache_write_price_per_million=cache_write_price,
+            pricing_tiers=pricing_tiers,
+            unit=pricing_config.unit,
+            origin="config",
+        )
+        current = in_force.get(model_key)
+        if current is not None and DeploymentPricingService.rates_match(current, new_pricing):
+            logger.debug("Pricing for '%s' is unchanged; keeping the version in force", model_key)
+            continue
+
         existing_pricing = (
             await db.execute(
                 select(ModelPricing).where(
@@ -249,17 +278,6 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
             )
             continue
 
-        new_pricing = ModelPricing(
-            model_key=model_key,
-            effective_at=effective_at,
-            input_price_per_million=input_price,
-            output_price_per_million=output_price,
-            cache_read_price_per_million=cache_read_price,
-            cache_write_price_per_million=cache_write_price,
-            pricing_tiers=pricing_tiers,
-            unit=pricing_config.unit,
-            origin="config",
-        )
         db.add(new_pricing)
         logger.info("Added pricing for '%s': input=$%s/M, output=$%s/M", model_key, input_price, output_price)
 

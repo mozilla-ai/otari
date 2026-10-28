@@ -122,7 +122,7 @@ class DeploymentPricingService:
 
     @staticmethod
     def rates_match(stored: ModelPricing, default: ModelPricing) -> bool:
-        """Whether a stored version already holds a default's rates.
+        """Whether a stored version already holds a default's rates, per the same unit.
 
         Compared at the rate column's own scale, because the stored value has
         been through it and the freshly resolved one has not, so an exact
@@ -132,6 +132,8 @@ class DeploymentPricingService:
         for field in _RATE_FIELDS:
             if _quantized(getattr(stored, field)) != _quantized(getattr(default, field)):
                 return False
+        if (stored.unit or "tokens") != (default.unit or "tokens"):
+            return False
         return list(stored.pricing_tiers or []) == list(default.pricing_tiers or [])
 
     async def write_rate(

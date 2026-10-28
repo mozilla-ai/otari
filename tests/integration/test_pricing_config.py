@@ -7,15 +7,20 @@ from decimal import Decimal
 import pytest
 from any_llm.types.completion import CompletionUsage
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from gateway.api.deps import build_deployment_pricing_service
 from gateway.api.routes.chat import log_usage
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.settings.pricing import PricingConfig
+from gateway.core.settings.pricing import PricingConfig, PricingTierConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.db import ModelPricing, get_db
 from gateway.main import create_app
 from gateway.models.usage import UsageLog
+from gateway.services.pricing import DeploymentPricingService
+from gateway.services.pricing_init_service import initialize_pricing_from_config
 
 from .conftest import build_async_session_override
 
@@ -673,6 +678,55 @@ def test_pricing_initialization_with_no_config(postgres_url: str, test_db: Sessi
             assert pricing_count == 0, "No pricing should be loaded when config is empty"
     finally:
         dispose_override()
+
+
+def _undated_pricing_config(input_price: float) -> GatewayConfig:
+    return GatewayConfig(
+        master_key="test-master-key",
+        providers={"openai": {"api_key": "test-key"}},
+        pricing={
+            "openai:gpt-4": PricingConfig(
+                input_price_per_million=input_price,
+                output_price_per_million=60.0,
+                cache_read_price_per_million=3.0,
+                pricing_tiers=[PricingTierConfig(min_input_tokens=1000, input_price_per_million=40.0)],
+            )
+        },
+    )
+
+
+def _pricing(db: AsyncSession) -> DeploymentPricingService:
+    return build_deployment_pricing_service(UnitOfWork(db))
+
+
+async def _config_versions(db: AsyncSession) -> list[ModelPricing]:
+    result = await db.execute(
+        select(ModelPricing).where(ModelPricing.model_key == "openai:gpt-4").order_by(ModelPricing.effective_at)
+    )
+    return list(result.scalars().all())
+
+
+@pytest.mark.asyncio
+async def test_undated_config_pricing_is_seeded_once_across_restarts(async_db: AsyncSession) -> None:
+    """A pricing entry without effective_at adds no row on a restart that leaves it unchanged."""
+    config = _undated_pricing_config(30.0)
+
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+    await initialize_pricing_from_config(config, async_db, _pricing(async_db))
+
+    versions = await _config_versions(async_db)
+    assert len(versions) == 1
+    assert versions[0].origin == "config"
+
+
+@pytest.mark.asyncio
+async def test_undated_config_pricing_adds_a_version_when_the_rate_changes(async_db: AsyncSession) -> None:
+    """Editing the configured rate still takes effect on the next start."""
+    await initialize_pricing_from_config(_undated_pricing_config(30.0), async_db, _pricing(async_db))
+    await initialize_pricing_from_config(_undated_pricing_config(35.0), async_db, _pricing(async_db))
+
+    versions = await _config_versions(async_db)
+    assert [version.input_price_per_million for version in versions] == [Decimal(30), Decimal(35)]
 
 
 @pytest.mark.asyncio
