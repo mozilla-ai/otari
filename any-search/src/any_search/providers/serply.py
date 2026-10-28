@@ -28,8 +28,7 @@ an opaque Google redirect token, which Serply sometimes returns in its place,
 is dropped rather than failing the search. Ads, places, the knowledge graph
 and Serply's other SERP features come in arrays of their own beside
 ``results``, which the adapter does not read, so a field Serply adds breaks
-nothing. A result's ``metadata.published_time`` becomes ``published`` when it is a
-``May 27, 2026`` date, and Serply reports no cost.
+nothing. Serply dates no hit and reports no cost.
 
 API: https://serply.io/docs/resources/google-search. ``tbs`` and ``tbm`` are
 Google's own parameters, which the documentation does not list; Serply passes
@@ -40,7 +39,6 @@ $0.75 per 1,000 in the largest packs; a new account gets 2,500 credits to use
 in its first 30 days.
 """
 
-from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -198,16 +196,4 @@ def _hit(item: Any, response: httpx.Response) -> SearchHit | None:
         raise _unexpected(response)
     if not link.startswith(("https://", "http://")):
         return None
-    return SearchHit(url=link, title=title, snippet=description, published=_published(item), raw=item)
-
-
-def _published(item: dict[str, Any]) -> datetime | None:
-    """``metadata.published_time``, which Google prints as ``May 27, 2026``; ``None`` for any other form."""
-    metadata = item.get("metadata")
-    value = metadata.get("published_time") if isinstance(metadata, dict) else None
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.strptime(value, "%b %d, %Y").replace(tzinfo=UTC)
-    except ValueError:
-        return None
+    return SearchHit(url=link, title=title, snippet=description, raw=item)

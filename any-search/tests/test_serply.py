@@ -5,7 +5,6 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -137,9 +136,8 @@ async def test_reads_the_recorded_answer() -> None:
         recorded[0]["title"],
         recorded[0]["description"],
         None,
-        datetime(2026, 5, 27, tzinfo=UTC),
+        None,
     )
-    assert result.hits[1].published == datetime(2024, 3, 19, tzinfo=UTC)
     assert first.raw == recorded[0]
     assert (result.cost, result.cost_source, result.error) == (None, "none", None)
     assert result.raw == _recorded("normal").json()
