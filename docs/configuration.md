@@ -1454,8 +1454,9 @@ The signup form needs mail configured in either case, because it sends a verific
 
 ## Built-in tools and guardrails variables
 
-The Tools pages and `GET /api/v1/tool-settings` show effective sandbox, web-search,
-and guardrail configuration. Common startup settings are:
+`GET /api/v1/tool-settings` shows effective sandbox, web-search, and guardrail
+configuration. On the dashboard, the Tools pages show the sandbox and guardrail
+settings, and the deployment's Web search page shows the web-search ones. Common startup settings are:
 
 - `sandbox_provider` and `sandbox_url`
 - `sandbox_container_idle_ttl_sec` and `sandbox_container_max_lifetime_sec`

@@ -92,10 +92,11 @@ dashboard session. It does not prove that the session may act deployment-wide.
   dashboard cookie. The Playground's own completion endpoint
   (`routes/playground.py`) is the one surface that runs a completion from a
   session, and it is a separate route rather than a relaxation of that one: it
-  resolves the caller's attribution user and proves their workspace membership
-  itself, then hands the pipeline a `SessionPrincipal`
-  (`types/session_principal.py`). Adding a second such route means doing all
-  three, not reusing the type.
+  resolves the caller's attribution user, proves their workspace membership
+  and refuses a viewer itself
+  (`OrganizationService.require_workspace_contributor_access`), then hands the
+  pipeline a `SessionPrincipal` (`types/session_principal.py`). Adding a second
+  such route means doing all of that, not reusing the type.
 - Non-billable catalog reads use `verify_catalog_reader`.
 - A service key manages its own end users (`routes/end_users.py`) through
   `verify_service_key`, which takes neither the master key nor a cookie, and
@@ -107,7 +108,8 @@ that needs a deployment-wide route gets a separately scoped endpoint, as
 organization usage does for reads and `/api/v1/organizations/me/keys`
 (`organization_keys.py`) does for writes; do not loosen the original route. A
 member's key surface derives its owner as well as its scope, so it takes no
-`user_id` and mints nothing budget-exempt.
+`user_id`, mints nothing budget-exempt, and refuses a viewer's key writes
+through the same contributor check.
 
 The API key determines the billed workspace. Client `user`, workspace, or
 organization fields cannot move billing or credential resolution.
