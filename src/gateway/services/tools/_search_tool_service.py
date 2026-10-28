@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from gateway.core.config import GatewayConfig
-from gateway.core.database import DATABASE_ERRORS
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.settings.tools import BUILTIN_FETCH, BUILTIN_FETCH_PROVIDER, ToolInstance, ToolKind
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.tools_exceptions import (
@@ -366,6 +366,13 @@ class SearchToolService:
             async with self.uow:
                 shadowed = apply_at_startup(self.config, await self.tools.list_committed())
                 record_read_settings(await self.read_settings())
+        except DATABASE_ERRORS as exc:
+            # By class only: a database error's message can carry the row it read.
+            logger.error(
+                "Failed to load stored search tools (%s); continuing with config search tools only",
+                describe_database_error(exc),
+            )
+            shadowed = set()
         except Exception:
             logger.exception("Failed to load stored search tools; continuing with config search tools only")
             shadowed = set()

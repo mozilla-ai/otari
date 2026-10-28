@@ -1,11 +1,13 @@
 """Unit tests for the stored search-tool overlay merged over config search tools."""
 
+import asyncio
 import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from gateway.api import deps
 from gateway.core.config import GatewayConfig
@@ -364,3 +366,54 @@ async def test_the_service_reads_the_settings_without_reporting_invalid_ones(mon
     service = deps.build_search_tool_service(object(), object(), config=GatewayConfig())  # type: ignore[arg-type]
     await service.read_settings()
     assert calls == [False]
+
+
+def _database_down() -> OperationalError:
+    return OperationalError("SELECT secret-statement", {}, Exception("secret-row-value"))
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_the_database_refuses_is_logged_by_class_and_retried(caplog: pytest.LogCaptureFixture) -> None:
+    ticks = 0
+
+    async def refresh() -> None:
+        nonlocal ticks
+        ticks += 1
+        if ticks == 1:
+            raise _database_down()
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await overlay.run_search_tool_refresher(refresh, interval=0)
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "Stored search tool refresh failed (OperationalError" in logged
+    assert "secret" not in logged
+    assert not any(record.exc_info for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_a_startup_load_the_database_refuses_is_logged_by_class(caplog: pytest.LogCaptureFixture) -> None:
+    class _Refusing:
+        async def list_committed(self) -> list[SearchToolCredential]:
+            raise _database_down()
+
+    async def read_settings() -> dict[str, Any]:
+        return {}
+
+    async def stage_setting(_key: str, value: Any) -> Any:
+        return value
+
+    config = GatewayConfig(search_tools={"from-file": {"provider": "fake"}})
+    service = SearchToolService(
+        _UnitOfWork(),  # type: ignore[arg-type]
+        config=config,
+        tools=_Refusing(),  # type: ignore[arg-type]
+        read_settings=read_settings,
+        stage_setting=stage_setting,
+    )
+    await service.load_at_startup()
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "Failed to load stored search tools (OperationalError" in logged
+    assert "secret" not in logged
+    assert not any(record.exc_info for record in caplog.records)
+    assert set(config.search_tools) == {"from-file"}

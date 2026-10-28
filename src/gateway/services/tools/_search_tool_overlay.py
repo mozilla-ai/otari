@@ -32,6 +32,7 @@ from datetime import datetime
 from typing import Any
 
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.settings.tools import ToolKind, dangling_reference_warnings, warn_about_instances
 from gateway.log_config import logger
 from gateway.models.tools import SearchToolCredential
@@ -275,5 +276,9 @@ async def run_search_tool_refresher(
             await refresh()
         except asyncio.CancelledError:
             raise
+        except DATABASE_ERRORS as exc:
+            logger.warning(
+                "Stored search tool refresh failed (%s); retrying in %ss", describe_database_error(exc), interval
+            )
         except Exception:
             logger.warning("Stored search tool refresh failed; retrying in %ss", interval, exc_info=True)
