@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -15,6 +15,7 @@ import {
   organizationContext,
   workspaceMcpServer,
 } from "@/tests/fixtures"
+import { renderWithRouter } from "@/tests/router"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 
@@ -82,7 +83,8 @@ function renderCard(variant?: "card" | "page") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(
+  // In a router, because the page keeps its search in the URL.
+  return renderWithRouter(
     <QueryClientProvider client={client}>
       <SelectedWorkspaceProvider>
         <WorkspaceMcpServersCard variant={variant} />
@@ -95,7 +97,7 @@ function renderCard(variant?: "card" | "page") {
 // immediately would submit against a table that had not loaded. The rendered
 // list is the signal that the workspace and its servers are both in hand.
 async function renderLoaded(rows: WorkspaceMcpServer[] = []) {
-  renderCard()
+  await renderCard()
   if (rows.length === 0) {
     await screen.findByText(/No MCP server registered/i)
     return
@@ -119,7 +121,7 @@ describe("WorkspaceMcpServersCard", () => {
     // page component is a one-line wrapper with no test of its own, so without
     // this the page's only h1 could be dropped silently.
     mockApi()
-    renderCard("page")
+    await renderCard("page")
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "MCP servers" }),
@@ -134,12 +136,45 @@ describe("WorkspaceMcpServersCard", () => {
 
   it("keeps its own heading where it is one card among several", async () => {
     mockApi()
-    renderCard()
+    await renderLoaded()
 
     expect(
-      await screen.findByRole("heading", { level: 2, name: "MCP servers" }),
+      screen.getByRole("heading", { level: 2, name: "MCP servers" }),
     ).toBeInTheDocument()
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull()
+  })
+
+  it("narrows its own page by name or URL, and not as a section of Tools", async () => {
+    mockApi({
+      servers: [
+        workspaceMcpServer({
+          id: "s-1",
+          name: "github",
+          url: "https://mcp.example.com/github",
+        }),
+        workspaceMcpServer({
+          id: "s-2",
+          name: "linear",
+          url: "https://mcp.linear.app/sse",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderCard("page")
+    await screen.findByText("github")
+    const search = screen.getByRole("searchbox", { name: "Search MCP servers" })
+
+    await user.type(search, "linear.app")
+    await waitFor(() =>
+      expect(screen.queryByText("github")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("linear")).toBeInTheDocument()
+
+    await user.clear(search)
+    await user.type(search, "nothing-like-this")
+    expect(
+      await screen.findByText("No MCP servers match this search."),
+    ).toBeInTheDocument()
   })
 
   it("lists the workspace's servers with what the API says about each", async () => {
