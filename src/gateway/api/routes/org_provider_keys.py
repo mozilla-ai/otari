@@ -196,13 +196,21 @@ async def list_org_provider_key_models(
     key_id: uuid.UUID,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 500,
+    search: Annotated[
+        str | None,
+        Query(
+            max_length=200,
+            description="Narrow to models whose name contains this text, case-insensitively.",
+        ),
+    ] = None,
 ) -> OrgProviderKeyModelsPublic:
     """List the models offered on one key, each with the rate it currently serves at.
 
     Organization owners and admins only. ``count`` is the total rather than the
-    page length, so a client knows whether another page is owed.
+    page length, so a client knows whether another page is owed. ``search``
+    narrows the page and the count together.
     """
-    return await service.list_models(user=current_identity, key_id=key_id, skip=skip, limit=limit)
+    return await service.list_models(user=current_identity, key_id=key_id, skip=skip, limit=limit, search=search)
 
 
 @org_router.post("/{key_id}/models", status_code=status.HTTP_201_CREATED)
