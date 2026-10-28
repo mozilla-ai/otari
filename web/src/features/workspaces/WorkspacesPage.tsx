@@ -12,10 +12,12 @@ import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { Select } from "@/design-system/forms/Select"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { budgetLabeler, shortBudgetId } from "@/features/budgets/budgetLabel"
 import { canManage } from "@/features/organization/roles"
@@ -42,6 +44,7 @@ import {
   useWorkspaces,
 } from "@/shared/api/workspaces"
 import { formatDate } from "@/shared/helpers/format"
+import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
 
 // Workspaces are the unit inside an organization that work is scoped to. This
 // page lists the ones the caller can see, and opening a row reveals its roster:
@@ -772,6 +775,10 @@ export function WorkspacesPage() {
   // takes away the node react-aria restores focus to, so closing drops focus to
   // `<body>`. `PageIntro`'s action is ungated for the same reason.
   const showOnboarding = !workspaces.isLoading && rows.length === 0
+  const search = useListSearch()
+  const shown = rows.filter((row) =>
+    matchesSearch(search.term, row.name, row.description),
+  )
 
   // The default-budget column is dropped, not emptied, for a caller who cannot
   // read the budget names it shows; see the note on `isOperator` above.
@@ -950,17 +957,33 @@ export function WorkspacesPage() {
           onAction={manages ? openCreate : undefined}
         />
       ) : (
-        <TableScrollFrame className="otari-workspaces-table">
-          <DataTable
-            mobileLayout="cards"
-            ariaLabel="Workspaces"
-            columns={columns}
-            rows={rows}
-            getRowKey={getWorkspaceRowKey}
-            isLoading={workspaces.isLoading}
-            emptyContent="No workspaces yet."
-          />
-        </TableScrollFrame>
+        <>
+          <Toolbar>
+            <SearchField
+              label="Search workspaces"
+              placeholder="Search by name or description"
+              value={search.value}
+              onChange={search.onChange}
+              resultCount={shown.length}
+              className="w-full md:w-96"
+            />
+          </Toolbar>
+          <TableScrollFrame className="otari-workspaces-table">
+            <DataTable
+              mobileLayout="cards"
+              ariaLabel="Workspaces"
+              columns={columns}
+              rows={shown}
+              getRowKey={getWorkspaceRowKey}
+              isLoading={workspaces.isLoading}
+              emptyContent={
+                search.term
+                  ? "No workspaces match this search."
+                  : "No workspaces yet."
+              }
+            />
+          </TableScrollFrame>
+        </>
       )}
 
       <ConfirmDialog
