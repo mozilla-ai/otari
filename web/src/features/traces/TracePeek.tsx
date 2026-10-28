@@ -172,13 +172,15 @@ function Attributes({
     ...Object.entries(observation.metadata ?? {}),
   ]
   return (
-    <dl className="grid grid-cols-[9rem_1fr] gap-x-4 gap-y-2">
+    // Keys and values wrap anywhere: a dotted attribute key or an ID has no
+    // space to break at, and would otherwise run into the next column.
+    <dl className="grid grid-cols-[fit-content(16rem)_minmax(0,1fr)] gap-x-4 gap-y-2">
       {rows
         .filter(([, value]) => value)
         .map(([key, value]) => (
           <div key={key} className="contents">
-            <dt className="text-muted">{key}</dt>
-            <dd className="break-words text-body">{value}</dd>
+            <dt className="wrap-anywhere text-muted">{key}</dt>
+            <dd className="wrap-anywhere text-body">{value}</dd>
           </div>
         ))}
     </dl>
