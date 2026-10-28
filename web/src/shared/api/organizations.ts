@@ -370,12 +370,16 @@ export function useOrganizationMembers(enabled = true) {
  * still answers the two readers who genuinely want every row, a label lookup
  * and a candidate list, and both are tracked elsewhere (otari#1380).
  */
-export function useOrganizationMembersPage(page: number, pageSize: number) {
+export function useOrganizationMembersPage(
+  page: number,
+  pageSize: number,
+  search = "",
+) {
   return useQuery({
-    queryKey: [ORGANIZATION_MEMBERS, "page", page, pageSize],
+    queryKey: [ORGANIZATION_MEMBERS, "page", page, pageSize, search],
     queryFn: () =>
       apiFetch<OrganizationMembers>(
-        `/organizations/me/members?skip=${page * pageSize}&limit=${pageSize}`,
+        `/organizations/me/members?skip=${page * pageSize}&limit=${pageSize}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
       ),
     staleTime: 60_000,
     placeholderData: keepPreviousData,

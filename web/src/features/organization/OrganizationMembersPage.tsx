@@ -8,7 +8,6 @@ import {
   FiUserMinus,
   FiXCircle,
 } from "react-icons/fi"
-
 import type {
   BulkInviteOrganizationMembersResult,
   InviteOrganizationMemberRequest,
@@ -32,12 +31,14 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { Select } from "@/design-system/forms/Select"
 import { TextArea } from "@/design-system/forms/TextArea"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { Disclosure } from "@/design-system/navigation/Disclosure"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
@@ -78,6 +79,7 @@ import { absoluteDashboardLink } from "@/shared/helpers/dashboardLink"
 import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import { useListSearch } from "@/shared/hooks/useListSearch"
 
 import {
   asMembershipRole,
@@ -850,7 +852,10 @@ export function OrganizationMembersPage() {
   const context = useOrganizationContext()
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const members = useOrganizationMembersPage(page, pageSize)
+  const search = useListSearch()
+  // Searched by the endpoint, so a match on a later page is found and the
+  // pager's total is the number that matched.
+  const members = useOrganizationMembersPage(page, pageSize, search.term)
   const update = useUpdateOrganizationMember()
   const remove = useRemoveOrganizationMember()
   const revoke = useRevokeOrganizationMemberInvitation()
@@ -1354,6 +1359,20 @@ export function OrganizationMembersPage() {
         />
       ) : null}
 
+      <Toolbar className="pb-3">
+        <SearchField
+          label="Search members"
+          placeholder="Search by name or email"
+          value={search.value}
+          onChange={(next) => {
+            search.onChange(next)
+            setPage(0)
+          }}
+          resultCount={members.data?.count ?? 0}
+          className="w-full md:w-96"
+        />
+      </Toolbar>
+
       <TableScrollFrame className="otari-members-table">
         <DataTable
           mobileLayout="cards"
@@ -1362,7 +1381,9 @@ export function OrganizationMembersPage() {
           rows={rows}
           getRowKey={memberRowKey}
           isLoading={members.isLoading}
-          emptyContent="No members yet."
+          emptyContent={
+            search.term ? "No members match this search." : "No members yet."
+          }
         />
       </TableScrollFrame>
       <TablePagination
