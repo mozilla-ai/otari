@@ -933,7 +933,9 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # holds one pooled connection at a time.
             await release_session(session)
             async with create_unit_of_work_with_session() as (search_tool_session, uow):
-                await build_search_tool_service(uow, search_tool_session, config=config).load_at_startup()
+                stored_tools_loaded = await build_search_tool_service(
+                    uow, search_tool_session, config=config
+                ).load_at_startup()
             # Before the first request, so a stored rule never lets a burst through at boot.
             await load_rate_limit_rules_at_startup(config)
             # After the overrides, not at config load: the web-search URL a
@@ -968,7 +970,16 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             await load_org_provider_keys_at_startup(session)
             await bootstrap_first_api_key(config, session, app.state.container.resolve(ApiKeyFormatPort, session))
             await initialize_pricing_from_config(config, session)
-            await initialize_tool_prices_from_config(config, session)
+            # Only with the stored tools applied, since the writer reads the
+            # merged instance maps, where a stored instance hides the config
+            # entry of its name and kind, price included.
+            if stored_tools_loaded:
+                await initialize_tool_prices_from_config(config, session)
+            else:
+                logger.warning(
+                    "The stored search and fetch tools did not load, so this start writes no config.yml tool "
+                    "prices; the next start that loads them writes them."
+                )
             await warn_if_require_pricing_without_pricing(config, session)
             await warn_if_search_tools_lack_flat_pricing(config, session)
             await warn_about_legacy_tool_prices(config, session)

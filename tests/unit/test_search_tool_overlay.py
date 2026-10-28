@@ -411,7 +411,7 @@ async def test_a_startup_load_the_database_refuses_is_logged_by_class(caplog: py
         read_settings=read_settings,
         stage_setting=stage_setting,
     )
-    await service.load_at_startup()
+    assert await service.load_at_startup() is False
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert "Failed to load stored search tools (OperationalError" in logged
     assert "secret" not in logged
@@ -442,6 +442,27 @@ async def test_a_startup_load_whose_commit_fails_applies_no_stored_row() -> None
         read_settings=read_settings,
         stage_setting=stage_setting,
     )
-    await service.load_at_startup()
+    assert await service.load_at_startup() is False
     assert set(config.search_tools) == {"from-file"}
     assert overlay._read_settings == {}
+
+
+@pytest.mark.asyncio
+async def test_a_startup_load_that_commits_applies_the_rows_and_says_so() -> None:
+    async def read_settings() -> dict[str, Any]:
+        return {"web_search_default_tool": "first"}
+
+    async def stage_setting(_key: str, value: Any) -> Any:
+        return value
+
+    config = GatewayConfig(search_tools={"from-file": {"provider": "fake"}})
+    service = SearchToolService(
+        _UnitOfWork(),  # type: ignore[arg-type]
+        config=config,
+        tools=_Rows([]),  # type: ignore[arg-type]
+        read_settings=read_settings,
+        stage_setting=stage_setting,
+    )
+    assert await service.load_at_startup() is True
+    assert set(config.search_tools) == {"from-file", "first", "second"}
+    assert overlay._read_settings == {"web_search_default_tool": "first"}

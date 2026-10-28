@@ -1164,7 +1164,10 @@ model price can never be read as the tool's. The same row can be set through
 is priced; a `price_per_call` in the file adds a new version at startup only
 when it differs from the rate in force, so a rate set through the API for a tool
 that has a `price_per_call` lasts until the next restart, as a `pricing:` entry
-without `effective_at` does for a model. That rate is what a search reserves
+without `effective_at` does for a model. A tool stored from the dashboard under
+the same name and kind replaces this entry, its price included, so a start whose
+stored tools fail to load writes no `price_per_call` at all, and the next start
+that loads them does. That rate is what a search reserves
 against the caller's budget before it runs. A successful search settles at the
 provider's reported charge when it reports one, and at the rate otherwise. A
 search a workspace's organization search key served is priced under
