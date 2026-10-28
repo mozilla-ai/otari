@@ -8,6 +8,7 @@ import type {
   WorkspaceMemberRole,
 } from "@/client"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
@@ -25,6 +26,7 @@ import {
   useUpdateWorkspaceMemberRole,
   useWorkspaceMembers,
 } from "@/shared/api/workspaces"
+import { matchesSearch } from "@/shared/hooks/useListSearch"
 
 // A workspace's roster and the dialog that adds to it, kept out of the page so
 // the rules they encode (a workspace's members are a subset of the
@@ -145,6 +147,7 @@ export function WorkspaceMembersPanel({
   workspaceName,
   orgMembers,
   canManageWorkspace,
+  searchTerm = "",
 }: {
   // Id and name rather than a Workspace: the Members page reaches this holding
   // only the caller's membership, which carries both and nothing else.
@@ -152,13 +155,15 @@ export function WorkspaceMembersPanel({
   workspaceName: string
   orgMembers: OrganizationMember[]
   canManageWorkspace: boolean
+  /** The page's settled search term; a row matches on the name it shows. */
+  searchTerm?: string
 }) {
   const members = useWorkspaceMembers(workspaceId)
   const updateRole = useUpdateWorkspaceMemberRole()
   const removeMember = useRemoveWorkspaceMember()
   const [removing, setRemoving] = useState<WorkspaceMember>()
 
-  const rows = members.data ?? []
+  const allRows = members.data ?? []
   const nameByUserId = useMemo(
     () =>
       new Map(
@@ -167,6 +172,9 @@ export function WorkspaceMembersPanel({
           .map((member) => [member.user_id as string, memberLabel(member)]),
       ),
     [orgMembers],
+  )
+  const rows = allRows.filter((member) =>
+    matchesSearch(searchTerm, nameByUserId.get(member.user_id)),
   )
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -177,8 +185,12 @@ export function WorkspaceMembersPanel({
 
       {members.isLoading ? (
         <p className="text-sm text-muted">Loading members…</p>
-      ) : rows.length === 0 ? (
+      ) : allRows.length === 0 ? (
         <p className="text-sm text-muted">This workspace has no members yet.</p>
+      ) : rows.length === 0 ? (
+        <EmptyMessage>
+          No members of {workspaceName} match this search.
+        </EmptyMessage>
       ) : (
         <ul className="flex flex-col gap-2">
           {rows.map((member) => (
