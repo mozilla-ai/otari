@@ -8,6 +8,7 @@ import {
   memberRowKey,
   membershipLabel,
 } from "@/features/organization/roles"
+import { matchesSearch } from "@/shared/hooks/useListSearch"
 
 // Who belongs to the caller's organization, read-only, for a caller who is not
 // offered Organization > Members & roles: the roles matrix has the members list
@@ -22,10 +23,13 @@ export function OrganizationRosterCard({
   members,
   isLoading,
   organizationName,
+  searchTerm = "",
 }: {
   members: OrganizationMember[]
   isLoading: boolean
   organizationName: string | undefined
+  /** The page's settled search term, matched on the name and email shown. */
+  searchTerm?: string
 }) {
   const columns: DataTableColumn<OrganizationMember>[] = [
     {
@@ -68,13 +72,19 @@ export function OrganizationRosterCard({
           <DataTable
             ariaLabel="Organization members"
             columns={columns}
-            rows={members}
+            rows={members.filter((member) =>
+              matchesSearch(searchTerm, memberLabel(member), member.email),
+            )}
             getRowKey={memberRowKey}
             isLoading={isLoading}
             // Says nothing about the organization: an empty table is also what a
             // failed read leaves behind, and the page's banner is the only thing
             // that knows which happened.
-            emptyContent="No members to show."
+            emptyContent={
+              searchTerm
+                ? "No organization members match this search."
+                : "No members to show."
+            }
           />
         </Card.Content>
       </Card>

@@ -3,7 +3,9 @@ import { useState } from "react"
 import { Button } from "@/design-system/actions/Button"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { OrganizationRosterCard } from "@/features/organization/OrganizationRosterCard"
 import { canManage, canManageWorkspace } from "@/features/organization/roles"
 import {
@@ -16,6 +18,7 @@ import {
 } from "@/shared/api/organizations"
 import { useWorkspaceMembers } from "@/shared/api/workspaces"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useListSearch } from "@/shared/hooks/useListSearch"
 
 // The roster of the workspace the switcher has selected, which is the one page
 // in the workspace context that is genuinely scoped to it today: the workspace
@@ -39,6 +42,7 @@ export function WorkspaceMembersPage() {
   // the organization a candidate list, and the control that uses that list now
   // sits in the heading row.
   const members = useWorkspaceMembers(selected?.workspace_id ?? null)
+  const search = useListSearch()
   const [isAdding, setIsAdding] = useState(false)
   const [openCount, setOpenCount] = useState(0)
 
@@ -115,12 +119,24 @@ export function WorkspaceMembersPage() {
           left to read as "everyone is already in this workspace", which is what
           an empty candidate list otherwise looks like. */}
       <ErrorBanner error={orgMembers.error} />
+      {/* One search for both lists: who is in this workspace, and the
+          organization roster beside it, are the same people at two scopes. */}
+      <Toolbar>
+        <SearchField
+          label="Search members"
+          placeholder="Search by name or email"
+          value={search.value}
+          onChange={search.onChange}
+          className="w-full md:w-96"
+        />
+      </Toolbar>
       {selected ? (
         <WorkspaceMembersPanel
           workspaceId={selected.workspace_id}
           workspaceName={selected.name}
           orgMembers={orgMembers.data ?? []}
           canManageWorkspace={canManageSelectedWorkspace}
+          searchTerm={search.term}
         />
       ) : (
         // An empty roster would read as "this workspace has nobody in it",
@@ -141,6 +157,7 @@ export function WorkspaceMembersPage() {
           members={orgMembers.data ?? []}
           isLoading={orgMembers.isPending && !orgMembers.data}
           organizationName={context.data?.organization?.name}
+          searchTerm={search.term}
         />
       ) : null}
       {hasOrganizationAnswered && canManageOrganization ? (

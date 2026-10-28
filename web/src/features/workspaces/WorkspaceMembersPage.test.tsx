@@ -90,6 +90,38 @@ describe("WorkspaceMembersPage", () => {
     expect(await screen.findByText("Members of Alpha")).toBeInTheDocument()
   })
 
+  it("narrows the workspace roster by name, and says so when nobody matches", async () => {
+    mockApi({
+      members: [
+        workspaceMember({ user_id: USER }),
+        workspaceMember({ user_id: SECOND_USER }),
+      ],
+      orgMembers: [
+        organizationMember({ user_id: USER, full_name: "Alex Avery" }),
+        organizationMember({ user_id: SECOND_USER, full_name: "Blair Bell" }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByText("Alex Avery")
+    const search = screen.getByRole("searchbox", { name: "Search members" })
+
+    await user.type(search, "BLAIR")
+    await waitFor(() =>
+      expect(screen.queryByText("Alex Avery")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("Blair Bell")).toBeInTheDocument()
+
+    await user.clear(search)
+    await user.type(search, "nobody-here")
+    expect(
+      await screen.findByText("No members of Alpha match this search."),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText("This workspace has no members yet."),
+    ).not.toBeInTheDocument()
+  })
+
   it("says so rather than showing an empty roster when there is no workspace", async () => {
     mockApi({ memberships: [] })
     await renderPage()
