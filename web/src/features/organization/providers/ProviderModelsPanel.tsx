@@ -6,7 +6,6 @@ import {
   FiRotateCcw,
   FiSlash,
 } from "react-icons/fi"
-
 import type { OrgProviderKey, OrgProviderModel } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
@@ -17,9 +16,11 @@ import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { formatPricedRate, pricingUnitOf } from "@/features/models/pricingUnit"
 import {
   useOrgProviderModels,
@@ -30,6 +31,7 @@ import {
 } from "@/shared/api/organizations"
 import { useDeleteOrganizationPricing } from "@/shared/api/pricing"
 import { formatRate } from "@/shared/helpers/format"
+import { useListSearch } from "@/shared/hooks/useListSearch"
 
 import { OfferModelDialog } from "./OfferModelDialog"
 import { refreshOutcome } from "./refreshOutcome"
@@ -126,7 +128,17 @@ export function ProviderModelsPanel({
   onPageChange: (page: number) => void
   onPageSizeChange: (size: number) => void
 }) {
-  const models = useOrgProviderModels(providerKey.id, page, pageSize)
+  // Its own param and pager beside the page's: the key list above has `q`.
+  const search = useListSearch({
+    param: "models_q",
+    pageParam: "models_page",
+  })
+  const models = useOrgProviderModels(
+    providerKey.id,
+    page,
+    pageSize,
+    search.term,
+  )
   const setEnabled = useSetOrgProviderModelEnabled(providerKey.id)
   const withdraw = useWithdrawOrgProviderModel(providerKey.id)
   const clearRate = useDeleteOrganizationPricing()
@@ -342,7 +354,7 @@ export function ProviderModelsPanel({
 
       {/* A failed list is not an empty one: with a settled error, rendering
           "no models yet" would tell an admin their catalog is gone. */}
-      {!models.error && rows.length === 0 ? (
+      {!models.error && rows.length === 0 && !search.term ? (
         <EmptyState
           title="No models offered yet"
           description="Refresh to offer what this provider lists, or add a model by name for a backend that publishes no list."
@@ -352,6 +364,16 @@ export function ProviderModelsPanel({
         />
       ) : (
         <>
+          <Toolbar>
+            <SearchField
+              label={`Search models on ${providerKey.name}`}
+              placeholder="Search by model name"
+              value={search.value}
+              onChange={search.onChange}
+              resultCount={models.data?.count ?? 0}
+              className="w-full md:w-96"
+            />
+          </Toolbar>
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
               ariaLabel={`Models on ${providerKey.name}`}
@@ -359,6 +381,7 @@ export function ProviderModelsPanel({
               rows={rows}
               getRowKey={(row) => row.id}
               isLoading={models.isLoading}
+              emptyContent="No models match this search."
             />
           </TableScrollFrame>
           <TablePagination

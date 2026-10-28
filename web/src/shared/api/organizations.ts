@@ -897,13 +897,14 @@ export function useOrgProviderModels(
   keyId: string,
   page: number,
   pageSize: number,
+  search = "",
   enabled = true,
 ) {
   return useQuery({
-    queryKey: [ORGANIZATION_PROVIDER_MODELS, keyId, page, pageSize],
+    queryKey: [ORGANIZATION_PROVIDER_MODELS, keyId, page, pageSize, search],
     queryFn: () =>
       apiFetch<OrgProviderModels>(
-        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models?skip=${page * pageSize}&limit=${pageSize}`,
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models?skip=${page * pageSize}&limit=${pageSize}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
       ),
     staleTime: 60_000,
     placeholderData: (previous, previousQuery) =>
