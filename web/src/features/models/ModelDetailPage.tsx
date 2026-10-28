@@ -625,7 +625,7 @@ export function ModelDetailView({
               first.
             </p>
           </div>
-          <div className="flex flex-col gap-3 border border-border bg-surface p-3">
+          <div className="flex flex-col gap-3 border border-border bg-surface p-3 [--table-fill:var(--color-surface)]">
             {quantizations.length > 0 ? (
               <div className="otari-toolbar flex flex-wrap items-center gap-2">
                 <FilterSelect

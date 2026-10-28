@@ -459,6 +459,37 @@
   background-color: transparent;
   border-bottom: 1px solid var(--color-border);
 }
+
+/* A table taller than the screen can hold scrolls inside itself under a
+   pinned header, so the page around it keeps its controls in reach.
+   `--table-max-height` is the viewport less the top bar, a toolbar above and
+   a pager below, so all three fit at once whatever the rows' height, and
+   floored so a short window still shows a few rows rather than one. Desk
+   only: phones get their own strategy. Never on paper, where a clipped table
+   is lost rows. */
+:root {
+  --table-max-height: max(18rem, calc(100dvh - 12rem));
+}
+/* A card is a surface, so a table inside one pins its header on that fill. */
+.card {
+  --table-fill: var(--color-surface);
+}
+@media screen and (min-width: 768px) {
+  .otari-table .table__scroll-container,
+  .otari-table .table__resizable-container {
+    max-height: var(--table-max-height);
+    scroll-padding-top: var(--table-header-height);
+  }
+  /* Pinned so the labels survive the scroll, and opaque so the rows pass under
+     it rather than through it. `--table-fill` is for a table sitting on a
+     surface other than the page; a pinned first column reads it too. */
+  .otari-table .table__header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background-color: var(--table-fill, var(--color-background));
+  }
+}
 .otari-table .table__column,
 .otari-table
   [role="row"]
