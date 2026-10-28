@@ -262,7 +262,14 @@ function mockApi(
     }
     if (url.includes("/models")) {
       if (method === "PATCH") return jsonResponse({ ...models[0], ...body })
-      return jsonResponse({ data: models, count: models.length })
+      // Narrowed the way the route narrows a search: by name, ignoring case.
+      const term = (
+        new URL(url, "http://localhost").searchParams.get("search") ?? ""
+      ).toLowerCase()
+      const matched = models.filter((model) =>
+        model.model.toLowerCase().includes(term),
+      )
+      return jsonResponse({ data: matched, count: matched.length })
     }
     if (url.includes(hosted)) {
       if (method === "GET") {
@@ -882,6 +889,37 @@ describe("HostedProvidersPage", () => {
     expect(hostedRequests(requests, "DELETE")[0].url).toContain(
       "/hosted-providers/openai",
     )
+  })
+
+  it("searches a provider's models through the endpoint", async () => {
+    const requests = mockApi({
+      models: [hostedModel(), hostedModel({ id: "m2", model: "o9-preview" })],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+    await user.click(
+      await screen.findByRole("button", { name: "Models on openai" }),
+    )
+    const panel = await screen.findByRole("region", {
+      name: "Models on openai",
+    })
+    await within(panel).findByText("gpt-4o")
+
+    await user.type(
+      within(panel).getByRole("searchbox", {
+        name: "Search models on openai",
+      }),
+      "o9",
+    )
+    await waitFor(() =>
+      expect(within(panel).queryByText("gpt-4o")).not.toBeInTheDocument(),
+    )
+    expect(within(panel).getByText("o9-preview")).toBeInTheDocument()
+    expect(
+      hostedRequests(requests, "GET").some((request) =>
+        request.url.includes("/models?skip=0&limit=25&search=o9"),
+      ),
+    ).toBe(true)
   })
 
   it("opens a provider's models with their price source and a serving switch", async () => {

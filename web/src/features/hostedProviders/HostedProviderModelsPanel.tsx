@@ -1,6 +1,5 @@
 import { useState } from "react"
 import { FiEdit2, FiPlus, FiRefreshCw } from "react-icons/fi"
-
 import type { HostedModel, HostedProvider } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
@@ -12,9 +11,11 @@ import {
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { formatPricedRate, pricingUnitOf } from "@/features/models/pricingUnit"
 import {
   useHostedModels,
@@ -22,6 +23,8 @@ import {
   useUpdateHostedModel,
 } from "@/shared/api/hostedProviders"
 import { formatRate } from "@/shared/helpers/format"
+import { useDebounced } from "@/shared/hooks/useDebounced"
+import { SEARCH_MAX_LENGTH } from "@/shared/hooks/useListSearch"
 
 import { HostedModelForm } from "./HostedModelForm"
 import { refreshOutcome } from "./refreshOutcome"
@@ -80,7 +83,11 @@ export function HostedProviderModelsPanel({
 }) {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0])
-  const models = useHostedModels(provider.name, page, pageSize)
+  // In component state, not the URL, like the page and the open provider it
+  // belongs to: a term in the URL would outlive the panel on a reload.
+  const [query, setQuery] = useState("")
+  const term = useDebounced(query.trim().slice(0, SEARCH_MAX_LENGTH))
+  const models = useHostedModels(provider.name, page, pageSize, term)
   const update = useUpdateHostedModel(provider.name)
   const refresh = useRefreshHostedModels(provider.name)
 
@@ -221,7 +228,7 @@ export function HostedProviderModelsPanel({
       ) : null}
 
       {/* A failed list is not an empty one. */}
-      {!models.error && rows.length === 0 ? (
+      {!models.error && rows.length === 0 && !term ? (
         <EmptyState
           title="No models offered yet"
           description="Refresh to offer what the provider lists, or add a model to say what this provider serves and at what price."
@@ -231,6 +238,19 @@ export function HostedProviderModelsPanel({
         />
       ) : (
         <>
+          <Toolbar>
+            <SearchField
+              label={`Search models on ${provider.name}`}
+              placeholder="Search by model name"
+              value={query}
+              onChange={(next) => {
+                setQuery(next)
+                setPage(0)
+              }}
+              resultCount={models.data?.count ?? 0}
+              className="w-full md:w-96"
+            />
+          </Toolbar>
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
               ariaLabel={`Models on ${provider.name}`}
@@ -238,6 +258,7 @@ export function HostedProviderModelsPanel({
               rows={rows}
               getRowKey={(row) => row.id}
               isLoading={models.isLoading}
+              emptyContent="No models match this search."
             />
           </TableScrollFrame>
           <TablePagination
