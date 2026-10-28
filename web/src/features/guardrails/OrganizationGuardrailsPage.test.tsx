@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -15,6 +15,7 @@ import {
   organizationGuardrail,
   organizationGuardrailDefinition,
 } from "@/tests/fixtures"
+import { renderWithRouter } from "@/tests/router"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 
@@ -81,7 +82,8 @@ function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  render(
+  // In a router, because the page keeps its search in the URL.
+  return renderWithRouter(
     <QueryClientProvider client={client}>
       <OrganizationGuardrailsPage />
     </QueryClientProvider>,
@@ -109,7 +111,7 @@ afterEach(() => {
 describe("OrganizationGuardrailsPage", () => {
   it("withholds the tables, and every guardrail and catalog read, from a member", async () => {
     const calls = mockApi({ role: "member" })
-    renderPage()
+    await renderPage()
 
     expect(
       await screen.findByText(/set by an owner or admin of the organization/),
@@ -120,7 +122,7 @@ describe("OrganizationGuardrailsPage", () => {
 
   it("lists a definition by what it is, never by its secret", async () => {
     mockApi({ definitions: [lakera] })
-    renderPage()
+    await renderPage()
 
     const definition = await row(
       "Guardrails you have configured",
@@ -134,6 +136,38 @@ describe("OrganizationGuardrailsPage", () => {
     ).toBeInTheDocument()
     expect(definition.getByText("Api key set")).toBeInTheDocument()
     expect(definition.getByText("Active")).toBeInTheDocument()
+  })
+
+  it("narrows the configured guardrails by name", async () => {
+    mockApi({
+      definitions: [
+        lakera,
+        organizationGuardrailDefinition({ id: "d2", name: "staging-check" }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+    await row("Guardrails you have configured", "prod-lakera")
+
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search guardrails" }),
+      "staging",
+    )
+    await waitFor(() =>
+      expect(screen.queryByText("prod-lakera")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("staging-check")).toBeInTheDocument()
+
+    await user.clear(
+      screen.getByRole("searchbox", { name: "Search guardrails" }),
+    )
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search guardrails" }),
+      "nothing-like-this",
+    )
+    expect(
+      await screen.findByText("No guardrails match this search."),
+    ).toBeInTheDocument()
   })
 
   it("says who runs each mandate, and what it does when the check cannot run", async () => {
@@ -155,7 +189,7 @@ describe("OrganizationGuardrailsPage", () => {
         organizationGuardrail({ id: "m3", profile: "on-deployment" }),
       ],
     })
-    renderPage()
+    await renderPage()
 
     const onDefinition = await row("Where they run", "on-definition")
     expect(onDefinition.getByText("prod-lakera")).toBeInTheDocument()
@@ -187,7 +221,7 @@ describe("OrganizationGuardrailsPage", () => {
         organizationGuardrail({ id: "b", profile: "b", definition_id: "d1" }),
       ],
     })
-    renderPage()
+    await renderPage()
 
     expect(
       await screen.findByText(
@@ -211,7 +245,7 @@ describe("OrganizationGuardrailsPage", () => {
         organizationGuardrail({ id: "a", profile: "pii", definition_id: "d1" }),
       ],
     })
-    renderPage()
+    await renderPage()
 
     await userEvent.click(
       (await row("Guardrails you have configured", "prod-lakera")).getByRole(
@@ -231,7 +265,7 @@ describe("OrganizationGuardrailsPage", () => {
     const calls = mockApi({
       mandates: [organizationGuardrail({ id: "a", profile: "pii" })],
     })
-    renderPage()
+    await renderPage()
 
     const mandate = await row("Where they run", "pii")
     const pause = mandate.getByRole("button", { name: "Pause pii" })
@@ -260,7 +294,7 @@ describe("OrganizationGuardrailsPage", () => {
 
   it("tests a configured guardrail from its row, and offers no switch", async () => {
     mockApi({ definitions: [lakera] })
-    renderPage()
+    await renderPage()
 
     const definition = await row(
       "Guardrails you have configured",
@@ -293,7 +327,7 @@ describe("OrganizationGuardrailsPage", () => {
         }),
       ],
     })
-    renderPage()
+    await renderPage()
 
     const linked = await row("Where they run", "lakera")
     // Tested from the configured guardrail's own row instead.
@@ -314,7 +348,7 @@ describe("OrganizationGuardrailsPage", () => {
         organizationGuardrail({ id: "a", profile: "pii", mode: "block" }),
       ],
     })
-    renderPage()
+    await renderPage()
 
     await userEvent.click(
       (await row("Where they run", "pii")).getByRole("button", {
@@ -331,7 +365,7 @@ describe("OrganizationGuardrailsPage", () => {
     mockApi({
       mandates: [organizationGuardrail({ id: "a", profile: "pii" })],
     })
-    renderPage()
+    await renderPage()
 
     await userEvent.click(
       (await row("Where they run", "pii")).getByRole("button", {
