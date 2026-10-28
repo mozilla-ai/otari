@@ -26,7 +26,7 @@ sees.
 """
 
 from collections.abc import Mapping
-from typing import Annotated, Any, NoReturn
+from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -132,23 +132,19 @@ def _is_decryptable(row: SearchToolCredential) -> bool:
     return True
 
 
-async def _rollback(
-    db: AsyncSession, operation: str, exc: BaseException, *, conflict_detail: str | None = None
-) -> NoReturn:
-    """Roll back a write the database refused, and answer for it."""
-    await db.rollback()
-    if conflict_detail is not None and isinstance(exc, IntegrityError):
-        # A concurrent create can slip past the pre-check and collide on the
-        # primary key, which is the create's 409.
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict_detail) from None
-    raise database_error(operation, exc) from None
-
-
 async def _commit(db: AsyncSession, operation: str, *, conflict_detail: str | None = None) -> None:
     try:
         await db.commit()
+    except IntegrityError as exc:
+        # A concurrent create can slip past the pre-check and collide on the
+        # primary key here; surface that as the intended 409, not a 500.
+        await db.rollback()
+        if conflict_detail is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict_detail) from None
+        raise database_error(operation, exc) from None
     except DATABASE_ERRORS as exc:
-        await _rollback(db, operation, exc, conflict_detail=conflict_detail)
+        await db.rollback()
+        raise database_error(operation, exc) from None
 
 
 async def _apply_write(db: AsyncSession, config: GatewayConfig, name: str) -> None:
@@ -323,8 +319,12 @@ async def create_search_tool(
             await stage_override(db, WEB_SEARCH_DEFAULT_TOOL, pinned.name)
     except SecretBoxUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except IntegrityError:
+        # A concurrent create can slip past the pre-check and collide on the
+        # primary key, which is the create's 409.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict) from None
     except DATABASE_ERRORS as exc:
-        await _rollback(db, "create search tool", exc, conflict_detail=conflict)
+        raise database_error("create search tool", exc) from None
 
     await _commit(db, "create search tool", conflict_detail=conflict)
     if pinned is not None:
@@ -429,7 +429,7 @@ async def update_search_tool(
     except SecretBoxUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
     except DATABASE_ERRORS as exc:
-        await _rollback(db, "update search tool", exc)
+        raise database_error("update search tool", exc) from None
 
     await _commit(db, "update search tool")
     await _apply_write(db, config, name)
@@ -447,7 +447,7 @@ async def delete_stored_search_tool(
     try:
         deleted = await delete_search_tool(db, name)
     except DATABASE_ERRORS as exc:
-        await _rollback(db, "delete stored search tool", exc)
+        raise database_error("delete stored search tool", exc) from None
     if not deleted:
         detail = f"No stored search tool '{name}'."
         if name in config_file_search_tools(config):
