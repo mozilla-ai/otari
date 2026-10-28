@@ -19,7 +19,6 @@ gates:
     runs: [pre_tool_use.edit_target, stop.working_tree]
     enforcement: required
     forbidden: ["web/public/pwa/manifest*"]
-    accept_warnings: [glob-matches-no-file]
     message: >-
       The PWA manifest is generated at build time by web/pwaManifest.ts;
       only icons live under web/public/pwa/ (see web/AGENTS.md, "PWA
@@ -31,7 +30,6 @@ gates:
     enforcement: required
     forbidden:
     - src/gateway/static/dashboard/**
-    accept_warnings: [glob-matches-no-file]
     message: 'AGENTS.md Generated Artifacts: the dashboard bundle (src/gateway/static/dashboard/)
       is generated and not committed; do not commit changes under this path.'
 

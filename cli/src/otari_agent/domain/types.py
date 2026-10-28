@@ -113,7 +113,7 @@ class WarningCode(str, Enum):
         return member
 
     BACKSLASH_IN_GLOB = "backslash-in-glob", "command_if_changed", "judge", "path", "verifier"
-    GLOB_MATCHES_NO_FILE = "glob-matches-no-file", "command_if_changed", "judge", "path", "verifier"
+    GLOB_MATCHES_NO_FILE = "glob-matches-no-file", "command_if_changed", "judge", "verifier"
     GLOB_MISSES_SHALLOWER_DEPTH = "glob-misses-shallower-depth", "command_if_changed", "judge", "path", "verifier"
     JUDGE_GATE_CAP = "judge-gate-cap", "judge"
     SHELL_READ_UNSEEN = "shell-read-unseen", "path"
