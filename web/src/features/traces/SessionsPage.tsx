@@ -44,7 +44,7 @@ import { BreakGlassLog } from "./BreakGlassLog"
 import { exceptionalAccess } from "./exceptionalAccess"
 import { formatDuration, formatTraceTimestamp } from "./format"
 import { toTrace } from "./fromApi"
-import { SessionContent } from "./SessionContent"
+import { SessionContent, ShareSessionAction } from "./SessionContent"
 import { TracePeek } from "./TracePeek"
 import {
   sessionDurationMs,
@@ -574,6 +574,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
               />
             ) : null
           }
+          actions={shown ? <ShareSessionAction detail={shown} /> : null}
         />
       ) : null}
     </div>

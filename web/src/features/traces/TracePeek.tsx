@@ -255,6 +255,7 @@ export function TracePeek({
   onPrevious,
   onNext,
   notice,
+  actions,
 }: {
   trace: Trace
   /** Why the session's spans could not be read, when they could not. */
@@ -266,8 +267,10 @@ export function TracePeek({
   onClose: () => void
   onPrevious?: () => void
   onNext?: () => void
-  /** Said above the session and every span in it: who may read what it was about. */
+  /** Said on the session itself, not on each span: who may read what it was about. */
   notice?: ReactNode
+  /** Controls for the whole session, beside the format switch. */
+  actions?: ReactNode
 }) {
   const [tab, setTab] = useState<PeekTab>("preview")
   const [format, setFormat] = useState<Format>("formatted")
@@ -563,15 +566,18 @@ export function TracePeek({
             </Tab>
           ))}
         </TabRow>
-        {observation || activeTab === "log" ? (
-          <Segmented
-            size="sm"
-            label="Format"
-            options={FORMAT_OPTIONS}
-            value={format}
-            onChange={(next) => setFormat(next as Format)}
-          />
-        ) : null}
+        <div className="flex shrink-0 items-center gap-2">
+          {actions}
+          {observation || activeTab === "log" ? (
+            <Segmented
+              size="sm"
+              label="Format"
+              options={FORMAT_OPTIONS}
+              value={format}
+              onChange={(next) => setFormat(next as Format)}
+            />
+          ) : null}
+        </div>
       </div>
 
       <div ref={bodyRef} className="relative flex min-h-0 flex-1 overflow-auto">
@@ -665,7 +671,7 @@ export function TracePeek({
                   Back to the spans
                 </Button>
               </div>
-              {notice}
+              {observation ? null : notice}
               {activeTab === "attributes" && observation ? (
                 <Attributes trace={trace} observation={observation} />
               ) : !observation && trace.gateway ? (
