@@ -43,6 +43,88 @@ describe("toTrace", () => {
     expect(byId.get("call-toolu_1")?.metadata?.Timing).toBe("Approximate")
   })
 
+  it("draws a request that made one LLM call and nothing else as that call", () => {
+    const detail = traceDetail()
+    const spans = [
+      ...detail.spans,
+      traceSpan({
+        span_id: "req-3",
+        start_time: "2026-10-07T12:01:10Z",
+        end_time: "2026-10-07T12:01:20Z",
+      }),
+      traceSpan({
+        span_id: "llm-3",
+        parent_span_id: "req-3",
+        kind: "llm",
+        model: "gpt-5",
+        start_time: "2026-10-07T12:01:10Z",
+      }),
+      traceSpan({
+        span_id: "prompt-1",
+        operation: "interaction",
+        start_time: "2026-10-07T12:01:20Z",
+      }),
+      traceSpan({
+        span_id: "llm-4",
+        parent_span_id: "prompt-1",
+        kind: "llm",
+        model: "gpt-5",
+        start_time: "2026-10-07T12:01:20Z",
+      }),
+    ]
+    const turns = [
+      { ...detail.turns[0], step_ids: ["req-1", "req-2", "req-3"] },
+      {
+        ...detail.turns[0],
+        index: 1,
+        started_at: "2026-10-07T12:01:20Z",
+        step_ids: ["prompt-1"],
+      },
+    ]
+    const trace = toTrace(traceSummary(), { ...detail, spans, turns })
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    // The lone call takes its request's row, under the request's own parent.
+    expect(byId.has("req-3")).toBe(false)
+    expect(byId.get("llm-3")).toMatchObject({
+      type: "GENERATION",
+      parentObservationId: "turn-0",
+    })
+    // A call beside a tool, or one that failed where its request did not,
+    // keeps the request it belongs to.
+    expect(byId.get("llm-1")?.parentObservationId).toBe("req-1")
+    expect(byId.get("llm-2")?.parentObservationId).toBe("req-2")
+    // An agent's prompt is not a gateway request, so it keeps its row.
+    expect(byId.get("prompt-1")?.name).toBe("Prompt")
+    expect(byId.get("llm-4")?.parentObservationId).toBe("prompt-1")
+  })
+
+  it("keeps a lone call's request when the request carries content of its own", () => {
+    const detail = traceDetail()
+    const spans = [
+      ...detail.spans,
+      traceSpan({
+        span_id: "req-3",
+        start_time: "2026-10-07T12:01:10Z",
+        content: { prompt: "fix the flaky test" },
+      }),
+      traceSpan({
+        span_id: "llm-3",
+        parent_span_id: "req-3",
+        kind: "llm",
+        start_time: "2026-10-07T12:01:10Z",
+      }),
+    ]
+    const turns = [
+      { ...detail.turns[0], step_ids: ["req-1", "req-2", "req-3"] },
+    ]
+    const trace = toTrace(traceSummary(), { ...detail, spans, turns })
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.has("req-3")).toBe(true)
+    expect(byId.get("llm-3")?.parentObservationId).toBe("req-3")
+  })
+
   it("carries a model request's context window and the sizes the gateway kept of it", () => {
     const detail = traceDetail()
     const spans = detail.spans.map((span) =>

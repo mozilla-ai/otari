@@ -1001,7 +1001,7 @@ a key offers that nothing prices is switched on and served at no cost, where
 [Who is shown which models](models.md#who-is-shown-which-models)). The gateway logs a warning for each unpriced model at most once an
 hour per process, and the dashboard shows operators a banner naming the models
 that served unpriced traffic in the selected workspace in the last 24 hours
-and still have no stored price, linked to those requests in Activity, where
+and still have no stored price, linked to those requests on the Overview, where
 each can be priced.
 
 ### Keeping the defaults current

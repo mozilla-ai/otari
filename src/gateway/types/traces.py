@@ -37,6 +37,9 @@ from otari_agent.domain.policy import MAX_GATE_ID_LENGTH
 # trace id (32 hex) or span id (16 hex), and the hashes derived from them.
 TRACE_ID_MAX_LENGTH = 64
 
+# A trace's key: its workspace and its id.
+TraceKey = tuple[uuid.UUID, str]
+
 SpanKind = Literal["turn", "step", "llm", "tool", "routing_attempt", "guardrail", "mcp_connect", "agent", "other"]
 SPAN_KINDS: tuple[SpanKind, ...] = (
     "turn",
@@ -434,6 +437,7 @@ class TraceFilter:
     end: datetime | None = None
     user_ids: tuple[str, ...] = ()
     api_key_ids: tuple[str, ...] = ()
+    models: tuple[str, ...] = ()
     harnesses: tuple[str, ...] = ()
     session_sources: tuple[str, ...] = ()
     has_error: bool | None = None

@@ -648,14 +648,7 @@ describe("AppShell surface gating", () => {
       within(screen.getByRole("navigation", { name: "Sidebar" }))
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual([
-      "Overview",
-      "Activity",
-      "Usage",
-      "Models",
-      "API keys",
-      "Members",
-    ])
+    ).toEqual(["Overview", "Models", "API keys", "Members"])
     // Routing and Tools nest destinations, so they expand rather than
     // navigate; their children are links once the group is open.
     expect(
@@ -751,9 +744,8 @@ describe("AppShell surface gating", () => {
     // them served, an empty heading over nothing is worse than no heading.
     expect(screen.queryByText("Access")).toBeNull()
     expect(screen.getByText("Build")).toBeInTheDocument()
-    // "Observe" goes with them. It labels the request log and the usage
-    // rollups, both gated on the usage surface, and the index that used to keep
-    // the heading alive now sits in its own group above it. The front page is
+    // "Observe" has no base rows (the request log and the usage rollups are
+    // the Overview's tabs), so it draws no heading either. The front page is
     // still there, which is the part that matters: a deployment with no
     // management surface at all is left with a landing row and no headings it
     // cannot fill.

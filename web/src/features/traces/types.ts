@@ -46,6 +46,8 @@ export interface Observation {
   /** Characters per kind of input, for a request the gateway served. */
   context?: ContextWeights
   cost?: number
+  /** A gateway LLM call's request group: every attempt the request made. */
+  requestGroupId?: string
   input?: unknown
   output?: unknown
   metadata?: Record<string, string>

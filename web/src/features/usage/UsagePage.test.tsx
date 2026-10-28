@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { useLocation } from "@tanstack/react-router"
-import { render, screen, within } from "@testing-library/react"
+import { useLocation, useNavigate } from "@tanstack/react-router"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { UsageSummary } from "@/client"
 import { UsagePage } from "@/features/usage/UsagePage"
 import { API_ROOT } from "@/shared/api/client"
+import { localMidnightIso } from "@/shared/helpers/timeRange"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
@@ -311,7 +312,22 @@ function LocationProbe() {
   )
 }
 
-function renderPage(ui: ReactElement, options: { scoped?: boolean } = {}) {
+// The page's own URL, for state it writes without leaving the route.
+function UrlProbe() {
+  const loc = useLocation()
+  return (
+    <output aria-label="Page URL">{`${loc.pathname}${loc.searchStr}`}</output>
+  )
+}
+
+function pageUrl() {
+  return screen.getByLabelText("Page URL").textContent ?? ""
+}
+
+function renderPage(
+  ui: ReactElement,
+  options: { scoped?: boolean; url?: string } = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -333,8 +349,8 @@ function renderPage(ui: ReactElement, options: { scoped?: boolean } = {}) {
     </DeploymentProvider>,
     {
       wrapper: withRouter({
-        url: "/usage",
-        routes: [{ path: "/activity", element: <LocationProbe /> }],
+        url: options.url ?? "/usage",
+        routes: [{ path: "/requests", element: <LocationProbe /> }],
       }),
     },
   )
@@ -786,7 +802,7 @@ describe("UsagePage", () => {
     expect(screen.getByText(/Other \(14,000 req\)/)).toBeInTheDocument()
   })
 
-  it("drills into the Activity log filtered on the clicked model", async () => {
+  it("drills into the Requests view filtered on the clicked model", async () => {
     const user = userEvent.setup()
     mockApi(summary())
     renderPage(<UsagePage />)
@@ -796,7 +812,7 @@ describe("UsagePage", () => {
 
     const loc =
       screen.getByRole("status", { name: "Current location" }).textContent ?? ""
-    expect(loc.startsWith("/activity")).toBe(true)
+    expect(loc.startsWith("/requests")).toBe(true)
     expect(loc).toContain("model=gpt-5.6")
   })
 
@@ -818,7 +834,7 @@ describe("UsagePage", () => {
 
     const loc =
       screen.getByRole("status", { name: "Current location" }).textContent ?? ""
-    expect(loc.startsWith("/activity")).toBe(true)
+    expect(loc.startsWith("/requests")).toBe(true)
     expect(loc).toContain("model=gpt-5.6")
     expect(loc).toContain("user_id=alice")
   })
@@ -848,7 +864,7 @@ describe("UsagePage", () => {
 
     const loc =
       screen.getByRole("status", { name: "Current location" }).textContent ?? ""
-    expect(loc.startsWith("/activity")).toBe(true)
+    expect(loc.startsWith("/requests")).toBe(true)
     expect(loc).toContain("user_id=alice")
     expect(loc).toContain("model=gpt-5.6")
   })
@@ -931,7 +947,7 @@ describe("UsagePage", () => {
 
     const loc =
       screen.getByRole("status", { name: "Current location" }).textContent ?? ""
-    expect(loc.startsWith("/activity")).toBe(true)
+    expect(loc.startsWith("/requests")).toBe(true)
     expect(loc).toContain("model=gpt-5.6")
     expect(loc).toContain("api_key_id=key-1")
   })
@@ -941,7 +957,7 @@ describe("UsagePage", () => {
     renderPage(<UsagePage />)
 
     // Session is the default secondary dimension: it is what names the work
-    // behind a bill for agent traffic.
+    // behind a bill.
     expect(await screen.findByText("project:otari")).toBeInTheDocument()
     expect(screen.getByText("Spend by session")).toBeInTheDocument()
     expect(screen.getByText("project:docs")).toBeInTheDocument()
@@ -1020,7 +1036,7 @@ describe("UsagePage", () => {
     expect(screen.getByText("claude_code")).toBeInTheDocument()
   })
 
-  it("drills into the Activity log scoped to the clicked session", async () => {
+  it("drills into the Requests view scoped to the clicked session", async () => {
     const user = userEvent.setup()
     mockApi(summary())
     renderPage(<UsagePage />)
@@ -1030,11 +1046,11 @@ describe("UsagePage", () => {
 
     const loc =
       screen.getByRole("status", { name: "Current location" }).textContent ?? ""
-    expect(loc.startsWith("/activity")).toBe(true)
+    expect(loc.startsWith("/requests")).toBe(true)
     expect(loc).toContain("source_label=project%3Aotari")
   })
 
-  it("drills into the Activity log scoped to the clicked provider", async () => {
+  it("drills into the Requests view scoped to the clicked provider", async () => {
     const user = userEvent.setup()
     mockApi(summary())
     renderPage(<UsagePage />)
@@ -1307,7 +1323,7 @@ describe("UsagePage", () => {
     ).toBeInTheDocument()
   })
 
-  it("carries a whole multi-value filter into the request log", async () => {
+  it("carries a whole multi-value filter into the Requests view", async () => {
     const user = userEvent.setup()
     mockApi(summary())
     renderPage(<UsagePage />)
@@ -1388,7 +1404,7 @@ describe("UsagePage gateway-run tools", () => {
     expect(within(fetchRow).getByText("$0.43")).toBeInTheDocument()
   })
 
-  it("drills into the Activity log filtered on the clicked tool", async () => {
+  it("drills into the Requests view filtered on the clicked tool", async () => {
     const user = userEvent.setup()
     mockApi(
       summary({
@@ -1404,7 +1420,217 @@ describe("UsagePage gateway-run tools", () => {
 
     const loc =
       screen.getByRole("status", { name: "Current location" }).textContent ?? ""
-    expect(loc.startsWith("/activity")).toBe(true)
+    expect(loc.startsWith("/requests")).toBe(true)
     expect(loc).toContain("tool=web_search")
+  })
+})
+
+describe("UsagePage view state in the URL", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("restores range, filters, metric and grouping from the URL", async () => {
+    const fetchMock = mockApi(summary())
+    renderPage(<UsagePage />, {
+      url: "/usage?range=7d&model=gpt-5.6&user_id=alice&user_id=bob&api_key_id=key-1&metric=tokens&group_by=model",
+    })
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Remove Model filter gpt-5.6",
+      }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Remove API key filter key-1" }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Tokens" })).toBeInTheDocument()
+    expect(selectTrigger("Group by")).toHaveTextContent("By model")
+    await screen.findByText("project:otari")
+    const main = fetchMock.mock.calls
+      .map(([u]) => String(u))
+      .find(
+        (u) => u.includes("/usage/summary") && u.includes("dimensions=model"),
+      )
+    expect(main).toContain("model=gpt-5.6")
+    expect(main).toContain("user_id=alice")
+    expect(main).toContain("user_id=bob")
+    expect(main).toContain("api_key_id=key-1")
+  })
+
+  it("writes the range on a preset pick and clears explicit bounds", async () => {
+    const user = userEvent.setup()
+    mockApi(summary())
+    renderPage(
+      <>
+        <UsagePage />
+        <UrlProbe />
+      </>,
+      {
+        url: "/usage?start_date=2026-07-01T00:00:00.000Z&end_date=2026-07-02T00:00:00.000Z",
+      },
+    )
+    await screen.findByText("gpt-5.6")
+
+    await user.click(screen.getByRole("button", { name: "7d" }))
+
+    const url = pageUrl()
+    expect(url).toContain("range=7d")
+    expect(url).not.toContain("start_date")
+    expect(url).not.toContain("end_date")
+  })
+
+  it("opens today from local midnight, and marks it while it is the window", async () => {
+    const user = userEvent.setup()
+    mockApi(summary())
+    renderPage(
+      <>
+        <UsagePage />
+        <UrlProbe />
+      </>,
+      { url: "/usage?range=7d" },
+    )
+    await screen.findByText("gpt-5.6")
+
+    await user.click(screen.getByRole("button", { name: "Today" }))
+
+    const url = new URL(pageUrl(), "http://localhost")
+    expect(url.searchParams.get("start_date")).toBe(localMidnightIso())
+    expect(url.searchParams.has("end_date")).toBe(false)
+    expect(screen.getByRole("button", { name: "Today" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    expect(screen.getByRole("button", { name: "7d" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    )
+  })
+
+  it("re-anchors the rolling window when an explicit window is cleared", async () => {
+    const user = userEvent.setup()
+    vi.useFakeTimers({
+      toFake: ["Date"],
+      now: Date.parse("2026-07-10T12:00:00Z"),
+    })
+    const fetchMock = mockApi(summary())
+    function ClearWindow() {
+      const navigate = useNavigate()
+      return (
+        <button
+          type="button"
+          onClick={() =>
+            void navigate({ to: "/usage", search: { range: "30d" } })
+          }
+        >
+          Clear window
+        </button>
+      )
+    }
+    renderPage(
+      <>
+        <UsagePage />
+        <ClearWindow />
+      </>,
+      {
+        url: "/usage?range=30d&start_date=2026-07-01T00:00:00.000Z&end_date=2026-07-02T00:00:00.000Z",
+      },
+    )
+    await screen.findByText("gpt-5.6")
+
+    vi.setSystemTime(Date.parse("2026-07-10T18:00:00Z"))
+    await user.click(screen.getByRole("button", { name: "Clear window" }))
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls
+          .map(([u]) => String(u))
+          .some(
+            (u) =>
+              u.includes("/usage/summary") &&
+              u.includes("start_date=2026-06-10T18%3A00%3A00.000Z"),
+          ),
+      ).toBe(true),
+    )
+    vi.useRealTimers()
+  })
+
+  it("falls back to 30d and corrects the URL for an unknown range", async () => {
+    mockApi(summary())
+    renderPage(
+      <>
+        <UsagePage />
+        <UrlProbe />
+      </>,
+      { url: "/usage?range=all&model=gpt-5.6" },
+    )
+    await screen.findByText("gpt-5.6")
+
+    await waitFor(() => expect(pageUrl()).not.toContain("range="))
+    expect(pageUrl()).toContain("model=gpt-5.6")
+  })
+
+  it("leaves the range alone when explicit bounds are present", async () => {
+    mockApi(summary())
+    renderPage(
+      <>
+        <UsagePage />
+        <UrlProbe />
+      </>,
+      { url: "/usage?range=all&start_date=2026-07-01T00:00:00.000Z" },
+    )
+    await screen.findByText("gpt-5.6")
+
+    expect(pageUrl()).toContain("range=all")
+  })
+
+  it("carries the window and the page's filters into the Requests view", async () => {
+    const user = userEvent.setup()
+    mockApi(summary())
+    renderPage(<UsagePage />, {
+      url: "/usage?start_date=2026-07-01T00:00:00.000Z&end_date=2026-07-02T00:00:00.000Z&model=gpt-5.6&user_id=alice",
+    })
+
+    await user.click((await screen.findByText("project:otari")).closest("tr")!)
+
+    const loc =
+      screen.getByRole("status", { name: "Current location" }).textContent ?? ""
+    expect(loc.startsWith("/requests")).toBe(true)
+    expect(loc).toContain("start_date=2026-07-01")
+    expect(loc).toContain("end_date=2026-07-02")
+    expect(loc).toContain("model=gpt-5.6")
+    expect(loc).toContain("user_id=alice")
+    expect(loc).toContain("source_label=project%3Aotari")
+  })
+
+  it("renders no heading but keeps Refresh when embedded", async () => {
+    mockApi(summary())
+    renderPage(<UsagePage embedded />)
+    await screen.findByText("gpt-5.6")
+
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /refresh/i })).toBeInTheDocument()
+  })
+
+  it("leaves the entity pickers and their reads to the Overview when embedded", async () => {
+    const fetchMock = mockApi(summary())
+    renderPage(<UsagePage embedded />)
+    await screen.findByText("gpt-5.6")
+
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Add filter" }),
+    ).not.toBeInTheDocument()
+    // The window's presets stay.
+    expect(screen.getByRole("button", { name: "24h" })).toBeInTheDocument()
+    // Only the page's own summary and its previous-period read run: no model,
+    // user or key list is fetched for a picker that is not drawn.
+    const dimensions = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes("/usage/summary"))
+      .flatMap((url) =>
+        new URL(url, "http://x").searchParams.getAll("dimensions"),
+      )
+    expect(dimensions).not.toContain("api_key")
   })
 })

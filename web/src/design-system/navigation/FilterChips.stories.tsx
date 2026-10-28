@@ -53,6 +53,24 @@ export const WithChips: Story = {
   },
 }
 
+/** `toggleLabel` tells apart two disclosures on one page. */
+export const NamedToggle: Story = {
+  args: {
+    toggleLabel: "More filters",
+    children: (
+      <FilterSelect
+        label="Tool"
+        value=""
+        onChange={() => {}}
+        options={[
+          { value: "", label: "All" },
+          { value: "web_search", label: "Web search" },
+        ]}
+      />
+    ),
+  },
+}
+
 /** `start` and `end` slot a page's own controls into the same row. */
 export const WithSlots: Story = {
   args: {

@@ -305,7 +305,7 @@ export function ActivityTimeline<B extends ChartBucket>({
           </span>
           <div className="flex items-center gap-1.5">
             <span className="hidden text-xs text-muted sm:inline">
-              Drag to filter a range
+              Click a bar or drag to filter
             </span>
             {/* `md:min-h-8 md:min-w-8` on both: 44px where a finger does the
                 zooming, back to the toolbar's own 32px density from `md` up. */}

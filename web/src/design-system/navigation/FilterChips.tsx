@@ -28,6 +28,7 @@ export function FilterChips({
   onClearAll,
   start,
   end,
+  toggleLabel = "Add filter",
 }: {
   chips: FilterChip[]
   // The picker controls (comboboxes/selects), revealed by "Add filter".
@@ -39,6 +40,9 @@ export function FilterChips({
   // line of vertical space on pages where filters sit beside the range picker.
   start?: ReactNode
   end?: ReactNode
+  // The toggle's name while closed, for a page that carries two of these and
+  // needs the controls told apart.
+  toggleLabel?: string
 }) {
   const [open, setOpen] = useState(false)
   const regionId = useId()
@@ -57,7 +61,7 @@ export function FilterChips({
           aria-expanded={open}
           aria-controls={regionId}
         >
-          {open ? "Done" : "Add filter"}
+          {open ? "Done" : toggleLabel}
         </Button>
         {chips.map((chip) => (
           <DismissChip

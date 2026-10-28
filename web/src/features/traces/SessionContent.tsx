@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { FiLock } from "react-icons/fi"
 
 import type {
   TraceContentShare,
@@ -6,11 +7,13 @@ import type {
   TraceShareAudience,
 } from "@/client"
 import { Button } from "@/design-system/actions/Button"
+import { IconButton } from "@/design-system/actions/IconButton"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { RadioGroup } from "@/design-system/forms/RadioGroup"
 import { TextArea } from "@/design-system/forms/TextArea"
+import { Popover } from "@/design-system/overlays/Popover"
 import {
   useBreakGlass,
   useEndTraceShare,
@@ -66,9 +69,6 @@ export function SessionContent({
 }) {
   const access = detail.content_access
   const holdsPrivate = detail.spans.some((span) => span.content_private)
-  const holdsContent = detail.spans.some(
-    (span) => Object.keys(span.content).length > 0,
-  )
   const owned = access === "owner" && detail.summary.user_id !== null
 
   if (access === "break_glass") {
@@ -107,10 +107,58 @@ export function SessionContent({
   // On ownership alone, not on the content having opened: during a key-source
   // outage the content reads back empty, and the owner must still be able to
   // stop a share and see who read it.
-  if (owned) {
-    return <OwnerSharing detail={detail} canShare={holdsContent} />
-  }
+  if (owned) return <OwnerSharing detail={detail} />
   return null
+}
+
+/** Whether the reader owns the session and it kept something of theirs to share. */
+function isSharable(detail: TraceDetail): boolean {
+  return (
+    detail.content_access === "owner" &&
+    detail.summary.user_id !== null &&
+    !detail.spans.some((span) => span.content_private) &&
+    detail.spans.some((span) => Object.keys(span.content).length > 0)
+  )
+}
+
+/**
+ * The owner's share control, for the panel's toolbar: who can read the session,
+ * behind a lock that opens it on a press (a tap on a phone, where a tooltip
+ * would never show), and the button that shares it.
+ */
+export function ShareSessionAction({ detail }: { detail: TraceDetail }) {
+  const platformBreakGlass = useTraceContentPolicy().policy.platform_break_glass
+  const [isSharing, setIsSharing] = useState(false)
+  if (!isSharable(detail)) return null
+  return (
+    <div className="flex items-center gap-1">
+      <Popover
+        label="Who can read this session"
+        placement="bottom end"
+        trigger={
+          <IconButton label="Who can read this session" size="sm">
+            <FiLock aria-hidden="true" className="size-4" />
+          </IconButton>
+        }
+      >
+        <p className="max-w-80 text-body">
+          Otari shows what this session was about, its prompts, commands and
+          file paths, only to you. {exceptionalAccess(platformBreakGlass)} Share
+          it when you want someone to look into it.
+        </p>
+      </Popover>
+      <Button size="sm" onPress={() => setIsSharing(true)}>
+        Share this session
+      </Button>
+      {isSharing ? (
+        <ShareDialog
+          traceId={detail.summary.trace_id}
+          workspaceId={detail.summary.workspace_id}
+          onClose={() => setIsSharing(false)}
+        />
+      ) : null}
+    </div>
+  )
 }
 
 function BreakGlassAction({
@@ -183,20 +231,12 @@ function BreakGlassAction({
   )
 }
 
-function OwnerSharing({
-  detail,
-  canShare,
-}: {
-  detail: TraceDetail
-  /** Whether there is content to share; nothing new is offered without it. */
-  canShare: boolean
-}) {
-  const platformBreakGlass = useTraceContentPolicy().policy.platform_break_glass
+// The owner's shares, with who read them; sharing itself is in the toolbar.
+function OwnerSharing({ detail }: { detail: TraceDetail }) {
   const traceId = detail.summary.trace_id
   const workspaceId = detail.summary.workspace_id
   const shares = useTraceShares(traceId, workspaceId, true)
   const endShare = useEndTraceShare()
-  const [isSharing, setIsSharing] = useState(false)
   // Pages are offsets over an order that moves as shares end, so a share can
   // appear on two of them; each is listed once.
   const items = [
@@ -207,24 +247,12 @@ function OwnerSharing({
     ).values(),
   ]
 
-  // A session that never kept content and was never shared has nothing to say.
-  if (!canShare && items.length === 0 && !shares.error) return null
+  // A session never shared has nothing to list.
+  if (items.length === 0 && !shares.error) return null
 
   return (
     <div className="flex flex-col gap-3">
-      <InfoBanner>
-        Otari shows what this session was about, its prompts, commands and file
-        paths, only to you. {exceptionalAccess(platformBreakGlass)} Share it
-        when you want someone to look into it.
-      </InfoBanner>
       <ErrorBanner error={shares.error ?? endShare.error} />
-      {canShare ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="primary" onPress={() => setIsSharing(true)}>
-            Share this session
-          </Button>
-        </div>
-      ) : null}
       {shares.hasNextPage ? (
         <div>
           <Button
@@ -250,13 +278,6 @@ function OwnerSharing({
             />
           ))}
         </ul>
-      ) : null}
-      {isSharing ? (
-        <ShareDialog
-          traceId={traceId}
-          workspaceId={workspaceId}
-          onClose={() => setIsSharing(false)}
-        />
       ) : null}
     </div>
   )

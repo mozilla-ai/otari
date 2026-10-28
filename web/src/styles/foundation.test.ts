@@ -732,7 +732,6 @@ describe("a table is a region, not a card", () => {
     "otari-members-table",
     "otari-models-table",
     "otari-offered-models-table",
-    "otari-overview-activity",
     "otari-provider-keys-table",
     "otari-providers-table",
     "otari-routing-table",
@@ -1165,10 +1164,6 @@ describe("content text wears a type role", () => {
     [
       "features/models/AccessListControl.tsx",
       "the blocked-from-every-model (or search tool) state banner, ruled in ModelScopeControl before it moved here",
-    ],
-    [
-      "features/overview/OverviewPage.tsx",
-      "an error-count figure and a chart's figcaption",
     ],
     [
       "design-system/metrics/KpiCell.tsx",

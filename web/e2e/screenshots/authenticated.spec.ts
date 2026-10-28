@@ -88,9 +88,10 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "organization-domains",
     heading: /email domains/i,
   },
-  { route: "/usage", name: "usage", heading: /usage/i },
-  { route: "/activity", name: "activity", heading: /activity/i },
-  { route: "/sessions", name: "sessions", heading: /sessions/i },
+  // The Overview's other two tabs, one baseline each ("overview" above is the
+  // first): they share the heading and the tab row, and differ below it.
+  { route: "/requests", name: "requests", heading: /overview/i },
+  { route: "/sessions", name: "sessions", heading: /overview/i },
   { route: "/tools", name: "tools", heading: /tools/i },
   // A narrowed Tools child is no longer the page above with two services
   // hidden: it heads with the tool's own status row, and its group titles drop

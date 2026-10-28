@@ -5,7 +5,10 @@ import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { TraceContentShare } from "@/client"
-import { SessionContent } from "@/features/traces/SessionContent"
+import {
+  SessionContent,
+  ShareSessionAction,
+} from "@/features/traces/SessionContent"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
@@ -122,11 +125,23 @@ describe("SessionContent", () => {
       content_access: "owner",
       spans: [{ ...tool, content: { command: "pytest -x" } }],
     })
-    renderWith(<SessionContent detail={detail} />)
+    renderWith(
+      <>
+        <SessionContent detail={detail} />
+        <ShareSessionAction detail={detail} />
+      </>,
+    )
 
     expect(
       await screen.findByText(/Read by admin@example.test/),
     ).toBeInTheDocument()
+    // Who can read it is behind the share control's lock, not a banner on the page.
+    expect(screen.queryByText(/only to you/)).not.toBeInTheDocument()
+    await userEvent.click(
+      screen.getByRole("button", { name: "Who can read this session" }),
+    )
+    expect(await screen.findByText(/only to you/)).toBeInTheDocument()
+    await userEvent.keyboard("{Escape}")
     await userEvent.click(
       screen.getByRole("button", { name: "Share this session" }),
     )
@@ -149,7 +164,7 @@ describe("SessionContent", () => {
   it("offers no sharing on a session no user owns", () => {
     mockApi()
     renderWith(
-      <SessionContent
+      <ShareSessionAction
         detail={traceDetail({
           summary: traceSummary({ user_id: null }),
           content_access: "owner",
@@ -165,15 +180,17 @@ describe("SessionContent", () => {
 
   it("keeps an owner's share controls while the content cannot be opened", async () => {
     mockApi([SHARE])
+    const detail = traceDetail({
+      summary: traceSummary({ user_id: "alice" }),
+      content_access: "owner",
+      // A key-source outage: the content reads back empty.
+      spans: [tool],
+    })
     renderWith(
-      <SessionContent
-        detail={traceDetail({
-          summary: traceSummary({ user_id: "alice" }),
-          content_access: "owner",
-          // A key-source outage: the content reads back empty.
-          spans: [tool],
-        })}
-      />,
+      <>
+        <SessionContent detail={detail} />
+        <ShareSessionAction detail={detail} />
+      </>,
     )
 
     expect(
