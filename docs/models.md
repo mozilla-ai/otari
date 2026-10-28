@@ -338,9 +338,9 @@ Each offering also carries the provider's list price from the live models.dev
 catalog, where it has one. The default is billed from the accepted models.dev
 snapshot, which can lag that catalog, so a difference between the two means a
 price update is waiting for review. Each offering also carries, for a signed-in
-caller, for a signed-in caller the organization's last thirty
-days on that offering: requests, cache hit rate, and the effective price per
-million tokens after cache reads and tiers.
+caller, the organization's last thirty days on that offering: requests, cache
+hit rate, and the effective price per million tokens after cache reads and
+tiers.
 
 ### Browsing the grouped catalog
 
