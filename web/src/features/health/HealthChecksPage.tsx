@@ -17,11 +17,13 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Field } from "@/design-system/forms/Field"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { TextArea } from "@/design-system/forms/TextArea"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import {
   useDisableFailingModels,
   useHealthCheckStatus,
@@ -31,6 +33,7 @@ import {
 import { looksLikeAddress, parseAddresses } from "@/shared/helpers/addresses"
 import { formatDateTimeMinutes } from "@/shared/helpers/format"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
 
 // The server's cap on the alert list.
 const MAX_ALERT_EMAILS = 20
@@ -434,6 +437,7 @@ export function HealthChecksPage() {
   const [showAll, setShowAll] = useState(false)
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0])
+  const search = useListSearch()
   const data = status.data
 
   if (status.isPending && !data) {
@@ -441,8 +445,16 @@ export function HealthChecksPage() {
   }
 
   const busy = Boolean(data?.running || data?.settings.run_requested)
+  // One search over both tables: a provider, or a model under one.
   const results = data
-    ? data.results.filter((result) => showAll || result.status === "fail")
+    ? data.results.filter(
+        (result) =>
+          (showAll || result.status === "fail") &&
+          matchesSearch(search.term, result.selector),
+      )
+    : []
+  const providerRows = data
+    ? data.providers.filter((row) => matchesSearch(search.term, row.provider))
     : []
   const failing = data
     ? data.results.filter((result) => result.status === "fail").length
@@ -491,13 +503,31 @@ export function HealthChecksPage() {
               .
             </InfoBanner>
           ) : null}
+          {data.providers.length > 0 ? (
+            <Toolbar>
+              <SearchField
+                label="Search providers and models"
+                placeholder="Search by provider or model"
+                value={search.value}
+                onChange={(next) => {
+                  search.onChange(next)
+                  setPage(0)
+                }}
+                className="w-full md:w-96"
+              />
+            </Toolbar>
+          ) : null}
           <DataTable
             ariaLabel="Providers"
             columns={PROVIDER_COLUMNS}
-            rows={data.providers}
+            rows={providerRows}
             getRowKey={(row) => row.provider}
             mobileLayout="cards"
-            emptyContent="No results yet. Run the checks to see each provider."
+            emptyContent={
+              search.term
+                ? "No providers match this search."
+                : "No results yet. Run the checks to see each provider."
+            }
           />
           {data.results.length > 0 ? (
             <SettingsGroup
@@ -546,7 +576,11 @@ export function HealthChecksPage() {
                 rows={pageRows}
                 getRowKey={(row) => row.selector}
                 mobileLayout="cards"
-                emptyContent="Every model answered."
+                emptyContent={
+                  search.term
+                    ? "No models match this search."
+                    : "Every model answered."
+                }
               />
               {results.length > PAGE_SIZE_OPTIONS[0] ? (
                 <TablePagination

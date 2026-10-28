@@ -188,6 +188,29 @@ describe("HealthChecksPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("narrows both tables with one search", async () => {
+    mockApi(status())
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByRole("grid", { name: "Providers" })
+    await user.click(screen.getByRole("button", { name: "Show all" }))
+
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search providers and models" }),
+      "deepinfra",
+    )
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("grid", { name: "Providers" })).queryByText(
+          "bedrock",
+        ),
+      ).toBeNull(),
+    )
+    const models = screen.getByRole("grid", { name: "Models" })
+    expect(within(models).getByText("deepinfra:llama")).toBeInTheDocument()
+    expect(within(models).queryByText("bedrock:claude")).toBeNull()
+  })
+
   it("pages the failing models", async () => {
     const failing = Array.from({ length: 30 }, (_, i) => ({
       ...status().results[0],
