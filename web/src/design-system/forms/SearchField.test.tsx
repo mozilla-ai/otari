@@ -183,3 +183,43 @@ describe("SearchField", () => {
     })
   })
 })
+
+describe("SearchField resultCount", () => {
+  it("says nothing while there is no term", () => {
+    render(
+      <SearchField
+        label="Search"
+        value=""
+        onChange={() => {}}
+        resultCount={4}
+      />,
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("")
+  })
+
+  it("states the count in a live region once there is a term", () => {
+    const { rerender } = render(
+      <SearchField
+        label="Search"
+        value="gpt"
+        onChange={() => {}}
+        resultCount={1200}
+      />,
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("1,200 matches")
+    rerender(
+      <SearchField
+        label="Search"
+        value="gpt"
+        onChange={() => {}}
+        resultCount={1}
+      />,
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("1 match")
+  })
+
+  it("renders no region when the caller does not count", () => {
+    render(<SearchField label="Search" value="gpt" onChange={() => {}} />)
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  })
+})
