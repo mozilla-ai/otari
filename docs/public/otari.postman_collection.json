@@ -6999,7 +6999,7 @@
         {
           "name": "List Org Provider Key Models",
           "request": {
-            "description": "List the models offered on one key, each with the rate it currently serves at.\n\nOrganization owners and admins only. ``count`` is the total rather than the\npage length, so a client knows whether another page is owed.",
+            "description": "List the models offered on one key, each with the rate it currently serves at.\n\nOrganization owners and admins only. ``count`` is the total rather than the\npage length, so a client knows whether another page is owed. ``search``\nnarrows the page and the count together.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7027,9 +7027,15 @@
                   "disabled": true,
                   "key": "limit",
                   "value": ""
+                },
+                {
+                  "description": "Narrow to models whose name contains this text, case-insensitively.",
+                  "disabled": true,
+                  "key": "search",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/models?skip=&limit=",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/models?skip=&limit=&search=",
               "variable": [
                 {
                   "description": "path parameter",

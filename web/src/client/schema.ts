@@ -3735,7 +3735,8 @@ export interface paths {
          * @description List the models offered on one key, each with the rate it currently serves at.
          *
          *     Organization owners and admins only. ``count`` is the total rather than the
-         *     page length, so a client knows whether another page is owed.
+         *     page length, so a client knows whether another page is owed. ``search``
+         *     narrows the page and the count together.
          */
         get: operations["provider-keys-list_org_provider_key_models"];
         put?: never;
@@ -25942,6 +25943,8 @@ export interface operations {
                 skip?: number;
                 /** @description Maximum number of records to return */
                 limit?: number;
+                /** @description Narrow to models whose name contains this text, case-insensitively. */
+                search?: string | null;
             };
             header?: never;
             path: {

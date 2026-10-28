@@ -380,6 +380,29 @@ async def test_adding_a_model_by_name_offers_it(async_db: AsyncSession, monkeypa
         await _service(async_db).add_model(user=owner, key_id=key_id, model="gpt-4o")
 
 
+async def test_a_search_narrows_the_offered_models_and_their_count(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key(async_db, owner)
+    other_key_id = await _key(async_db, owner, name="secondary")
+    _defaults(monkeypatch, {})
+    for model in ("gpt-4o", "gpt-4o-mini", "o3_pro", "o3-mini"):
+        await _service(async_db).add_model(user=owner, key_id=key_id, model=model)
+    await _service(async_db).add_model(user=owner, key_id=other_key_id, model="gpt-4o-other-key")
+
+    async def search(term: str) -> tuple[list[str], int]:
+        page = await _service(async_db).list_models(user=owner, key_id=key_id, search=term)
+        return [row.model for row in page.data], page.count
+
+    assert await search("GPT-4O") == (["gpt-4o", "gpt-4o-mini"], 2)
+    # An underscore is the text it says, not LIKE's any-character wildcard.
+    assert await search("o3_") == (["o3_pro"], 1)
+    assert await search("nothing-like-this") == ([], 0)
+    assert (await search("  "))[1] == 4
+
+
 async def test_the_unique_index_decides_a_racing_offer(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     """The pre-check races the insert, so the constraint is the real arbiter.
 

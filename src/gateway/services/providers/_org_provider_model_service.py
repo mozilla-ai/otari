@@ -307,12 +307,12 @@ class OrgProviderModelService:
     # ------------------------------------------------------------------
 
     async def list_models(
-        self, *, user: User, key_id: uuid.UUID, skip: int = 0, limit: int = 500
+        self, *, user: User, key_id: uuid.UUID, skip: int = 0, limit: int = 500, search: str | None = None
     ) -> OrgProviderKeyModelsPublic:
         """One page of a key's offered models, each priced as it currently serves."""
         async with self.uow:
             key = await self._key_for_user(user, key_id)
-            rows, count = await self.models.list_for_key(key_id, skip=skip, limit=limit)
+            rows, count = await self.models.list_for_key(key_id, skip=skip, limit=limit, search=search)
             prices = await self._current_prices(key, rows)
         return OrgProviderKeyModelsPublic(data=[_model_public(row, prices.get(row.model)) for row in rows], count=count)
 
