@@ -354,6 +354,7 @@ export function ProviderModelsPanel({
         <>
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
+              scrollResetKey={page}
               ariaLabel={`Models on ${providerKey.name}`}
               columns={columns}
               rows={rows}

@@ -770,6 +770,7 @@ export function ModelCatalogView({
           ) : view === "table" ? (
             <TableScrollFrame className="otari-models-table">
               <DataTable
+                scrollResetKey={page}
                 ariaLabel="Models"
                 columns={TABLE_COLUMNS}
                 rows={pageRows}

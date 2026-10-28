@@ -233,6 +233,7 @@ export function HostedProviderModelsPanel({
         <>
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
+              scrollResetKey={page}
               ariaLabel={`Models on ${provider.name}`}
               columns={columns}
               rows={rows}
