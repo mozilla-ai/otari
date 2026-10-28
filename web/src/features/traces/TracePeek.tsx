@@ -8,7 +8,7 @@ import { Skeleton } from "@/design-system/feedback/Skeleton"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
-import { RequestLogLink } from "@/features/activity/RequestLogLink"
+
 import { PeekPanel, ResizeHandle } from "@/shared/components/PeekPanel"
 import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
 import { CostCard } from "./CostCard"
@@ -20,6 +20,7 @@ import {
 } from "./format"
 import { GateCard, VERDICT } from "./GateCard"
 import { GatesView, stoppedBy } from "./GatesView"
+import { GatewayCall } from "./GatewayCall"
 import { GatewayPanel } from "./GatewayPanel"
 import { type Format, IOBlock } from "./IOBlock"
 import { LogView } from "./LogView"
@@ -677,20 +678,21 @@ export function TracePeek({
                 <GateCard gate={observation.gate} />
               ) : observation ? (
                 <>
-                  {/* A gateway LLM call is named after its usage row. */}
-                  {observation.type === "GENERATION" &&
-                  observation.metadata?.Origin === "gateway" ? (
-                    <div className="flex">
-                      <RequestLogLink
-                        requestId={observation.id}
-                        startMs={
-                          Date.parse(trace.timestamp) + observation.startMs
-                        }
-                        endMs={Date.parse(trace.timestamp) + observation.endMs}
-                      />
-                    </div>
-                  ) : null}
-                  {observation.explain ? (
+                  {observation.requestGroupId ? (
+                    <GatewayCall
+                      attemptId={observation.id}
+                      requestGroupId={observation.requestGroupId}
+                      startMs={
+                        Date.parse(trace.timestamp) + observation.startMs
+                      }
+                      endMs={Date.parse(trace.timestamp) + observation.endMs}
+                      summary={
+                        observation.explain ? (
+                          <ExplainCard explanation={observation.explain} />
+                        ) : null
+                      }
+                    />
+                  ) : observation.explain ? (
                     <ExplainCard explanation={observation.explain} />
                   ) : null}
                   {observation.estimate ? (
