@@ -15,7 +15,7 @@ against the bug.
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -27,10 +27,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.sql import Executable
 from sqlmodel import SQLModel
 
+from gateway.api.deps import build_search_tool_service
+from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tools import SearchToolCredential
-from gateway.services import search_tool_store_service as search_tool_store
-from gateway.services.search_tool_store_service import reencrypt_search_tools
+from gateway.services.search_tool_store_service import reset_search_tool_cache
 from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
+from gateway.services.tools import _search_tool_service
 
 T = TypeVar("T")
 
@@ -75,6 +78,20 @@ def _commit_from_another_connection(db_path: str, statement: Executable) -> None
 @pytest.fixture(autouse=True)
 def _secret_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+
+
+@pytest.fixture(autouse=True)
+def _clean_overlay() -> Iterator[None]:
+    """A rotation applies the rows to this worker's overlay once it commits."""
+    reset_search_tool_cache()
+    yield
+    reset_search_tool_cache()
+
+
+async def reencrypt_search_tools(session: AsyncSession) -> tuple[int, int, int]:
+    """Rotate through the service and return its counts."""
+    counts = await build_search_tool_service(UnitOfWork(session), session, config=GatewayConfig()).reencrypt()
+    return counts.reencrypted, counts.unreadable, counts.skipped
 
 
 async def _add_search_tool(session: AsyncSession, name: str, api_key: str, *, kind: str = "search") -> None:
@@ -136,7 +153,7 @@ class TestSearchToolRotation:
                     )
                 return real_encrypt(plaintext)
 
-            monkeypatch.setattr(search_tool_store, "encrypt_secret", encrypt_and_let_someone_else_commit)
+            monkeypatch.setattr(_search_tool_service, "encrypt_secret", encrypt_and_let_someone_else_commit)
 
             counts = await reencrypt_search_tools(session)
             await session.commit()

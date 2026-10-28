@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from gateway.api import deps
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.tools import (
     BUILTIN_FETCH,
@@ -332,3 +333,18 @@ async def test_the_refresh_reads_the_rows_then_the_settings_and_applies_both(
     applied = [record.getMessage() for record in caplog.records if "Applied tool setting" in record.getMessage()]
     # Only what changed, and by key: web_search_url was already unset.
     assert applied == ["Applied tool setting web_search_default_tool, changed since this worker last read it"]
+
+
+@pytest.mark.asyncio
+async def test_the_service_reads_the_settings_without_reporting_invalid_ones(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Startup reported each invalid row; a refresh every interval would repeat it."""
+    calls: list[bool] = []
+
+    async def load_overrides(_session: object, *, report_invalid: bool = True) -> dict[str, Any]:
+        calls.append(report_invalid)
+        return {}
+
+    monkeypatch.setattr(deps, "load_overrides", load_overrides)
+    service = deps.build_search_tool_service(object(), object(), config=GatewayConfig())  # type: ignore[arg-type]
+    await service.read_settings()
+    assert calls == [False]

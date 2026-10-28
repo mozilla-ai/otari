@@ -70,6 +70,7 @@ from gateway.repositories.tenancy import (
 )
 from gateway.repositories.tools import (
     OrgWebSearchKeyRepository,
+    SearchToolRepository,
     WorkspaceCodeExecutionPolicyRepository,
     WorkspaceWebSearchKeyOverrideRepository,
 )
@@ -142,7 +143,9 @@ from gateway.services.tenancy.workspace_activation_service import WorkspaceActiv
 from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers, WorkspaceMcpServerService
 from gateway.services.tenancy.workspace_service import WorkspaceService
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies, WorkspaceWebSearchService
+from gateway.services.tool_settings_service import load_overrides, stage_override
 from gateway.services.tools import (
+    SearchToolService,
     WebSearchKeyService,
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
@@ -1740,6 +1743,34 @@ def build_scheduled_catalog_update(config: GatewayConfig) -> ScheduledRun:
     return run
 
 
+def build_search_tool_service(uow: UnitOfWork, session: AsyncSession, *, config: GatewayConfig) -> SearchToolService:
+    """Build the search-tool service on ``uow``.
+
+    ``session`` is the session ``uow`` runs on. The runtime tool settings are
+    read and staged through it, so a default a create stores lands in the
+    create's commit.
+    """
+    return SearchToolService(
+        uow,
+        config=config,
+        tools=SearchToolRepository(uow),
+        read_settings=lambda: load_overrides(session, report_invalid=False),
+        stage_setting=lambda key, value: stage_override(session, key, value),
+    )
+
+
+def get_search_tool_service(
+    uow: UnitOfWorkDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> SearchToolService:
+    """Build the search-tool service on the request's unit of work."""
+    return build_search_tool_service(uow, db, config=config)
+
+
+SearchToolServiceDep = Annotated[SearchToolService, Depends(get_search_tool_service)]
+
+
 def build_hosted_discovery(config: GatewayConfig) -> HostedDiscovery:
     """Build the discovery worker's read of the hosted providers' dials.
 
@@ -2290,6 +2321,7 @@ __all__ = [
     "InferenceServiceDep",
     "ModelProviderPortDep",
     "HostedProviderServiceDep",
+    "SearchToolServiceDep",
     "OrgProviderModelServiceDep",
     "RateLimitServiceDep",
     "HealthCheckServiceDep",

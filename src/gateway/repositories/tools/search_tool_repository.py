@@ -9,11 +9,24 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 from sqlalchemy import CursorResult, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tools import SearchToolCredential
 from gateway.repositories.base_repository import BaseRepository
+
+
+class SearchToolConflict(Exception):
+    """The database refused a flush on a unique key.
+
+    The repository's name for that ``IntegrityError``, so the service that maps
+    it to a domain error imports no database library.
+    """
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.name = name
 
 
 class SearchToolRepository(BaseRepository[SearchToolCredential, BaseModel, BaseModel]):
@@ -49,14 +62,18 @@ class SearchToolRepository(BaseRepository[SearchToolCredential, BaseModel, BaseM
         return (await self.db.execute(stmt)).scalar_one_or_none()
 
     async def insert(self, **fields: Any) -> SearchToolCredential:
-        """Stage a new row, flushed so a name that already has one is refused here.
+        """Stage a new row, flushed with whatever the transaction staged before it.
 
         Raises:
-            IntegrityError: a row of that name already exists.
+            SearchToolConflict: a row of that name already exists, or a write
+                staged before it collided with one committed meanwhile.
         """
         row = SearchToolCredential(**fields)
         self.db.add(row)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError as exc:
+            raise SearchToolConflict(row.name) from exc
         await self.db.refresh(row)
         return row
 

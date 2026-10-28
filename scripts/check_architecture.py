@@ -603,7 +603,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/api/routes/routing.py",
     "gateway/api/routes/routing_memory.py",
     "gateway/api/routes/scoped_budgets.py",
-    "gateway/api/routes/search_tools.py",
     "gateway/api/routes/settings.py",
     "gateway/api/routes/tool_settings.py",
     "gateway/api/routes/users.py",
