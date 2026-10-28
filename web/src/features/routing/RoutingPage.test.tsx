@@ -73,6 +73,31 @@ describe("RoutingPage", () => {
     expect(within(fastRow).getByText("Every caller")).toBeInTheDocument()
   })
 
+  it("narrows the policies by name or by a model they route to", async () => {
+    mockApi([
+      policy("fast", CHAIN),
+      policy("solo", { select: [{ default: "openai:gpt-5" }] }),
+    ])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+    await screen.findByText("solo")
+    const search = screen.getByRole("searchbox", {
+      name: "Search routing policies",
+    })
+
+    // A backup is a model the policy routes to, so it finds the row too.
+    await user.type(search, "claude-haiku")
+    expect(await screen.findByText("1 match")).toBeInTheDocument()
+    expect(screen.getByText("fast")).toBeInTheDocument()
+    expect(screen.queryByText("solo")).not.toBeInTheDocument()
+
+    await user.clear(search)
+    await user.type(search, "nothing-like-this")
+    expect(
+      await screen.findByText("No routing policies match this search."),
+    ).toBeInTheDocument()
+  })
+
   it("says a policy has no backups rather than leaving the cell empty", async () => {
     mockApi([policy("solo", { select: [{ default: "openai:gpt-5" }] })])
     renderPage(<RoutingPage />)
