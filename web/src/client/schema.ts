@@ -2427,7 +2427,7 @@ export interface paths {
          *     request sends as `model` to let the gateway choose the provider: it tries the
          *     model's offerings best first and falls back down the list. An entry's price,
          *     token limits and capabilities are those of the offering tried first, at the
-         *     caller's own rate. A limit nobody knows is null.
+         *     caller's own rate. A value nobody knows is omitted rather than sent as null.
          *
          *     Aliases and routing policies are listed beside the models. An
          *     `instance:model` selector still pins a request to one provider, and
@@ -2516,6 +2516,8 @@ export interface paths {
         /**
          * Get Model
          * @description Get details for a specific model, by catalog id, alias or `instance:model` selector.
+         *
+         *     A value the gateway does not know is omitted rather than sent as null.
          */
         get: operations["models-get_model"];
         put?: never;

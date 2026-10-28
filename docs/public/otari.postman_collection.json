@@ -4328,7 +4328,7 @@
         {
           "name": "List Models",
           "request": {
-            "description": "List all available models, one entry per model however many providers serve it.\n\nEach `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a\nrequest sends as `model` to let the gateway choose the provider: it tries the\nmodel's offerings best first and falls back down the list. An entry's price,\ntoken limits and capabilities are those of the offering tried first, at the\ncaller's own rate. A limit nobody knows is null.\n\nAliases and routing policies are listed beside the models. An\n`instance:model` selector still pins a request to one provider, and\nGET /api/v1/catalog/models/{model_id} lists the offerings of a model.",
+            "description": "List all available models, one entry per model however many providers serve it.\n\nEach `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a\nrequest sends as `model` to let the gateway choose the provider: it tries the\nmodel's offerings best first and falls back down the list. An entry's price,\ntoken limits and capabilities are those of the offering tried first, at the\ncaller's own rate. A value nobody knows is omitted rather than sent as null.\n\nAliases and routing policies are listed beside the models. An\n`instance:model` selector still pins a request to one provider, and\nGET /api/v1/catalog/models/{model_id} lists the offerings of a model.",
             "header": [],
             "method": "GET",
             "url": {
@@ -4403,7 +4403,7 @@
         {
           "name": "Get Model",
           "request": {
-            "description": "Get details for a specific model, by catalog id, alias or `instance:model` selector.",
+            "description": "Get details for a specific model, by catalog id, alias or `instance:model` selector.\n\nA value the gateway does not know is omitted rather than sent as null.",
             "header": [],
             "method": "GET",
             "url": {

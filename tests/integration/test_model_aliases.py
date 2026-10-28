@@ -204,8 +204,6 @@ def test_get_model_alias_surfaces_target_pricing(client: TestClient) -> None:
     assert resp.json()["pricing"] == {
         "input_price_per_million": 1.0,
         "output_price_per_million": 2.0,
-        "cache_read_price_per_million": None,
-        "cache_write_price_per_million": None,
         "pricing_tiers": [],
         "unit": "tokens",
     }
@@ -290,7 +288,7 @@ def test_pricing_an_alias_is_rejected(client: TestClient) -> None:
 
     # Nothing was written: the alias is still unpriced, not priced at 99.
     listing = client.get(f"{API_ROOT}/models", headers=HEADERS)
-    assert next(m for m in listing.json()["data"] if m["id"] == "myopusmodel")["pricing"] is None
+    assert "pricing" not in next(m for m in listing.json()["data"] if m["id"] == "myopusmodel")
     assert client.get(f"{API_ROOT}/pricing/myopusmodel", headers=HEADERS).status_code == 404
 
 

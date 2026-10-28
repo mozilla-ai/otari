@@ -1442,7 +1442,7 @@ def test_a_dynamic_stored_policy_reports_no_single_price(client: TestClient) -> 
 
     resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     entries = {model["id"]: model for model in resp.json()["data"]}
-    assert entries["listed-dynamic"]["pricing"] is None
+    assert "pricing" not in entries["listed-dynamic"]
     # Reuses the existing field rather than inventing a second way to say it.
     assert entries["listed-dynamic"]["pricing_source"] == "dynamic"
 
