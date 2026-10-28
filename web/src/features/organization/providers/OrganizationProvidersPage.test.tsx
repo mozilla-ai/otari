@@ -159,6 +159,33 @@ describe("OrganizationProvidersPage", () => {
     expect(trigger).toBeInTheDocument()
   })
 
+  it("narrows the keys by name or provider", async () => {
+    mockApi({
+      keys: [
+        orgProviderKey({ id: "k-1", name: "Production", provider: "openai" }),
+        orgProviderKey({ id: "k-2", name: "Backup", provider: "anthropic" }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+    await screen.findByText("Production")
+    const search = screen.getByRole("searchbox", {
+      name: "Search provider keys",
+    })
+
+    await user.type(search, "anthrop")
+    await waitFor(() =>
+      expect(screen.queryByText("Production")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("Backup")).toBeInTheDocument()
+
+    await user.clear(search)
+    await user.type(search, "nothing-like-this")
+    expect(
+      await screen.findByText("No provider keys match this search."),
+    ).toBeInTheDocument()
+  })
+
   it("marks a key the deployment cannot decrypt and says how to fix it", async () => {
     // Every other signal on the row reads normal: the key is stored, it has a
     // last4, nothing disabled it. What is wrong is that the ciphertext no longer
