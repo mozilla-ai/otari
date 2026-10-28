@@ -12,7 +12,7 @@ the same way.
 
 import asyncio
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Set
 from datetime import datetime
 from typing import Any
 
@@ -49,6 +49,7 @@ from gateway.services.pricing_service import (
     pricing_key_forms,
     resolve_organization_override,
 )
+from gateway.services.provider_kwargs import normalize_pricing_key
 from gateway.services.tenancy.organization_model_access import (
     resolve_all_organizations_offered_keys,
     workspace_organizations,
@@ -115,6 +116,7 @@ def models_by_identity(
     listed: Iterable[ModelObject],
     *,
     organization_id: uuid.UUID | None = None,
+    alias_targets: Set[str] = frozenset(),
 ) -> list[ModelObject]:
     """Fold a flat listing into one row per model, keyed by catalog id, sorted by id.
 
@@ -123,6 +125,10 @@ def models_by_identity(
     ``listed``; while the index does not know the model yet, the cheapest
     priced one. Aliases and policies are names rather than offerings and pass
     through, and a model whose id one of them already takes is left to it.
+
+    An offering whose canonical key is in ``alias_targets`` still ranks, since
+    the catalog id reaches it, but a model offered only by alias targets gets
+    no row: the alias stands in for it.
     """
     names: dict[str, ModelObject] = {}
     offerings: dict[str, ModelObject] = {}
@@ -137,6 +143,8 @@ def models_by_identity(
         if identity.id in rows:
             continue
         members = set(identity.selectors)
+        if all(normalize_pricing_key(config, selector) in alias_targets for selector in members):
+            continue
         ranked = [
             selector
             for selector in resolve_catalog_offerings(identity.id, organization_id=organization_id)

@@ -731,6 +731,8 @@ class MergedCatalog:
     """What the caller reaches on a deployment-owned key; see :attr:`CatalogScope.deployment_key_models`."""
     models_dev: dict[str, Any] | None = None
     """The models.dev catalog the limits were read from, for a reader that joins more of it."""
+    alias_targets: set[str] = field(default_factory=set)
+    """Canonical keys of the caller's alias targets, whether or not the listing withheld them."""
 
 
 async def build_merged_catalog(
@@ -824,7 +826,8 @@ async def build_merged_catalog(
     # the models.dev default then vanished from the dashboard along with its
     # rate, and the single-model read served the same model with its price all
     # along, so nothing was actually kept off the wire.
-    alias_targets = alias_target_keys(config, configured_aliases) if withhold_alias_targets else set()
+    targets = alias_target_keys(config, configured_aliases)
+    alias_targets = targets if withhold_alias_targets else set()
     models_dev = await load_catalog_metadata(config, cached_only=cached_only)
 
     merged: dict[str, ModelObject] = {}
@@ -988,6 +991,7 @@ async def build_merged_catalog(
         discovered_keys=discovered_keys,
         deployment_key_models=scope.deployment_key_models,
         models_dev=models_dev,
+        alias_targets=targets,
     )
 
 

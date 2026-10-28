@@ -217,13 +217,23 @@ async def _listing(
     *,
     provider: str | None = None,
 ) -> list[ModelObject]:
+    # Alias targets are kept so a model's row is chosen among the offerings a
+    # request by its catalog id tries; ``models_by_identity`` still hides them.
     catalog = await build_merged_catalog(
-        db, config, auth=auth, session_identity=session_identity, provider=provider, model_provider=model_provider
+        db,
+        config,
+        auth=auth,
+        session_identity=session_identity,
+        provider=provider,
+        model_provider=model_provider,
+        withhold_alias_targets=False,
     )
     models = list(catalog.models.values())
     organization_id = await viewer_organization(db, auth, session_identity)
     await apply_organization_pricing(db, config, models, catalog.aliases, organization_id)
-    return models_by_identity(config, catalog.models_dev, models, organization_id=organization_id)
+    return models_by_identity(
+        config, catalog.models_dev, models, organization_id=organization_id, alias_targets=catalog.alias_targets
+    )
 
 
 # Served before GET /models/{model_id:path}, which FastAPI would otherwise match

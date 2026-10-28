@@ -90,6 +90,37 @@ def test_an_offering_the_caller_cannot_see_is_never_the_one_described(config: Ga
     assert listed[0].pricing.input_price_per_million == 0.7
 
 
+def test_an_alias_target_a_request_tries_first_is_the_one_described(config: GatewayConfig) -> None:
+    """The alias hides the target's name, not its place in the catalog id's dispatch order."""
+    rows = [
+        selectors.OfferingRow(_NEBIUS, "nebius", "nebius", 0.1),
+        selectors.OfferingRow(_FIREWORKS, "fireworks", "fireworks", 0.7),
+    ]
+    selectors.set_selector_index(
+        selectors.build_selector_index(rows, {"z-ai/glm-5.3": ("glm-5.3", (_NEBIUS, _FIREWORKS))})
+    )
+    try:
+        first = selectors.resolve_catalog_offerings("z-ai/glm-5.3")[0]
+        listed = models_by_identity(
+            config, None, [_offering(_NEBIUS, 0.1), _offering(_FIREWORKS, 0.7)], alias_targets={_NEBIUS}
+        )
+    finally:
+        selectors.reset_selector_index()
+
+    assert first == _NEBIUS
+    assert [row.id for row in listed] == ["z-ai/glm-5.3"]
+    assert listed[0].pricing is not None
+    assert listed[0].pricing.input_price_per_million == 0.1
+
+
+def test_a_model_offered_only_by_alias_targets_is_left_to_the_alias(config: GatewayConfig, no_index: None) -> None:
+    alias = ModelObject(id="fast", created=0, owned_by=ALIAS_OWNED_BY)
+
+    listed = models_by_identity(config, None, [alias, _offering("openai:gpt-4o", 2.5)], alias_targets={"openai:gpt-4o"})
+
+    assert [row.id for row in listed] == ["fast"]
+
+
 def test_aliases_and_policies_are_listed_as_themselves(config: GatewayConfig, no_index: None) -> None:
     alias = ModelObject(id="fast", created=0, owned_by=ALIAS_OWNED_BY)
     policy = ModelObject(id="cheapest", created=0, owned_by="openai", pricing_source="dynamic")
