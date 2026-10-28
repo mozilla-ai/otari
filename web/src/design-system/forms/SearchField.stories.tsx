@@ -57,6 +57,15 @@ export const CustomPlaceholder: Story = {
   },
 }
 
+/**
+ * `resultCount` is the caller's count of what its search found. It shows beside
+ * the field while there is a term, and a screen reader hears it once it
+ * settles. Clear the field and it goes quiet.
+ */
+export const WithResultCount: Story = {
+  args: { value: "gpt", resultCount: 12, className: "w-96" },
+}
+
 export const Disabled: Story = { args: { isDisabled: true, className: "w-72" } }
 
 /**
