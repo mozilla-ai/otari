@@ -9,8 +9,10 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { DocsLink } from "@/design-system/navigation/DocsLink"
 import { RouterReadiness } from "@/features/routing/RouterReadiness"
 import {
@@ -22,7 +24,7 @@ import {
 } from "@/shared/api/routing"
 import { docsSourceHref } from "@/shared/helpers/docs"
 import { useUrlValue } from "@/shared/helpers/urlState"
-
+import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
 import { AutomaticFallbacks } from "./AutomaticFallbacks"
 import { CreatePolicyDialog } from "./CreatePolicyDialog"
 import { BackupsCell, MainModelCell } from "./PolicyCells"
@@ -48,6 +50,18 @@ export function RoutingPage() {
     canEdit,
     writeWorkspaceId,
   } = useRoutingRows()
+  const search = useListSearch()
+  // What the row shows: its name, the model it sends to, and the pool and
+  // backups behind that.
+  const shown = rows.filter((row) =>
+    matchesSearch(
+      search.term,
+      row.name,
+      findFallthroughTarget(row.spec),
+      ...findCandidates(row.spec),
+      ...(row.spec.on_failure ?? []),
+    ),
+  )
   const deletePolicy = useDeleteRoutingPolicy()
   const deleteAlias = useDeleteAlias()
   const deleteOrgPolicy = useDeleteOrganizationRoutingPolicy()
@@ -304,18 +318,34 @@ export function RoutingPage() {
           </EmptyState>
         )
       ) : (
-        <TableScrollFrame className="otari-routing-table">
-          <DataTable
-            ariaLabel="Routing policies"
-            columns={columns}
-            rows={rows}
-            getRowKey={rowKeyOf}
-            detailKey={expanded}
-            renderDetail={renderDetail}
-            isLoading={isListLoading}
-            emptyContent="No routing policies yet."
-          />
-        </TableScrollFrame>
+        <>
+          <Toolbar>
+            <SearchField
+              label="Search routing policies"
+              placeholder="Search by name or model"
+              value={search.value}
+              onChange={search.onChange}
+              resultCount={shown.length}
+              className="w-full md:w-96"
+            />
+          </Toolbar>
+          <TableScrollFrame className="otari-routing-table">
+            <DataTable
+              ariaLabel="Routing policies"
+              columns={columns}
+              rows={shown}
+              getRowKey={rowKeyOf}
+              detailKey={expanded}
+              renderDetail={renderDetail}
+              isLoading={isListLoading}
+              emptyContent={
+                search.term
+                  ? "No routing policies match this search."
+                  : "No routing policies yet."
+              }
+            />
+          </TableScrollFrame>
+        </>
       )}
 
       <AutomaticFallbacksSection />
