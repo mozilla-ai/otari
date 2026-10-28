@@ -198,6 +198,10 @@ TablePagination    the narrowed total, when the list pages
   row the search does not match would look like nothing happened: there,
   making one ends the search (Workspaces, Routing, a workspace's Members, MCP
   servers, provider keys).
+  A second list on the same page names its own param and pager
+  (`useListSearch({ param: "models_q", pageParam: "models_page" })`). A panel
+  whose page and open state live in component state keeps its term there too,
+  so a reload does not leave a term behind with nothing to filter.
 - **Search the whole collection, never the page on screen.** The endpoint does
   the searching (`performance.md`, "The server does the shaping"): a list paged
   by its endpoint passes `term` to the endpoint's `search` param, in the query
