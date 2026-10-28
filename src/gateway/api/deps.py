@@ -1748,8 +1748,7 @@ def build_search_tool_service(uow: UnitOfWork, session: AsyncSession, *, config:
 
     ``session`` is the session ``uow`` runs on. The runtime tool settings are
     read and staged through it, so a default a create stores lands in the
-    create's commit. A worker job builds both with
-    ``create_unit_of_work_with_session``.
+    create's commit.
     """
     return SearchToolService(
         uow,
