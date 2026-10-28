@@ -1181,6 +1181,13 @@ def domain_error(adapter: FormatAdapter[Any, Any], exc: TenancyError) -> HTTPExc
     )
 
 
+def _country_refusal(adapter: FormatAdapter[Any, Any], detail: str) -> HTTPException:
+    """The 403 for a request whose country the provider that would serve it does not serve."""
+    return adapter.error(
+        status.HTTP_403_FORBIDDEN, detail, ErrorKind.PERMISSION, headers=error_headers(COUNTRY_NOT_SUPPORTED)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Request context (auth, budget reservation)
 # ---------------------------------------------------------------------------
@@ -2079,9 +2086,7 @@ async def _serve_from_hosted_credential(
             tags=ctx.tags,
             safety_identifier=ctx.upstream_user,
         )
-        raise adapter.error(
-            status.HTTP_403_FORBIDDEN, detail, ErrorKind.PERMISSION, headers=error_headers(COUNTRY_NOT_SUPPORTED)
-        ) from exc
+        raise _country_refusal(adapter, detail) from exc
 
     try:
         served = dispatch_on_hosted_credential(credential, model=resolved.model, alias=resolved.alias)
@@ -2929,9 +2934,7 @@ async def resolve_request_context(
             tags=tags,
             safety_identifier=upstream_user,
         )
-        raise adapter.error(
-            status.HTTP_403_FORBIDDEN, detail, ErrorKind.PERMISSION, headers=error_headers(COUNTRY_NOT_SUPPORTED)
-        ) from exc
+        raise _country_refusal(adapter, detail) from exc
 
     if idempotency is not None and session_principal is None:
         try:
@@ -3261,9 +3264,7 @@ async def resolve_request_context(
                 tags=tags,
                 safety_identifier=upstream_user,
             )
-            raise adapter.error(
-                status.HTTP_403_FORBIDDEN, detail, ErrorKind.PERMISSION, headers=error_headers(COUNTRY_NOT_SUPPORTED)
-            ) from exc
+            raise _country_refusal(adapter, detail) from exc
         except Exception as exc:
             await refund_reservation(db, reservation)
             logger.error("Request setup failed after reservation: %s", exc)
