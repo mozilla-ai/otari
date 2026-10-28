@@ -12,6 +12,7 @@ from typing import Any, Never, cast
 from sqlalchemy import CursorResult, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 
+from gateway.core.sql import LIKE_ESCAPE, contains_pattern
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.providers import (
     ConfiguredProviderImport,
@@ -190,14 +191,21 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
         return result.scalar_one_or_none()
 
     async def list_for_provider(
-        self, provider: str, *, skip: int = 0, limit: int = 500
+        self, provider: str, *, skip: int = 0, limit: int = 500, search: str | None = None
     ) -> tuple[Sequence[HostedProviderModel], int]:
-        """One page of a provider's offered models, and how many there are in total."""
+        """One page of a provider's offered models, and how many there are in total.
+
+        ``search`` narrows on the model name, case-insensitively, and the count
+        narrows with it.
+        """
+        filters = [HostedProviderModel.provider == provider]
+        if term := (search or "").strip():
+            filters.append(func.lower(HostedProviderModel.model).like(contains_pattern(term), escape=LIKE_ESCAPE))
         rows = (
             (
                 await self.db.execute(
                     select(HostedProviderModel)
-                    .where(HostedProviderModel.provider == provider)
+                    .where(*filters)
                     .order_by(HostedProviderModel.model)
                     .offset(skip)
                     .limit(limit)
@@ -207,9 +215,7 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
             .all()
         )
         total = (
-            await self.db.execute(
-                select(func.count()).select_from(HostedProviderModel).where(HostedProviderModel.provider == provider)
-            )
+            await self.db.execute(select(func.count()).select_from(HostedProviderModel).where(*filters))
         ).scalar_one()
         return rows, total
 

@@ -2027,6 +2027,8 @@ export interface paths {
         /**
          * List Hosted Models
          * @description List the models offered on one provider, with the price each currently serves at.
+         *
+         *     ``search`` narrows the page and the count together.
          */
         get: operations["hosted-providers-list_hosted_models"];
         put?: never;
@@ -23038,6 +23040,8 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description Narrow to models whose name contains this text, case-insensitively. */
+                search?: string | null;
             };
             header?: never;
             path: {
