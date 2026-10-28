@@ -3276,7 +3276,7 @@
         {
           "name": "List Hosted Models",
           "request": {
-            "description": "List the models offered on one provider, with the price each currently serves at.",
+            "description": "List the models offered on one provider, with the price each currently serves at.\n\n``search`` narrows the page and the count together.",
             "header": [],
             "method": "GET",
             "url": {
@@ -3302,9 +3302,15 @@
                   "disabled": true,
                   "key": "limit",
                   "value": ""
+                },
+                {
+                  "description": "Narrow to models whose name contains this text, case-insensitively.",
+                  "disabled": true,
+                  "key": "search",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider/models?skip=&limit=",
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider/models?skip=&limit=&search=",
               "variable": [
                 {
                   "description": "path parameter",
