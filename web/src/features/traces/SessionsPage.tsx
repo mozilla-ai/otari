@@ -257,13 +257,14 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
   )
   const startParam = url.get("start_date")
   const endParam = url.get("end_date")
-  // A start alone (Usage's Today, the attention strip's link) runs to now.
-  const custom: TimeWindow | undefined = startParam
-    ? {
-        start: Date.parse(startParam),
-        end: endParam ? Date.parse(endParam) : now,
-      }
-    : undefined
+  // A start alone (Usage's Today, the attention strip's link) runs to now. A
+  // bound that does not parse (a hand-edited link) falls back to the preset.
+  const customStart = startParam ? Date.parse(startParam) : Number.NaN
+  const customEnd = endParam ? Date.parse(endParam) : now
+  const custom: TimeWindow | undefined =
+    Number.isFinite(customStart) && Number.isFinite(customEnd)
+      ? { start: customStart, end: customEnd }
+      : undefined
 
   const range = url.get("range")
   const patch = url.patch

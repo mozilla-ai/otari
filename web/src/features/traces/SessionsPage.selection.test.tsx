@@ -56,6 +56,16 @@ describe("SessionsPage timeline selection", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("falls back to the preset when a link's start date does not parse", async () => {
+    mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?start_date=not-a-date")
+
+    expect(
+      await screen.findByRole("grid", { name: "Sessions" }),
+    ).toBeInTheDocument()
+  })
+
   it("does not open a lone session just because the page opened on one", async () => {
     mockApi({ traces: [traceSummary()] })
 

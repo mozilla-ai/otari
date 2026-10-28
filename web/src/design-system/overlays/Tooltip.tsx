@@ -85,7 +85,11 @@ export function Tooltip({
     (children.type === Button || children.type === IconButton)
   ) {
     return (
-      <HeroTooltip.Root delay={delay}>
+      <HeroTooltip.Root
+        delay={delay}
+        isOpen={isOpen}
+        onOpenChange={onOpenChange}
+      >
         {children}
         <HeroTooltip.Content placement={placement}>
           {content}

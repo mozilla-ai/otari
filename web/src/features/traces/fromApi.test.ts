@@ -99,6 +99,32 @@ describe("toTrace", () => {
     expect(byId.get("llm-4")?.parentObservationId).toBe("prompt-1")
   })
 
+  it("keeps a lone call's request when the request carries content of its own", () => {
+    const detail = traceDetail()
+    const spans = [
+      ...detail.spans,
+      traceSpan({
+        span_id: "req-3",
+        start_time: "2026-10-07T12:01:10Z",
+        content: { prompt: "fix the flaky test" },
+      }),
+      traceSpan({
+        span_id: "llm-3",
+        parent_span_id: "req-3",
+        kind: "llm",
+        start_time: "2026-10-07T12:01:10Z",
+      }),
+    ]
+    const turns = [
+      { ...detail.turns[0], step_ids: ["req-1", "req-2", "req-3"] },
+    ]
+    const trace = toTrace(traceSummary(), { ...detail, spans, turns })
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.has("req-3")).toBe(true)
+    expect(byId.get("llm-3")?.parentObservationId).toBe("req-3")
+  })
+
   it("carries a model request's context window and the sizes the gateway kept of it", () => {
     const detail = traceDetail()
     const spans = detail.spans.map((span) =>

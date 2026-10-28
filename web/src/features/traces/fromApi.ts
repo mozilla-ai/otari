@@ -337,11 +337,15 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         : (turnOf.get(span.span_id) ?? null)
     // A gateway request that made one LLM call and nothing else is that call,
     // so the call takes the request's row rather than sitting alone under it.
-    // A request with a fallback, a gateway-run tool or a gate keeps its row.
+    // A request with a fallback, a gateway-run tool, a gate, or content or an
+    // error of its own keeps its row, so nothing it carries is lost.
     const loneCall = ({ span, children }: SpanNode) => {
       const [call] = children
       return span.kind === "step" &&
         span.operation !== "interaction" &&
+        Object.keys(span.content).length === 0 &&
+        !span.content_private &&
+        span.error_class === null &&
         children.length === 1 &&
         call.span.kind === "llm" &&
         call.children.length === 0 &&
