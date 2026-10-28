@@ -891,6 +891,38 @@ describe("HostedProvidersPage", () => {
     )
   })
 
+  it("narrows the providers by name or by the provider they run", async () => {
+    mockApi({
+      providers: [
+        hostedProvider({ name: "openai-eu", provider: "openai" }),
+        hostedProvider({ name: "claude-direct", provider: "anthropic" }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByText("openai-eu")
+
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search providers" }),
+      "anthropic",
+    )
+    await waitFor(() =>
+      expect(screen.queryByText("openai-eu")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("claude-direct")).toBeInTheDocument()
+
+    await user.clear(
+      screen.getByRole("searchbox", { name: "Search providers" }),
+    )
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search providers" }),
+      "nothing-like-this",
+    )
+    expect(
+      await screen.findByText("No providers match this search."),
+    ).toBeInTheDocument()
+  })
+
   it("searches a provider's models through the endpoint", async () => {
     const requests = mockApi({
       models: [hostedModel(), hostedModel({ id: "m2", model: "o9-preview" })],
