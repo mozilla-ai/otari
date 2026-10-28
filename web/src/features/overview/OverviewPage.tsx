@@ -59,6 +59,7 @@ import {
 } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import { BOOT_MARKS, useMarkAfterPaint } from "@/shared/telemetry/bootTiming"
 
 const DAY_MS = 86_400_000
 const PERIOD_DAYS = 30
@@ -184,6 +185,9 @@ function UsageKpiCells({
 }) {
   const todayTotals = today.data?.totals
   const periodTotals = period.data?.totals
+  // The boot measurement's primary moment: the first frame with a figure in
+  // "Spend today". Written once per load, so a later visit adds nothing.
+  useMarkAfterPaint(BOOT_MARKS.KPIS, todayTotals !== undefined)
   const prevTotals = previous.data?.totals
 
   // The 30-day daily series is already on the wire, and so is today's hourly
@@ -218,6 +222,7 @@ function UsageKpiCells({
         // A real zero where zero is a fact, an em dash where the value is
         // unknown: a failed query must not read as "you spent nothing".
         value={todayTotals ? formatUsd(todayTotals.cost) : "—"}
+        valueTiming={todayTotals ? "overview-kpi" : undefined}
         // "midnight" and not "00:00 UTC": `useWindows` builds this window from
         // the caller's *local* midnight, deliberately and with a comment saying
         // so, so a UTC string would be false for everyone not on it.

@@ -8,6 +8,7 @@ import { Provider } from "@/app/provider"
 import { apiFetch } from "@/shared/api/client"
 import { prepareRequests } from "@/shared/api/overlayRequestPolicy"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
+import { BOOT_MARKS, markOnce } from "@/shared/telemetry/bootTiming"
 import "@/styles/globals.css"
 
 reloadOnStaleChunk()
@@ -38,7 +39,9 @@ const BOOTSTRAP_TIMEOUT_MS = 8_000
 function loadBootstrap(): Promise<WireBootstrap | null> {
   return apiFetch<WireBootstrap>("/bootstrap", {
     signal: AbortSignal.timeout(BOOTSTRAP_TIMEOUT_MS),
-  }).catch(() => null)
+  })
+    .catch(() => null)
+    .finally(() => markOnce(BOOT_MARKS.BOOTSTRAP))
 }
 
 // Settled before the bootstrap is asked for, because the answer can change

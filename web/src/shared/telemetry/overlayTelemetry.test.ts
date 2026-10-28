@@ -119,7 +119,7 @@ describe("the base build's dependencies", () => {
 })
 
 describe("the event catalog", () => {
-  it("carries the fourteen names the platform already records under", () => {
+  it("carries the names the platform records under, and the boot timing", () => {
     // Pinned as strings, not just as keys: a superset build reports into the
     // analytics workspace otari-ai already reports into, so renaming one here
     // splits its funnel in two rather than failing anything.
@@ -138,6 +138,7 @@ describe("the event catalog", () => {
       ACTIVATION_GUIDE_SHOWN: "Activation Guide Shown",
       ACTIVATION_GUIDE_DISMISSED: "Activation Guide Dismissed",
       CHECKOUT_CANCELLED: "Checkout Cancelled",
+      DASHBOARD_BOOT_TIMED: "Dashboard Boot Timed",
     })
   })
 })

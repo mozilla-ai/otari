@@ -36,3 +36,31 @@ describe("KpiCell", () => {
     expect(getByTitle(subline)).toHaveClass("truncate")
   })
 })
+
+describe("KpiCell value timing", () => {
+  const value = (container: HTMLElement) =>
+    (container.firstElementChild as HTMLElement).children[1] as HTMLElement
+
+  it("names the value for Element Timing only when asked to", () => {
+    const { container, rerender } = render(
+      <KpiCell label="Spend today" value="—" />,
+    )
+    expect(value(container)).not.toHaveAttribute("elementtiming")
+
+    rerender(
+      <KpiCell label="Spend today" value="$1.20" valueTiming="overview-kpi" />,
+    )
+    expect(value(container)).toHaveAttribute("elementtiming", "overview-kpi")
+  })
+
+  it("renders the timed figure as a fresh element, not the placeholder's", () => {
+    const { container, rerender } = render(
+      <KpiCell label="Spend today" value="—" />,
+    )
+    const placeholder = value(container)
+    rerender(
+      <KpiCell label="Spend today" value="$1.20" valueTiming="overview-kpi" />,
+    )
+    expect(value(container)).not.toBe(placeholder)
+  })
+})

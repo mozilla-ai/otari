@@ -31,7 +31,14 @@ type Story = StoryObj<typeof meta>
 export const Default: Story = {
   render: () => (
     <KpiStrip isEmpty={false} columns={4}>
-      <KpiCell label="Spend" value="$412.08" subline="This month" />
+      {/* Named for Element Timing, as Overview's first figure is; it changes
+          nothing on screen. */}
+      <KpiCell
+        label="Spend"
+        value="$412.08"
+        subline="This month"
+        valueTiming="story-kpi"
+      />
       <KpiCell label="Requests" value="1,284,901" subline="This month" />
       <KpiCell label="Tokens" value="94.2M" subline="This month" />
       <KpiCell label="Errors" value="0.4%" subline="This month" />
