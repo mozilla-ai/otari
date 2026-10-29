@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { useParams, useSearch } from "@tanstack/react-router"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -96,6 +96,21 @@ describe("RoutingPage", () => {
     expect(
       await screen.findByText("No routing policies match this search."),
     ).toBeInTheDocument()
+  })
+
+  it("finds a policy by the model a budget switches it to", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+    await screen.findByText("auto")
+
+    // gpt-5-nano is only the target past 80% of the budget, not the default.
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search routing policies" }),
+      "gpt-5-nano",
+    )
+    await waitFor(() => expect(screen.queryByText("fast")).toBeNull())
+    expect(screen.getByText("auto")).toBeInTheDocument()
   })
 
   it("says a policy has no backups rather than leaving the cell empty", async () => {
