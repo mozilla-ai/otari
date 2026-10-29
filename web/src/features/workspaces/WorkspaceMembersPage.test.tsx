@@ -122,6 +122,50 @@ describe("WorkspaceMembersPage", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("narrows the organization roster a member reads, by name or email", async () => {
+    mockApi({
+      context: organizationContext({ role: "member" }),
+      orgMembers: [
+        organizationMember({
+          user_id: USER,
+          full_name: "Alex Avery",
+          email: "alex@example.com",
+        }),
+        organizationMember({
+          user_id: SECOND_USER,
+          full_name: "Blair Bell",
+          email: "blair@example.com",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+    const roster = await screen.findByRole("grid", {
+      name: "Organization members",
+    })
+    await within(roster).findByText("Blair Bell")
+
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search members" }),
+      "blair@",
+    )
+    await waitFor(() =>
+      expect(within(roster).queryByText("Alex Avery")).toBeNull(),
+    )
+    expect(within(roster).getByText("Blair Bell")).toBeInTheDocument()
+
+    await user.clear(screen.getByRole("searchbox", { name: "Search members" }))
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search members" }),
+      "nobody-here",
+    )
+    expect(
+      await within(roster).findByText(
+        "No organization members match this search.",
+      ),
+    ).toBeInTheDocument()
+  })
+
   it("says so rather than showing an empty roster when there is no workspace", async () => {
     mockApi({ memberships: [] })
     await renderPage()
