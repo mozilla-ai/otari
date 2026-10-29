@@ -148,10 +148,14 @@ model a coding agent's subagent should start on.
 It owns `ports/agent_model_recommender_port.py` and its adapter in
 `adapters/`, and `exceptions/routing_exceptions.py`. The port names who
 answers a subagent model recommendation and at what price. The core asks the
-decision model the deployment configured, which may be a local one, and an
-overlay may bind a recommender of its own, so the composition root binds
-the implementation and no caller chooses between them. Neither implementation meters
-the call; the decisions scaffold does.
+subagent router switched on in the dashboard (the `agent_recommenders` table,
+administered through `/api/v1/routing/recommenders` and held in memory per
+worker for the quote), at the token rates stored with it, or, with none
+stored, the decision model the deployment configured, which may be a local
+one, at no price of its own. An overlay may bind a recommender of its own, or
+wrap the core one, so the composition root binds the implementation and no
+caller chooses between them. The adapter quotes the price where it owns one;
+the decisions scaffold meters the call.
 
 ### files
 

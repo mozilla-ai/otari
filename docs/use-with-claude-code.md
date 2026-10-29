@@ -159,17 +159,20 @@ active API key may ask. The decision call is billed to the caller and recorded
 in usage like a `POST /api/v1/decisions` call; nothing else is dispatched, and
 the harness acts on the answer with its own provider credentials.
 
-Who answers depends on the build. A self-run deployment asks the decision
-model `agent_recommender_model` names, which may be a local one, and the call
-costs what that provider charges. On otari.ai a managed recommender answers
-behind the same route, which you never configure, at the price of one
-recommendation.
+Who answers is the deployment's choice. An operator stores one or more
+decision models on the **Subagent router** page of the deployment view, each
+with its key and a price per million tokens, and switches one on; a
+recommendation is then charged to the caller at that price (see
+[Subagent routers](routing.md#subagent-routers)). On otari.ai that router is
+managed for you. With no router stored, the deployment asks the decision model
+`agent_recommender_model` names, which may be a local one, and the call costs
+what the deployment's own pricing rows say.
 
-A self-run deployment needs a
-[decision provider](configuration.md#decision-providers) the
-`agent_recommender_model` selector resolves to, `typesafe` with an API key by
-default. Without one, the route answers 400 and the plugin falls back to the
-model the subagent would have had anyway.
+That fallback needs a [decision provider](configuration.md#decision-providers)
+the `agent_recommender_model` selector resolves to, `typesafe` with an API key
+by default. Without one, or with every stored router switched off, the route
+answers 400 and the plugin falls back to the model the subagent would have had
+anyway.
 
 ```bash
 curl "$OTARI_URL/api/v1/routing/recommend" \

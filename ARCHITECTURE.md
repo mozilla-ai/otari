@@ -78,7 +78,7 @@ A **port** is a domain-named interface (a Python `Protocol`), named for what it 
 | `ApiKeyFormatPort` | The shape of the API keys a build mints, and where a presented key is checked. |
 | `RateLimitStorePort` | Where rate-limit counts and concurrency slots are kept. Two core adapters: this process's memory, and Redis for a count every replica shares. |
 | `ContentKeyPort` | Where the data keys that seal stored content come from. Two core adapters: `OTARI_SECRET_KEY`, and a customer-managed AWS KMS key. |
-| `AgentModelRecommenderPort` | Which model a coding agent's subagent should start on, and at what price. The core adapter puts one choice question to the decision model the deployment configured and quotes no price of its own. |
+| `AgentModelRecommenderPort` | Which model a coding agent's subagent should start on, and at what price. The core adapter puts one choice question to the subagent router switched on in the dashboard, at the token rates stored with it, or, with none stored, to the decision model `agent_recommender_model` names, at no price of its own. |
 
 The cardinal property: **every port ships with a working adapter in Otari's core**, a real lightweight implementation or an honest [Null Object](https://en.wikipedia.org/wiki/Null_object_pattern). Otari must stand alone with no overlay present. `BillingPort`, for example, is a Null Object in the core: it is present and callable, and does nothing, so nothing in the core needs to know whether real billing exists anywhere.
 

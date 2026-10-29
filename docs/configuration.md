@@ -606,8 +606,10 @@ Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
 `otari gen-secret-key`. To rotate it, configure the new key before the old key,
 run the hosted provider and search-tool re-encryption endpoints
 (`POST /api/v1/hosted-providers/reencrypt` and
-`POST /api/v1/search-tools/reencrypt`), then remove the old key. Losing every
-configured encryption key makes stored credentials unrecoverable.
+`POST /api/v1/search-tools/reencrypt`), then remove the old key. A subagent
+router's key has no re-encryption endpoint yet: re-enter it on the Subagent
+router page after the rotation. Losing every configured encryption key makes
+stored credentials unrecoverable.
 
 #### Upgrading from the Deployment providers page
 
@@ -1397,9 +1399,10 @@ agent_recommender_candidates:
   opus: Hard reasoning, ambiguous goals, large or security-sensitive changes.
 ```
 
-These are a deployment's own settings. On otari.ai a managed
-recommender answers behind the same route, so neither applies there.
-`agent_recommender_model` is a `decision_providers` selector, resolved per
+`agent_recommender_model` is the fallback: a router stored on the
+[Subagent router](routing.md#subagent-routers) page answers in its place, at
+the price stored with it, and with routers stored and all of them switched off
+nothing answers at all. It is a `decision_providers` selector, resolved per
 request, so a deployment that never asks need not configure the provider.
 `agent_recommender_candidates` maps each model name, as Claude Code spells it,
 to what it is for; `null` is allowed when the name says enough. At least two
