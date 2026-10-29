@@ -386,7 +386,12 @@ export function OrganizationProvidersPage() {
   )
   const search = useListSearch()
   const shown = rows.filter((key) =>
-    matchesSearch(search.term, key.name, key.provider),
+    matchesSearch(
+      search.term,
+      key.name,
+      key.provider,
+      providerDisplayName(key.provider),
+    ),
   )
   // The key whose models are open, if it is on the table: an archived key's
   // id can sit in the URL while archived rows are hidden.
@@ -667,7 +672,7 @@ export function OrganizationProvidersPage() {
 
       {/* The page is a stack of bands that set their own spacing, so this one
           carries its own air rather than taking it from a column gap. */}
-      {canEdit && (keys.data ?? []).length > 0 ? (
+      {canEdit && ((keys.data ?? []).length > 0 || search.value) ? (
         <Toolbar className="pb-3">
           <SearchField
             label="Search provider keys"

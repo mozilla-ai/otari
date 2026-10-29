@@ -31,6 +31,7 @@ import { CreatePolicyDialog } from "./CreatePolicyDialog"
 import { BackupsCell, MainModelCell } from "./PolicyCells"
 import type { Intent } from "./policyDraft"
 import {
+  findBudgetConditions,
   findCandidates,
   findFallthroughTarget,
   findRouterBackend,
@@ -52,14 +53,15 @@ export function RoutingPage() {
     writeWorkspaceId,
   } = useRoutingRows()
   const search = useListSearch()
-  // What the row shows: its name, the model it sends to, and the pool and
-  // backups behind that.
+  // What the row shows: its name, the model it sends to, the targets a budget
+  // switches it to, and the pool and backups behind them.
   const shown = rows.filter((row) =>
     matchesSearch(
       search.term,
       row.name,
       findFallthroughTarget(row.spec),
       ...findCandidates(row.spec),
+      ...findBudgetConditions(row.spec).map((condition) => condition.target),
       ...(row.spec.on_failure ?? []),
     ),
   )

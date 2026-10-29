@@ -163,7 +163,7 @@ describe("OrganizationProvidersPage", () => {
     mockApi({
       keys: [
         orgProviderKey({ id: "k-1", name: "Production", provider: "openai" }),
-        orgProviderKey({ id: "k-2", name: "Backup", provider: "anthropic" }),
+        orgProviderKey({ id: "k-2", name: "Backup", provider: "gemini" }),
       ],
     })
     const user = userEvent.setup()
@@ -173,7 +173,8 @@ describe("OrganizationProvidersPage", () => {
       name: "Search provider keys",
     })
 
-    await user.type(search, "anthrop")
+    // By the name the Provider column shows ("Google Gemini"), not only the id.
+    await user.type(search, "google")
     await waitFor(() =>
       expect(screen.queryByText("Production")).not.toBeInTheDocument(),
     )

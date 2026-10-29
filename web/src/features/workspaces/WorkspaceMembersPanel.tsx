@@ -173,8 +173,11 @@ export function WorkspaceMembersPanel({
       ),
     [orgMembers],
   )
+  // The fallback is what a row shows when the organization roster failed.
+  const labelOf = (member: WorkspaceMember) =>
+    nameByUserId.get(member.user_id) ?? `Identity ${member.user_id.slice(0, 8)}`
   const rows = allRows.filter((member) =>
-    matchesSearch(searchTerm, nameByUserId.get(member.user_id) ?? ""),
+    matchesSearch(searchTerm, labelOf(member)),
   )
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -198,10 +201,7 @@ export function WorkspaceMembersPanel({
               key={member.id}
               className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface-alt px-3 py-2"
             >
-              <span className="text-body">
-                {nameByUserId.get(member.user_id) ??
-                  `Identity ${member.user_id.slice(0, 8)}`}
-              </span>
+              <span className="text-body">{labelOf(member)}</span>
               <Chip
                 size="sm"
                 color={member.status === "active" ? "accent" : "default"}
