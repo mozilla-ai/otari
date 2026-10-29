@@ -347,7 +347,7 @@ export function OrganizationGuardrailsPage() {
         <div className="flex flex-col gap-8">
           <section className="flex flex-col gap-3">
             <h2 className="text-title">Guardrails you have configured</h2>
-            {defined.length > 0 ? (
+            {defined.length > 0 || search.value ? (
               <Toolbar>
                 <SearchField
                   label="Search guardrails"
@@ -367,7 +367,7 @@ export function OrganizationGuardrailsPage() {
                 getRowKey={(row) => row.id}
                 isLoading={isLoading}
                 emptyContent={
-                  search.term
+                  search.term && defined.length > 0
                     ? "No guardrails match this search."
                     : "None yet. Configure a guardrail to have Otari run a vendor's check itself."
                 }
