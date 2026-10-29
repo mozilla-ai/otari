@@ -47,7 +47,6 @@ from gateway.services.tools._search_tool_overlay import (
     apply_at_startup,
     apply_stored_rows,
     apply_stored_tools,
-    config_file_search_tools,
     config_file_tools,
     record_read_settings,
     report_startup,
@@ -430,7 +429,7 @@ class SearchToolService:
 
     def _not_stored(self, name: str) -> str:
         """Why no stored instance called ``name`` can be deleted, naming the one the API cannot change."""
-        if name in config_file_search_tools(self.config):
+        if name in config_file_tools(self.config, "search"):
             return f"Search tool '{name}' is defined in the config file and cannot be deleted through the API."
         if name in config_file_tools(self.config, "fetch"):
             return f"Fetch tool '{name}' is defined in the config file and cannot be deleted through the API."

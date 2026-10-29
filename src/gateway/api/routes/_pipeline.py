@@ -1679,12 +1679,7 @@ async def _admit_or_refuse(
             ctx.request_id,
             describe_port_error(exc),
         )
-        # Whatever the adapter wrote before failing is discarded, and a
-        # session its error left unusable is made usable for the refund.
-        try:
-            await ctx.db.rollback()
-        except DATABASE_ERRORS as rollback_error:
-            logger.warning("Could not roll back a failed funding check: %s", describe_database_error(rollback_error))
+        await _discard_failed_funding_check(ctx.db)
         raise await _funding_unavailable(ctx, resolved, adapter=adapter) from exc
     # The commit also lands any credit admission granted, so a request whose
     # admission did not commit is not served on it.
@@ -1696,6 +1691,14 @@ async def _admit_or_refuse(
         )
         raise await _funding_unavailable(ctx, resolved, adapter=adapter)
     ctx.deployment_charge = charge
+
+
+async def _discard_failed_funding_check(db: AsyncSession) -> None:
+    """Roll back what a failed funding check wrote, so the session is usable for the refund."""
+    try:
+        await db.rollback()
+    except DATABASE_ERRORS as rollback_error:
+        logger.warning("Could not roll back a failed funding check: %s", describe_database_error(rollback_error))
 
 
 async def _funding_unavailable(
@@ -1905,12 +1908,7 @@ def _hosted_candidate(
                 ctx.request_id,
                 describe_port_error(exc),
             )
-            try:
-                await ctx.db.rollback()
-            except DATABASE_ERRORS as rollback_error:
-                logger.warning(
-                    "Could not roll back a failed funding check: %s", describe_database_error(rollback_error)
-                )
+            await _discard_failed_funding_check(ctx.db)
             raise CandidateCannotServe(
                 HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=FUNDS_CHECK_UNAVAILABLE_DETAIL)
             ) from exc
@@ -4123,10 +4121,7 @@ async def _admit_tool_funding(
             ctx.request_id,
             describe_port_error(exc),
         )
-        try:
-            await ctx.db.rollback()
-        except DATABASE_ERRORS as rollback_error:
-            logger.warning("Could not roll back a failed funding check: %s", describe_database_error(rollback_error))
+        await _discard_failed_funding_check(ctx.db)
         await _refuse_tool_funding(
             ctx, adapter, tool_key, FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE
         )
