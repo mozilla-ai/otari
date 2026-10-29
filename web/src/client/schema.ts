@@ -17865,6 +17865,11 @@ export interface components {
              * @description Days after it started that a session is deleted, however active it still is.
              */
             session_max_age_days: number;
+            /**
+             * Tool Output
+             * @description Whether content also keeps what each tool returned, on a request routed through the gateway. Never true where content_available is false.
+             */
+            tool_output: boolean;
         };
         /** TraceCountPublic */
         TraceCountPublic: {

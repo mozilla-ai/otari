@@ -457,15 +457,15 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
         {embedded ? null : (
           <PageIntro title="Sessions">
             Every agent session the gateway recorded: the turns, LLM calls and
-            tools behind each one. No model response or tool output is stored.
+            tools behind each one. No model response is stored.
           </PageIntro>
         )}
         {keepsContent ? (
           <InfoBanner>
             {workspace ? "This workspace keeps" : "Your workspaces keep"} what
-            your sessions were about: the prompts, commands and file paths your
-            agents send. Otari shows yours only to you, unless you share a
-            session. {exceptionalAccess(platformBreakGlass)}
+            your sessions were about: the prompts and tool calls your agents
+            send. Otari shows yours only to you, unless you share a session.{" "}
+            {exceptionalAccess(platformBreakGlass)}
           </InfoBanner>
         ) : null}
 

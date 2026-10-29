@@ -201,6 +201,12 @@ class TraceContentPolicyPublic(BaseModel):
             "keeps it only once its managers turn it on as well."
         )
     )
+    tool_output: bool = Field(
+        description=(
+            "Whether content also keeps what each tool returned, on a request routed through the gateway. Never "
+            "true where content_available is false."
+        )
+    )
     platform_break_glass: bool = Field(
         description=(
             "Whether the deployment's operator may open any organization's session content without its owner's "

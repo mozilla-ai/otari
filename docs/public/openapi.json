@@ -21944,10 +21944,16 @@
             "description": "Days after it started that a session is deleted, however active it still is.",
             "title": "Session Max Age Days",
             "type": "integer"
+          },
+          "tool_output": {
+            "description": "Whether content also keeps what each tool returned, on a request routed through the gateway. Never true where content_available is false.",
+            "title": "Tool Output",
+            "type": "boolean"
           }
         },
         "required": [
           "content_available",
+          "tool_output",
           "platform_break_glass",
           "retention_days",
           "session_max_age_days"
