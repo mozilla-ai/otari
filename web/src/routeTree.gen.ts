@@ -33,6 +33,7 @@ import { Route as OverviewSessionsRouteImport } from './routes/_overview.session
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
 import { Route as AdminCodeExecutionRouteImport } from './routes/admin.code-execution'
 import { Route as AdminHostedProvidersRouteImport } from './routes/admin.hosted-providers'
+import { Route as AdminRecommenderRouteImport } from './routes/admin.recommender'
 import { Route as AdminWebSearchRouteImport } from './routes/admin.web-search'
 import { Route as ModelsIndexRouteImport } from './routes/models.index'
 import { Route as ModelsSplatRouteImport } from './routes/models.$'
@@ -170,6 +171,11 @@ const AdminHostedProvidersRoute = AdminHostedProvidersRouteImport.update({
   path: '/admin/hosted-providers',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRecommenderRoute = AdminRecommenderRouteImport.update({
+  id: '/admin/recommender',
+  path: '/admin/recommender',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminWebSearchRoute = AdminWebSearchRouteImport.update({
   id: '/admin/web-search',
   path: '/admin/web-search',
@@ -281,6 +287,7 @@ export interface FileRoutesByFullPath {
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
+  '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
@@ -318,6 +325,7 @@ export interface FileRoutesByTo {
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
+  '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
@@ -362,6 +370,7 @@ export interface FileRoutesById {
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
+  '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
@@ -407,6 +416,7 @@ export interface FileRouteTypes {
     | '/admin/accounts'
     | '/admin/code-execution'
     | '/admin/hosted-providers'
+    | '/admin/recommender'
     | '/admin/web-search'
     | '/models/$'
     | '/organization/domains'
@@ -444,6 +454,7 @@ export interface FileRouteTypes {
     | '/admin/accounts'
     | '/admin/code-execution'
     | '/admin/hosted-providers'
+    | '/admin/recommender'
     | '/admin/web-search'
     | '/models/$'
     | '/organization/domains'
@@ -487,6 +498,7 @@ export interface FileRouteTypes {
     | '/admin/accounts'
     | '/admin/code-execution'
     | '/admin/hosted-providers'
+    | '/admin/recommender'
     | '/admin/web-search'
     | '/models/$'
     | '/organization/domains'
@@ -529,6 +541,7 @@ export interface RootRouteChildren {
   AdminAccountsRoute: typeof AdminAccountsRoute
   AdminCodeExecutionRoute: typeof AdminCodeExecutionRoute
   AdminHostedProvidersRoute: typeof AdminHostedProvidersRoute
+  AdminRecommenderRoute: typeof AdminRecommenderRoute
   AdminWebSearchRoute: typeof AdminWebSearchRoute
 }
 
@@ -700,6 +713,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/hosted-providers'
       fullPath: '/admin/hosted-providers'
       preLoaderRoute: typeof AdminHostedProvidersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/recommender': {
+      id: '/admin/recommender'
+      path: '/admin/recommender'
+      fullPath: '/admin/recommender'
+      preLoaderRoute: typeof AdminRecommenderRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/web-search': {
@@ -930,6 +950,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminAccountsRoute: AdminAccountsRoute,
   AdminCodeExecutionRoute: AdminCodeExecutionRoute,
   AdminHostedProvidersRoute: AdminHostedProvidersRoute,
+  AdminRecommenderRoute: AdminRecommenderRoute,
   AdminWebSearchRoute: AdminWebSearchRoute,
 }
 export const routeTree = rootRouteImport

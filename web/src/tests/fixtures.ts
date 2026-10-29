@@ -149,6 +149,7 @@ export function pricingResponse(
 // overrides `surfaces` rather than editing this.
 export const SURFACES = [
   "admin",
+  "agent_recommenders",
   "budgets",
   "health_checks",
   "hosted_providers",
