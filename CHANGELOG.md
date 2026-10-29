@@ -4,6 +4,25 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.34.0](https://github.com/mozilla-ai/otari/releases/tag/v0.34.0) - 2026-10-29
+
+
+
+### Bug Fixes
+
+- **tools:** Apply the stored search tools at startup only once their read has committed in [#2672](https://github.com/mozilla-ai/otari/pull/2672) by [@aittalam](https://github.com/aittalam) ([`db39c11`](https://github.com/mozilla-ai/otari/commit/db39c11f0d1300fa6a98bf0372645103999eafae))
+- **routing:** Name only the chosen model in a recommendation's reason in [#2678](https://github.com/mozilla-ai/otari/pull/2678) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`1270e49`](https://github.com/mozilla-ai/otari/commit/1270e49a3c238f8fe2ea46867de2a10c920f35eb))
+
+
+### Features
+
+- **BREAKING:** **traces:** Keep session content private, sealed with OTARI_SECRET_KEY or AWS KMS in [#2614](https://github.com/mozilla-ai/otari/pull/2614) by [@agpituk](https://github.com/agpituk) ([`a67d37c`](https://github.com/mozilla-ai/otari/commit/a67d37c1af09ed1db128cdc60924a63ee11caaeb))
+- **traces:** Filter sessions by model in [#2615](https://github.com/mozilla-ai/otari/pull/2615) by [@agpituk](https://github.com/agpituk) ([`3ed479f`](https://github.com/mozilla-ai/otari/commit/3ed479f33050446055f50b07e6a4bd59c9e8c815))
+- **web:** Fold Usage, Activity and Sessions into the Overview in [#2616](https://github.com/mozilla-ai/otari/pull/2616) by [@agpituk](https://github.com/agpituk) ([`154b9ac`](https://github.com/mozilla-ai/otari/commit/154b9ac11ef6a25817d6e815e28dd0af4af4549f))
+- **BREAKING:** **models:** List each model once in GET /api/v1/models and let Otari pick the provider in [#2645](https://github.com/mozilla-ai/otari/pull/2645) by [@tbille](https://github.com/tbille) ([`ac4bb58`](https://github.com/mozilla-ai/otari/commit/ac4bb589c05d928ad9c0746b5edcf9d2081a364d))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.33.0...v0.34.0
 ## [0.33.0](https://github.com/mozilla-ai/otari/releases/tag/v0.33.0) - 2026-10-27
 
 
