@@ -1,5 +1,6 @@
 """A provider type's ``provider_supported_countries`` on the completion routes."""
 
+import uuid
 from collections.abc import Generator
 from typing import Any
 from unittest.mock import DEFAULT, AsyncMock, patch
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import COUNTRY_NOT_SUPPORTED, ERROR_CODE_HEADER
 from gateway.models.routing import RoutingConfig
+from gateway.services.routing import ActiveRecommender, RecommenderPrice, RecommenderSource, StoredRecommender
 
 from .conftest import build_test_client
 from .test_routing_policies import _awaited_model, _completion
@@ -206,6 +208,39 @@ def test_a_decision_is_refused_for_another_country(decisions_client: TestClient)
                 "user": "alice",
                 "state": "hi",
                 "questions": {"urgent": {"type": "noul", "instructions": "Is this urgent?"}},
+            },
+            headers={**HEADERS, _COUNTRY_HEADER: "FR"},
+        )
+
+    assert resp.status_code == 403, resp.text
+    assert resp.headers[ERROR_CODE_HEADER] == COUNTRY_NOT_SUPPORTED
+    mock.assert_not_awaited()
+
+
+def test_a_stored_subagent_router_is_refused_for_another_country(decisions_client: TestClient) -> None:
+    # Metered as otari:subagent-router, but the gate reads the provider the router calls.
+    stored = StoredRecommender(
+        id=uuid.uuid4(), provider="openrouter", model="decider", api_base=None, price=RecommenderPrice(), api_key="k"
+    )
+    with (
+        patch(
+            "gateway.adapters.agent_model_recommender_adapter.active_agent_recommender",
+            return_value=ActiveRecommender(RecommenderSource.STORED, stored),
+        ),
+        patch("gateway.adapters.agent_model_recommender_adapter.request_decision", new=AsyncMock()) as mock,
+    ):
+        resp = decisions_client.post(
+            f"{API_ROOT}/routing/recommend",
+            json={
+                "harness": "claude-code",
+                "session_id": "s1",
+                "tool_use_id": "t1",
+                "agent_type": "Explore",
+                "description": "List files",
+                "prompt": "List the files under src/.",
+                "parent_model": "claude-opus-5",
+                "requested_model": None,
+                "user": "alice",
             },
             headers={**HEADERS, _COUNTRY_HEADER: "FR"},
         )

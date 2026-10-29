@@ -31,17 +31,21 @@ from __future__ import annotations
 import math
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, UniqueConstraint, Uuid, text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, Uuid, false, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base
+from gateway.models.money import UsdRate
 
 __all__ = [
+    "AGENT_RECOMMENDER_ENABLED_INDEX",
     "MAX_CANDIDATES",
     "WEIGHTED_BACKEND",
+    "AgentRecommender",
     "PolicyGuardrail",
     "PolicySpec",
     "RouterPreference",
@@ -678,3 +682,46 @@ class RouterPreference(Base):
             "label_source": self.label_source,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+# Unique over the rows switched on, so a second one cannot be. Named so the
+# repository can tell this refusal from any other integrity error.
+AGENT_RECOMMENDER_ENABLED_INDEX = "uq_agent_recommenders_enabled"
+
+
+class AgentRecommender(Base):
+    """A decision model that recommends a subagent's model, and what one recommendation costs.
+
+    A deployment may hold several, and at most one is switched on. The key is
+    stored encrypted (``secret_box``) and read back in one place, the
+    recommender adapter, which hands it to the upstream inside this process.
+    The two rates are what the caller is charged per million of the decision
+    model's tokens; the most one call can cost is held before it and the
+    tokens it used are charged after it.
+    """
+
+    __tablename__ = "agent_recommenders"
+    __table_args__ = (
+        Index(
+            AGENT_RECOMMENDER_ENABLED_INDEX,
+            "enabled",
+            unique=True,
+            # Both dialects, or SQLite builds a full unique index and admits one switched-off row.
+            sqlite_where=text("enabled"),
+            postgresql_where=text("enabled"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(String(32))
+    """The decision provider kind, one of ``DECISION_PROVIDERS``."""
+    model: Mapped[str] = mapped_column(String(255))
+    """The decision model, as the provider names it."""
+    api_base: Mapped[str | None] = mapped_column(String(1024))
+    encrypted_api_key: Mapped[str | None] = mapped_column(Text)
+    api_key_last4: Mapped[str | None] = mapped_column(String(4))
+    input_price_per_million: Mapped[Decimal] = mapped_column(UsdRate, default=Decimal(0), server_default="0")
+    output_price_per_million: Mapped[Decimal] = mapped_column(UsdRate, default=Decimal(0), server_default="0")
+    enabled: Mapped[bool] = mapped_column(default=False, server_default=false())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=lambda: datetime.now(UTC))

@@ -53,12 +53,15 @@ class Quote:
     any pricing row key on. ``charge`` is the price of one recommendation
     where the recommender owns the price, a service fee the caller holds before
     the call. ``None`` is pass-through: the caller pays what the upstream
-    charged, priced from the caller's own rows.
+    charged, priced from the caller's own rows. ``served_by`` names the
+    provider the call goes to where the label does not, so the country gate
+    still applies to it.
     """
 
     provider: str
     model: str
     charge: Decimal | None = None
+    served_by: str | None = None
 
 
 @dataclass(frozen=True)
