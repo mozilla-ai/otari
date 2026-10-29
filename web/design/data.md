@@ -194,11 +194,19 @@ TablePagination    the narrowed total, when the list pages
 - **The term lives in the URL** as `?q=`, through `useListSearch`
   (`shared/hooks/useListSearch.ts`). It survives a reload, Back and a shared link,
   a create or a delete does not clear it, and a change returns to the first page.
-- **Search the whole collection, never the page on screen.** A list paged by its
-  endpoint passes `term` to the endpoint's `search` param, in the query key with
-  `placeholderData`. A list the page already holds in full filters with
-  `matchesSearch`, which matches the way the endpoints do: case-insensitive,
-  anywhere in the text, nothing a wildcard.
+- **Search the whole collection, never the page on screen.** The endpoint does
+  the searching (`performance.md`, "The server does the shaping"): a list paged
+  by its endpoint passes `term` to the endpoint's `search` param, in the query
+  key with `placeholderData`. `matchesSearch` filters in memory instead, and
+  only a list that is small by construction earns it: one the server caps
+  (guardrail definitions, MCP servers) or one read whole by design (routing
+  policies, hosted providers, health status). It matches the way the endpoints
+  do: case-insensitive, anywhere in the text, nothing a wildcard.
+- **A list read by a whole-collection walk is debt, not a license.** API keys,
+  workspaces, members and provider keys are searched with `matchesSearch` today
+  only because their pages still walk the collection (`shared/api/paging.ts`,
+  otari#1376). The search moves to the endpoint's `search` param with the walk,
+  and `/keys` is the next one due.
 - **Match what a person can see** that names the row: a name, an email, a prefix.
   Never a secret, never a field the row does not show.
 - **Say how many matched.** Pass `resultCount` to `SearchField`; it shows the count
