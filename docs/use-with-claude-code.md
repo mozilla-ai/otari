@@ -190,7 +190,7 @@ curl "$OTARI_URL/api/v1/routing/recommend" \
 ```json
 {
   "model": "haiku",
-  "reason": "jev-1.13.0 chose haiku with 81%",
+  "reason": "haiku with 81%",
   "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 }
 }
 ```

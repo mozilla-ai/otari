@@ -107,7 +107,7 @@ def test_reads_the_chosen_candidate_and_its_probability() -> None:
     recommendation = recommendation_from_decision(answer, candidates=CANDIDATES)
 
     assert recommendation.model == "sonnet"
-    assert recommendation.reason == "jev-1.13.0 chose sonnet with 70%"
+    assert recommendation.reason == "sonnet with 70%"
     assert recommendation.probabilities == {"haiku": 0.2, "sonnet": 0.7, "opus": 0.1}
 
 
@@ -115,7 +115,7 @@ def test_a_choice_without_probabilities_still_recommends() -> None:
     recommendation = recommendation_from_decision(_answer(choice="haiku"), candidates=CANDIDATES)
 
     assert recommendation.model == "haiku"
-    assert recommendation.reason == "jev-1.13.0 chose haiku"
+    assert recommendation.reason == "haiku"
     assert recommendation.probabilities is None
 
 

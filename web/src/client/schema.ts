@@ -7620,7 +7620,7 @@ export interface components {
          *         "opus": 0.07,
          *         "sonnet": 0.72
          *       },
-         *       "reason": "jev-1.13.0 chose sonnet with 72%"
+         *       "reason": "sonnet with 72%"
          *     }
          */
         AgentModelRecommendation: {
