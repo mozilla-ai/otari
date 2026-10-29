@@ -228,6 +228,7 @@ def test_settings_includes_full_config_view(tmp_path: Path) -> None:
         "sandbox_url",
         "guardrails_url",
         "models_dev_url",
+        "models_dev_v2_url",
     ):
         assert by_key[name]["settable"] is False, name
 

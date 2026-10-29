@@ -75,6 +75,8 @@ class ModelsDevPrice:
     provider_name: str | None
     provider_doc: str | None
     canonical_model_id: str | None
+    per_image: Decimal | None = None
+    """USD for one generated image, from the catalog's v2 data; ``None`` for a model not priced per image."""
 
     @property
     def reference(self) -> str:
@@ -83,7 +85,7 @@ class ModelsDevPrice:
 
     @property
     def priced(self) -> bool:
-        return self.input is not None or self.output is not None
+        return self.input is not None or self.output is not None or self.per_image is not None
 
     def pricing_tiers(self) -> list[dict[str, float | int]]:
         """The tiers in the ``pricing_tiers`` column shape, rates as JSON numbers."""
@@ -100,7 +102,7 @@ class ModelsDevPrice:
         ]
 
     def price_signature(self) -> tuple[object, ...]:
-        return (self.input, self.output, self.cache_read, self.cache_write, self.tiers)
+        return (self.input, self.output, self.cache_read, self.cache_write, self.tiers, self.per_image)
 
 
 def parse_rate(value: object) -> Decimal | None:
@@ -137,6 +139,8 @@ def invalid_rate_count(catalog: Mapping[str, Any]) -> int:
             if not isinstance(cost, dict):
                 continue
             count += bad(cost) + bad(cost.get("context_over_200k"))
+            per_image = cost.get("per_image")
+            count += int(per_image is not None and parse_rate(per_image) is None)
             tiers = cost.get("tiers")
             count += sum(bad(tier) for tier in tiers) if isinstance(tiers, list) else 0
     return count
@@ -197,6 +201,7 @@ def _entry(provider: Mapping[str, Any], provider_id: str, model_id: str, model: 
         provider_name=_str(provider.get("name")),
         provider_doc=_str(provider.get("doc")),
         canonical_model_id=_str(model.get("canonical_model_id")),
+        per_image=parse_rate(cost.get("per_image")),
     )
 
 

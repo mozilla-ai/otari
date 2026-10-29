@@ -1052,10 +1052,21 @@ serves the same `api.json`. It must be an absolute http(s) URL with no
 credentials in it. It is a startup setting: the dashboard shows it but cannot
 change it.
 
+The v1 catalog leaves image generation models out, so an update also downloads
+the v2 catalog from `models_dev_v2_url` (default
+`https://mozilla-ai.github.io/models.dev/experimental_v2.0_api.json`; upstream
+serves it at `https://models.dev/experimental/v2.0/api.json`) and adds each
+image model's price per generated image to the same snapshot, so a preview, a
+review and an approval cover both. A model whose image price varies by request
+option, such as a dearer 4K tier, or is quoted per megapixel, gets no default:
+a single figure would undercharge some requests. An update fails, and changes
+nothing, when either download fails. `models_dev_v2_url` follows the same
+rules as `models_dev_url`.
+
 To refresh the bundled snapshot, as a maintainer does at release, run
-`python scripts/update_models_dev_snapshot.py` (pass `--url` to fetch from a
-mirror or fork, or `--input FILE` with a saved `api.json`) and commit
-`src/gateway/data/models_dev_pricing.json`.
+`python scripts/update_models_dev_snapshot.py` (pass `--url` and `--v2-url` to
+fetch from a mirror or fork, or `--input FILE` and `--v2-input FILE` with saved
+copies) and commit `src/gateway/data/models_dev_pricing.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was
 rejected, so the next check re-offers the same update while upstream still
@@ -1151,6 +1162,14 @@ in `tokens`, because its tokens are recorded on the usage row.
 A flat per-image or per-request rate cannot follow what the caller chooses: an
 image's size and quality, or an audio file's length. Set it at the dearest
 option you allow.
+
+With `default_pricing` on, image generation with no stored rate takes the
+models.dev price per image (see [Keeping the defaults current](#keeping-the-defaults-current)),
+billed per image returned like an `images` rate. It never takes a models.dev
+token rate, which read per image would bill a token price for each image. A
+hosted provider's image models, and those an organization's own key offers, are
+stored at that price in `images`, so they arrive switched on under
+`require_pricing`. The other endpoints in the table take no models.dev default.
 
 An unpriced request on audio or moderations is served at zero cost. Image
 generation, embeddings, rerank and direct search are subject to

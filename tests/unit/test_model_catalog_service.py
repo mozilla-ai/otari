@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import ValidationError
 
-from gateway.core.config import MODELS_DEV_URL, GatewayConfig
+from gateway.core.config import MODELS_DEV_URL, MODELS_DEV_V2_URL, GatewayConfig
 from gateway.services import model_catalog_service as mcs
 from gateway.services.catalog import load_catalog_metadata, metadata_entry
 from gateway.services.model_catalog_service import build_metadata_map, parse_entry
@@ -261,6 +261,9 @@ async def test_the_catalog_is_fetched_from_models_dev_url() -> None:
 
 def test_models_dev_url_defaults_to_upstream_and_refuses_an_address_it_cannot_use() -> None:
     assert GatewayConfig(master_key="k").models_dev_url == MODELS_DEV_URL
+    assert GatewayConfig(master_key="k").models_dev_v2_url == MODELS_DEV_V2_URL
+    with pytest.raises(ValidationError, match="models_dev_v2_url must be an absolute http"):
+        GatewayConfig(master_key="k", models_dev_v2_url="v2.json")
     mirror = GatewayConfig(master_key="k", models_dev_url=" https://mirror.example/api.json ")
     assert mirror.models_dev_url == "https://mirror.example/api.json"
 

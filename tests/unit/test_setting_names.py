@@ -107,6 +107,7 @@ _SETTING_NAMES = frozenset(
         "models_dev_cache_ttl_seconds",
         "models_dev_metadata",
         "models_dev_url",
+        "models_dev_v2_url",
         "oauth_github_client_id",
         "oauth_github_client_secret",
         "oauth_google_client_id",

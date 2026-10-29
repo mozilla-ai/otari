@@ -78,12 +78,11 @@ async def create_image(
         }
         return await aimage_generation(**image_kwargs)
 
-    # Only an explicitly configured rate counts (pricing_use_defaults=False), for
-    # the same unit mismatch audio, moderations, and search avoid: a token rate is
-    # still read per image here for now (see ``price_usage``'s legacy reading)
-    # while models.dev quotes USD per million tokens. gpt-image-1 is in that
-    # dataset at 5.0, which would bill $5.00 for one image and, because this route
-    # reserves its estimate, hold that $5.00 against the budget before the call.
+    # A default rate comes only from a price models.dev states per image
+    # (pricing_default_unit="images"), never from its token rates: gpt-image-1 is
+    # in that dataset at 5.0 per million tokens, which read per image would bill
+    # $5.00 for one image and, because this route reserves its estimate, hold
+    # that $5.00 against the budget before the call.
     outcome = await run_passthrough(
         endpoint=USAGE_ENDPOINT,
         raw_request=raw_request,
@@ -96,7 +95,7 @@ async def create_image(
         user=request.user,
         call_provider=call_provider,
         request_params=request.model_fields_set,
-        pricing_use_defaults=False,
+        pricing_default_unit="images",
         estimate=estimate,
         enforce_require_pricing=True,
         billing=IMAGES_BILLING,

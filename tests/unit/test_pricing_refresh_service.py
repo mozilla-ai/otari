@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import gateway.services.pricing.generations as generations
 import gateway.services.pricing_refresh_service as refresh
-from gateway.core.config import MODELS_DEV_URL, GatewayConfig
+from gateway.core.config import MODELS_DEV_URL, MODELS_DEV_V2_URL, GatewayConfig
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
 from gateway.services.pricing import (
     active_generations,
@@ -53,15 +53,21 @@ async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
 
 @pytest.fixture
 def upstream(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """The catalog the fetch returns, and the arguments it was called with."""
-    state: dict[str, Any] = {"catalog": _catalog(), "calls": []}
+    """The v1 and v2 catalogs the fetches return, and the arguments each was called with."""
+    state: dict[str, Any] = {"catalog": _catalog(), "v2": {}, "calls": [], "v2_calls": []}
 
     async def fetch(**kwargs: Any) -> dict[str, Any]:
         state["calls"].append(kwargs)
         catalog: dict[str, Any] = state["catalog"]
         return catalog
 
+    async def fetch_v2(**kwargs: Any) -> dict[str, Any]:
+        state["v2_calls"].append(kwargs)
+        v2: dict[str, Any] = state["v2"]
+        return v2
+
     monkeypatch.setattr(refresh, "fetch_models_dev_document", fetch)
+    monkeypatch.setattr(refresh, "fetch_models_dev_v2_document", fetch_v2)
     return state
 
 
@@ -427,7 +433,69 @@ async def test_history_longer_than_the_resident_window_fails_closed_before_it(
 @pytest.mark.asyncio
 async def test_the_fetch_reads_the_configured_catalog_url(session: AsyncSession, upstream: dict[str, Any]) -> None:
     await refresh.prepare_price_refresh(session)
-    mirror = "https://mirror.example/api.json"
-    await refresh.prepare_price_refresh(session, GatewayConfig(master_key="k", models_dev_url=mirror))
+    mirror, mirror_v2 = "https://mirror.example/api.json", "https://mirror.example/v2.json"
+    await refresh.prepare_price_refresh(
+        session, GatewayConfig(master_key="k", models_dev_url=mirror, models_dev_v2_url=mirror_v2)
+    )
 
     assert [call["url"] for call in upstream["calls"]] == [MODELS_DEV_URL, mirror]
+    assert [call["url"] for call in upstream["v2_calls"]] == [MODELS_DEV_V2_URL, mirror_v2]
+
+
+def _image_model(output: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": "painter",
+        "type": "image",
+        "name": "Painter",
+        "canonical_id": "lab/painter",
+        "cost": {"image": {"output": output}},
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_flat_per_image_price_from_v2_joins_the_snapshot(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    upstream["v2"] = {
+        "test": {"id": "test", "models": {"painter": _image_model({"unit": "image", "price": 0.03})}},
+        "studio": {
+            "id": "studio",
+            "name": "Studio",
+            "models": {
+                "tiered": _image_model({"unit": "image", "price": 0.1, "overrides": [{"when": {}, "price": 0.2}]}),
+                "by-area": _image_model({"unit": "megapixel", "price": 0.04}),
+            },
+        },
+    }
+
+    preview = await refresh.prepare_price_refresh(session)
+
+    pending = await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE)
+    assert pending is not None
+    stored = json.loads(pending.snapshot)
+    assert stored["test"]["models"]["painter"] == {
+        "name": "Painter",
+        "canonical_model_id": "lab/painter",
+        "cost": {"per_image": 0.03},
+    }
+    # A price that varies by option, or is not per image, is left out.
+    assert "studio" not in stored
+    # Added against the bundled snapshot: the token-priced test model and the per-image one.
+    assert preview.added_count == 2
+
+    assert await refresh.confirm_price_refresh(session) is True
+    entry = current_index().get("test", "painter")
+    assert entry is not None and entry.per_image == Decimal("0.03") and entry.input is None
+
+
+@pytest.mark.asyncio
+async def test_a_v2_fetch_failure_is_a_refresh_error(
+    session: AsyncSession, upstream: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fail(**_: Any) -> dict[str, Any]:
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(refresh, "fetch_models_dev_v2_document", fail)
+    with pytest.raises(refresh.PricingRefreshError):
+        await refresh.prepare_price_refresh(session)
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is None

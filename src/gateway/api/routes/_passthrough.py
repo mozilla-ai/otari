@@ -132,6 +132,7 @@ from gateway.services.model_access import (
 )
 from gateway.services.pricing import UsageCharge, can_price, price_usage
 from gateway.services.pricing_service import (
+    DefaultPricingUnit,
     ResolvedPricing,
     find_model_pricing,
     no_pricing_error_detail,
@@ -221,6 +222,7 @@ async def run_passthrough(
     call_provider: Callable[[ResolvedProvider], Awaitable[ResultT]],
     lookup_pricing: bool = True,
     pricing_use_defaults: bool = True,
+    pricing_default_unit: DefaultPricingUnit = "tokens",
     estimate: Callable[[ModelPricing | None], Decimal] | None = None,
     enforce_require_pricing: bool = False,
     billing: PassthroughBilling,
@@ -260,6 +262,9 @@ async def run_passthrough(
             would charge them as USD per million *requests* and a per-image route
             as USD per image, writing a charge line at the wrong unit for a rate
             nobody configured.
+        pricing_default_unit: The unit a default rate must be in. ``images``
+            lets image generation take the catalog's per-image price, which is
+            stated in that unit, and never its token rates.
         estimate: Maps the pricing row to the reservation estimate in USD.
             Defaults to zero, which still enforces per-user state (user exists,
             not blocked, not already over budget).
@@ -519,6 +524,7 @@ async def run_passthrough(
                     resolved.instance,
                     resolved.model,
                     use_defaults=pricing_use_defaults,
+                    default_unit=pricing_default_unit,
                     organization_id=organization_id,
                 )
             except Exception:
@@ -549,6 +555,7 @@ async def run_passthrough(
                 resolved.instance,
                 resolved.model,
                 use_defaults=pricing_use_defaults,
+                default_unit=pricing_default_unit,
                 organization_id=organization_id,
             )
             pricing = found_pricing.pricing if found_pricing is not None else None
@@ -667,6 +674,7 @@ async def run_passthrough(
                 resolved.instance,
                 resolved.model,
                 use_defaults=pricing_use_defaults,
+                default_unit=pricing_default_unit,
                 organization_id=organization_id,
                 deployment_paid=True,
             )

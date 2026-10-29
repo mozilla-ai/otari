@@ -25,6 +25,7 @@ from gateway.services.pricing.bundled import (
     load_bundled_index,
 )
 from gateway.services.pricing.catalog_trim import (
+    merge_image_prices,
     trim_catalog,
 )
 from gateway.services.pricing.generations import (
@@ -75,6 +76,7 @@ __all__ = [
     "current_index",
     "invalid_rate_count",
     "load_bundled_index",
+    "merge_image_prices",
     "paid_by_the_deployment",
     "parse_rate",
     "price_usage",

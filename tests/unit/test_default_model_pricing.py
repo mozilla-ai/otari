@@ -13,7 +13,9 @@ from gateway.services.pricing_service import (
     configure_default_pricing,
     configure_provider_types,
     default_model_pricing,
+    default_offer_pricing,
     default_pricing_enabled,
+    default_pricing_match,
     default_pricing_reference,
     model_context_window,
 )
@@ -333,3 +335,34 @@ def test_the_bundled_snapshot_serves_when_nothing_was_accepted() -> None:
     assert pricing is not None
     assert pricing.input_price_per_million > 0
     assert pricing.output_price_per_million > 0
+
+
+def test_an_offered_image_model_takes_its_per_image_price_and_never_its_token_rates(
+    install_models_dev: Install,
+) -> None:
+    install_models_dev(
+        {
+            "studio": {
+                "id": "studio",
+                "models": {
+                    "painter": {"cost": {"per_image": 0.03}},
+                    "both": {"cost": {"input": 5, "output": 40, "per_image": 0.04}},
+                    "chat": {"cost": {"input": 1, "output": 2}},
+                },
+            }
+        }
+    )
+
+    painter = default_offer_pricing("studio", "painter", NOW)
+    assert painter is not None
+    assert (painter.unit, painter.input_price_per_million) == ("images", Decimal(30000))
+    # Listed with token rates too, an image model is still stored per image.
+    both = default_offer_pricing("studio", "both", NOW)
+    assert both is not None and (both.unit, both.input_price_per_million) == ("images", Decimal(40000))
+    chat = default_offer_pricing("studio", "chat", NOW)
+    assert chat is not None and (chat.unit or "tokens", chat.input_price_per_million) == ("tokens", Decimal(1))
+    assert default_offer_pricing("studio", "missing", NOW) is None
+
+    # Each unit answers only from its own kind of price.
+    assert default_model_pricing("studio", "painter", NOW) is None
+    assert default_pricing_match("studio", "chat", NOW, unit="images") is None
