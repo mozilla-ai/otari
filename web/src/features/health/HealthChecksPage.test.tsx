@@ -230,6 +230,22 @@ describe("HealthChecksPage", () => {
     expect(within(second).getByText("bedrock:model-29")).toBeInTheDocument()
   })
 
+  it("says the failing-only view is why a search finds no model", async () => {
+    mockApi(status())
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByRole("grid", { name: "Models" })
+
+    // deepinfra:llama passes, so the failing-only view hides it.
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search providers and models" }),
+      "llama",
+    )
+    expect(
+      await screen.findByText("No failing models match this search."),
+    ).toBeInTheDocument()
+  })
+
   it("goes back to the first page of models when the search changes", async () => {
     const failing = Array.from({ length: 30 }, (_, i) => ({
       ...status().results[0],

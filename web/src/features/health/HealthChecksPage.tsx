@@ -445,7 +445,6 @@ export function HealthChecksPage() {
   }
 
   const busy = Boolean(data?.running || data?.settings.run_requested)
-  // One search over both tables: a provider, or a model under one.
   const results = data
     ? data.results.filter(
         (result) =>
@@ -503,7 +502,7 @@ export function HealthChecksPage() {
               .
             </InfoBanner>
           ) : null}
-          {data.providers.length > 0 ? (
+          {data.providers.length > 0 || search.value ? (
             <Toolbar>
               <SearchField
                 label="Search providers and models"
@@ -524,7 +523,7 @@ export function HealthChecksPage() {
             getRowKey={(row) => row.provider}
             mobileLayout="cards"
             emptyContent={
-              search.term
+              search.term && data.providers.length > 0
                 ? "No providers match this search."
                 : "No results yet. Run the checks to see each provider."
             }
@@ -578,7 +577,9 @@ export function HealthChecksPage() {
                 mobileLayout="cards"
                 emptyContent={
                   search.term
-                    ? "No models match this search."
+                    ? showAll
+                      ? "No models match this search."
+                      : "No failing models match this search."
                     : "Every model answered."
                 }
               />
