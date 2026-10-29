@@ -40,16 +40,10 @@ export function useListSearch({
  * The in-memory half of a list search, for a list the page already holds in
  * full. It matches the way the gateway's `search` params do (a lowercased
  * substring, nothing treated as a wildcard), so a term finds the same rows
- * whichever side searches.
+ * whichever side searches. A caller passes an absent field as `""`.
  */
-// ponytail: a linear scan per settled term, fine at the sizes a full walk
-// allows; a list that outgrows it moves to its endpoint's `search` param.
-export function matchesSearch(
-  term: string,
-  // `null` too, because the fields are API values read straight off the rows.
-  ...fields: (string | null | undefined)[]
-): boolean {
+export function matchesSearch(term: string, ...fields: string[]): boolean {
   if (term === "") return true
   const needle = term.toLowerCase()
-  return fields.some((field) => field?.toLowerCase().includes(needle))
+  return fields.some((field) => field.toLowerCase().includes(needle))
 }

@@ -10,7 +10,6 @@ import type { ReactNode } from "react"
 import { useEffect, useEffectEvent, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 import { FiChevronDown } from "react-icons/fi"
-
 import type { CatalogFacets, CatalogModelSummary } from "@/client"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { TablePagination } from "@/design-system/data/TablePagination"
@@ -43,7 +42,6 @@ import {
   PRICING_OPTIONS,
   providerOptions,
   RELEASE_OPTIONS,
-  SEARCH_MAX_LENGTH,
   SORT_OPTIONS,
   SOURCE_OPTIONS,
   vendorOptions,
@@ -65,6 +63,7 @@ import {
 import type { DashboardSearch } from "@/shared/helpers/search"
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useDebounced } from "@/shared/hooks/useDebounced"
+import { SEARCH_MAX_LENGTH } from "@/shared/hooks/useListSearch"
 
 // The catalog, grouped by model: a rail of filters on the left, and on the
 // right a search, a sort, and one card per model. A card is a link to the model's own page, `/models/<id>`,
