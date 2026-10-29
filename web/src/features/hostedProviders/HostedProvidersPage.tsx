@@ -418,7 +418,7 @@ export function HostedProvidersPage() {
     matchesSearch(
       search.term,
       row.name,
-      row.kind === "hosted" ? row.hosted.provider : row.instance.name,
+      row.kind === "hosted" ? row.hosted.provider : row.instance.provider_type,
     ),
   )
 

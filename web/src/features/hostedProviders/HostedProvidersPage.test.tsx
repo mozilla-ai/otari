@@ -897,6 +897,7 @@ describe("HostedProvidersPage", () => {
         hostedProvider({ name: "openai-eu", provider: "openai" }),
         hostedProvider({ name: "claude-direct", provider: "anthropic" }),
       ],
+      configured: [{ ...providerInfo("eu-gateway"), provider_type: "bedrock" }],
     })
     const user = userEvent.setup()
     await renderPage()
@@ -910,6 +911,17 @@ describe("HostedProvidersPage", () => {
       expect(screen.queryByText("openai-eu")).not.toBeInTheDocument(),
     )
     expect(screen.getByText("claude-direct")).toBeInTheDocument()
+
+    // A configured provider by the type its row shows beside its name.
+    await user.clear(
+      screen.getByRole("searchbox", { name: "Search providers" }),
+    )
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search providers" }),
+      "bedrock",
+    )
+    expect(await screen.findByText("eu-gateway")).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText("claude-direct")).toBeNull())
 
     await user.clear(
       screen.getByRole("searchbox", { name: "Search providers" }),
