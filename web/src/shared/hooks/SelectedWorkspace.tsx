@@ -20,6 +20,13 @@ interface SelectedWorkspace {
   selected: CallerWorkspaceMembership | null
   select: (workspaceId: string) => void
   isLoading: boolean
+  /**
+   * False while the selection rests on the organization context kept from the
+   * previous load rather than the current one. Drawing from it and reading
+   * with it are fine; acting on it on nobody's behalf, such as minting a key
+   * or remembering a choice, waits until this is true.
+   */
+  isConfirmed: boolean
 }
 
 const Context = createContext<SelectedWorkspace | null>(null)
@@ -66,16 +73,19 @@ export function SelectedWorkspaceProvider({
   }, [memberships, chosen])
 
   // Write the resolved id back, not the chosen one, so a stale stored id is
-  // repaired rather than kept and re-resolved on every load.
+  // repaired rather than kept and re-resolved on every load. Not from a kept
+  // context, whose workspaces may have changed since: a choice it cannot
+  // resolve would be repaired onto its first workspace.
+  const isConfirmed = !context.isPlaceholderData
   useEffect(() => {
-    if (!selected) return
+    if (!selected || !isConfirmed) return
     try {
       window.localStorage.setItem(STORAGE_KEY, selected.workspace_id)
     } catch {
       // See readStored: a browser that refuses storage still gets a working
       // switcher, it just forgets the choice between loads.
     }
-  }, [selected])
+  }, [selected, isConfirmed])
 
   const select = useCallback((workspaceId: string) => {
     setChosen(workspaceId)
@@ -87,8 +97,9 @@ export function SelectedWorkspaceProvider({
       selected,
       select,
       isLoading: context.isLoading,
+      isConfirmed,
     }),
-    [memberships, selected, select, context.isLoading],
+    [memberships, selected, select, context.isLoading, isConfirmed],
   )
 
   return <Context.Provider value={value}>{children}</Context.Provider>
@@ -104,6 +115,7 @@ const NO_WORKSPACE: SelectedWorkspace = {
   selected: null,
   select: () => {},
   isLoading: false,
+  isConfirmed: true,
 }
 
 export function useSelectedWorkspace(): SelectedWorkspace {

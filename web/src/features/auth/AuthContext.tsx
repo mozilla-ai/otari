@@ -11,15 +11,13 @@ import {
 } from "react"
 
 import { deleteSession, setUnauthorizedHandler } from "@/shared/api/client"
+import { forgetOrganizationContext } from "@/shared/api/organizations"
+import {
+  hasSessionMarker,
+  SESSION_MARKER_KEY,
+} from "@/shared/helpers/sessionMarker"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
-
-// Non-secret marker that a session cookie was minted for this browser. The
-// credential itself is an HttpOnly cookie the page cannot read, so this flag is
-// what lets the app render signed-in synchronously on load instead of probing
-// the server first. If it is ever stale (cookie expired or revoked), the first
-// 401 drops it and bounces to sign-in, exactly like any mid-session revocation.
-const STORAGE_KEY = "otari.dashboard.hasSession"
 
 interface AuthContextValue {
   isAuthenticated: boolean
@@ -42,20 +40,12 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-function readStoredMarker(): boolean {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY) === "1"
-  } catch {
-    return false
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const { recordEvent, identify } = useTelemetry()
 
   const [isAuthenticated, setAuthenticated] =
-    useState<boolean>(readStoredMarker)
+    useState<boolean>(hasSessionMarker)
   const [isSigningOut, setSigningOut] = useState(false)
   // logout() can fire more than once concurrently: a manual sign-out and a
   // stray 401-triggered auto-logout (unauthorizedHandler) can both land
@@ -70,7 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // request when a session expires), so recording unconditionally would count
   // one session ending several times, and a 401 arriving after sign-out would
   // invent an ending that never happened.
-  const sessionOpenRef = useRef(readStoredMarker())
+  const sessionOpenRef = useRef(hasSessionMarker())
   // Whether there is still a session for a sign-out to end. A ref rather than
   // `isAuthenticated` because the recording below happens during the call, not
   // after the re-render it schedules, and because the counting above is the
@@ -97,10 +87,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // server-side revocation below turns out.
     setAuthenticated(false)
     // Drop any admin data cached under the old session so it can't render to a
-    // later, possibly different, session in the same tab.
+    // later, possibly different, session in the same tab, nor on the next load.
+    forgetOrganizationContext()
     queryClient.clear()
     try {
-      window.localStorage.removeItem(STORAGE_KEY)
+      window.localStorage.removeItem(SESSION_MARKER_KEY)
     } catch {
       // Ignore storage errors (e.g. private mode); in-memory state still clears.
     }
@@ -122,13 +113,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // holds the session cookie; this only flips the rendered state.
   const login = useCallback(() => {
     // Clear any cache from a prior session before the new session's queries run.
+    forgetOrganizationContext()
     queryClient.clear()
     setAuthenticated(true)
     // A new session to end: the next `logout` records again.
     sessionOpenRef.current = true
     hasSessionRef.current = true
     try {
-      window.localStorage.setItem(STORAGE_KEY, "1")
+      window.localStorage.setItem(SESSION_MARKER_KEY, "1")
     } catch {
       // Ignore storage errors; the sign-in still works for this tab.
     }

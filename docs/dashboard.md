@@ -8,6 +8,37 @@ The dashboard reads `GET /api/v1/bootstrap` before rendering. That response cont
 the available sign-in methods and navigation surfaces, so a page the deployment
 does not serve is not offered.
 
+## Answers kept between loads
+
+A dashboard served beside its gateway waits for every answer, because the round
+trip is short. A build that serves one dashboard for gateways reached across the
+internet can opt in, through its request policy, to keeping some answers in
+browser storage (`localStorage`) and showing them on the next load while it reads
+the current ones. The dashboard Otari serves keeps nothing.
+
+Where a build opts in, it can keep:
+
+- **The bootstrap** (`otari.dashboard.bootstrap`): the whole `GET /api/v1/bootstrap`
+  response, which describes the deployment and nobody in particular. The current
+  response replaces it and the page renders again when the two differ. When the
+  current one cannot be read, the kept one stays for that load and is forgotten,
+  so the next load says the gateway could not be reached.
+- **The organization context** (`otari.dashboard.organizationContext`), for a
+  signed-in browser: the organization's id, name, slug and creation date, your
+  membership id, role and status in it, whether you operate the deployment,
+  whether the deployment can encrypt provider keys, and the id, name and role of
+  each workspace you belong to. Your name, email address and user id are not
+  kept, so the account menu names you once the current answer arrives. Signing
+  in, signing out, an expired session, a failed read and an answer that you
+  belong to no organization all forget it. Nothing is sent to analytics, no
+  workspace selection is remembered and no setup key is created from it until
+  the current answer confirms it.
+
+Each entry records the API address it came from and when it was kept. An entry
+for another address, or one older than the default dashboard session lifetime
+(168 hours), is ignored. A browser that refuses storage keeps nothing and waits
+for every answer.
+
 ## Sign-in and secrets
 
 The master key and `OTARI_SECRET_KEY` are different credentials:

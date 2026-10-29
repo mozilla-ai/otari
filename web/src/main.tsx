@@ -3,10 +3,13 @@ import { createRoot } from "react-dom/client"
 
 import App from "@/app/App"
 import { reloadOnStaleChunk } from "@/app/AutoUpdate"
-import { loadDeployment } from "@/app/boot"
+import { openKeptBootstrap, startDeployment } from "@/app/boot"
 import { Provider } from "@/app/provider"
 import { apiFetch } from "@/shared/api/client"
-import { prepareRequests } from "@/shared/api/overlayRequestPolicy"
+import {
+  prepareRequests,
+  requestPolicy,
+} from "@/shared/api/overlayRequestPolicy"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import "@/styles/globals.css"
 
@@ -20,8 +23,9 @@ if (!container) {
 // Read before the first render rather than during it. The answer decides
 // whether this URL is a management dashboard or a sign-in screen, and painting
 // one only to swap it for the other is worse than waiting one same-origin round
-// trip. A failure hands App null, which says the gateway is unreachable instead
-// of guessing a deployment.
+// trip. A request policy that keeps the previous load's answer is the exception
+// (`app/boot.ts`). A failure hands App null, which says the gateway is
+// unreachable instead of guessing a deployment.
 // Shorter than apiFetch's 30s default, because nothing at all is on screen until
 // this settles: a stalled gateway or proxy would otherwise hold a blank page for
 // half a minute before the error state appears. A refused connection fails fast
@@ -44,12 +48,18 @@ function loadBootstrap(): Promise<WireBootstrap | null> {
 // Settled before the bootstrap is asked for, because the answer can change
 // where that request goes; a preparation that fails lands on the same screen
 // as a bootstrap that never arrived (see `app/boot.ts`).
-void loadDeployment(prepareRequests, loadBootstrap).then((bootstrap) => {
-  createRoot(container).render(
-    <StrictMode>
-      <Provider>
-        <App bootstrap={bootstrap} />
-      </Provider>
-    </StrictMode>,
-  )
-})
+const root = createRoot(container)
+void startDeployment(
+  prepareRequests,
+  loadBootstrap,
+  () => openKeptBootstrap(requestPolicy(), window.location.hash),
+  (bootstrap) => {
+    root.render(
+      <StrictMode>
+        <Provider>
+          <App bootstrap={bootstrap} />
+        </Provider>
+      </StrictMode>,
+    )
+  },
+)

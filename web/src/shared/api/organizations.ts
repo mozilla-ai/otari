@@ -8,6 +8,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
 import type {
   AcceptInvitationRequest,
   AcceptInvitationResult,
@@ -40,6 +41,12 @@ import type {
   UpdateOrgProviderModelRequest,
 } from "@/client"
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
+import {
+  forgetKeptAnswer,
+  keptAnswer,
+  markKeptAnswer,
+} from "@/shared/api/keptAnswers"
+import { requestPolicy } from "@/shared/api/overlayRequestPolicy"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
   CATALOG,
@@ -54,6 +61,7 @@ import {
   ORGANIZATIONS,
   WORKSPACES,
 } from "@/shared/api/queryKeys"
+import { hasSessionMarker } from "@/shared/helpers/sessionMarker"
 
 /** The context key as React Query addresses it, for a filter that excludes it. */
 const ORGANIZATION_CONTEXT_HASH = hashKey(ORGANIZATION_CONTEXT)
@@ -77,6 +85,14 @@ const NO_ORGANIZATION = new ApiError(404, "Organization not found")
 // errored query with no data back to pending, the shell reads the gap as an
 // outage and fails open onto operator rows, and any rereads in a loop make the
 // whole chrome flicker. Any other failure keeps the dashboard's retry policy.
+//
+// Where the request policy keeps it (`keptAnswers.organizationContext`), the
+// context kept from the previous load stands in as placeholder data while
+// this one loads, so the pages that wait on it start their own reads a round
+// trip sooner (`useKeepOrganizationContext`). Placeholder rather than initial
+// data because it is never cached and reads as `isPlaceholderData`, which
+// anything that acts on the context rather than drawing it waits out. A 404
+// and a failed read both forget it.
 export function useOrganizationContext(
   enabled = true,
 ): UseQueryResult<OrganizationContext> {
@@ -86,10 +102,15 @@ export function useOrganizationContext(
       try {
         return await apiFetch<OrganizationContext>("/organizations/me")
       } catch (error) {
+        forgetOrganizationContext()
         if (isNoOrganizationError(error)) return null
         throw error
       }
     },
+    placeholderData:
+      enabled && keepsOrganizationContext() && hasSessionMarker()
+        ? readKeptOrganizationContext
+        : undefined,
     staleTime: 60_000,
     enabled,
   })
@@ -97,6 +118,92 @@ export function useOrganizationContext(
     ...asContextResult(query),
     refetch: (options) => query.refetch(options).then(asContextResult),
   }
+}
+
+const KEPT_CONTEXT_KEY = "otari.dashboard.organizationContext"
+
+function keepsOrganizationContext(): boolean {
+  return requestPolicy().keptAnswers?.organizationContext === true
+}
+
+function keptOrganizationContext() {
+  return keptAnswer<OrganizationContext>(
+    KEPT_CONTEXT_KEY,
+    requestPolicy().origin,
+  )
+}
+
+function readKeptOrganizationContext(): OrganizationContext | undefined {
+  return keptOrganizationContext().read()
+}
+
+/** Drops the kept context: on sign-in, on sign-out, and on a failed read. */
+export function forgetOrganizationContext(): void {
+  forgetKeptAnswer(KEPT_CONTEXT_KEY)
+}
+
+/**
+ * What of the context is kept: what starts the reads every page waits on and
+ * picks which page renders, and nothing about the person. The caller's name,
+ * address and user id stay out, so a browser left signed in shows nobody's
+ * identity before the server has said whose session it is; the account menu
+ * names the caller once the current answer arrives.
+ */
+function keptFields(context: OrganizationContext): OrganizationContext {
+  const { organization } = context
+  return {
+    organization: {
+      id: organization.id,
+      name: organization.name,
+      slug: organization.slug,
+      created_at: organization.created_at,
+    },
+    organization_member_id: context.organization_member_id,
+    role: context.role,
+    status: context.status,
+    deployment_operator: context.deployment_operator,
+    provider_key_encryption_available:
+      context.provider_key_encryption_available,
+    workspace_memberships: (context.workspace_memberships ?? []).map(
+      (membership) => ({
+        workspace_id: membership.workspace_id,
+        name: membership.name,
+        role: membership.role,
+      }),
+    ),
+  }
+}
+
+/**
+ * Keeps the caller's current context in this browser for the next load, where
+ * the request policy turns that on, and forgets any kept one where it does
+ * not. Written from every answer the cache holds, a switch or a rename
+ * included, so the next load starts from the organization the caller last
+ * left. Mounted once, for a session.
+ *
+ * Records the load's outcome as `ctx:kept:hit|miss|off`, and `ctx:current`
+ * once the current answer has been read.
+ */
+export function useKeepOrganizationContext(): void {
+  const keeps = keepsOrganizationContext()
+  const { data, isPlaceholderData, isFetched } = useOrganizationContext()
+  const [outcome] = useState(() =>
+    keeps ? (isPlaceholderData ? "hit" : data ? undefined : "miss") : "off",
+  )
+  useEffect(() => {
+    if (outcome) markKeptAnswer(`ctx:kept:${outcome}`)
+  }, [outcome])
+  useEffect(() => {
+    if (isFetched) markKeptAnswer("ctx:current")
+  }, [isFetched])
+  useEffect(() => {
+    if (!keeps) {
+      forgetOrganizationContext()
+      return
+    }
+    if (!data || isPlaceholderData) return
+    keptOrganizationContext().write(keptFields(data))
+  }, [keeps, data, isPlaceholderData])
 }
 
 // The cached `null` as callers see it. A later failure wins over the 404 it
@@ -281,10 +388,14 @@ function enterOrganization(
   queryClient: QueryClient,
   context: OrganizationContext,
 ) {
-  const leftWorkspaceIds = (
-    queryClient.getQueryData<OrganizationContext>(ORGANIZATION_CONTEXT)
-      ?.workspace_memberships ?? []
-  ).map((membership) => membership.workspace_id)
+  // The kept context, while it is what the page shows: a switch made before
+  // the current answer arrived leaves the same workspaces.
+  const left =
+    queryClient.getQueryData<OrganizationContext>(ORGANIZATION_CONTEXT) ??
+    (keepsOrganizationContext() ? readKeptOrganizationContext() : undefined)
+  const leftWorkspaceIds = (left?.workspace_memberships ?? []).map(
+    (membership) => membership.workspace_id,
+  )
   // A query keyed on a workspace of the organization just left stays
   // mounted under that id until the selection follows the new context on
   // the next render, so refetching it here asks for a workspace the caller
