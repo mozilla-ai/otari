@@ -20,6 +20,7 @@ from gateway.services.providers._hosted_catalog_update import (
     ScheduledRun,
     run_catalog_updater,
 )
+from gateway.services.providers._hosted_credentials import last4, normalize_api_base, public_api_base
 from gateway.services.providers._hosted_name_index import (
     hosted_implementation,
     load_hosted_names_at_startup,
@@ -87,13 +88,16 @@ __all__ = [
     "ensure_provider_country",
     "hosted_credential_for",
     "hosted_implementation",
+    "last4",
     "hosted_models_for",
     "load_hosted_names_at_startup",
     "load_provider_endpoints_at_startup",
     "missing_provider_credential",
+    "normalize_api_base",
     "organization_to_serve",
     "owned_endpoint_http_client",
     "provider_for",
+    "public_api_base",
     "refresh_provider_endpoint_cache",
     "refuse_unsafe_configured_endpoints",
     "reset_hosted_name_index",

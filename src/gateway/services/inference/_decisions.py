@@ -98,19 +98,29 @@ def resolve_decision_provider(config: GatewayConfig, selector: str) -> tuple[Dec
         raise UnknownDecisionProviderError(msg)
     name, model = split
     entry = config.decision_providers[name]
-    provider = str(entry.get("provider") or name)
-    default_root, path = _ENDPOINTS[provider]
-    root = str(entry.get("api_base") or default_root).rstrip("/")
     return (
-        DecisionProvider(
-            name=name,
-            provider=provider,
+        decision_provider_for(
+            name,
+            str(entry.get("provider") or name),
             api_key=str(entry["api_key"]) if entry.get("api_key") else None,
-            url=f"{root}{path}",
+            api_base=str(entry["api_base"]) if entry.get("api_base") else None,
             timeout_s=float(entry.get("timeout") or _DEFAULT_TIMEOUT_S),
         ),
         model,
     )
+
+
+def decision_provider_for(
+    name: str, provider: str, *, api_key: str | None, api_base: str | None, timeout_s: float
+) -> DecisionProvider:
+    """A provider to dispatch against, from the facts a ``decision_providers`` entry or a stored row holds.
+
+    ``provider`` is one of ``DECISION_PROVIDERS``, and ``api_base`` replaces its
+    default root, which a self-hosted server has none of.
+    """
+    default_root, path = _ENDPOINTS[provider]
+    root = str(api_base or default_root).rstrip("/")
+    return DecisionProvider(name=name, provider=provider, api_key=api_key, url=f"{root}{path}", timeout_s=timeout_s)
 
 
 def decision_body(request: DecisionRequest, model: str) -> dict[str, Any]:
