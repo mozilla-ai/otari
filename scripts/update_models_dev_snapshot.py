@@ -1,7 +1,9 @@
 """Regenerate the bundled models.dev price snapshot.
 
-Run at release: ``python scripts/update_models_dev_snapshot.py`` fetches
-https://models.dev/api.json, or ``--input FILE`` trims a saved copy. Standard
+Run at release: ``python scripts/update_models_dev_snapshot.py`` fetches the
+mozilla-ai fork of models.dev, ``--url`` fetches another copy serving the same
+api.json (upstream is https://models.dev/api.json), and ``--input FILE`` trims a
+saved copy. Standard
 library only; the trimming rules live in the gateway so a stored snapshot and
 the bundled one are cut the same way.
 """
@@ -19,7 +21,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 TRIM_MODULE = ROOT / "src" / "gateway" / "services" / "pricing" / "catalog_trim.py"
 OUTPUT = ROOT / "src" / "gateway" / "data" / "models_dev_pricing.json"
-URL = "https://models.dev/api.json"
+URL = "https://mozilla-ai.github.io/models.dev/api.json"
 
 
 def _load_trim() -> Callable[[dict[str, Any]], dict[str, Any]]:
@@ -33,6 +35,7 @@ def _load_trim() -> Callable[[dict[str, Any]], dict[str, Any]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--url", default=URL, help=f"where to fetch api.json from (default: {URL})")
     parser.add_argument("--input", type=Path, help="a saved api.json instead of fetching")
     parser.add_argument("--output", type=Path, default=OUTPUT)
     parser.add_argument("--date", help="generated_at (YYYY-MM-DD); defaults to today")
@@ -41,7 +44,7 @@ def main() -> int:
     if args.input:
         raw = json.loads(args.input.read_text("utf-8"))
     else:
-        request = urllib.request.Request(URL, headers={"User-Agent": "otari-gateway"})
+        request = urllib.request.Request(args.url, headers={"User-Agent": "otari-gateway"})
         with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
             raw = json.loads(response.read())
     if not isinstance(raw, dict):
@@ -49,7 +52,7 @@ def main() -> int:
         return 1
 
     trim = _load_trim()
-    document = {"_meta": {"source": URL, "generated_at": args.date or datetime.now(UTC).date().isoformat()}}
+    document = {"_meta": {"source": args.url, "generated_at": args.date or datetime.now(UTC).date().isoformat()}}
     document.update(trim(raw))
     models = sum(len(provider["models"]) for key, provider in document.items() if key != "_meta")
     args.output.write_text(json.dumps(document, separators=(",", ":"), ensure_ascii=False) + "\n", "utf-8")

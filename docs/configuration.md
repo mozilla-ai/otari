@@ -1053,8 +1053,9 @@ credentials in it. It is a startup setting: the dashboard shows it but cannot
 change it.
 
 To refresh the bundled snapshot, as a maintainer does at release, run
-`python scripts/update_models_dev_snapshot.py` (or pass `--input FILE` with a
-saved `api.json`) and commit `src/gateway/data/models_dev_pricing.json`.
+`python scripts/update_models_dev_snapshot.py` (pass `--url` to fetch from a
+mirror or fork, or `--input FILE` with a saved `api.json`) and commit
+`src/gateway/data/models_dev_pricing.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was
 rejected, so the next check re-offers the same update while upstream still
