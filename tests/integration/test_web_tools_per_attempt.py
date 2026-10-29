@@ -127,7 +127,7 @@ def _billing_exhausted() -> httpx.HTTPStatusError:
 async def _failing_events() -> AsyncIterator[MessageStreamEvent]:
     """An otari tool-loop stream that fails before its first event, like a provider's 402 would."""
     raise _billing_exhausted()
-    yield  # pragma: no cover -- unreachable; keeps this an async generator function
+    yield  # pragma: no cover, unreachable; keeps this an async generator function
 
 
 def _reply(text: str, content: list[Any] | None = None, stop_reason: str = "end_turn") -> MessageResponse:
@@ -537,15 +537,7 @@ def test_otari_runs_otaris_tool_on_every_candidate(
 def test_a_streamed_loop_candidates_failure_falls_over_to_the_next_candidate(
     client: TestClient, api_key_header: dict[str, str]
 ) -> None:
-    """Regression for a streamed, tool-loop-served candidate that fails before any output.
-
-    Before the fix, ``open_stream``'s tool-loop branch returned the
-    (not-yet-started) async generator straight to the walk, instead of holding
-    it for a first chunk the way the non-tool-loop branch does. A candidate
-    whose provider call only runs once the stream is iterated -- after the walk
-    has already moved on -- looked like a success to ``walk_attempts``, which
-    then never tried the next candidate.
-    """
+    """A streamed, tool-loop-served candidate that fails before any output must still fall over."""
     response, seen = _post_messages(
         client,
         {**api_key_header, WEB_SEARCH_HEADER: "otari"},

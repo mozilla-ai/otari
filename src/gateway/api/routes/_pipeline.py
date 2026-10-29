@@ -5513,15 +5513,15 @@ async def open_stream(
     """Open the upstream stream for a single-attempt streaming request.
 
     A provider stream is held for its first chunk (:func:`hold_for_first_chunk`),
-    so a provider failure before any output raises here -- which is also what
-    lets a multi-candidate routing policy fall over to its next candidate
-    (:func:`gateway.api.routes._attempts.walk_attempts` only retries a failure
-    its ``run_attempt`` callback raises; a generator it merely returns, not yet
-    iterated, is a success as far as the walk can tell). This applies to the
-    tool-loop path too: ``_eager_backend_stream`` is an async generator, so
-    without the hold, nothing in it -- including the provider call itself --
-    runs until something downstream of the walk starts pulling events, by
-    which point failover has already committed to this candidate.
+    so a provider failure before any output raises here, which is also what
+    lets a multi-candidate routing policy fall over to its next candidate:
+    :func:`gateway.api.routes._attempts.walk_attempts` only retries a failure
+    its ``run_attempt`` callback raises, and a generator it merely returns,
+    not yet iterated, is a success as far as the walk can tell. This applies
+    to the tool-loop path too, since ``_eager_backend_stream`` is an async
+    generator: without the hold, nothing in it, including the provider call
+    itself, runs until something downstream of the walk starts pulling
+    events, by which point failover has already committed to this candidate.
 
     The sandbox and web_search backends are opened eagerly (their
     ``__aenter__`` runs before this function returns) so a backend-unreachable
