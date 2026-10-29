@@ -308,6 +308,7 @@ export function CreateWorkspaceForm({
   isOpen,
   onClose,
   onCreated,
+  onSaved,
   hold = defaultHold,
   returnFocusRef,
 }: {
@@ -328,6 +329,8 @@ export function CreateWorkspaceForm({
   // appeared. The scope switcher does, because creating from there is a request
   // to work in the new workspace, not just to add it.
   onCreated?: (workspace: Workspace) => void
+  /** Fired with the same timing, for a caller that stays where it is. */
+  onSaved?: (workspace: Workspace) => void
 }) {
   const create = useCreateWorkspace()
   const createDefault = useCreateWorkspaceBudgetDefault()
@@ -418,6 +421,7 @@ export function CreateWorkspaceForm({
             // callers get by keying it on an open counter. The failure paths
             // below release it in place.
             onClose()
+            onSaved?.(workspace)
             onCreated?.(workspace)
           }
           if (budgetId === NO_DEFAULT) {
@@ -936,6 +940,9 @@ export function WorkspacesPage() {
         key={creatingCount}
         isOpen={creating}
         onClose={() => setCreating(false)}
+        // The page has no other word that the workspace exists, so a search
+        // it does not match would hide it: making one ends the search.
+        onSaved={() => search.onChange("")}
         returnFocusRef={createButtonRef}
       />
 

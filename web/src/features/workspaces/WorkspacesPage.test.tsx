@@ -239,6 +239,23 @@ describe("WorkspacesPage", () => {
     })
   })
 
+  it("ends a search when a workspace is made, so the new one is on screen", async () => {
+    mockApi({ workspaces: [workspace({ id: "ws-1", name: "Research" })] })
+    const user = userEvent.setup()
+    await renderPage(<WorkspacesPage />)
+    await screen.findByText("Research")
+    const search = screen.getByRole("searchbox", { name: "Search workspaces" })
+    await user.type(search, "research")
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create workspace" }),
+    )
+    await user.type(screen.getByLabelText("Name"), "Billing")
+    await user.click(screen.getByRole("button", { name: "Create workspace" }))
+
+    await waitFor(() => expect(search).toHaveValue(""))
+  })
+
   // The form itself carries no band, so that the scope switcher can put it in a
   // modal (otari-ai#2107). The band belongs to this page, and it is pinned here
   // because losing it is invisible in jsdom: the fields render either way.
