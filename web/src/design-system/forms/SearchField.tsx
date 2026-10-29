@@ -95,7 +95,7 @@ export function SearchField({
       }}
       isDisabled={isDisabled}
       maxLength={maxLength}
-      className={resultCount === undefined ? className : "min-w-0 flex-1"}
+      className="min-w-0 flex-1"
     >
       <HeroSearchField.Group>
         <HeroSearchField.SearchIcon />
@@ -104,15 +104,18 @@ export function SearchField({
       </HeroSearchField.Group>
     </HeroSearchField.Root>
   )
-  if (resultCount === undefined) return field
+  // One shape with or without a count, so a count that arrives with the first
+  // response does not move the field and remount the input being typed in.
   return (
     <div className={`flex items-center gap-3 ${className}`}>
       {field}
-      <span role="status" className="shrink-0 text-caption">
-        {value.trim() === ""
-          ? ""
-          : `${formatNumber(resultCount)} ${resultCount === 1 ? "match" : "matches"}`}
-      </span>
+      {resultCount === undefined ? null : (
+        <span role="status" className="shrink-0 text-caption">
+          {value.trim() === ""
+            ? ""
+            : `${formatNumber(resultCount)} ${resultCount === 1 ? "match" : "matches"}`}
+        </span>
+      )}
     </div>
   )
 }

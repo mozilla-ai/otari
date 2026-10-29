@@ -218,6 +218,24 @@ describe("SearchField resultCount", () => {
     expect(screen.getByRole("status")).toHaveTextContent("1 match")
   })
 
+  it("keeps the input, and its focus, when a count first arrives", async () => {
+    const { rerender } = render(
+      <SearchField label="Search" value="gpt" onChange={() => {}} />,
+    )
+    const input = screen.getByRole("searchbox", { name: "Search" })
+    input.focus()
+    rerender(
+      <SearchField
+        label="Search"
+        value="gpt"
+        onChange={() => {}}
+        resultCount={3}
+      />,
+    )
+    expect(screen.getByRole("searchbox", { name: "Search" })).toBe(input)
+    expect(input).toHaveFocus()
+  })
+
   it("renders no region when the caller does not count", () => {
     render(<SearchField label="Search" value="gpt" onChange={() => {}} />)
     expect(screen.queryByRole("status")).not.toBeInTheDocument()
